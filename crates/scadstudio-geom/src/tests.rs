@@ -276,11 +276,8 @@ fn hole_in_plate_is_round_and_in_the_right_place() {
     assert_bounds("plate_hole_placement", &result, Vec3::new(40.0, 20.0, 4.0), 1e-9);
 
     // Every vertex introduced by the cut sits on the hole's circle.
-    let on_hole: Vec<&Vec3> = result
-        .positions
-        .iter()
-        .filter(|p| ((p.x - centre_x).powi(2) + p.y * p.y).sqrt() < 3.0 + 1e-6)
-        .collect();
+    let on_hole: Vec<&Vec3> =
+        result.positions.iter().filter(|p| ((p.x - centre_x).powi(2) + p.y * p.y).sqrt() < 3.0 + 1e-6).collect();
     assert!(!on_hole.is_empty(), "no vertices found on the hole boundary");
     for p in on_hole {
         let r = ((p.x - centre_x).powi(2) + p.y * p.y).sqrt();
@@ -329,12 +326,7 @@ fn primitive_bounds_match_declared_dimensions() {
     let cases: Vec<(&str, Mesh, Vec3, f64)> = vec![
         ("box", primitives::box_mesh(40.0, 20.0, 4.0), Vec3::new(40.0, 20.0, 4.0), 1e-9),
         ("plate", primitives::plate_mesh(30.0, 10.0, 2.0), Vec3::new(30.0, 10.0, 2.0), 1e-9),
-        (
-            "rounded_box",
-            primitives::rounded_box_mesh(40.0, 20.0, 4.0, 3.0, 8),
-            Vec3::new(40.0, 20.0, 4.0),
-            1e-9,
-        ),
+        ("rounded_box", primitives::rounded_box_mesh(40.0, 20.0, 4.0, 3.0, 8), Vec3::new(40.0, 20.0, 4.0), 1e-9),
         ("wedge", primitives::wedge_mesh(20.0, 10.0, 8.0, 5.0), Vec3::new(20.0, 10.0, 8.0), 1e-9),
         ("cylinder", primitives::cylinder_mesh(50.0, 50.0, 12.0, 32), Vec3::new(50.0, 50.0, 12.0), 1e-9),
         ("disc", primitives::disc_mesh(20.0, 20.0, 2.0, 32), Vec3::new(20.0, 20.0, 2.0), 1e-9),
@@ -342,12 +334,7 @@ fn primitive_bounds_match_declared_dimensions() {
         ("ring", primitives::ring_mesh(20.0, 12.0, 2.0, 32), Vec3::new(20.0, 20.0, 2.0), 1e-9),
         ("cone", primitives::cone_mesh(20.0, 0.0, 15.0, 32), Vec3::new(20.0, 20.0, 15.0), 1e-9),
         ("frustum", primitives::cone_mesh(20.0, 8.0, 15.0, 32), Vec3::new(20.0, 20.0, 15.0), 1e-9),
-        (
-            "pyramid",
-            primitives::pyramid_mesh(20.0, 15.0, 0.0, 0.0, 10.0),
-            Vec3::new(20.0, 15.0, 10.0),
-            1e-9,
-        ),
+        ("pyramid", primitives::pyramid_mesh(20.0, 15.0, 0.0, 0.0, 10.0), Vec3::new(20.0, 15.0, 10.0), 1e-9),
         ("sphere", primitives::ellipsoid_mesh(50.0, 50.0, 50.0, 32), Vec3::new(50.0, 50.0, 50.0), 1e-9),
         ("ellipsoid", primitives::ellipsoid_mesh(50.0, 30.0, 20.0, 32), Vec3::new(50.0, 30.0, 20.0), 1e-9),
         ("capsule", primitives::capsule_mesh(10.0, 30.0, 32), Vec3::new(10.0, 10.0, 30.0), 1e-9),
@@ -385,4 +372,129 @@ fn polyhedra_sizes_match_both_conventions() {
         }
         assert!((shortest - 20.0).abs() < 1e-9, "{name}: edge length {shortest}");
     }
+}
+
+#[test]
+fn a_union_of_scattered_solids_never_reaches_the_kernel() {
+    // The accumulated-bounding-box trap: folding `union` over many operands
+    // makes the accumulator's box span everything unioned so far, so an operand
+    // physically nowhere near any other still looks like it overlaps and gets
+    // run through the BSP against the whole pile. `union_all` keeps each
+    // disjoint island's own box instead. What this test pins is the *cost*: a
+    // grid of mutually disjoint boxes must stay linear, not blow up once the
+    // accumulated box covers the grid.
+    let boxes: Vec<Mesh> = (0..40)
+        .map(|i| {
+            let (row, column) = (i / 8, i % 8);
+            primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(column as f64 * 50.0, row as f64 * 50.0, 0.0))
+        })
+        .collect();
+    let expected_triangles: usize = boxes.iter().map(|b| b.triangle_count()).sum();
+
+    let started = std::time::Instant::now();
+    let result = evaluate_boolean(BooleanOp::Union, &boxes);
+    let elapsed = started.elapsed();
+
+    // Disjoint operands concatenate, which is what the kernel would have
+    // produced anyway -- so not one triangle is added or removed.
+    assert_eq!(result.triangle_count(), expected_triangles);
+    assert_manifold("scattered union", &result);
+    assert!(elapsed.as_secs_f64() < 1.0, "a union of 40 disjoint boxes took {elapsed:?}");
+}
+
+#[test]
+fn merging_two_islands_still_catches_a_third_that_now_touches() {
+    // A union that bridges two islands grows the merged box, which can bring it
+    // into contact with an island that was previously clear. Three boxes in a
+    // row, fed middle-last, is the smallest case: neither end touches the other,
+    // but the middle overlaps both, so all three must end up as one solid.
+    let left = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(-8.0, 0.0, 0.0));
+    let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(8.0, 0.0, 0.0));
+    let middle = primitives::box_mesh(10.0, 10.0, 10.0);
+
+    let result = evaluate_boolean(BooleanOp::Union, &[left, right, middle]);
+    assert_manifold("bridged union", &result);
+    // One solid 26mm long, not three overlapping boxes left side by side.
+    assert_bounds("bridged union", &result, Vec3::new(26.0, 10.0, 10.0), 1e-9);
+}
+
+#[test]
+fn a_boolean_result_is_no_denser_than_the_solid_it_describes() {
+    // A BSP clips against *infinite* planes, so subtracting a 16-segment
+    // cylinder from a plate slices the plate's whole top and bottom face along
+    // sixteen lines that run right across it. Correct, but a plate with a hole,
+    // a slot and a boss used to arrive at ~1500 triangles for a solid ~230
+    // describe. `repair::heal` rebuilds each flat region from its own boundary
+    // to undo that; this pins the budget so a chain of booleans cannot start
+    // compounding again.
+    let plate = primitives::box_mesh(40.0, 20.0, 4.0);
+    let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 16).translated(Vec3::new(-12.0, 0.0, 0.0));
+    let slot = primitives::box_mesh(8.0, 5.0, 20.0).translated(Vec3::new(12.0, 0.0, 0.0));
+    let boss = primitives::cylinder_mesh(9.0, 9.0, 5.0, 16);
+
+    let drilled = evaluate_boolean(BooleanOp::Difference, &[plate, hole, slot]);
+    assert_manifold("drilled plate", &drilled);
+    let assembly = evaluate_boolean(BooleanOp::Union, &[drilled, boss]);
+    assert_manifold("assembly", &assembly);
+
+    // The dimensions the numbers promise survive the rebuild: the plate is 4mm
+    // thick and the boss, centred on it, is 5mm tall.
+    assert_bounds("assembly", &assembly, Vec3::new(40.0, 20.0, 5.0), 1e-9);
+    assert!(
+        assembly.triangle_count() < 400,
+        "a plate with a hole, a slot and a boss came out at {} triangles",
+        assembly.triangle_count()
+    );
+}
+
+#[test]
+fn rebuilding_a_flat_region_keeps_its_boundary() {
+    // The one thing retriangulation must never do is straighten a face's
+    // boundary and leave the neighbouring face still bent to the old shape --
+    // that is a T-junction, and slicers reject it. Nine holes in a row give the
+    // top face a boundary made almost entirely of collinear split points, which
+    // is exactly the case that stresses it.
+    let mut operands = vec![primitives::box_mesh(100.0, 20.0, 4.0)];
+    for i in 0..9 {
+        operands.push(primitives::cylinder_mesh(6.0, 6.0, 20.0, 12).translated(Vec3::new(
+            -40.0 + i as f64 * 10.0,
+            0.0,
+            0.0,
+        )));
+    }
+    let result = evaluate_boolean(BooleanOp::Difference, &operands);
+    assert_manifold("nine holes", &result);
+    assert_bounds("nine holes", &result, Vec3::new(100.0, 20.0, 4.0), 1e-9);
+
+    // Every hole is still open: no vertex may sit inside one.
+    for i in 0..9 {
+        let centre_x = -40.0 + i as f64 * 10.0;
+        for p in &result.positions {
+            let r = ((p.x - centre_x).powi(2) + p.y * p.y).sqrt();
+            assert!(r > 3.0 * (std::f64::consts::PI / 12.0).cos() - 1e-6, "a vertex landed inside hole {i}");
+        }
+    }
+}
+
+#[test]
+fn a_region_that_cannot_be_rebuilt_keeps_its_original_triangles() {
+    // Retriangulation is allowed to give up, and when it does the region must
+    // come through untouched rather than half-rebuilt. Two coplanar squares
+    // meeting at one corner are the smallest case it must refuse: the boundary
+    // leaves that corner two ways, and which one continues the loop is a guess.
+    let mut region = Mesh::new();
+    let quad = |m: &mut Mesh, x: f64, y: f64| {
+        let p = |dx: f64, dy: f64| Vec3::new(x + dx, y + dy, 0.0);
+        m.push_triangle(p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0));
+        m.push_triangle(p(0.0, 0.0), p(10.0, 10.0), p(0.0, 10.0));
+    };
+    quad(&mut region, 0.0, 0.0);
+    quad(&mut region, 10.0, 10.0);
+    // Welded, so the shared corner really is one vertex and the pinch is real.
+    let region = region.weld();
+
+    let rebuilt = crate::planar::retriangulate_flat_regions(&region);
+    assert_eq!(rebuilt.triangle_count(), region.triangle_count(), "a pinched region was rebuilt anyway");
+    let (lo, hi) = rebuilt.bounds().unwrap();
+    assert_eq!((lo, hi), region.bounds().unwrap());
 }

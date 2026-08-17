@@ -31,14 +31,8 @@ pub enum Format {
 }
 
 impl Format {
-    pub const ALL: [Format; 6] = [
-        Format::ThreeMf,
-        Format::StlBinary,
-        Format::StlAscii,
-        Format::Obj,
-        Format::PlyBinary,
-        Format::PlyAscii,
-    ];
+    pub const ALL: [Format; 6] =
+        [Format::ThreeMf, Format::StlBinary, Format::StlAscii, Format::Obj, Format::PlyBinary, Format::PlyAscii];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -138,10 +132,7 @@ pub enum ExportError {
 impl fmt::Display for ExportError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ExportError::Empty => write!(
-                f,
-                "There is nothing to export: the scene has no visible geometry."
-            ),
+            ExportError::Empty => write!(f, "There is nothing to export: the scene has no visible geometry."),
             ExportError::Invalid(problems) => {
                 writeln!(f, "The mesh is not valid for 3D printing, so nothing was written:")?;
                 for problem in problems {
@@ -271,10 +262,7 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), ExportError> {
 
 fn temp_sibling(path: &Path) -> PathBuf {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "export".into());
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
     path.with_file_name(format!(".{name}.{stamp}.part"))
 }
 
@@ -306,12 +294,7 @@ fn three_mf(mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<Ve
     ));
     model.push_str(" <resources>\n  <object id=\"1\" type=\"model\">\n   <mesh>\n    <vertices>\n");
     for (i, p) in mesh.positions.iter().enumerate() {
-        model.push_str(&format!(
-            "     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>\n",
-            coord(p.x),
-            coord(p.y),
-            coord(p.z)
-        ));
+        model.push_str(&format!("     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>\n", coord(p.x), coord(p.y), coord(p.z)));
         if i % 4096 == 0 && !progress(0.2 + 0.4 * (i as f32 / mesh.positions.len().max(1) as f32)) {
             return Err(ExportError::Cancelled);
         }
@@ -514,8 +497,8 @@ mod tests {
         open.indices.pop();
         let path = temp_dir().join("invalid.stl");
         let mut cb = no_progress();
-        let err = write(&path, &open, &Options { format: Format::StlBinary, ..Default::default() }, &mut cb)
-            .unwrap_err();
+        let err =
+            write(&path, &open, &Options { format: Format::StlBinary, ..Default::default() }, &mut cb).unwrap_err();
         assert!(matches!(err, ExportError::Invalid(_)));
         assert!(err.to_string().contains("watertight"));
         assert!(!path.exists(), "a file was written for a mesh that failed verification");
@@ -684,8 +667,13 @@ mod tests {
             seen.push(p);
             true
         };
-        write(&temp_dir().join("progress.obj"), &plate(), &Options { format: Format::Obj, ..Default::default() }, &mut cb)
-            .unwrap();
+        write(
+            &temp_dir().join("progress.obj"),
+            &plate(),
+            &Options { format: Format::Obj, ..Default::default() },
+            &mut cb,
+        )
+        .unwrap();
         assert_eq!(seen.first(), Some(&0.0));
         assert_eq!(seen.last(), Some(&1.0));
         assert!(seen.windows(2).all(|w| w[1] >= w[0] - 1e-6), "progress went backwards: {seen:?}");
@@ -720,14 +708,73 @@ mod tests {
 
     #[test]
     fn a_drilled_plate_exports_as_a_watertight_solid() {
+        // Spec acceptance criterion 4, read back out of the written file rather
+        // than trusted from the mesh that went in: the hole must still be round,
+        // in the right place, and the surface closed.
         use scadstudio_geom::{evaluate_boolean, BooleanOp};
-        let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 32).translated(Vec3::new(-8.0, 0.0, 0.0));
+        let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 32).translated(Vec3::new(-12.0, 0.0, 0.0));
         let mesh = evaluate_boolean(BooleanOp::Difference, &[plate(), hole]);
         assert!(verify(&mesh.weld()).is_empty(), "{:?}", verify(&mesh.weld()));
+
         let path = temp_dir().join("drilled.3mf");
         let mut cb = no_progress();
         write(&path, &mesh, &Options::default(), &mut cb).unwrap();
         assert!(std::fs::metadata(&path).unwrap().len() > 500);
+        std::fs::remove_file(&path).unwrap();
+
+        // OBJ for the geometry assertions, because it is the one format this
+        // crate writes that can be read back without a zip reader.
+        let path = temp_dir().join("drilled.obj");
+        write(&path, &mesh, &Options { format: Format::Obj, ..Default::default() }, &mut cb).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+
+        let vertices: Vec<[f64; 3]> = text
+            .lines()
+            .filter(|l| l.starts_with("v "))
+            .map(|l| {
+                let mut f = l[2..].split_whitespace().map(|v| v.parse::<f64>().unwrap());
+                [f.next().unwrap(), f.next().unwrap(), f.next().unwrap()]
+            })
+            .collect();
+        let (mut lo, mut hi) = ([f64::MAX; 3], [f64::MIN; 3]);
+        for v in &vertices {
+            for a in 0..3 {
+                lo[a] = lo[a].min(v[a]);
+                hi[a] = hi[a].max(v[a]);
+            }
+        }
+        // The plate's own dimensions are untouched by the cut.
+        assert_eq!((hi[0] - lo[0], hi[2] - lo[2]), (40.0, 4.0));
+        // The bore is open: a 32-segment circumscribed hole's nearest surface is
+        // its flats, at radius 3 * cos(pi/32).
+        let flat_radius = 3.0 * (std::f64::consts::PI / 32.0).cos();
+        for v in &vertices {
+            let r = ((v[0] + 12.0).powi(2) + v[1].powi(2)).sqrt();
+            assert!(r > flat_radius - 1e-6, "a vertex at {v:?} landed inside the bore");
+        }
+        // And 12mm from the left edge, measured on the hole's own vertices.
+        let bore: Vec<&[f64; 3]> =
+            vertices.iter().filter(|v| ((v[0] + 12.0).powi(2) + v[1].powi(2)).sqrt() < 3.5).collect();
+        assert!(!bore.is_empty(), "no bore vertices found");
+        let bore_centre = bore.iter().map(|v| v[0]).sum::<f64>() / bore.len() as f64;
+        assert!(
+            (bore_centre - lo[0] - 8.0).abs() < 1e-6,
+            "bore centre {bore_centre} is not 8mm from the left edge {}",
+            lo[0]
+        );
+
+        // Watertight in the file: every undirected edge shared by exactly two faces.
+        let mut edges: std::collections::HashMap<(usize, usize), u32> = std::collections::HashMap::new();
+        for line in text.lines().filter(|l| l.starts_with("f ")) {
+            let face: Vec<usize> =
+                line[2..].split_whitespace().map(|f| f.split('/').next().unwrap().parse::<usize>().unwrap()).collect();
+            for k in 0..face.len() {
+                let (a, b) = (face[k], face[(k + 1) % face.len()]);
+                *edges.entry((a.min(b), a.max(b))).or_insert(0) += 1;
+            }
+        }
+        assert!(!edges.is_empty());
+        assert!(edges.values().all(|&c| c == 2), "the exported surface is not closed");
         std::fs::remove_file(&path).unwrap();
     }
 }

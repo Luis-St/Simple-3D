@@ -136,13 +136,7 @@ fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
             dead[neg.pop().unwrap()] = true;
         }
     }
-    let indices = mesh
-        .indices
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !dead[*i])
-        .map(|(_, t)| *t)
-        .collect();
+    let indices = mesh.indices.iter().enumerate().filter(|(i, _)| !dead[*i]).map(|(_, t)| *t).collect();
     Mesh { positions: mesh.positions, indices }
 }
 
@@ -253,14 +247,38 @@ fn find_on_edge_vertex(
     None
 }
 
-/// Weld, cancel coincident opposite faces, and eliminate T-junctions. Applied
-/// to every boolean result so nested booleans always get clean input.
+/// Weld, cancel coincident opposite faces, eliminate T-junctions, and rebuild
+/// each flat region's interior triangulation. Applied to every boolean result so
+/// nested booleans always get clean, and reasonably sized, input.
 pub fn heal(mesh: &Mesh) -> Mesh {
     let m = weld_tolerant(mesh, WELD_TOL);
     let m = drop_slivers(m, WELD_TOL);
     let m = cancel_opposite_faces(m);
-    let m = split_t_junctions(m, WELD_TOL);
-    compact(m)
+    let healed = split_t_junctions(m, WELD_TOL);
+
+    // Rebuilding each flat region deliberately straightens its boundary, dropping
+    // the collinear vertices the pass above inserted -- an ear clipper stalls on
+    // those. The neighbouring faces still have their own corners there, so a
+    // second T-junction pass puts exactly the same splits back, this time into
+    // far fewer and larger triangles.
+    //
+    // Retriangulation is the most intricate step here and the one most exposed to
+    // geometry nobody anticipated, so its output only stands if it is at least as
+    // sound as the input it replaced. A valid but bulky mesh always beats a slim
+    // broken one.
+    // Compacted before the second T-junction pass, and not just at the end:
+    // retriangulating orphans every vertex that was interior to a flat region,
+    // and those orphans sit *on* the large new triangles that replaced them.
+    // Left in `positions` they would all be found as on-edge vertices and split
+    // straight back out again.
+    let simplified = compact(crate::planar::retriangulate_flat_regions(&healed));
+    let simplified = split_t_junctions(simplified, WELD_TOL);
+    if simplified.triangle_count() < healed.triangle_count()
+        && (simplified.manifold_issue().is_none() || healed.manifold_issue().is_some())
+    {
+        return compact(simplified);
+    }
+    compact(healed)
 }
 
 /// Drop positions no triangle references (cancelling faces can orphan some).
