@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/scadstudio-core",
+    "crates/scadstudio-geom",
+    "crates/scadstudio-export",
+    "crates/scadstudio-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+panic = "unwind"
