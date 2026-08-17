@@ -95,12 +95,6 @@ impl View {
         Some(self.view_to_screen(v))
     }
 
-    /// Project without the near-plane test, for gizmo handles that should stay
-    /// on screen even when their anchor is marginal.
-    pub fn project_unclipped(&self, world: Vec3) -> egui::Pos2 {
-        self.view_to_screen(self.to_view(world)).0
-    }
-
     /// Ray through a screen position: `(origin, direction)`, direction normalised.
     pub fn ray(&self, screen: egui::Pos2) -> (Vec3, Vec3) {
         let (right, up) = self.basis();

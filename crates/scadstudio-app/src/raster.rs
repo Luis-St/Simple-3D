@@ -331,6 +331,29 @@ mod tests {
     }
 
     #[test]
+    fn a_line_biased_away_from_the_eye_loses_a_depth_tie() {
+        // How the ground grid gets out of the way of geometry it is coplanar with.
+        let mut frame = Frame::new(16, 16);
+        frame.clear(BG);
+        frame.line(vertex(0.0, 4.0, 1.0), vertex(15.0, 4.0, 1.0), BLUE, -0.01);
+        frame.triangle([vertex(0.0, 0.0, 1.0), vertex(16.0, 0.0, 1.0), vertex(0.0, 16.0, 1.0)], RED, true);
+        assert_eq!(frame.pixel(4, 4), RED, "the line survived under the face it is coplanar with");
+    }
+
+    #[test]
+    fn a_long_line_running_far_outside_the_frame_still_draws() {
+        // The origin axes are thousands of units long; clipping has to happen
+        // before stepping, or they cost thousands of rejected samples -- and an
+        // earlier length cap made them vanish altogether.
+        let mut frame = Frame::new(32, 32);
+        frame.clear(BG);
+        frame.line(vertex(-40000.0, 16.0, 1.0), vertex(40000.0, 16.0, 1.0), RED, 0.0);
+        assert_eq!(frame.pixel(0, 16), RED);
+        assert_eq!(frame.pixel(31, 16), RED);
+        assert_eq!(frame.pixel(16, 16), RED);
+    }
+
+    #[test]
     fn a_triangle_entirely_in_front_of_the_near_plane_is_untouched() {
         let tri = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 0.0, 5.0), Vec3::new(0.0, 1.0, 6.0)];
         let out = clip_near(tri, 0.05);

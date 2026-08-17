@@ -7,7 +7,9 @@
 //! point the user can then modify.
 //!
 //! Key names are the strings the UI toolkit uses for its own key enum ("A",
-//! "ArrowUp", "Escape", "Num5"), so no translation table can drift out of date.
+//! "Up", "Escape", "F2"), so no translation table can drift out of date. There
+//! is a test in the app crate that checks every preset binding against the
+//! toolkit's actual key list, so a binding nobody can type cannot ship.
 //! A keymap saved on one platform therefore loads sensibly on the other.
 
 use serde::de::Error as _;
@@ -421,30 +423,30 @@ impl Keymap {
         set(Group, Chord::ctrl("G"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
-        set(MoveUp, Chord::ctrl("ArrowUp"));
-        set(MoveDown, Chord::ctrl("ArrowDown"));
+        set(MoveUp, Chord::ctrl("Up"));
+        set(MoveDown, Chord::ctrl("Down"));
 
         set(FrameSelection, Chord::key("F"));
         set(FrameAll, Chord::shift("F"));
         set(ToggleProjection, Chord::key("P"));
-        set(ViewTop, Chord::key("Num7"));
-        set(ViewBottom, Chord::ctrl("Num7"));
-        set(ViewFront, Chord::key("Num1"));
-        set(ViewBack, Chord::ctrl("Num1"));
-        set(ViewRight, Chord::key("Num3"));
-        set(ViewLeft, Chord::ctrl("Num3"));
-        set(ViewIsometric, Chord::key("Num0"));
-        set(ToggleGrid, Chord::key("Num5"));
-        set(DisplayShaded, Chord::key("Num8"));
-        set(DisplayShadedEdges, Chord::key("Num9"));
-        set(DisplayWireframe, Chord::key("Num6"));
+        set(ViewTop, Chord::key("7"));
+        set(ViewBottom, Chord::ctrl("7"));
+        set(ViewFront, Chord::key("1"));
+        set(ViewBack, Chord::ctrl("1"));
+        set(ViewRight, Chord::key("3"));
+        set(ViewLeft, Chord::ctrl("3"));
+        set(ViewIsometric, Chord::key("0"));
+        set(ToggleGrid, Chord::key("5"));
+        set(DisplayShaded, Chord::key("8"));
+        set(DisplayShadedEdges, Chord::key("9"));
+        set(DisplayWireframe, Chord::key("6"));
         set(ToggleBoundingBox, Chord::key("B"));
         set(ToggleGhosts, Chord::shift("H"));
 
-        set(NudgeLeft, Chord::key("ArrowLeft"));
-        set(NudgeRight, Chord::key("ArrowRight"));
-        set(NudgeUp, Chord::key("ArrowUp"));
-        set(NudgeDown, Chord::key("ArrowDown"));
+        set(NudgeLeft, Chord::key("Left"));
+        set(NudgeRight, Chord::key("Right"));
+        set(NudgeUp, Chord::key("Up"));
+        set(NudgeDown, Chord::key("Down"));
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
         set(ToggleHandleFrame, Chord::key("X"));
@@ -710,7 +712,7 @@ mod tests {
             Chord::key("A"),
             Chord::ctrl("S"),
             Chord::ctrl_shift("Z"),
-            Chord::shift("ArrowUp"),
+            Chord::shift("Up"),
             Chord { key: "F5".into(), ctrl: true, shift: true, alt: true },
         ] {
             assert_eq!(Chord::from_str(&chord.to_string()).unwrap(), chord);

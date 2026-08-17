@@ -181,7 +181,9 @@ pub fn render(request: &Request<'_>) -> Frame {
             Style::Selected => {
                 // Always outlined, in every display mode: the selection has to
                 // be visible, and an outline reads clearly over a shaded body.
-                draw_edges(&mut frame, &view, item.renderable, request.palette.selected);
+                // A larger bias than the solid's own edges, or the two would tie
+                // at equal depth and the outline would lose.
+                draw_selection(&mut frame, &view, item.renderable, request.palette.selected);
             }
             Style::Ghost => draw_ghost(&mut frame, &view, item.renderable, request.palette.ghost),
         }
@@ -277,11 +279,36 @@ fn clip_pieces(view: &View, in_view: [Vec3; 3]) -> Vec<[Vec3; 3]> {
     }
 }
 
+/// Depth bias for a line, as a fraction of its own depth key. Absolute biases
+/// do not work here: the key is `1/z` under perspective, so a fixed nudge that
+/// is invisible up close is larger than the whole scene's depth range when the
+/// camera is far away -- which is what made the origin axes draw straight through
+/// solid geometry.
+const EDGE_BIAS: f32 = 2.0e-4;
+const SELECTION_BIAS: f32 = 8.0e-4;
+/// The grid and the axes are biased *away* from the eye, so a face that happens
+/// to be coplanar with one of them hides it. Without this a plate 4mm thick and
+/// centred on the origin has the ground grid drawn straight across its side
+/// walls, because the wall and the grid line tie at exactly equal depth and the
+/// grid got there first. The axes are biased slightly less than the grid,
+/// because the X and Y axes lie exactly along grid lines and would otherwise
+/// lose that tie in turn.
+const GRID_BIAS: f32 = -8.0e-4;
+const AXIS_BIAS: f32 = -5.0e-4;
+
 fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
-        draw_world_line(frame, view, a, b, colour, 0.004);
+        draw_world_line(frame, view, a, b, colour, EDGE_BIAS);
+    }
+}
+
+fn draw_selection(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
+    for edge in &item.edges {
+        let a = item.mesh.positions[edge[0] as usize];
+        let b = item.mesh.positions[edge[1] as usize];
+        draw_world_line(frame, view, a, b, colour, SELECTION_BIAS);
     }
 }
 
@@ -296,7 +323,8 @@ fn draw_wireframe(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgb
 }
 
 /// Draw a world-space line, clipping it against the near plane so a segment
-/// crossing behind the eye does not project to nonsense.
+/// crossing behind the eye does not project to nonsense. `bias` is a fraction of
+/// the line's own depth key, not an absolute amount.
 fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32) {
     let (mut va, mut vb) = (view.to_view(a), view.to_view(b));
     if !view.camera.orthographic {
@@ -311,7 +339,9 @@ fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgb
             vb = vb.lerp(va, t);
         }
     }
-    frame.line(to_vertex(view, va), to_vertex(view, vb), colour, bias);
+    let (va, vb) = (to_vertex(view, va), to_vertex(view, vb));
+    let scale = (va.key.abs() + vb.key.abs()) * 0.5;
+    frame.line(va, vb, colour, bias * scale);
 }
 
 /// Grid spacing that is actually legible: step up in powers of ten until one
@@ -345,7 +375,7 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
             Vec3::new(cx + offset, cy - half, 0.0),
             Vec3::new(cx + offset, cy + half, 0.0),
             colour,
-            0.0,
+            GRID_BIAS,
         );
         draw_world_line(
             frame,
@@ -353,7 +383,7 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
             Vec3::new(cx - half, cy + offset, 0.0),
             Vec3::new(cx + half, cy + offset, 0.0),
             colour,
-            0.0,
+            GRID_BIAS,
         );
     }
 }
@@ -367,7 +397,7 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
         (Vec3::new(0.0, 1.0, 0.0), palette.axis_y),
         (Vec3::new(0.0, 0.0, 1.0), palette.axis_z),
     ] {
-        draw_world_line(frame, view, dir * -length, dir * length, colour, 0.002);
+        draw_world_line(frame, view, dir * -length, dir * length, colour, AXIS_BIAS);
     }
 }
 
@@ -541,6 +571,38 @@ mod tests {
         // A dark background needs a light model and vice versa, or nothing reads.
         assert!(dark.background[0] < dark.solid[0]);
         assert!(light.background[0] > light.solid[0]);
+    }
+
+    #[test]
+    fn the_grid_never_draws_over_geometry_it_is_coplanar_with() {
+        // A 4mm plate centred on the origin has its side walls cut exactly by the
+        // z=0 grid plane, and its bottom face lies on the grid for an anchored
+        // one. Rendering with and without the grid must leave every pixel the
+        // model itself painted untouched.
+        let prepared = Renderable::prepare(&primitives::box_mesh(60.0, 40.0, 4.0));
+        let build = |grid: bool| {
+            let mut req =
+                request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+            req.grid = Grid { visible: grid, spacing: 10.0 };
+            req.view.camera.pitch = 10.0;
+            (render(&req), req.palette)
+        };
+        let (without, palette) = build(false);
+        let (with, _) = build(true);
+
+        let axis_colours = [palette.axis_x, palette.axis_y, palette.axis_z];
+        let mut checked = 0;
+        for i in 0..(160 * 120) {
+            let o = i * 4;
+            let bare: Rgba = [without.color[o], without.color[o + 1], without.color[o + 2], without.color[o + 3]];
+            if bare == palette.background || axis_colours.contains(&bare) {
+                continue;
+            }
+            let gridded: Rgba = [with.color[o], with.color[o + 1], with.color[o + 2], with.color[o + 3]];
+            assert_eq!(gridded, bare, "the grid overwrote the model at pixel {i}");
+            checked += 1;
+        }
+        assert!(checked > 800, "only {checked} model pixels were checked");
     }
 
     #[test]
