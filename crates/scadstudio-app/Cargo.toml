@@ -16,6 +16,6 @@ scadstudio-geom = { path = "../scadstudio-geom" }
 # The viewport is a from-scratch software rasterizer (see src/raster.rs), so
 # eframe only has to give us a window and 2D drawing. `default-features = false`
 # plus `glow` keeps wgpu, persistence and the web backend out of the build.
-eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+eframe = { version = "0.32", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 rfd = "0.17"
-egui = "0.36"
+egui = "0.32"

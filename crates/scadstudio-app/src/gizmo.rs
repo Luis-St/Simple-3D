@@ -19,7 +19,7 @@
 
 use crate::view::View;
 use scadstudio_core::eval::Evaluated;
-use scadstudio_core::primitive::{AxisDriver, ParamValue, Params, ParamsExt};
+use scadstudio_core::primitive::{AxisDriver, ParamValue, Params};
 use scadstudio_core::scene::{NodeId, Scene};
 use scadstudio_core::unit::{format_angle, format_length, Unit};
 use scadstudio_core::xform::Xform;
@@ -661,6 +661,7 @@ pub fn axis_screen_sign(gizmo: &Gizmo, view: &View, axis: usize, vertical: bool)
 mod tests {
     use super::*;
     use scadstudio_core::eval::{Cancel, Evaluator};
+    use scadstudio_core::primitive::ParamsExt;
     use scadstudio_core::scene::Camera;
 
     struct Fixture {
