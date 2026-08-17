@@ -1,5 +1,39 @@
 # Known issues
 
+## The 200-primitive performance target is not met
+
+`crates/scadstudio-core/tests/performance.rs` builds the spec's acceptance
+criterion 13 scene: fifty assemblies, each a plate with a hole and a slot cut
+from it plus a boss unioned on, so 200 primitives inside 100 nested boolean
+groups. Measured on a release build:
+
+| | time |
+|---|---|
+| cold evaluation | ~10 s |
+| one-dimension edit | ~9.6 s |
+| re-evaluating an unchanged scene | ~0.5 ms |
+
+So the caching works perfectly when *nothing* changed, and barely helps when one
+dimension does. The spec asks for an interactive preview and "well under a
+second" for a single-value edit, and neither holds.
+
+`a_single_value_edit_reuses_the_cache` is `#[ignore]`d rather than relaxed: it
+states the target, and it should be un-ignored by whatever fixes this.
+
+What has been ruled out: the root union is *not* the bottleneck. Operands whose
+bounding boxes do not overlap now skip the BSP kernel entirely (their union is a
+concatenation, which is what the kernel would have produced anyway), and that
+only moved the cold run from 10.4 s to 10.0 s. The cost is in the fifty inner
+*difference* groups.
+
+Where to look next: an edit to one assembly's hole diameter should invalidate one
+subtree hash out of fifty, so the fact that the warm run costs almost as much as
+the cold one means either the cache is missing where it should hit, or the work
+that is genuinely redone is far more expensive than one fiftieth. Instrument
+`Evaluator::subtree` with a hit/miss counter first -- that distinguishes the two
+immediately. The mesh-density issue below is a plausible contributor, since each
+difference group's output feeds the assembly union above it.
+
 ## Boolean output is denser than it needs to be
 
 A BSP boolean clips against *infinite* planes. Subtracting an 8 mm 24-segment
