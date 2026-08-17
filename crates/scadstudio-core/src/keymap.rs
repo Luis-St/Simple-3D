@@ -641,6 +641,38 @@ mod tests {
         assert!(map.self_conflicts().is_empty());
     }
 
+    /// Spec acceptance criterion 27 as one sequence: switch preset, *then* rebind
+    /// onto a combination already in use, and the conflict is named.
+    ///
+    /// The two halves are covered separately above, but the criterion asks for
+    /// them in order, and a preset switch is exactly what could leave the map in
+    /// a state where the conflict check looks at the wrong bindings.
+    #[test]
+    fn a_conflict_is_named_after_switching_preset_too() {
+        let mut map = Keymap::default();
+        map.switch_preset(Preset::MeshEditor);
+        assert_eq!(map.preset, Preset::MeshEditor);
+        assert!(map.self_conflicts().is_empty(), "the switch itself introduced a conflict");
+
+        // A chord this preset genuinely holds -- not one carried over from the
+        // preset we came from.
+        let (holder, chord) = (Command::ModeMove, map.binding(Command::ModeMove).unwrap().clone());
+        assert_eq!(chord, Chord::key("G"), "MeshEditor's ModeMove binding changed; pick another chord");
+
+        let named = map.set(Command::Rename, chord.clone(), false).unwrap_err();
+        assert_eq!(named, holder, "the conflict named the wrong command");
+        // Refused, not silently overwritten: both bindings are as they were.
+        assert_eq!(map.binding(Command::ModeMove), Some(&chord));
+        assert_ne!(map.binding(Command::Rename), Some(&chord));
+
+        // Reassigning on confirmation takes it from the holder rather than
+        // leaving two commands on one chord.
+        map.set(Command::Rename, chord.clone(), true).unwrap();
+        assert_eq!(map.binding(Command::Rename), Some(&chord));
+        assert_eq!(map.binding(Command::ModeMove), None);
+        assert!(map.self_conflicts().is_empty());
+    }
+
     #[test]
     fn rebinding_a_command_to_its_own_chord_is_not_a_conflict() {
         let mut map = Keymap::default();
