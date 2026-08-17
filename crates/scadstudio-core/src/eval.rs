@@ -16,6 +16,7 @@
 
 use crate::primitive::ParamValue;
 use crate::scene::{Anchor, Body, GroupOp, NodeId, Scene};
+use crate::xform::Xform;
 use scadstudio_geom::{evaluate_boolean, Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
@@ -35,9 +36,18 @@ pub struct NodeError {
 pub struct Evaluated {
     /// The whole scene as one mesh, ready to export.
     pub mesh: Arc<Mesh>,
-    /// Each visible primitive's own mesh in world space, for picking, selection
-    /// highlighting and the translucent display of hidden nodes.
+    /// Each primitive's own mesh in world space, for picking, selection
+    /// highlighting and the translucent display of hidden nodes. Hidden nodes are
+    /// included so they can be drawn as ghosts.
     pub node_meshes: BTreeMap<NodeId, Arc<Mesh>>,
+    /// Each node's *parent* frame in world space, including any anchor shift an
+    /// ancestor group applied. A manipulator handle needs this to place itself,
+    /// and its inverse to turn a world-space drag back into the parent-frame
+    /// coordinates `Node::position` is stored in.
+    pub node_frames: BTreeMap<NodeId, Xform>,
+    /// Each node's own bounding box in its own frame, after its anchor and before
+    /// its rotation and position. This is what the resize handles sit on.
+    pub node_local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
     /// Nodes whose own evaluation failed. Non-empty means export must refuse.
     pub errors: Vec<NodeError>,
     /// Set when the run was superseded by a later edit; the result is partial
@@ -124,12 +134,14 @@ impl Evaluator {
 
     pub fn evaluate(&mut self, scene: &Scene, cancel: &Cancel) -> Evaluated {
         let result = self.subtree(scene, scene.root(), cancel);
-        let mut node_meshes: BTreeMap<NodeId, Arc<Mesh>> = BTreeMap::new();
-        self.collect_node_meshes(scene, scene.root(), Transform::identity(), &mut node_meshes, cancel);
+        let mut collected = Collected::default();
+        self.walk(scene, scene.root(), Xform::IDENTITY, &mut collected, cancel);
         self.trim();
         Evaluated {
             mesh: result.mesh.clone(),
-            node_meshes,
+            node_meshes: collected.meshes,
+            node_frames: collected.frames,
+            node_local_bounds: collected.local_bounds,
             errors: result.errors.clone(),
             cancelled: cancel.is_cancelled(),
         }
@@ -209,20 +221,21 @@ impl Evaluator {
         mesh
     }
 
-    /// World-space mesh per primitive, used for picking, selection highlighting
-    /// and drawing hidden nodes as ghosts. Hidden nodes are included -- the
-    /// caller knows they took no part in the evaluated mesh.
-    fn collect_node_meshes(
+    /// Walk the tree accumulating each node's world frame, its own mesh in world
+    /// space and its local bounding box. One pass, so the transforms the handles
+    /// use and the meshes picking uses can never disagree.
+    fn walk(
         &mut self,
         scene: &Scene,
         id: NodeId,
-        parent: Transform,
-        out: &mut BTreeMap<NodeId, Arc<Mesh>>,
+        parent: Xform,
+        out: &mut Collected,
         cancel: &Cancel,
     ) {
         if cancel.is_cancelled() {
             return;
         }
+        out.frames.insert(id, parent);
         let node = scene.node(id);
         // The anchor shift happens in the node's own frame, before its rotation,
         // so it composes on the right of the node's own transform.
@@ -230,17 +243,26 @@ impl Evaluator {
             Anchor::Base => self.subtree(scene, id, cancel).anchor_offset,
             Anchor::Centre => Vec3::ZERO,
         };
-        let here = parent
-            .compose(&Transform::from_pos_rot(node.position, node.rotation))
-            .compose(&Transform::from_translation(anchor_offset));
+        let own = parent.compose(&Xform::from_pos_rot(node.position, node.rotation));
+        let shifted = own.compose(&Xform::from_translation(anchor_offset));
         match &node.body {
             Body::Primitive { .. } => {
                 let mesh = self.primitive_mesh(scene, id);
-                out.insert(id, Arc::new(here.apply(&mesh)));
+                if let Some((lo, hi)) = mesh.bounds() {
+                    out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
+                }
+                out.meshes.insert(id, Arc::new(apply(&shifted, &mesh)));
             }
             Body::Group { .. } => {
+                if let Some((lo, hi)) = self.subtree(scene, id, cancel).mesh.bounds() {
+                    // A group's mesh is already in its parent's frame, so undo
+                    // the node's own transform to get its local box.
+                    let inv = Xform::from_pos_rot(node.position, node.rotation).inverse();
+                    let (a, b) = (inv.point(lo), inv.point(hi));
+                    out.local_bounds.insert(id, (a.min(b), a.max(b)));
+                }
                 for &child in &node.children {
-                    self.collect_node_meshes(scene, child, here, out, cancel);
+                    self.walk(scene, child, shifted, out, cancel);
                 }
             }
         }
@@ -310,62 +332,15 @@ fn combine(op: GroupOp, children: &[Mesh], id: NodeId, name: &str, errors: &mut 
     result
 }
 
-/// An affine transform: rotate by the node's Euler angles, then translate.
-/// Composing these is what lets a group's transform apply to a whole assembly
-/// while each descendant keeps its own coordinates. A matrix rather than a
-/// stack of Euler triples, so nesting depth is unbounded.
-#[derive(Clone, Copy, Debug)]
-struct Transform {
-    /// Row-major 3x3 rotation.
-    m: [[f64; 3]; 3],
-    t: Vec3,
+#[derive(Default)]
+struct Collected {
+    meshes: BTreeMap<NodeId, Arc<Mesh>>,
+    frames: BTreeMap<NodeId, Xform>,
+    local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
 }
 
-impl Transform {
-    fn identity() -> Transform {
-        Transform { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: Vec3::ZERO }
-    }
-
-    fn from_translation(t: Vec3) -> Transform {
-        Transform { t, ..Transform::identity() }
-    }
-
-    /// Built by rotating the basis vectors, so it is the same rotation
-    /// `Vec3::rotate_xyz_deg` performs -- X, then Y, then Z -- by construction
-    /// rather than by a hand-derived product that could drift from it.
-    fn from_pos_rot(position: Vec3, rotation: Vec3) -> Transform {
-        let x = Vec3::new(1.0, 0.0, 0.0).rotate_xyz_deg(rotation);
-        let y = Vec3::new(0.0, 1.0, 0.0).rotate_xyz_deg(rotation);
-        let z = Vec3::new(0.0, 0.0, 1.0).rotate_xyz_deg(rotation);
-        Transform { m: [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]], t: position }
-    }
-
-    fn point(&self, p: Vec3) -> Vec3 {
-        Vec3::new(
-            self.m[0][0] * p.x + self.m[0][1] * p.y + self.m[0][2] * p.z,
-            self.m[1][0] * p.x + self.m[1][1] * p.y + self.m[1][2] * p.z,
-            self.m[2][0] * p.x + self.m[2][1] * p.y + self.m[2][2] * p.z,
-        ) + self.t
-    }
-
-    /// `self` applied after `inner`: the result maps `inner`'s local space all
-    /// the way out through `self`.
-    fn compose(&self, inner: &Transform) -> Transform {
-        let mut m = [[0.0; 3]; 3];
-        for r in 0..3 {
-            for c in 0..3 {
-                m[r][c] = (0..3).map(|k| self.m[r][k] * inner.m[k][c]).sum();
-            }
-        }
-        Transform { m, t: self.point(inner.t) }
-    }
-
-    fn apply(&self, mesh: &Mesh) -> Mesh {
-        Mesh {
-            positions: mesh.positions.iter().map(|&p| self.point(p)).collect(),
-            indices: mesh.indices.clone(),
-        }
-    }
+fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
+    Mesh { positions: mesh.positions.iter().map(|&p| xf.point(p)).collect(), indices: mesh.indices.clone() }
 }
 
 /// `DefaultHasher::new` uses fixed keys (unlike `RandomState`), so the same
@@ -645,6 +620,75 @@ mod tests {
         let (lo, hi) = mesh.bounds().unwrap();
         let centre = (lo + hi) * 0.5;
         assert!((centre.x - 50.0).abs() < 1e-9 && (centre.y - 10.0).abs() < 1e-9, "{centre:?}");
+    }
+
+    #[test]
+    fn a_nodes_frame_places_its_origin_and_orients_its_axes() {
+        // What a manipulator handle relies on: `node_frames[id]` is the *parent*
+        // frame, so the node's origin is `frame.point(node.position)` and its
+        // own axes come from composing its rotation on top.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        scene.get_mut(group).unwrap().position = Vec3::new(50.0, 0.0, 0.0);
+        scene.get_mut(group).unwrap().rotation = Vec3::new(0.0, 0.0, 90.0);
+        let id = plate(&mut scene, group);
+        scene.get_mut(id).unwrap().position = Vec3::new(10.0, 0.0, 0.0);
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let frame = out.node_frames[&id];
+        let origin = frame.point(scene.node(id).position);
+        // The group's 90-degree Z rotation turns the child's local +X into +Y.
+        assert!((origin - Vec3::new(50.0, 10.0, 0.0)).length() < 1e-9, "{origin:?}");
+
+        // And the world-space mesh agrees with that origin.
+        let (lo, hi) = out.node_meshes[&id].bounds().unwrap();
+        let centre = (lo + hi) * 0.5;
+        assert!((centre - origin).length() < 1e-9, "{centre:?} vs {origin:?}");
+
+        // Turning a world-space drag back into parent-frame coordinates.
+        let dragged_to = Vec3::new(50.0, 25.0, 0.0);
+        let new_position = frame.inverse().point(dragged_to);
+        assert!((new_position - Vec3::new(25.0, 0.0, 0.0)).length() < 1e-9, "{new_position:?}");
+    }
+
+    #[test]
+    fn local_bounds_follow_the_anchor_and_ignore_the_transform() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let id = plate(&mut scene, root);
+        scene.get_mut(id).unwrap().position = Vec3::new(100.0, 200.0, 300.0);
+        scene.get_mut(id).unwrap().rotation = Vec3::new(0.0, 90.0, 0.0);
+
+        let mut evaluator = Evaluator::new();
+        let centred = evaluator.evaluate(&scene, &Cancel::new());
+        let (lo, hi) = centred.node_local_bounds[&id];
+        assert!((hi - lo - Vec3::new(40.0, 20.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
+        assert!((lo.z + 2.0).abs() < 1e-9, "centre anchor should straddle zero, got {}", lo.z);
+
+        scene.get_mut(id).unwrap().anchor = Anchor::Base;
+        let based = evaluator.evaluate(&scene, &Cancel::new());
+        let (lo, hi) = based.node_local_bounds[&id];
+        assert!(lo.z.abs() < 1e-9, "base anchor should put the local minimum at zero, got {}", lo.z);
+        assert!((hi - lo - Vec3::new(40.0, 20.0, 4.0)).length() < 1e-9);
+    }
+
+    #[test]
+    fn a_group_frame_carries_its_ancestors_anchor_shift() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        scene.get_mut(group).unwrap().anchor = Anchor::Base;
+        let id = plate(&mut scene, group);
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        // The group's base anchor lifted its contents by half the plate's
+        // thickness, and the child's frame has to know that or its handles would
+        // sit below the geometry.
+        let origin = out.node_frames[&id].point(scene.node(id).position);
+        assert!((origin.z - 2.0).abs() < 1e-9, "{origin:?}");
+        let (lo, _) = out.node_meshes[&id].bounds().unwrap();
+        assert!(lo.z.abs() < 1e-9, "{lo:?}");
     }
 
     #[test]
