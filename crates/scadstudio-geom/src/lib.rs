@@ -3,6 +3,7 @@ pub mod hull;
 pub mod mesh;
 pub mod polyhedra;
 pub mod primitives;
+pub mod repair;
 pub mod revolve;
 pub mod vec3;
 
