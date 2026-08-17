@@ -66,8 +66,8 @@ impl ZipWriter {
         self.buffer.extend_from_slice(&20u16.to_le_bytes()); // version needed
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // flags
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // method: stored
-        // A fixed timestamp, so exporting the same scene twice produces
-        // byte-identical files -- the same reason the evaluator is deterministic.
+                                                            // A fixed timestamp, so exporting the same scene twice produces
+                                                            // byte-identical files -- the same reason the evaluator is deterministic.
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // time
         self.buffer.extend_from_slice(&0x21u16.to_le_bytes()); // date: 1980-01-01
         self.buffer.extend_from_slice(&crc.to_le_bytes());

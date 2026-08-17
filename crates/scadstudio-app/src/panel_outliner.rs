@@ -28,55 +28,51 @@ pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId) -
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let mut width = app.settings.outliner_width;
-    egui::SidePanel::left("outliner")
-        .resizable(true)
-        .default_width(width)
-        .width_range(180.0..=520.0)
-        .show(ctx, |ui| {
-            width = ui.available_width();
-            ui.horizontal(|ui| {
-                ui.heading("Outliner");
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("Delete").clicked() {
-                        app.run(scadstudio_core::keymap::Command::Delete);
-                    }
-                    if ui.small_button("Group").clicked() {
-                        app.run(scadstudio_core::keymap::Command::Group);
-                    }
-                });
-            });
-            ui.separator();
-
-            let dragging = app.outliner_drag;
-            app.drop_target = None;
-            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                let ids = app.scene.depth_first();
-                for id in ids {
-                    row(app, ui, id, dragging);
+    egui::SidePanel::left("outliner").resizable(true).default_width(width).width_range(180.0..=520.0).show(ctx, |ui| {
+        width = ui.available_width();
+        ui.horizontal(|ui| {
+            ui.heading("Outliner");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Delete").clicked() {
+                    app.run(scadstudio_core::keymap::Command::Delete);
                 }
-                // Dropping in the empty space below the tree means "at the end of
-                // the root", which is otherwise awkward to reach.
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
-                    egui::Sense::hover(),
+                if ui.small_button("Group").clicked() {
+                    app.run(scadstudio_core::keymap::Command::Group);
+                }
+            });
+        });
+        ui.separator();
+
+        let dragging = app.outliner_drag;
+        app.drop_target = None;
+        egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
+            let ids = app.scene.depth_first();
+            for id in ids {
+                row(app, ui, id, dragging);
+            }
+            // Dropping in the empty space below the tree means "at the end of
+            // the root", which is otherwise awkward to reach.
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
+                egui::Sense::hover(),
+            );
+            if dragging.is_some() && response.hovered() {
+                let root = app.scene.root();
+                app.drop_target =
+                    Some(DropTarget { parent: root, index: app.scene.node(root).children.len(), into: None });
+                ui.painter().hline(
+                    rect.x_range(),
+                    rect.top() + 1.0,
+                    egui::Stroke::new(2.0_f32, ui.visuals().selection.bg_fill),
                 );
-                if dragging.is_some() && response.hovered() {
-                    let root = app.scene.root();
-                    app.drop_target =
-                        Some(DropTarget { parent: root, index: app.scene.node(root).children.len(), into: None });
-                    ui.painter().hline(
-                        rect.x_range(),
-                        rect.top() + 1.0,
-                        egui::Stroke::new(2.0_f32, ui.visuals().selection.bg_fill),
-                    );
-                }
-            });
-
-            // Finish the drag on release, wherever the pointer ended up.
-            if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
-                finish_drag(app);
             }
         });
+
+        // Finish the drag on release, wherever the pointer ended up.
+        if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
+            finish_drag(app);
+        }
+    });
     app.settings.outliner_width = width;
 }
 
@@ -90,9 +86,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
     let is_root = id == app.scene.root();
     let selected = app.is_selected(id);
     let failed = app.evaluated.error_for(id).is_some();
-    let base_child = group_op
-        .filter(|op| op.order_matters())
-        .and_then(|_| app.scene.difference_base(id));
+    let base_child = group_op.filter(|op| op.order_matters()).and_then(|_| app.scene.difference_base(id));
 
     let row_response: Option<egui::Response> = ui
         .horizontal(|ui| {
@@ -140,9 +134,8 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
                 // (spec section 5.2).
                 text = text.color(ui.visuals().error_fg_color);
             }
-            let label = ui
-                .selectable_label(selected, text)
-                .on_hover_text(hover_text(app, id, is_group, group_op, base_child));
+            let label =
+                ui.selectable_label(selected, text).on_hover_text(hover_text(app, id, is_group, group_op, base_child));
 
             if is_group {
                 if let Some(op) = group_op {
@@ -228,8 +221,9 @@ fn hover_text(
             lines.push(format!("{} of {} children", op.label(), app.scene.node(id).children.len()));
             if op.order_matters() {
                 match base_child {
-                    Some(base) => lines
-                        .push(format!("Base: {} (everything below it is subtracted)", app.scene.node(base).name)),
+                    Some(base) => {
+                        lines.push(format!("Base: {} (everything below it is subtracted)", app.scene.node(base).name))
+                    }
                     None => lines.push("No visible child to use as the base".into()),
                 }
             }

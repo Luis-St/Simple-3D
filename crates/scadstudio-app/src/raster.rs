@@ -33,12 +33,7 @@ pub struct Vertex {
 
 impl Frame {
     pub fn new(width: usize, height: usize) -> Frame {
-        Frame {
-            width,
-            height,
-            color: vec![0; width * height * 4],
-            key: vec![f32::NEG_INFINITY; width * height],
-        }
+        Frame { width, height, color: vec![0; width * height * 4], key: vec![f32::NEG_INFINITY; width * height] }
     }
 
     pub fn clear(&mut self, background: Rgba) {
@@ -172,10 +167,8 @@ impl Frame {
         if t0 > t1 {
             return None;
         }
-        let at = |t: f32| Vertex {
-            pos: egui::pos2(a.pos.x + dx * t, a.pos.y + dy * t),
-            key: a.key + (b.key - a.key) * t,
-        };
+        let at =
+            |t: f32| Vertex { pos: egui::pos2(a.pos.x + dx * t, a.pos.y + dy * t), key: a.key + (b.key - a.key) * t };
         Some((at(t0), at(t1)))
     }
 
@@ -386,8 +379,14 @@ mod tests {
                 assert!(n.length() > 1e-9, "clipping produced a degenerate triangle");
             }
         }
-        assert_eq!(clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, -1.0), Vec3::new(0.0, 1.0, -2.0)], near).len(), 1);
-        assert_eq!(clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, -2.0)], near).len(), 2);
+        assert_eq!(
+            clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, -1.0), Vec3::new(0.0, 1.0, -2.0)], near).len(),
+            1
+        );
+        assert_eq!(
+            clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, -2.0)], near).len(),
+            2
+        );
     }
 
     #[test]

@@ -17,20 +17,18 @@ use scadstudio_geom::Vec3;
 use std::hash::{Hash, Hasher};
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
-    egui::CentralPanel::default()
-        .frame(egui::Frame::NONE)
-        .show(ctx, |ui| {
-            let rect = ui.available_rect_before_wrap();
-            app.viewport_rect = rect;
-            let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+    egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| {
+        let rect = ui.available_rect_before_wrap();
+        app.viewport_rect = rect;
+        let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
 
-            let dark = ui.visuals().dark_mode;
-            paint_scene(app, ui, rect, dark);
-            navigate(app, ui, &response);
-            let view = app.current_view();
-            manipulate(app, ui, &response, &view);
-            overlays(app, ui, rect, &view);
-        });
+        let dark = ui.visuals().dark_mode;
+        paint_scene(app, ui, rect, dark);
+        navigate(app, ui, &response);
+        let view = app.current_view();
+        manipulate(app, ui, &response, &view);
+        overlays(app, ui, rect, &view);
+    });
 }
 
 /// Rasterize the scene into a texture, reusing the last image while nothing that
@@ -50,8 +48,7 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         // points. Handing the rasterizer the panel rect instead would offset
         // every projected vertex by the panel's position and scale it by the
         // wrong factor -- the model would sit away from its own manipulator.
-        let render_rect =
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
+        let render_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let view = View::new(app.scene.camera, render_rect);
         let selected: Vec<NodeId> = app
             .top_level_selection()
@@ -86,10 +83,7 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         let image = frame.to_color_image();
         match &mut app.texture {
             Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
-            None => {
-                app.texture =
-                    Some(ui.ctx().load_texture("viewport", image, egui::TextureOptions::LINEAR))
-            }
+            None => app.texture = Some(ui.ctx().load_texture("viewport", image, egui::TextureOptions::LINEAR)),
         }
         app.image_key = key;
     }
@@ -114,7 +108,9 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
     let camera = app.scene.camera;
-    for value in [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg] {
+    for value in
+        [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]
+    {
         value.to_bits().hash(&mut hasher);
     }
     camera.orthographic.hash(&mut hasher);
@@ -292,13 +288,7 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     // Axis legend, in the same colours as the origin axes.
     let mut cursor = rect.left_top() + egui::vec2(10.0, 10.0);
     for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-        painter.text(
-            cursor,
-            egui::Align2::LEFT_TOP,
-            *name,
-            egui::FontId::monospace(12.0),
-            gizmo::axis_colour(axis),
-        );
+        painter.text(cursor, egui::Align2::LEFT_TOP, *name, egui::FontId::monospace(12.0), gizmo::axis_colour(axis));
         cursor.x += 16.0;
     }
     let info_colour = ui.visuals().text_color();
@@ -353,20 +343,8 @@ fn draw_box(painter: &egui::Painter, view: &View, lo: Vec3, hi: Vec3, colour: eg
             if i & 4 == 0 { lo.z } else { hi.z },
         )
     };
-    const EDGES: [(usize, usize); 12] = [
-        (0, 1),
-        (1, 3),
-        (3, 2),
-        (2, 0),
-        (4, 5),
-        (5, 7),
-        (7, 6),
-        (6, 4),
-        (0, 4),
-        (1, 5),
-        (2, 6),
-        (3, 7),
-    ];
+    const EDGES: [(usize, usize); 12] =
+        [(0, 1), (1, 3), (3, 2), (2, 0), (4, 5), (5, 7), (7, 6), (6, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
     for (a, b) in EDGES {
         let (Some((pa, _)), Some((pb, _))) = (view.project(corner(a)), view.project(corner(b))) else {
             continue;
@@ -395,8 +373,7 @@ fn label_box(
     ];
     for (world, text) in labels {
         let Some((screen, _)) = view.project(world) else { continue };
-        let galley =
-            painter.layout_no_wrap(format!("{text}{}", unit.suffix()), egui::FontId::monospace(11.0), colour);
+        let galley = painter.layout_no_wrap(format!("{text}{}", unit.suffix()), egui::FontId::monospace(11.0), colour);
         let at = screen + egui::vec2(6.0, -6.0);
         painter.rect_filled(
             egui::Rect::from_min_size(at, galley.size()).expand(2.0),
@@ -407,14 +384,7 @@ fn label_box(
     }
 }
 
-fn draw_gizmo(
-    app: &App,
-    painter: &egui::Painter,
-    ui: &egui::Ui,
-    gizmo: &Gizmo,
-    view: &View,
-    is_group: bool,
-) {
+fn draw_gizmo(app: &App, painter: &egui::Painter, ui: &egui::Ui, gizmo: &Gizmo, view: &View, is_group: bool) {
     let handles = gizmo.handles(is_group);
     if handles.is_empty() {
         if app.mode == gizmo::Mode::Resize {
@@ -423,11 +393,7 @@ fn draw_gizmo(
             painter.text(
                 origin + egui::vec2(12.0, 12.0),
                 egui::Align2::LEFT_TOP,
-                if is_group {
-                    "Groups have no resize handles"
-                } else {
-                    "This shape has no resizable axis"
-                },
+                if is_group { "Groups have no resize handles" } else { "This shape has no resizable axis" },
                 egui::FontId::proportional(11.0),
                 ui.visuals().weak_text_color(),
             );
@@ -440,11 +406,7 @@ fn draw_gizmo(
 
     for handle in handles {
         let axes = handle.axes();
-        let colour = if axes.len() == 1 {
-            gizmo::axis_colour(axes[0])
-        } else {
-            egui::Color32::from_rgb(200, 200, 210)
-        };
+        let colour = if axes.len() == 1 { gizmo::axis_colour(axes[0]) } else { egui::Color32::from_rgb(200, 200, 210) };
         let colour = if highlight(handle) { egui::Color32::from_rgb(255, 214, 96) } else { colour };
         match handle {
             Handle::MoveAxis(_) => {
@@ -483,15 +445,9 @@ fn draw_gizmo(
             Handle::ResizeCorner(_) => {
                 let Some((at, _)) = view.project(gizmo.handle_point(handle, view)) else { continue };
                 let size = if highlight(handle) { 5.0 } else { 3.5 };
-                painter.circle(
-                    at,
-                    size,
-                    egui::Color32::TRANSPARENT,
-                    egui::Stroke::new(2.0_f32, colour),
-                );
+                painter.circle(at, size, egui::Color32::TRANSPARENT, egui::Stroke::new(2.0_f32, colour));
             }
         }
     }
     painter.circle_filled(origin, 3.0, ui.visuals().strong_text_color());
-
 }

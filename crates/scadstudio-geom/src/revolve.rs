@@ -163,9 +163,8 @@ pub fn revolve_closed_profile(profile: &[(f64, f64)], segments: u32, sweep_deg: 
         }
     }
     if !full {
-        let centroid = |ring: &[Vec3]| -> Vec3 {
-            ring.iter().fold(Vec3::ZERO, |a, &b| a + b) * (1.0 / ring.len() as f64)
-        };
+        let centroid =
+            |ring: &[Vec3]| -> Vec3 { ring.iter().fold(Vec3::ZERO, |a, &b| a + b) * (1.0 / ring.len() as f64) };
         let start = &rings[0];
         let c0 = centroid(start);
         for i in 0..m {

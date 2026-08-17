@@ -1,0 +1,6 @@
+# The codebase is written to a wider line than rustfmt's 100-column default --
+# it keeps a match arm or an iterator chain on one line where breaking it adds
+# nothing. Recorded here so `cargo fmt` agrees with the code that is already in
+# the tree instead of reflowing all of it.
+max_width = 120
+use_small_heuristics = "Max"

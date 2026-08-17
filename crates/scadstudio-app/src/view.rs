@@ -258,11 +258,7 @@ mod tests {
             v.camera.orthographic = ortho;
             v.camera.yaw = -55.0;
             v.camera.pitch = 28.0;
-            for world in [
-                Vec3::new(10.0, 5.0, 3.0),
-                Vec3::new(-30.0, 12.0, -8.0),
-                Vec3::new(0.0, 0.0, 0.0),
-            ] {
+            for world in [Vec3::new(10.0, 5.0, 3.0), Vec3::new(-30.0, 12.0, -8.0), Vec3::new(0.0, 0.0, 0.0)] {
                 let (screen, _) = v.project(world).unwrap();
                 let (origin, dir) = v.ray(screen);
                 // The world point must lie on the ray through its own projection.

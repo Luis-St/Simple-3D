@@ -160,12 +160,7 @@ mod tests {
         scene.get_mut(hole).unwrap().rotation = Vec3::new(0.0, 0.0, 30.0);
         scene.get_mut(hole).unwrap().segments = Some(64);
         scene.get_mut(hole).unwrap().visible = false;
-        scene
-            .get_mut(hole)
-            .unwrap()
-            .params_mut()
-            .unwrap()
-            .insert("diameter_x".into(), ParamValue::Length(6.0));
+        scene.get_mut(hole).unwrap().params_mut().unwrap().insert("diameter_x".into(), ParamValue::Length(6.0));
         scene
     }
 

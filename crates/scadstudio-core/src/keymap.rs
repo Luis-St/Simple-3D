@@ -196,13 +196,13 @@ impl Command {
         use Command::*;
         match self {
             New | Open | Save | SaveAs | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility
-            | MoveUp | MoveDown => Area::Edit,
-            FrameSelection | FrameAll | ToggleProjection | ViewTop | ViewBottom | ViewFront | ViewBack
-            | ViewLeft | ViewRight | ViewIsometric | ToggleGrid | DisplayShaded | DisplayShadedEdges
-            | DisplayWireframe | ToggleBoundingBox | ToggleGhosts => Area::View,
-            ModeMove | ModeRotate | ModeResize | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp
-            | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility | MoveUp
+            | MoveDown => Area::Edit,
+            FrameSelection | FrameAll | ToggleProjection | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
+            | ViewRight | ViewIsometric | ToggleGrid | DisplayShaded | DisplayShadedEdges | DisplayWireframe
+            | ToggleBoundingBox | ToggleGhosts => Area::View,
+            ModeMove | ModeRotate | ModeResize | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp | NudgeDown
+            | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }

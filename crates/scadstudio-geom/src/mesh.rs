@@ -30,16 +30,11 @@ impl Mesh {
     pub fn append(&mut self, other: &Mesh) {
         let base = self.positions.len() as u32;
         self.positions.extend_from_slice(&other.positions);
-        self.indices
-            .extend(other.indices.iter().map(|t| [t[0] + base, t[1] + base, t[2] + base]));
+        self.indices.extend(other.indices.iter().map(|t| [t[0] + base, t[1] + base, t[2] + base]));
     }
 
     pub fn transformed(&self, translate: Vec3, rotate_deg: Vec3) -> Mesh {
-        let positions = self
-            .positions
-            .iter()
-            .map(|p| p.rotate_xyz_deg(rotate_deg) + translate)
-            .collect();
+        let positions = self.positions.iter().map(|p| p.rotate_xyz_deg(rotate_deg) + translate).collect();
         Mesh { positions, indices: self.indices.clone() }
     }
 

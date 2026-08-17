@@ -130,13 +130,7 @@ pub struct Gizmo {
 }
 
 impl Gizmo {
-    pub fn build(
-        scene: &Scene,
-        evaluated: &Evaluated,
-        id: NodeId,
-        mode: Mode,
-        world_frame: bool,
-    ) -> Option<Gizmo> {
+    pub fn build(scene: &Scene, evaluated: &Evaluated, id: NodeId, mode: Mode, world_frame: bool) -> Option<Gizmo> {
         let node = scene.get(id)?;
         if id == scene.root() {
             return None;
@@ -148,22 +142,12 @@ impl Gizmo {
         } else {
             [own.axis(0), own.axis(1), own.axis(2)]
         };
-        let (local_lo, local_hi) =
-            evaluated.node_local_bounds.get(&id).copied().unwrap_or((Vec3::ZERO, Vec3::ZERO));
+        let (local_lo, local_hi) = evaluated.node_local_bounds.get(&id).copied().unwrap_or((Vec3::ZERO, Vec3::ZERO));
         let drivers = match (node.spec(), node.params()) {
             (Some(spec), Some(params)) => (spec.axes)(params),
             _ => [None, None, None],
         };
-        Some(Gizmo {
-            mode,
-            origin: parent.point(node.position),
-            axes,
-            own,
-            parent,
-            local_lo,
-            local_hi,
-            drivers,
-        })
+        Some(Gizmo { mode, origin: parent.point(node.position), axes, own, parent, local_lo, local_hi, drivers })
     }
 
     /// The handles to draw and hit-test, in the order they should be tested --
@@ -261,11 +245,10 @@ impl Gizmo {
                 Handle::RotateRing(axis) => {
                     let points = self.ring_points(axis, view, 72);
                     let mut nearest = f32::MAX;
-                    for pair in points.windows(2).chain(std::iter::once(
-                        [*points.last().unwrap(), points[0]].as_slice(),
-                    )) {
-                        let (Some((a, _)), Some((b, _))) = (view.project(pair[0]), view.project(pair[1]))
-                        else {
+                    for pair in
+                        points.windows(2).chain(std::iter::once([*points.last().unwrap(), points[0]].as_slice()))
+                    {
+                        let (Some((a, _)), Some((b, _))) = (view.project(pair[0]), view.project(pair[1])) else {
                             continue;
                         };
                         nearest = nearest.min(distance_to_segment(cursor, a, b));
@@ -486,8 +469,7 @@ impl Drag {
                         if extent <= 0.0 {
                             continue;
                         }
-                        let outward =
-                            raw.dot(gizmo.axes[axis]) * if sides[axis] { 1.0 } else { -1.0 };
+                        let outward = raw.dot(gizmo.axes[axis]) * if sides[axis] { 1.0 } else { -1.0 };
                         if outward.abs() > best {
                             best = outward.abs();
                             ratio = Some((extent + outward) / extent);
@@ -501,8 +483,7 @@ impl Drag {
                     }
                     let outward = match ratio {
                         Some(r) => self.start_extent(axis) * (r - 1.0),
-                        None => mods.snap(raw.dot(gizmo.axes[axis]), move_snap)
-                            * if sides[axis] { 1.0 } else { -1.0 },
+                        None => mods.snap(raw.dot(gizmo.axes[axis]), move_snap) * if sides[axis] { 1.0 } else { -1.0 },
                     };
                     if let Some(extent) = self.resize_axis(scene, gizmo, axis, outward, false, sides[axis]) {
                         parts.push(format!("{} {}", axis_name(axis), format_length(extent, unit)));
@@ -680,10 +661,7 @@ mod tests {
             scene.camera = Camera { yaw: -55.0, pitch: 28.0, distance: 160.0, ..Camera::default() };
             let mut evaluator = Evaluator::new();
             let evaluated = evaluator.evaluate(&scene, &Cancel::new());
-            let view = View::new(
-                scene.camera,
-                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)),
-            );
+            let view = View::new(scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
             Fixture { scene, evaluator, evaluated, node, view }
         }
 
@@ -740,7 +718,11 @@ mod tests {
         let target = start + Vec3::new(23.0, 0.0, 0.0);
 
         drag_to(&mut f, handle, target, Mods::default(), 10.0);
-        assert!((f.scene.node(f.node).position.x - 20.0).abs() < 1e-9, "snapped to {:?}", f.scene.node(f.node).position);
+        assert!(
+            (f.scene.node(f.node).position.x - 20.0).abs() < 1e-9,
+            "snapped to {:?}",
+            f.scene.node(f.node).position
+        );
 
         let mut fresh = Fixture::new("box");
         drag_to(&mut fresh, handle, target, Mods { free: true, ..Default::default() }, 10.0);
@@ -748,7 +730,13 @@ mod tests {
         assert!((free - 23.0).abs() < 0.2 && (free - 20.0).abs() > 1.0, "free drag snapped anyway: {free}");
 
         let mut coarse = Fixture::new("box");
-        drag_to(&mut coarse, handle, start + Vec3::new(63.0, 0.0, 0.0), Mods { coarse: true, ..Default::default() }, 10.0);
+        drag_to(
+            &mut coarse,
+            handle,
+            start + Vec3::new(63.0, 0.0, 0.0),
+            Mods { coarse: true, ..Default::default() },
+            10.0,
+        );
         assert!((coarse.scene.node(coarse.node).position.x - 100.0).abs() < 1e-9, "coarse snap");
     }
 
@@ -758,13 +746,7 @@ mod tests {
         let gizmo = f.gizmo(Mode::Move);
         let handle = Handle::MovePlane(2); // the XY plane
         let start = gizmo.handle_point(handle, &f.view);
-        drag_to(
-            &mut f,
-            handle,
-            start + Vec3::new(20.0, 30.0, 0.0),
-            Mods { free: true, ..Default::default() },
-            10.0,
-        );
+        drag_to(&mut f, handle, start + Vec3::new(20.0, 30.0, 0.0), Mods { free: true, ..Default::default() }, 10.0);
         let p = f.scene.node(f.node).position;
         assert!((p.x - 20.0).abs() < 0.3 && (p.y - 30.0).abs() < 0.3, "{p:?}");
         assert!(p.z.abs() < 1e-6, "the plane's normal axis moved: {p:?}");
@@ -959,10 +941,7 @@ mod tests {
             (f.view.project(point).unwrap().0 - f.view.project(gizmo.origin).unwrap().0).length()
         };
         f.scene.camera.distance = 900.0;
-        f.view = View::new(
-            f.scene.camera,
-            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)),
-        );
+        f.view = View::new(f.scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
         f.reevaluate();
         let far_arm = {
             let gizmo = f.gizmo(Mode::Move);

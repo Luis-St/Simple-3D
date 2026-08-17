@@ -240,7 +240,12 @@ impl App {
                 (DisplayMode::Wireframe, Command::DisplayWireframe),
             ] {
                 let selected = self.settings.display_mode == mode;
-                let label = format!("{} {}\t{}", if selected { "*" } else { " " }, mode.label(), self.keymap.shortcut_text(command));
+                let label = format!(
+                    "{} {}\t{}",
+                    if selected { "*" } else { " " },
+                    mode.label(),
+                    self.keymap.shortcut_text(command)
+                );
                 if ui.button(label).clicked() {
                     self.run(command);
                     ui.close();
@@ -263,9 +268,11 @@ impl App {
 
     fn manipulate_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Manipulate", |ui| {
-            for (mode, command) in
-                [(Mode::Move, Command::ModeMove), (Mode::Rotate, Command::ModeRotate), (Mode::Resize, Command::ModeResize)]
-            {
+            for (mode, command) in [
+                (Mode::Move, Command::ModeMove),
+                (Mode::Rotate, Command::ModeRotate),
+                (Mode::Resize, Command::ModeResize),
+            ] {
                 let text = format!(
                     "{} {}\t{}",
                     if self.mode == mode { "*" } else { " " },
@@ -310,9 +317,11 @@ impl App {
                 Mode::Resize => Command::ModeResize,
             };
             let selected = self.mode == mode;
-            let response = ui
-                .selectable_label(selected, mode.label())
-                .on_hover_text(format!("{} ({})", mode.label(), self.keymap.shortcut_text(command)));
+            let response = ui.selectable_label(selected, mode.label()).on_hover_text(format!(
+                "{} ({})",
+                mode.label(),
+                self.keymap.shortcut_text(command)
+            ));
             if response.clicked() {
                 self.run(command);
             }
@@ -335,10 +344,9 @@ impl App {
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 // Display unit, so what the numbers mean is never in doubt.
-                egui::ComboBox::from_id_salt("status-unit")
-                    .selected_text(self.unit().suffix())
-                    .width(56.0)
-                    .show_ui(ui, |ui| {
+                egui::ComboBox::from_id_salt("status-unit").selected_text(self.unit().suffix()).width(56.0).show_ui(
+                    ui,
+                    |ui| {
                         for unit in Unit::ALL {
                             // Switching never rescales the model: the unit only
                             // changes what the fields read (spec section 4).
@@ -347,17 +355,14 @@ impl App {
                                 self.fields.clear();
                             }
                         }
-                    });
+                    },
+                );
                 ui.separator();
 
                 ui.label("Segments");
                 let mut segments = self.scene.settings.default_segments as f64;
-                let response = ui.add(
-                    egui::DragValue::new(&mut segments)
-                        .range(3.0..=512.0)
-                        .speed(0.5)
-                        .max_decimals(0),
-                );
+                let response =
+                    ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).speed(0.5).max_decimals(0));
                 if response.changed() {
                     self.edit("Default segments", Some("scene:segments"));
                     self.scene.settings.default_segments = segments.round() as u32;
@@ -409,20 +414,16 @@ impl App {
                     }
                     if !self.evaluated.errors.is_empty() {
                         ui.separator();
-                        let names: Vec<&str> =
-                            self.evaluated.errors.iter().map(|e| e.name.as_str()).collect();
-                        ui.colored_label(
-                            ui.visuals().error_fg_color,
-                            format!("Failed: {}", names.join(", ")),
-                        )
-                        .on_hover_text(
-                            self.evaluated
-                                .errors
-                                .iter()
-                                .map(|e| format!("{}: {}", e.name, e.message))
-                                .collect::<Vec<_>>()
-                                .join("\n"),
-                        );
+                        let names: Vec<&str> = self.evaluated.errors.iter().map(|e| e.name.as_str()).collect();
+                        ui.colored_label(ui.visuals().error_fg_color, format!("Failed: {}", names.join(", ")))
+                            .on_hover_text(
+                                self.evaluated
+                                    .errors
+                                    .iter()
+                                    .map(|e| format!("{}: {}", e.name, e.message))
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                            );
                     }
                 });
             });
@@ -451,13 +452,14 @@ impl App {
             .show(ctx, |ui| {
                 egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label("Format");
-                    egui::ComboBox::from_id_salt("export-format")
-                        .selected_text(self.export_format.label())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("export-format").selected_text(self.export_format.label()).show_ui(
+                        ui,
+                        |ui| {
                             for format in Format::ALL {
                                 ui.selectable_value(&mut self.export_format, format, format.label());
                             }
-                        });
+                        },
+                    );
                     ui.end_row();
 
                     ui.label("Units");
@@ -531,16 +533,17 @@ impl App {
             .show(ctx, |ui| {
                 egui::Grid::new("scene-settings").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
                     ui.label("Display unit");
-                    egui::ComboBox::from_id_salt("settings-unit")
-                        .selected_text(self.unit().suffix())
-                        .show_ui(ui, |ui| {
+                    egui::ComboBox::from_id_salt("settings-unit").selected_text(self.unit().suffix()).show_ui(
+                        ui,
+                        |ui| {
                             for unit in Unit::ALL {
                                 if ui.selectable_label(self.unit() == unit, unit.suffix()).clicked() {
                                     self.scene.settings.unit = unit;
                                     self.fields.clear();
                                 }
                             }
-                        });
+                        },
+                    );
                     ui.end_row();
 
                     ui.label("Default segments");
@@ -566,11 +569,7 @@ impl App {
                     ui.end_row();
 
                     ui.label("Rotation snap");
-                    ui.add(
-                        egui::DragValue::new(&mut self.settings.rotate_snap_deg)
-                            .range(0.1..=90.0)
-                            .suffix(" deg"),
-                    );
+                    ui.add(egui::DragValue::new(&mut self.settings.rotate_snap_deg).range(0.1..=90.0).suffix(" deg"));
                     ui.end_row();
 
                     ui.label("Show grid");
@@ -580,10 +579,7 @@ impl App {
                 ui.separator();
                 ui.label("Notes");
                 let mut notes = self.scene.settings.notes.clone();
-                if ui
-                    .add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0))
-                    .changed()
-                {
+                if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0)).changed() {
                     self.edit("Notes", Some("scene:notes"));
                     self.scene.settings.notes = notes;
                 }
@@ -631,22 +627,17 @@ impl App {
         }
 
         let mut open = true;
-        egui::Window::new("Keyboard and mouse")
-            .open(&mut open)
-            .default_width(560.0)
-            .default_height(560.0)
-            .show(ctx, |ui| {
+        egui::Window::new("Keyboard and mouse").open(&mut open).default_width(560.0).default_height(560.0).show(
+            ctx,
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Preset");
                     let mut preset = self.keymap.preset;
-                    egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).show_ui(
-                        ui,
-                        |ui| {
-                            for option in Preset::ALL {
-                                ui.selectable_value(&mut preset, option, option.label());
-                            }
-                        },
-                    );
+                    egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).show_ui(ui, |ui| {
+                        for option in Preset::ALL {
+                            ui.selectable_value(&mut preset, option, option.label());
+                        }
+                    });
                     if preset != self.keymap.preset {
                         // A preset is a starting point the user can then modify.
                         self.keymap.switch_preset(preset);
@@ -674,7 +665,10 @@ impl App {
                         if let Some(path) =
                             rfd::FileDialog::new().add_filter("ScadStudio keymap", &["json"]).pick_file()
                         {
-                            match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| Keymap::from_text(&t)) {
+                            match std::fs::read_to_string(&path)
+                                .map_err(|e| e.to_string())
+                                .and_then(|t| Keymap::from_text(&t))
+                            {
                                 Ok(keymap) => {
                                     self.keymap = keymap;
                                     let _ = config::save_keymap(&self.keymap);
@@ -753,10 +747,9 @@ impl App {
                         }
                         ui.add_space(4.0);
                         ui.strong(area.label());
-                        egui::Grid::new(format!("keymap-{}", area.label()))
-                            .num_columns(3)
-                            .spacing([10.0, 4.0])
-                            .show(ui, |ui| {
+                        egui::Grid::new(format!("keymap-{}", area.label())).num_columns(3).spacing([10.0, 4.0]).show(
+                            ui,
+                            |ui| {
                                 for command in commands {
                                     ui.label(command.label());
                                     let recording = self.recording == Some(command);
@@ -779,10 +772,12 @@ impl App {
                                     }
                                     ui.end_row();
                                 }
-                            });
+                            },
+                        );
                     }
                 });
-            });
+            },
+        );
         if !open {
             self.modal = Modal::None;
             self.recording = None;
