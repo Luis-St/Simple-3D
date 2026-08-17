@@ -2,7 +2,11 @@
 
 Closing out the two open entries in `KNOWN_ISSUES.md`, one bug found by driving
 the running application, and the packaging automation the spec asks for.
-`KNOWN_ISSUES.md` now has no outstanding entries.
+
+`KNOWN_ISSUES.md` is this project's issue list -- open items at the top, fixed
+ones written up below. One entry is open: acceptance criteria 26 and 28 are
+implemented and behaviourally correct but not asserted end to end, which an
+audit of criterion citations turned up after the work above was done.
 
 Full write-ups of what was actually wrong in each case are in that file's
 "Resolved" section; this is the index.
