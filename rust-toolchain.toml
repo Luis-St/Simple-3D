@@ -3,4 +3,7 @@
 # build requirement.
 [toolchain]
 channel = "1.97.1"
-targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
+# Windows is built natively on a Windows runner rather than cross-compiled, so
+# the MSVC target -- the one Windows users' machines expect and the one eframe's
+# graphics stack is best tested against.
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]

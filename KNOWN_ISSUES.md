@@ -1,65 +1,99 @@
 # Known issues
 
-## The 200-primitive performance target is not met
+None outstanding. Everything the spec asks for is implemented and tested; the
+two entries that used to stand here are in "Resolved" below, with what actually
+turned out to be wrong in each case.
 
-`crates/scadstudio-core/tests/performance.rs` builds the spec's acceptance
-criterion 13 scene: fifty assemblies, each a plate with a hole and a slot cut
-from it plus a boss unioned on, so 200 primitives inside 100 nested boolean
-groups. Measured on a release build:
+Two things worth knowing rather than fixing:
 
-| | time |
-|---|---|
-| cold evaluation | ~10 s |
-| one-dimension edit | ~9.6 s |
-| re-evaluating an unchanged scene | ~0.5 ms |
-
-So the caching works perfectly when *nothing* changed, and barely helps when one
-dimension does. The spec asks for an interactive preview and "well under a
-second" for a single-value edit, and neither holds.
-
-`a_single_value_edit_reuses_the_cache` is `#[ignore]`d rather than relaxed: it
-states the target, and it should be un-ignored by whatever fixes this.
-
-What has been ruled out: the root union is *not* the bottleneck. Operands whose
-bounding boxes do not overlap now skip the BSP kernel entirely (their union is a
-concatenation, which is what the kernel would have produced anyway), and that
-only moved the cold run from 10.4 s to 10.0 s. The cost is in the fifty inner
-*difference* groups.
-
-Where to look next: an edit to one assembly's hole diameter should invalidate one
-subtree hash out of fifty, so the fact that the warm run costs almost as much as
-the cold one means either the cache is missing where it should hit, or the work
-that is genuinely redone is far more expensive than one fiftieth. Instrument
-`Evaluator::subtree` with a hit/miss counter first -- that distinguishes the two
-immediately. The mesh-density issue below is a plausible contributor, since each
-difference group's output feeds the assembly union above it.
-
-## Boolean output is denser than it needs to be
-
-A BSP boolean clips against *infinite* planes. Subtracting an 8 mm 24-segment
-cylinder from a 40 × 20 mm plate therefore slices the plate's entire top and
-bottom face along 24 lines that run right across it, not just around the hole.
-The result is correct, watertight and manifold, but a plate with one hole and
-one boss comes out at ~1600 triangles where ~300 would describe the same solid.
-
-`csg_bsp::try_merge_group` recombines each *input* face's triangulation before
-the BSP sees it, which stops the growth compounding for simple faces, but it
-deliberately bails on a face that has a hole in it or is concave — exactly the
-faces an earlier boolean produces. So a long chain of booleans on the same face
-still accumulates triangles.
-
-The real fix is to retriangulate each coplanar region of the *output* from its
-boundary loops (which needs a polygon-with-holes triangulator: ear clipping
-plus hole bridging). A cheaper greedy "merge coplanar neighbours while the
-union stays convex" pass was tried and rejected: on the representative
-plate-with-hole-and-boss case it removed only 5% of the triangles, because the
-regions left behind by the infinite-plane cuts are mostly concave.
-
-Practical impact today: exports are larger than ideal and deep boolean chains
-get slower than the spec's 200-primitive target would like. Correctness is not
-affected — `Mesh::manifold_issue` gates every evaluation result.
+- **The boolean kernel classifies planes with a fixed epsilon** (`csg_bsp::EPSILON`,
+  1e-5 mm) rather than exact or rational arithmetic. Pathologically thin or
+  near-degenerate input can therefore still produce a non-manifold result. That
+  is caught, not shipped: `Mesh::manifold_issue` gates every evaluation, the
+  offending node is named in the outliner, and export refuses while the error
+  stands (spec section 5.2).
+- **Retriangulating a flat region is allowed to give up.** A boundary that
+  pinches at a vertex, a loop that will not close, a polygon that runs out of
+  ears -- any of these leave that region's original triangles in place. The
+  result is a denser mesh, never a wrong one, and `repair::heal` additionally
+  refuses the whole rebuild if it is less sound than what it replaced.
 
 ## Resolved
+
+### The 200-primitive performance target was missed by two orders of magnitude (fixed)
+
+The spec's acceptance criterion 13 scene -- fifty assemblies, each a plate with a
+hole and a slot cut from it plus a boss unioned on, so 200 primitives inside 100
+nested boolean groups -- took **~10 s** to evaluate cold and **~9.6 s** to update
+after a one-dimension edit, against a target of "well under a second". It now
+takes ~0.12 s and ~6 ms. `crates/scadstudio-core/tests/performance.rs` asserts
+both, and `a_single_value_edit_reuses_the_cache` is no longer `#[ignore]`d.
+
+The old note here blamed the fifty inner *difference* groups and said the root
+union had been ruled out. That was backwards, and the reasoning that ruled it out
+is worth recording because it is an easy trap.
+
+`evaluate_boolean` did skip the BSP kernel for operands whose bounding boxes do
+not overlap -- but it folded `union` over the operands, so the accumulator's box
+was the box of *everything unioned so far*. The first few assemblies really are
+disjoint from that box and skip the kernel; by the eleventh, the accumulated box
+spans two rows of the build plate and every remaining assembly's box falls inside
+it. From there on each one is run through a BSP tree of the whole pile. Measuring
+the skip's effect on the *cold* run (10.4 s to 10.0 s) hid this completely,
+because the skip does fire -- for the first ten operands out of fifty.
+
+`union_all` keeps the accumulated result as a set of **mutually disjoint parts**,
+each with its own box, and only invokes the kernel against the parts an operand
+can actually touch. Merging two parts grows the merged box, which can bring it
+into contact with a part that was previously clear, so the search restarts until
+nothing overlaps. `a_union_of_scattered_solids_never_reaches_the_kernel` and
+`merging_two_islands_still_catches_a_third_that_now_touches` cover both halves.
+
+The mesh-density fix below compounded it: 73,900 triangles became 11,400.
+
+### Boolean output was denser than the solid it described (fixed)
+
+A BSP boolean clips against *infinite* planes, so subtracting a 16-segment
+cylinder from a 40 x 20 mm plate sliced the plate's entire top and bottom face
+along sixteen lines running right across it. A plate with a hole, a slot and a
+boss arrived at ~1500 triangles for a solid ~230 describe, and every later
+boolean in the chain paid for those triangles again.
+
+`csg_bsp::try_merge_group` already recombined each *input* face's triangulation
+before the BSP saw it, which stopped the growth compounding for simple faces, but
+it bails on a face with a hole in it or a concave one -- exactly the faces an
+earlier boolean produces.
+
+The fix is `planar::retriangulate_flat_regions`, run from `repair::heal`: group
+the output triangles by plane, recover each region's boundary loops from the
+edges used once, bridge the holes into the outer loop, and ear-clip. Two things
+that were not obvious while building it:
+
+- **Ear clipping stalls on a healed boundary.** `split_t_junctions` deliberately
+  fills the boundary with collinear vertices so this face's edges match the
+  neighbouring face's. A collinear vertex is never a valid ear apex, so a run of
+  them can be left as the final three vertices with no ear to take. Dropping them
+  as zero-area ears reopens the T-junction the healer just closed. What works is
+  to strip them before triangulating and run `split_t_junctions` *again*
+  afterwards -- the neighbouring faces still have their corners there, so exactly
+  the same splits come back, into far fewer and larger triangles.
+- **Compact between the two passes.** Retriangulating orphans every vertex that
+  was interior to a flat region, and those orphans sit *on* the large new
+  triangles that replaced them. Left in `positions`, the second T-junction pass
+  finds them all as on-edge vertices and splits the mesh straight back to where
+  it started (measured: 100 triangles back up to 398).
+
+`repair::heal` keeps the rebuild only if it is smaller *and* at least as sound as
+what it replaced, so a region the pass cannot interpret costs nothing.
+
+### A group never reported its measured size (fixed)
+
+`Evaluator::walk` recorded a world-space mesh for primitives only, and the
+property editor derived the "Measured" panel from that -- so selecting any group,
+including the scene root, showed "No geometry yet." permanently rather than
+transiently. `Evaluated::node_world_bounds` now covers every node, measured over
+the subtree's transformed points rather than by transporting its local box (which
+would report a rotated 40 mm plate as 42 mm across, the box's diagonal).
 
 ### BSP CSG kernel left unpaired edges on `subtract`/`intersect` (fixed)
 
