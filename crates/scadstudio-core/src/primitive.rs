@@ -171,7 +171,7 @@ impl ParamsExt for Params {
 /// How one bounding-box axis of a primitive relates to one of its parameters,
 /// so a resize handle can write the real dimension instead of a scale factor
 /// (spec section 6.2). `extent = value * factor`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisDriver {
     pub param: &'static str,
     pub factor: f64,

@@ -646,63 +646,22 @@ impl App {
         let Some(id) = self.primary() else { return };
         let Some(gizmo) = self.gizmo_for(id) else { return };
         let view = self.current_view();
-        let [horizontal, vertical, third] = gizmo::screen_aligned_axes(&gizmo, &view);
-
-        let (axis, mut sign) = match command {
-            Command::NudgeLeft => (horizontal, -1.0),
-            Command::NudgeRight => (horizontal, 1.0),
-            Command::NudgeDown => (vertical, -1.0),
-            Command::NudgeUp => (vertical, 1.0),
-            Command::NudgeToward => (third, -1.0),
-            Command::NudgeAway => (third, 1.0),
-            _ => return,
-        };
-        // Match the axis's screen direction, so "left" really goes left.
-        let vertical_key = matches!(command, Command::NudgeUp | Command::NudgeDown);
-        if matches!(command, Command::NudgeLeft | Command::NudgeRight) || vertical_key {
-            sign *= gizmo::axis_screen_sign(&gizmo, &view, axis, vertical_key);
-        }
-
-        // A run of repeats coalesces into a single undo step.
-        let coalesce = format!("nudge:{id}:{:?}", self.mode);
-        self.edit("Nudge", Some(&coalesce));
+        let snap = self.move_snap();
+        let rotate_snap = self.settings.rotate_snap_deg;
+        // Records the undo step under a key stable across a held run, so the
+        // whole run coalesces into one.
+        let step =
+            gizmo::apply_nudge(&mut self.history, &mut self.scene, &gizmo, &view, id, command, snap, rotate_snap);
+        let Some(step) = step else { return };
+        self.touch();
         self.nudging = true;
 
-        match self.mode {
-            Mode::Move => {
-                let step = self.move_snap() * sign;
-                let world_delta = gizmo.axes[axis] * step;
-                let target = gizmo.parent.point(self.scene.node(id).position) + world_delta;
-                let local = gizmo.parent.inverse().point(target);
-                if let Some(node) = self.scene.get_mut(id) {
-                    node.position = local;
-                }
-            }
-            Mode::Rotate => {
-                let step = self.settings.rotate_snap_deg * sign;
-                if let Some(node) = self.scene.get_mut(id) {
-                    let current = gizmo::get_axis(node.rotation, axis);
-                    let mut rotation = node.rotation;
-                    gizmo::set_axis(&mut rotation, axis, current + step);
-                    node.rotation = rotation;
-                }
-            }
-            Mode::Resize => {
-                let Some(driver) = gizmo.drivers[axis] else {
-                    self.status = Status::Info(format!(
-                        "{} has no dimension on the {} axis",
-                        self.scene.node(id).name,
-                        gizmo::axis_name(axis)
-                    ));
-                    return;
-                };
-                let extent = gizmo::get_axis(gizmo.local_hi, axis) - gizmo::get_axis(gizmo.local_lo, axis);
-                let target = (extent + self.move_snap() * sign).max(1e-3);
-                let value = target / driver.factor;
-                if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-                    params.insert(driver.param.to_string(), scadstudio_core::primitive::ParamValue::Length(value));
-                }
-            }
+        if let gizmo::Nudge::NoDimension { axis } = step {
+            self.status = Status::Info(format!(
+                "{} has no dimension on the {} axis",
+                self.scene.node(id).name,
+                gizmo::axis_name(axis)
+            ));
         }
         self.fields.clear();
     }
@@ -915,5 +874,145 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.persist();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scadstudio_core::eval::{Cancel, Evaluator};
+
+    /// An `App` on a headless `egui::Context`, which needs no window and no
+    /// graphics -- so the command dispatch itself can be driven from a test.
+    ///
+    /// `App::new` reads the *user's real* settings and keymap, so both are put
+    /// back to their defaults here; a test must not change its answer because of
+    /// what is in the developer's config directory.
+    fn headless_app() -> App {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx, None);
+        app.settings = AppSettings::default();
+        app.keymap = Keymap::default();
+        // The gizmo needs a viewport to work out which axes face the screen, and
+        // an evaluation to know where the node is.
+        app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        app.reevaluate_for_test();
+        app
+    }
+
+    impl App {
+        fn reevaluate_for_test(&mut self) {
+            self.evaluated = Evaluator::new().evaluate(&self.scene, &Cancel::new());
+        }
+    }
+
+    /// Spec acceptance criterion 19: the application starts and stays usable on a
+    /// machine with no accelerated graphics.
+    ///
+    /// There is none here -- no GPU, no window, no display -- and this is the
+    /// whole of `App::new`: settings, the evaluation worker, the starter scene and
+    /// the first frame's worth of state. `raster.rs`'s tests cover the drawing
+    /// that follows being done on the CPU; this covers the starting.
+    #[test]
+    fn the_application_starts_with_no_graphics_at_all() {
+        let mut app = headless_app();
+        assert!(!app.scene.depth_first().is_empty(), "the starter scene is empty");
+        assert!(app.primary().is_some(), "nothing is selected to type numbers into");
+        assert_eq!(app.status, Status::Idle);
+        assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
+        assert!(app.evaluated.mesh.triangle_count() > 0, "the starter scene evaluated to nothing");
+
+        // And it stays usable: a command runs and takes effect.
+        app.run(Command::Duplicate);
+        assert_eq!(app.scene.depth_first().len(), 3, "root, plate and its duplicate");
+        app.run(Command::Undo);
+        assert_eq!(app.scene.depth_first().len(), 2);
+    }
+
+    /// Spec acceptance criterion 26, from the command a keypress actually
+    /// dispatches: hold an arrow key, every repeat steps by the snap increment,
+    /// and the whole run undoes in one.
+    ///
+    /// `gizmo::a_held_nudge_run_steps_by_the_snap_and_undoes_in_one` covers the
+    /// arithmetic; this covers the wiring from `App::run` to it, which is the
+    /// part a keypress reaches.
+    #[test]
+    fn holding_an_arrow_key_nudges_by_the_snap_and_undoes_in_one_step() {
+        const PRESSES: usize = 8;
+
+        let mut app = headless_app();
+        let id = app.primary().expect("the starter scene leaves a plate selected");
+        let snap = app.move_snap();
+        assert_eq!(snap, 10.0, "the default grid spacing changed; this test's arithmetic assumes it");
+        let start = app.scene.node(id).position;
+
+        // Something before the run, so "one undo step" is distinguishable from
+        // "undo emptied the stack".
+        app.run(Command::Rename);
+        let before_run = app.history.revision();
+
+        for _ in 0..PRESSES {
+            app.run(Command::NudgeRight);
+            app.reevaluate_for_test();
+        }
+        assert!(app.history.revision() > before_run, "the run recorded nothing at all");
+
+        let travelled = (app.scene.node(id).position - start).length();
+        assert!(
+            (travelled - snap * PRESSES as f64).abs() < 1e-6,
+            "{PRESSES} presses travelled {travelled} mm, expected {}",
+            snap * PRESSES as f64
+        );
+
+        app.run(Command::Undo);
+        assert_eq!(app.scene.node(id).position, start, "one undo did not restore the whole run");
+        app.run(Command::Redo);
+        assert!((app.scene.node(id).position - start).length() > snap, "redo did not put the run back");
+    }
+
+    /// Nudging in rotate and resize mode goes through the same key, and a mode
+    /// switch mid-way must not be swallowed into the previous run's undo step.
+    #[test]
+    fn switching_mode_starts_a_new_nudge_undo_step() {
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+
+        app.run(Command::ModeMove);
+        app.run(Command::NudgeRight);
+        app.reevaluate_for_test();
+        let moved = app.scene.node(id).position;
+
+        app.run(Command::ModeRotate);
+        app.run(Command::NudgeRight);
+        app.reevaluate_for_test();
+        assert_ne!(app.scene.node(id).rotation, Vec3::ZERO, "a rotate-mode nudge did not rotate");
+
+        // One undo takes back the rotation only.
+        app.run(Command::Undo);
+        assert_eq!(app.scene.node(id).rotation, Vec3::ZERO);
+        assert_eq!(app.scene.node(id).position, moved, "the rotation and the move shared an undo step");
+    }
+
+    /// Spec acceptance criterion 20's last clause, which is `App`'s to keep: a
+    /// pasted copy is left selected, so a nudge or a drag can follow immediately.
+    #[test]
+    fn a_pasted_copy_is_left_selected() {
+        let mut app = headless_app();
+        let original = app.primary().unwrap();
+
+        app.run(Command::Copy);
+        app.run(Command::Paste);
+
+        let pasted = app.primary().expect("nothing is selected after a paste");
+        assert_ne!(pasted, original, "the paste left the original selected, not the copy");
+        assert_eq!(app.selection, vec![pasted], "the copy is not the whole selection");
+        assert_eq!(app.scene.node(pasted).position, app.scene.node(original).position);
+
+        // And it really is usable straight away: a nudge acts on the copy.
+        app.reevaluate_for_test();
+        let start = app.scene.node(pasted).position;
+        app.run(Command::NudgeRight);
+        assert_ne!(app.scene.node(pasted).position, start, "the pasted copy could not be nudged");
+        assert_eq!(app.scene.node(original).position, start, "nudging the copy moved the original");
     }
 }
