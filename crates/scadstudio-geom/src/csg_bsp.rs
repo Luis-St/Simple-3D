@@ -249,9 +249,13 @@ fn plane_key(p: &Plane) -> (i64, i64, i64, i64) {
 /// the result of an earlier boolean op and legitimately has multiple
 /// boundary components (a face with a hole in it).
 fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Polygon> {
-    use std::collections::{HashMap, HashSet};
-    let mut edge_count: HashMap<((i64, i64, i64), (i64, i64, i64)), i32> = HashMap::new();
-    let mut pos_of: HashMap<(i64, i64, i64), Vec3> = HashMap::new();
+    // BTreeMap, not HashMap: `start` below is picked by iteration order, and
+    // `HashMap`'s is randomised per instance, which would make boolean output
+    // vary between runs of identical input (spec section 5.2 requires
+    // deterministic evaluation).
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut edge_count: BTreeMap<((i64, i64, i64), (i64, i64, i64)), i32> = BTreeMap::new();
+    let mut pos_of: BTreeMap<(i64, i64, i64), Vec3> = BTreeMap::new();
     for &ti in tri_idxs {
         let t = mesh.indices[ti];
         let pts = [mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]];
@@ -263,7 +267,7 @@ fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Poly
             *edge_count.entry((ka, kb)).or_insert(0) += 1;
         }
     }
-    let mut next: HashMap<(i64, i64, i64), (i64, i64, i64)> = HashMap::new();
+    let mut next: BTreeMap<(i64, i64, i64), (i64, i64, i64)> = BTreeMap::new();
     for (&(ka, kb), &c) in edge_count.iter() {
         let rev = edge_count.get(&(kb, ka)).copied().unwrap_or(0);
         if c == 1 && rev == 0 {
@@ -280,7 +284,7 @@ fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Poly
     let start = *next.keys().next().unwrap();
     let mut verts = Vec::new();
     let mut cur = start;
-    let mut visited = HashSet::new();
+    let mut visited = BTreeSet::new();
     loop {
         if !visited.insert(cur) {
             return None;
@@ -294,7 +298,41 @@ fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Poly
     if verts.len() != next.len() {
         return None; // boundary has more than one loop (e.g. a face with a hole)
     }
+    if !is_convex_loop(&verts, &plane) {
+        // Both `split_polygon` and `polygons_to_mesh` assume convexity (the
+        // latter fan-triangulates from vertex 0). A concave merged face -- an
+        // L-shaped face left behind by an earlier boolean, say -- would be
+        // silently mis-split and mis-triangulated, so fall back to feeding
+        // this group's triangles in individually.
+        return None;
+    }
     Some(Polygon { vertices: verts, plane })
+}
+
+/// True if the loop turns the same way at every vertex when viewed along the
+/// plane normal. Exactly-collinear vertices (a fan triangulation's midpoints)
+/// are tolerated: they are harmless for both splitting and fan-triangulation.
+fn is_convex_loop(verts: &[Vec3], plane: &Plane) -> bool {
+    let n = verts.len();
+    if n < 3 {
+        return false;
+    }
+    let mut sign = 0.0f64;
+    for i in 0..n {
+        let a = verts[i];
+        let b = verts[(i + 1) % n];
+        let c = verts[(i + 2) % n];
+        let turn = (b - a).cross(c - b).dot(plane.normal);
+        if turn.abs() < 1e-12 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = turn.signum();
+        } else if turn.signum() != sign {
+            return false;
+        }
+    }
+    true
 }
 
 pub fn debug_mesh_to_polygons(mesh: &Mesh) -> Vec<Vec<Vec3>> {
@@ -345,10 +383,39 @@ pub fn debug_roundtrip(mesh: &Mesh) -> Mesh {
 fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
     let mut mesh = Mesh::new();
     for poly in polys {
-        // Fan-triangulate; every polygon here is convex (a plane-clipped
-        // convex input stays convex), so a fan from vertex 0 is always valid.
-        for i in 1..poly.vertices.len() - 1 {
-            mesh.push_triangle(poly.vertices[0], poly.vertices[i], poly.vertices[i + 1]);
+        // Fan-triangulate; every polygon here is convex (a plane-clipped convex
+        // input stays convex, and `try_merge_group` rejects concave merges), so
+        // a fan from vertex 0 is always valid. Start the fan at a vertex that
+        // actually turns: a merged face can carry collinear T-junction vertices,
+        // and fanning from one of those emits zero-area triangles whose edges
+        // then break the manifold check.
+        let n = poly.vertices.len();
+        if n < 3 {
+            continue;
+        }
+        // A fan from vertex k produces a zero-area triangle whenever k lies on
+        // the supporting line of one of the edges the fan spans. For a convex
+        // loop that happens exactly when k is inside a collinear run or is
+        // adjacent to a vertex that is, so require k and both its neighbours to
+        // be genuine corners.
+        let turns: Vec<bool> = (0..n)
+            .map(|k| {
+                let a = poly.vertices[(k + n - 1) % n];
+                let b = poly.vertices[k];
+                let c = poly.vertices[(k + 1) % n];
+                (b - a).cross(c - b).length() > 1e-12
+            })
+            .collect();
+        let apex = (0..n)
+            .find(|&k| turns[k] && turns[(k + 1) % n] && turns[(k + n - 1) % n])
+            .or_else(|| (0..n).find(|&k| turns[k]))
+            .unwrap_or(0);
+        for i in 1..n - 1 {
+            mesh.push_triangle(
+                poly.vertices[apex],
+                poly.vertices[(apex + i) % n],
+                poly.vertices[(apex + i + 1) % n],
+            );
         }
     }
     mesh
@@ -389,7 +456,11 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {
             na.all_polygons()
         }
     };
-    polygons_to_mesh(&polys)
+    // The BSP clips whole polygons, which leaves T-junctions wherever two
+    // polygons sharing an edge were split at different points along it; heal
+    // them here so every boolean result -- including one feeding the next
+    // boolean in a chain -- is edge-manifold. See `repair`.
+    crate::repair::heal(&polygons_to_mesh(&polys))
 }
 
 enum BoolOp {

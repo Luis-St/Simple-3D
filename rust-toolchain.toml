@@ -1,0 +1,6 @@
+# Pinned so the automated build (see .github/workflows/release.yml) produces the
+# same binary from the same commit on both targets, per the spec's reproducible
+# build requirement.
+[toolchain]
+channel = "1.97.1"
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu"]
