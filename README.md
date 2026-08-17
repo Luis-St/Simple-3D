@@ -50,10 +50,18 @@ crates/
 ## Status
 
 All four crates are implemented and all 29 of the spec's acceptance criteria are
-behaviourally met. `cargo test --workspace` runs 258 tests, none ignored or
-failing; 27 of the 29 criteria are asserted by a test that cites the criterion
-by name, and the two that are not — 26 and 28 — are the open entry in
-`KNOWN_ISSUES.md`, which is this project's issue list.
+behaviourally met. `cargo test --workspace` runs 272 tests, none ignored or
+failing, and every one of the 29 criteria is asserted by a test that cites the
+criterion by name.
+
+Check that last claim rather than trusting it — `python3 tools/criteria_audit.py`
+prints the test covering each criterion and exits non-zero if any is uncovered.
+Do not use `grep -rn "criterion" crates/` for this: it counts a doc comment as
+coverage, and four criteria were passing that check without a test.
+
+Two items are open in `KNOWN_ISSUES.md`, which is this project's issue list:
+a manipulator drag is not asserted to undo in one step, and `App::new` reads the
+user's real config directory. Both are recorded there with what makes them hard.
 
 Highlights worth knowing about:
 
@@ -105,4 +113,6 @@ with the version taken from the tag.
 | Caching and invalidation | `scadstudio-core/src/eval.rs` (`subtree_key`) |
 | Manipulator handle behaviour and modifiers | `scadstudio-app/src/gizmo.rs` |
 | Keymap presets, rebinding and conflicts | `scadstudio-core/src/keymap.rs` |
+| Navigation bindings taking effect without a restart | `scadstudio-app/src/panel_viewport.rs` (`nav_gesture`) |
+| Whether a criterion is really covered | `tools/criteria_audit.py` |
 | File format and migration | `scadstudio-core/src/project.rs` |
