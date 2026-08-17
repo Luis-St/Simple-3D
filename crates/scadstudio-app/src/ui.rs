@@ -314,5 +314,4 @@ mod tests {
         assert_eq!(describe_elapsed(std::time::Duration::from_millis(12)), "12 ms");
         assert_eq!(describe_elapsed(std::time::Duration::from_millis(2500)), "2.5 s");
     }
-
 }

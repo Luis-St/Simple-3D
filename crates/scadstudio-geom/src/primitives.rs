@@ -8,7 +8,9 @@
 
 use crate::mesh::Mesh;
 use crate::polyhedra::{self, SizeMode};
-use crate::revolve::{extrude_frustum_polygon, revolve_closed_profile, revolve_open_profile, ring_outline, rounded_rect_outline};
+use crate::revolve::{
+    extrude_frustum_polygon, revolve_closed_profile, revolve_open_profile, ring_outline, rounded_rect_outline,
+};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 /// Circumradius for a regular n-gon of the given "diameter", honouring the
@@ -37,7 +39,12 @@ pub fn rounded_box_mesh(w: f64, d: f64, h: f64, corner_radius: f64, corner_segme
 
 pub fn wedge_mesh(w: f64, d: f64, h: f64, top_width: f64) -> Mesh {
     let bottom = [(w / 2.0, -d / 2.0), (w / 2.0, d / 2.0), (-w / 2.0, d / 2.0), (-w / 2.0, -d / 2.0)];
-    let top = [(top_width / 2.0, -d / 2.0), (top_width / 2.0, d / 2.0), (-top_width / 2.0, d / 2.0), (-top_width / 2.0, -d / 2.0)];
+    let top = [
+        (top_width / 2.0, -d / 2.0),
+        (top_width / 2.0, d / 2.0),
+        (-top_width / 2.0, d / 2.0),
+        (-top_width / 2.0, -d / 2.0),
+    ];
     extrude_frustum_polygon(&bottom, &top, h)
 }
 
@@ -54,12 +61,28 @@ pub fn cone_mesh(bottom_diameter: f64, top_diameter: f64, height: f64, segments:
 }
 
 pub fn pyramid_mesh(base_w: f64, base_d: f64, top_w: f64, top_d: f64, height: f64) -> Mesh {
-    let bottom = [(base_w / 2.0, -base_d / 2.0), (base_w / 2.0, base_d / 2.0), (-base_w / 2.0, base_d / 2.0), (-base_w / 2.0, -base_d / 2.0)];
-    let top = [(top_w / 2.0, -top_d / 2.0), (top_w / 2.0, top_d / 2.0), (-top_w / 2.0, top_d / 2.0), (-top_w / 2.0, -top_d / 2.0)];
+    let bottom = [
+        (base_w / 2.0, -base_d / 2.0),
+        (base_w / 2.0, base_d / 2.0),
+        (-base_w / 2.0, base_d / 2.0),
+        (-base_w / 2.0, -base_d / 2.0),
+    ];
+    let top = [
+        (top_w / 2.0, -top_d / 2.0),
+        (top_w / 2.0, top_d / 2.0),
+        (-top_w / 2.0, top_d / 2.0),
+        (-top_w / 2.0, -top_d / 2.0),
+    ];
     extrude_frustum_polygon(&bottom, &top, height)
 }
 
-pub fn regular_pyramid_mesh(sides: u32, base_diameter: f64, top_diameter: f64, height: f64, across_flats: bool) -> Mesh {
+pub fn regular_pyramid_mesh(
+    sides: u32,
+    base_diameter: f64,
+    top_diameter: f64,
+    height: f64,
+    across_flats: bool,
+) -> Mesh {
     let sides = sides.max(3);
     let rb = polygon_radius(sides, base_diameter, across_flats);
     let rt = polygon_radius(sides, top_diameter, across_flats);

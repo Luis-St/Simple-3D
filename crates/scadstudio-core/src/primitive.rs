@@ -15,16 +15,26 @@ use std::f64::consts::PI;
 #[derive(Clone, Copy, Debug)]
 pub enum ParamKind {
     /// A length, stored in millimetres and shown in the display unit.
-    Length { min: f64 },
+    Length {
+        min: f64,
+    },
     /// An integer count, e.g. a polygon's number of sides.
-    Count { min: u32, max: u32 },
+    Count {
+        min: u32,
+        max: u32,
+    },
     /// An angle in degrees.
-    Angle { min: f64, max: f64 },
+    Angle {
+        min: f64,
+        max: f64,
+    },
     Bool,
     /// A radio-style choice between named alternatives, for measurements that
     /// are otherwise ambiguous (across corners vs across flats, wall thickness
     /// vs inner diameter).
-    Choice { options: &'static [&'static str] },
+    Choice {
+        options: &'static [&'static str],
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -254,11 +264,7 @@ const SIZE_MODE: &[&str] = &["Circumscribed diameter", "Edge length"];
 /// rather than producing inverted geometry.
 fn tube_inner(p: &Params) -> f64 {
     let outer = p.num("outer_diameter");
-    let inner = if p.int("wall_mode") == 0 {
-        outer - 2.0 * p.num("wall_thickness")
-    } else {
-        p.num("inner_diameter")
-    };
+    let inner = if p.int("wall_mode") == 0 { outer - 2.0 * p.num("wall_thickness") } else { p.num("inner_diameter") };
     inner.clamp(0.0, outer)
 }
 
@@ -288,11 +294,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         segmented: false,
         build: |p, _seg| gen::box_mesh(p.num("width"), p.num("depth"), p.num("height")),
         axes: |_p| {
-            [
-                Some(AxisDriver::direct("width")),
-                Some(AxisDriver::direct("depth")),
-                Some(AxisDriver::direct("height")),
-            ]
+            [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -317,11 +319,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             )
         },
         axes: |_p| {
-            [
-                Some(AxisDriver::direct("width")),
-                Some(AxisDriver::direct("depth")),
-                Some(AxisDriver::direct("height")),
-            ]
+            [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -337,11 +335,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         segmented: false,
         build: |p, _seg| gen::wedge_mesh(p.num("width"), p.num("depth"), p.num("height"), p.num("top_width")),
         axes: |_p| {
-            [
-                Some(AxisDriver::direct("width")),
-                Some(AxisDriver::direct("depth")),
-                Some(AxisDriver::direct("height")),
-            ]
+            [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -508,12 +502,9 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         build: |p, seg| gen::cone_mesh(p.num("bottom_diameter"), p.num("top_diameter"), p.num("height"), seg),
         axes: |p| {
             // Whichever end is wider sets the X/Y extent.
-            let wider = if p.num("top_diameter") > p.num("bottom_diameter") { "top_diameter" } else { "bottom_diameter" };
-            [
-                Some(AxisDriver::direct(wider)),
-                Some(AxisDriver::direct(wider)),
-                Some(AxisDriver::direct("height")),
-            ]
+            let wider =
+                if p.num("top_diameter") > p.num("bottom_diameter") { "top_diameter" } else { "bottom_diameter" };
+            [Some(AxisDriver::direct(wider)), Some(AxisDriver::direct(wider)), Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -566,11 +557,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         },
         axes: |p| {
             let wider = if p.num("top_diameter") > p.num("base_diameter") { "top_diameter" } else { "base_diameter" };
-            [
-                Some(AxisDriver { param: wider, factor: polygon_x_factor(p) }),
-                None,
-                Some(AxisDriver::direct("height")),
-            ]
+            [Some(AxisDriver { param: wider, factor: polygon_x_factor(p) }), None, Some(AxisDriver::direct("height"))]
         },
     },
     // -- Regular polyhedra --------------------------------------------------
@@ -696,12 +683,7 @@ mod tests {
             let params = spec.default_params();
             let mesh = (spec.build)(&params, 32);
             assert!(mesh.triangle_count() > 0, "{}: empty mesh", spec.type_id);
-            assert!(
-                mesh.manifold_issue().is_none(),
-                "{}: {}",
-                spec.type_id,
-                mesh.manifold_issue().unwrap()
-            );
+            assert!(mesh.manifold_issue().is_none(), "{}: {}", spec.type_id, mesh.manifold_issue().unwrap());
         }
     }
 

@@ -69,10 +69,7 @@ pub fn octahedron_mesh(size: f64, mode: SizeMode) -> Mesh {
     ];
     let s = scale_for(&v, size, &mode);
     let v: Vec<Vec3> = v.iter().map(|p| *p * s).collect();
-    let faces = [
-        [0, 2, 4], [0, 2, 5], [0, 3, 4], [0, 3, 5],
-        [1, 2, 4], [1, 2, 5], [1, 3, 4], [1, 3, 5],
-    ];
+    let faces = [[0, 2, 4], [0, 2, 5], [0, 3, 4], [0, 3, 5], [1, 2, 4], [1, 2, 5], [1, 3, 4], [1, 3, 5]];
     build_polyhedron(&v, &faces)
 }
 
@@ -93,10 +90,26 @@ fn icosahedron_unit() -> (Vec<Vec3>, Vec<[usize; 3]>) {
         Vec3::new(-t, 0.0, 1.0),
     ];
     let faces: Vec<[usize; 3]> = vec![
-        [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
-        [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
-        [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
-        [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
     ];
     (v, faces)
 }
@@ -113,15 +126,12 @@ pub fn icosahedron_mesh(size: f64, mode: SizeMode) -> Mesh {
 /// each icosahedron vertex, fan-triangulated into 3 triangles.
 pub fn dodecahedron_mesh(size: f64, mode: SizeMode) -> Mesh {
     let (ico_v, ico_f) = icosahedron_unit();
-    let dode_v: Vec<Vec3> = ico_f
-        .iter()
-        .map(|f| ((ico_v[f[0]] + ico_v[f[1]] + ico_v[f[2]]) * (1.0 / 3.0)).normalized())
-        .collect();
+    let dode_v: Vec<Vec3> =
+        ico_f.iter().map(|f| ((ico_v[f[0]] + ico_v[f[1]] + ico_v[f[2]]) * (1.0 / 3.0)).normalized()).collect();
 
     let mut faces = Vec::new();
     for (vi, v) in ico_v.iter().enumerate() {
-        let incident: Vec<usize> =
-            ico_f.iter().enumerate().filter(|(_, f)| f.contains(&vi)).map(|(i, _)| i).collect();
+        let incident: Vec<usize> = ico_f.iter().enumerate().filter(|(_, f)| f.contains(&vi)).map(|(i, _)| i).collect();
         let normal = v.normalized();
         let tangent = if normal.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
         let u = normal.cross(tangent).normalized();

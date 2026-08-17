@@ -170,9 +170,7 @@ pub fn render(request: &Request<'_>) -> Frame {
         match item.style {
             Style::Solid => match request.mode {
                 DisplayMode::Wireframe => draw_wireframe(&mut frame, &view, item.renderable, request.palette.wire),
-                DisplayMode::Shaded => {
-                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255)
-                }
+                DisplayMode::Shaded => draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255),
                 DisplayMode::ShadedWithEdges => {
                     draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255);
                     draw_edges(&mut frame, &view, item.renderable, request.palette.edge);
@@ -459,12 +457,8 @@ mod tests {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
         let frame = render(&req);
-        let mut shades: Vec<u8> = frame
-            .color
-            .chunks_exact(4)
-            .filter(|p| *p != req.palette.background)
-            .map(|p| p[0])
-            .collect();
+        let mut shades: Vec<u8> =
+            frame.color.chunks_exact(4).filter(|p| *p != req.palette.background).map(|p| p[0]).collect();
         shades.sort_unstable();
         shades.dedup();
         assert!(shades.len() >= 3, "expected the three visible faces to differ, got {shades:?}");
@@ -514,10 +508,7 @@ mod tests {
         let painted = count_non_background(&frame, &req.palette);
         assert!(painted > 500, "the ghost did not draw");
         // Nothing fully opaque in the ghost's colour: everything is blended.
-        assert!(
-            !frame.color.chunks_exact(4).any(|p| p[..3] == req.palette.ghost[..3]),
-            "the ghost drew opaquely"
-        );
+        assert!(!frame.color.chunks_exact(4).any(|p| p[..3] == req.palette.ghost[..3]), "the ghost drew opaquely");
     }
 
     #[test]
@@ -581,8 +572,7 @@ mod tests {
         // model itself painted untouched.
         let prepared = Renderable::prepare(&primitives::box_mesh(60.0, 40.0, 4.0));
         let build = |grid: bool| {
-            let mut req =
-                request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+            let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
             req.grid = Grid { visible: grid, spacing: 10.0 };
             req.view.camera.pitch = 10.0;
             (render(&req), req.palette)
@@ -609,7 +599,8 @@ mod tests {
     fn rendering_the_same_scene_twice_gives_the_same_image() {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 20.0, 10.0));
         let build = || {
-            let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
+            let mut req =
+                request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
             req.grid = Grid { visible: true, spacing: 10.0 };
             render(&req).color
         };
@@ -641,10 +632,7 @@ mod tests {
         let near = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
         let far = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0).translated(Vec3::new(0.0, 0.0, -200.0)));
         let req = request(
-            vec![
-                Item { renderable: &far, style: Style::Solid },
-                Item { renderable: &near, style: Style::Solid },
-            ],
+            vec![Item { renderable: &far, style: Style::Solid }, Item { renderable: &near, style: Style::Solid }],
             DisplayMode::Shaded,
         );
         let with_both = render(&req);

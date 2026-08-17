@@ -55,10 +55,7 @@ pub fn copy(scene: &Scene, selection: &[NodeId]) -> Option<Clip> {
     if tops.is_empty() {
         return None;
     }
-    Some(Clip {
-        format: CLIP_VERSION,
-        nodes: tops.iter().filter_map(|&id| scene.export_subtree(id)).collect(),
-    })
+    Some(Clip { format: CLIP_VERSION, nodes: tops.iter().filter_map(|&id| scene.export_subtree(id)).collect() })
 }
 
 /// Paste a clip, following the same target rule as Add: into the selected group,

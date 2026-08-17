@@ -170,14 +170,7 @@ pub struct Camera {
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera {
-            target: Vec3::ZERO,
-            distance: 160.0,
-            yaw: -55.0,
-            pitch: 28.0,
-            orthographic: false,
-            fov_deg: 45.0,
-        }
+        Camera { target: Vec3::ZERO, distance: 160.0, yaw: -55.0, pitch: 28.0, orthographic: false, fov_deg: 45.0 }
     }
 }
 
@@ -310,8 +303,7 @@ impl Scene {
     /// A name that does not already exist among the parent's children, so the
     /// outliner stays readable. Names are not required to be unique.
     fn unique_name(&self, parent: NodeId, base: &str) -> String {
-        let taken: Vec<&str> =
-            self.nodes[&parent].children.iter().map(|c| self.nodes[c].name.as_str()).collect();
+        let taken: Vec<&str> = self.nodes[&parent].children.iter().map(|c| self.nodes[c].name.as_str()).collect();
         if !taken.contains(&base) {
             return base.to_string();
         }
@@ -484,12 +476,7 @@ impl Scene {
     /// A group's base child in a difference: the first *visible* one (spec
     /// section 3.3). The property editor states this plainly.
     pub fn difference_base(&self, group: NodeId) -> Option<NodeId> {
-        self.nodes
-            .get(&group)?
-            .children
-            .iter()
-            .copied()
-            .find(|c| self.nodes[c].visible)
+        self.nodes.get(&group)?.children.iter().copied().find(|c| self.nodes[c].visible)
     }
 
     // -- portable form (project file and clipboard share one schema) ---------
@@ -576,11 +563,7 @@ impl Scene {
     /// The effective segment count for a node: its own override, else the
     /// scene default.
     pub fn segments_for(&self, id: NodeId) -> u32 {
-        self.nodes
-            .get(&id)
-            .and_then(|n| n.segments)
-            .unwrap_or(self.settings.default_segments)
-            .clamp(3, 512)
+        self.nodes.get(&id).and_then(|n| n.segments).unwrap_or(self.settings.default_segments).clamp(3, 512)
     }
 }
 

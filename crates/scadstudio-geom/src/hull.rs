@@ -27,10 +27,7 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
     }
 
     let bounds_diag = {
-        let (lo, hi) = (
-            pts.iter().cloned().fold(pts[0], Vec3::min),
-            pts.iter().cloned().fold(pts[0], Vec3::max),
-        );
+        let (lo, hi) = (pts.iter().cloned().fold(pts[0], Vec3::min), pts.iter().cloned().fold(pts[0], Vec3::max));
         (hi - lo).length().max(1.0)
     };
     let eps = bounds_diag * 1e-9;
@@ -39,9 +36,7 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
     // line, farthest from that plane.
     let p0 = 0usize;
     let p1 = (0..pts.len())
-        .max_by(|&a, &b| {
-            (pts[a] - pts[p0]).length().partial_cmp(&(pts[b] - pts[p0]).length()).unwrap()
-        })
+        .max_by(|&a, &b| (pts[a] - pts[p0]).length().partial_cmp(&(pts[b] - pts[p0]).length()).unwrap())
         .unwrap();
     let dir = (pts[p1] - pts[p0]).normalized();
     let p2 = (0..pts.len())
@@ -112,11 +107,8 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
                 *edge_count.entry((a, b)).or_insert(0) += 1;
             }
         }
-        let horizon: Vec<(usize, usize)> = edge_count
-            .keys()
-            .filter(|&&(a, b)| !edge_count.contains_key(&(b, a)))
-            .cloned()
-            .collect();
+        let horizon: Vec<(usize, usize)> =
+            edge_count.keys().filter(|&&(a, b)| !edge_count.contains_key(&(b, a))).cloned().collect();
 
         let visible_set: std::collections::HashSet<usize> = visible.into_iter().collect();
         let mut new_faces: Vec<Face> = faces

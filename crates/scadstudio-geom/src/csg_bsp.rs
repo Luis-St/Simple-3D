@@ -233,7 +233,12 @@ fn pos_key(p: Vec3) -> (i64, i64, i64) {
 
 fn plane_key(p: &Plane) -> (i64, i64, i64, i64) {
     let s = 1_000_000.0;
-    ((p.normal.x * s).round() as i64, (p.normal.y * s).round() as i64, (p.normal.z * s).round() as i64, (p.w * s).round() as i64)
+    (
+        (p.normal.x * s).round() as i64,
+        (p.normal.y * s).round() as i64,
+        (p.normal.z * s).round() as i64,
+        (p.w * s).round() as i64,
+    )
 }
 
 /// Undo a plane group's internal triangulation (a "fan from centre" cap, or
@@ -411,11 +416,7 @@ fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
             .or_else(|| (0..n).find(|&k| turns[k]))
             .unwrap_or(0);
         for i in 1..n - 1 {
-            mesh.push_triangle(
-                poly.vertices[apex],
-                poly.vertices[(apex + i) % n],
-                poly.vertices[(apex + i + 1) % n],
-            );
+            mesh.push_triangle(poly.vertices[apex], poly.vertices[(apex + i) % n], poly.vertices[(apex + i + 1) % n]);
         }
     }
     mesh

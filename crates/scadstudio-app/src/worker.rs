@@ -49,14 +49,7 @@ impl EvalWorker {
             .name("scadstudio-eval".into())
             .spawn(move || evaluation_loop(job_rx, done_tx))
             .expect("the platform can start a thread");
-        EvalWorker {
-            jobs: job_tx,
-            done: done_rx,
-            current: None,
-            generation: 0,
-            outstanding: None,
-            last_elapsed: None,
-        }
+        EvalWorker { jobs: job_tx, done: done_rx, current: None, generation: 0, outstanding: None, last_elapsed: None }
     }
 
     /// Ask for a fresh evaluation, cancelling whatever is in flight.
@@ -273,12 +266,7 @@ mod tests {
         // inside the hole, so the closest vertex to its axis is on its wall --
         // a more reliable measure than the farthest, since the boolean scatters
         // T-junction vertices across the plate's faces near the hole too.
-        let hole_radius = result
-            .mesh
-            .positions
-            .iter()
-            .map(|p| p.x.hypot(p.y))
-            .fold(f64::MAX, f64::min);
+        let hole_radius = result.mesh.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min);
         assert!((hole_radius - 4.0).abs() < 1e-6, "got radius {hole_radius}, expected 4mm");
         // Nothing left queued behind it.
         assert!(worker.poll().is_none());

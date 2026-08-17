@@ -48,9 +48,5 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    eframe::run_native(
-        app::APP_NAME,
-        options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(&cc.egui_ctx, open)))),
-    )
+    eframe::run_native(app::APP_NAME, options, Box::new(move |cc| Ok(Box::new(app::App::new(&cc.egui_ctx, open)))))
 }

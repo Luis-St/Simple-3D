@@ -26,8 +26,7 @@ pub enum DisplayMode {
 }
 
 impl DisplayMode {
-    pub const ALL: [DisplayMode; 3] =
-        [DisplayMode::Shaded, DisplayMode::ShadedWithEdges, DisplayMode::Wireframe];
+    pub const ALL: [DisplayMode; 3] = [DisplayMode::Shaded, DisplayMode::ShadedWithEdges, DisplayMode::Wireframe];
 
     pub fn label(self) -> &'static str {
         match self {

@@ -22,8 +22,7 @@ impl Default for Xform {
 }
 
 impl Xform {
-    pub const IDENTITY: Xform =
-        Xform { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: Vec3::ZERO };
+    pub const IDENTITY: Xform = Xform { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: Vec3::ZERO };
 
     pub fn from_translation(t: Vec3) -> Xform {
         Xform { t, ..Xform::IDENTITY }
