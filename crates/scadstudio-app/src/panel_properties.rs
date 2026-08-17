@@ -13,11 +13,9 @@ use scadstudio_geom::Vec3;
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let mut width = app.settings.properties_width;
-    egui::SidePanel::right("properties")
-        .resizable(true)
-        .default_width(width)
-        .width_range(240.0..=620.0)
-        .show(ctx, |ui| {
+    egui::SidePanel::right("properties").resizable(true).default_width(width).width_range(240.0..=620.0).show(
+        ctx,
+        |ui| {
             width = ui.available_width();
             ui.heading("Properties");
             ui.separator();
@@ -41,7 +39,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 ui.separator();
                 measurements(app, ui, id);
             });
-        });
+        },
+    );
     app.settings.properties_width = width;
 }
 
@@ -71,9 +70,8 @@ fn common(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         }
         ui.end_row();
 
-        ui.label("Anchor").on_hover_text(
-            "Where this node's origin sits. Changing it moves the origin, never the shape.",
-        );
+        ui.label("Anchor")
+            .on_hover_text("Where this node's origin sits. Changing it moves the origin, never the shape.");
         ui.horizontal(|ui| {
             for option in Anchor::ALL {
                 if ui.radio_value(&mut anchor, option, option.label()).changed() {
@@ -114,10 +112,7 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
                 ));
             }
             None => {
-                ui.colored_label(
-                    ui.visuals().warn_fg_color,
-                    "No visible child, so there is nothing to subtract from.",
-                );
+                ui.colored_label(ui.visuals().warn_fg_color, "No visible child, so there is nothing to subtract from.");
             }
         }
         ui.label(egui::RichText::new("Child order matters here; reorder with the buttons below.").weak());
@@ -128,11 +123,8 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
         let child = *child;
         ui.horizontal(|ui| {
             let name = app.scene.node(child).name.clone();
-            let marker = if op.order_matters() && Some(child) == app.scene.difference_base(id) {
-                " (base)"
-            } else {
-                ""
-            };
+            let marker =
+                if op.order_matters() && Some(child) == app.scene.difference_base(id) { " (base)" } else { "" };
             if ui.selectable_label(app.is_selected(child), format!("{}. {name}{marker}", index + 1)).clicked() {
                 app.select_only(child);
             }
@@ -242,9 +234,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
         }
 
         if spec.segmented {
-            ui.label("Segments").on_hover_text(
-                "Overrides the scene default for this object's curved surfaces.",
-            );
+            ui.label("Segments").on_hover_text("Overrides the scene default for this object's curved surfaces.");
             ui.horizontal(|ui| {
                 let mut overridden = app.scene.node(id).segments.is_some();
                 if ui.checkbox(&mut overridden, "").changed() {
@@ -258,10 +248,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                 match app.scene.node(id).segments {
                     Some(current) => {
                         let mut value = current as f64;
-                        if ui
-                            .add(egui::DragValue::new(&mut value).range(3.0..=512.0).max_decimals(0))
-                            .changed()
-                        {
+                        if ui.add(egui::DragValue::new(&mut value).range(3.0..=512.0).max_decimals(0)).changed() {
                             app.edit("Segments", Some(&format!("segments:{id}")));
                             if let Some(node) = app.scene.get_mut(id) {
                                 node.segments = Some(value.round() as u32);
@@ -338,7 +325,7 @@ fn placement(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
 fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.strong("Measured");
     let unit = app.unit();
-    match app.evaluated.node_meshes.get(&id).and_then(|m| m.bounds()) {
+    match app.evaluated.node_world_bounds.get(&id).copied() {
         Some((lo, hi)) => {
             ui.label(format!("Bounding box: {}", ui::describe_size(hi - lo, unit)));
             ui.label(format!(
@@ -392,8 +379,7 @@ fn is_locked(app: &App, id: NodeId, group: u8) -> bool {
 /// if it is already locked, nudges one member so it visibly unlocks.
 fn toggle_lock(app: &mut App, id: NodeId, group: u8, key: &str) {
     let Some(spec) = app.scene.node(id).spec() else { return };
-    let keys: Vec<String> =
-        spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
+    let keys: Vec<String> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
     if is_locked(app, id, group) {
         // Nothing to change: the fields are already independent as far as the
         // model is concerned. Just tell the user.
@@ -415,8 +401,7 @@ fn apply_lock(app: &mut App, id: NodeId, group: u8, key: &str, value: ParamValue
     // Read the lock state from before this edit: the field just changed, so the
     // group is no longer equal, and asking now would always say "unlocked".
     let Some(spec) = app.scene.node(id).spec() else { return };
-    let keys: Vec<String> =
-        spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
+    let keys: Vec<String> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
     let others: Vec<&String> = keys.iter().filter(|k| k.as_str() != key).collect();
     let Some(params) = app.scene.node(id).params() else { return };
     // Locked before the edit means every *other* member still agrees with every
@@ -491,12 +476,7 @@ mod tests {
         let mut app_scene = scene.clone();
         // Defaults are all 20, so the group starts locked.
         assert!(locked_in(&app_scene, id, 1));
-        app_scene
-            .get_mut(id)
-            .unwrap()
-            .params_mut()
-            .unwrap()
-            .insert("diameter_y".into(), ParamValue::Length(30.0));
+        app_scene.get_mut(id).unwrap().params_mut().unwrap().insert("diameter_y".into(), ParamValue::Length(30.0));
         assert!(!locked_in(&app_scene, id, 1));
         let _ = scene;
     }
@@ -517,14 +497,12 @@ mod tests {
         let spec = primitive::lookup("tube").unwrap();
         let mut params = spec.default_params();
         params.insert("wall_mode".into(), ParamValue::Choice(0));
-        let visible: Vec<&str> =
-            spec.params.iter().filter(|p| spec.param_visible(p, &params)).map(|p| p.key).collect();
+        let visible: Vec<&str> = spec.params.iter().filter(|p| spec.param_visible(p, &params)).map(|p| p.key).collect();
         assert!(visible.contains(&"wall_thickness"));
         assert!(!visible.contains(&"inner_diameter"));
 
         params.insert("wall_mode".into(), ParamValue::Choice(1));
-        let visible: Vec<&str> =
-            spec.params.iter().filter(|p| spec.param_visible(p, &params)).map(|p| p.key).collect();
+        let visible: Vec<&str> = spec.params.iter().filter(|p| spec.param_visible(p, &params)).map(|p| p.key).collect();
         assert!(visible.contains(&"inner_diameter"));
         assert!(!visible.contains(&"wall_thickness"));
     }

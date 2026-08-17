@@ -152,6 +152,7 @@ impl App {
                 node_meshes: BTreeMap::new(),
                 node_frames: BTreeMap::new(),
                 node_local_bounds: BTreeMap::new(),
+                node_world_bounds: BTreeMap::new(),
                 errors: Vec::new(),
                 cancelled: false,
             },
@@ -595,7 +596,8 @@ impl App {
             self.scene.remove(*id);
         }
         self.clear_selection();
-        self.status = Status::Info(format!("Deleted {} node{}", targets.len(), if targets.len() == 1 { "" } else { "s" }));
+        self.status =
+            Status::Info(format!("Deleted {} node{}", targets.len(), if targets.len() == 1 { "" } else { "s" }));
     }
 
     fn group_selection(&mut self) {
@@ -698,10 +700,7 @@ impl App {
                 let target = (extent + self.move_snap() * sign).max(1e-3);
                 let value = target / driver.factor;
                 if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-                    params.insert(
-                        driver.param.to_string(),
-                        scadstudio_core::primitive::ParamValue::Length(value),
-                    );
+                    params.insert(driver.param.to_string(), scadstudio_core::primitive::ParamValue::Length(value));
                 }
             }
         }
@@ -741,13 +740,7 @@ impl App {
     }
 
     pub fn gizmo_for(&self, id: NodeId) -> Option<Gizmo> {
-        Gizmo::build(
-            &self.scene,
-            &self.evaluated,
-            id,
-            self.mode,
-            self.settings.handle_frame == HandleFrame::World,
-        )
+        Gizmo::build(&self.scene, &self.evaluated, id, self.mode, self.settings.handle_frame == HandleFrame::World)
     }
 
     pub fn current_view(&self) -> crate::view::View {
@@ -804,7 +797,12 @@ impl App {
         let mut dialog = rfd::FileDialog::new()
             .add_filter(self.export_format.label(), &[self.export_format.extension()])
             .set_file_name(format!("{default_name}.{}", self.export_format.extension()));
-        if let Some(dir) = self.settings.last_export_dir.clone().or_else(|| self.path.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf()))) {
+        if let Some(dir) = self
+            .settings
+            .last_export_dir
+            .clone()
+            .or_else(|| self.path.as_ref().and_then(|p| p.parent().map(|d| d.to_path_buf())))
+        {
             dialog = dialog.set_directory(dir);
         }
         let Some(mut path) = dialog.save_file() else { return };

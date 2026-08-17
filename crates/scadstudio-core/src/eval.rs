@@ -48,6 +48,12 @@ pub struct Evaluated {
     /// Each node's own bounding box in its own frame, after its anchor and before
     /// its rotation and position. This is what the resize handles sit on.
     pub node_local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
+    /// Each node's bounding box in world space -- what the property editor
+    /// reports as the node's measured size. Present for groups as well as
+    /// primitives: a group has no mesh of its own in `node_meshes`, but the
+    /// assembly it evaluates to is exactly what a user asking "how big is this"
+    /// means.
+    pub node_world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
     /// Nodes whose own evaluation failed. Non-empty means export must refuse.
     pub errors: Vec<NodeError>,
     /// Set when the run was superseded by a later edit; the result is partial
@@ -142,6 +148,7 @@ impl Evaluator {
             node_meshes: collected.meshes,
             node_frames: collected.frames,
             node_local_bounds: collected.local_bounds,
+            node_world_bounds: collected.world_bounds,
             errors: result.errors.clone(),
             cancelled: cancel.is_cancelled(),
         }
@@ -180,11 +187,7 @@ impl Evaluator {
                     }
                 }
                 if cancel.is_cancelled() {
-                    return Arc::new(SubtreeResult {
-                        mesh: Arc::new(Mesh::new()),
-                        anchor_offset: Vec3::ZERO,
-                        errors,
-                    });
+                    return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
                 }
                 combine(*op, &child_meshes, id, &node.name, &mut errors)
             }
@@ -224,14 +227,7 @@ impl Evaluator {
     /// Walk the tree accumulating each node's world frame, its own mesh in world
     /// space and its local bounding box. One pass, so the transforms the handles
     /// use and the meshes picking uses can never disagree.
-    fn walk(
-        &mut self,
-        scene: &Scene,
-        id: NodeId,
-        parent: Xform,
-        out: &mut Collected,
-        cancel: &Cancel,
-    ) {
+    fn walk(&mut self, scene: &Scene, id: NodeId, parent: Xform, out: &mut Collected, cancel: &Cancel) {
         if cancel.is_cancelled() {
             return;
         }
@@ -251,15 +247,27 @@ impl Evaluator {
                 if let Some((lo, hi)) = mesh.bounds() {
                     out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
                 }
-                out.meshes.insert(id, Arc::new(apply(&shifted, &mesh)));
+                let world = Arc::new(apply(&shifted, &mesh));
+                if let Some(bounds) = world.bounds() {
+                    out.world_bounds.insert(id, bounds);
+                }
+                out.meshes.insert(id, world);
             }
             Body::Group { .. } => {
-                if let Some((lo, hi)) = self.subtree(scene, id, cancel).mesh.bounds() {
+                let subtree = self.subtree(scene, id, cancel);
+                if let Some((lo, hi)) = subtree.mesh.bounds() {
                     // A group's mesh is already in its parent's frame, so undo
                     // the node's own transform to get its local box.
                     let inv = Xform::from_pos_rot(node.position, node.rotation).inverse();
                     let (a, b) = (inv.point(lo), inv.point(hi));
                     out.local_bounds.insert(id, (a.min(b), a.max(b)));
+                    // World bounds are measured over the transformed *points*,
+                    // not by transporting the box: rotating a box's corners and
+                    // taking their extent would report a group under an angled
+                    // ancestor as bigger than it is.
+                    if let Some(bounds) = bounds_of(subtree.mesh.positions.iter().map(|&p| parent.point(p))) {
+                        out.world_bounds.insert(id, bounds);
+                    }
                 }
                 for &child in &node.children {
                     self.walk(scene, child, shifted, out, cancel);
@@ -337,6 +345,18 @@ struct Collected {
     meshes: BTreeMap<NodeId, Arc<Mesh>>,
     frames: BTreeMap<NodeId, Xform>,
     local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
+    world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
+}
+
+fn bounds_of(points: impl Iterator<Item = Vec3>) -> Option<(Vec3, Vec3)> {
+    let mut bounds: Option<(Vec3, Vec3)> = None;
+    for p in points {
+        bounds = Some(match bounds {
+            Some((lo, hi)) => (lo.min(p), hi.max(p)),
+            None => (p, p),
+        });
+    }
+    bounds
 }
 
 fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
@@ -689,6 +709,46 @@ mod tests {
         assert!((origin.z - 2.0).abs() < 1e-9, "{origin:?}");
         let (lo, _) = out.node_meshes[&id].bounds().unwrap();
         assert!(lo.z.abs() < 1e-9, "{lo:?}");
+    }
+
+    #[test]
+    fn a_group_measures_the_assembly_it_evaluates_to() {
+        // A group owns no mesh of its own, so the property editor used to report
+        // "no geometry yet" for every group in the scene, forever. Its measured
+        // size is the size of what it evaluates to, in world space.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Difference, root, 0);
+        scene.get_mut(group).unwrap().position = Vec3::new(100.0, 0.0, 0.0);
+        plate(&mut scene, group);
+        let hole = cylinder(&mut scene, group, 6.0, 20.0);
+        scene.get_mut(hole).unwrap().position = Vec3::new(-8.0, 0.0, 0.0);
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (lo, hi) = out.node_world_bounds[&group];
+        assert!((hi - lo - Vec3::new(40.0, 20.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
+        // In world space, so the group's own position is included.
+        assert!(((lo.x + hi.x) / 2.0 - 100.0).abs() < 1e-9, "{lo:?}");
+        // And the root, which is a group too.
+        assert!(out.node_world_bounds.contains_key(&root));
+    }
+
+    #[test]
+    fn a_rotated_group_is_measured_over_its_geometry_not_its_box() {
+        // Transporting a group's local box by rotating its eight corners would
+        // report a 40mm plate turned 45 degrees as 42mm across -- the box's
+        // diagonal, not the plate's. The measurement has to come from the
+        // geometry.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        plate(&mut scene, group);
+        scene.get_mut(group).unwrap().rotation = Vec3::new(0.0, 0.0, 90.0);
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (lo, hi) = out.node_world_bounds[&group];
+        // Turned a quarter turn about Z, the 40 x 20 plate measures 20 x 40.
+        assert!((hi - lo - Vec3::new(20.0, 40.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
     }
 
     #[test]
