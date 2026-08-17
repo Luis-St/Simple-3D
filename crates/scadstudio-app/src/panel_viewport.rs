@@ -11,8 +11,8 @@ use crate::pick;
 use crate::render::{self, Grid, Item, Palette, Style};
 use crate::view::View;
 use scadstudio_core::config::DisplayMode;
-use scadstudio_core::keymap::MouseButton;
-use scadstudio_core::scene::NodeId;
+use scadstudio_core::keymap::{MouseButton, NavMap};
+use scadstudio_core::scene::{Camera, NodeId};
 use scadstudio_geom::Vec3;
 use std::hash::{Hash, Hasher};
 
@@ -117,57 +117,86 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     hasher.finish()
 }
 
-/// Orbit, pan and zoom, all on remappable bindings that take effect immediately
-/// (spec section 8.2, acceptance criterion 29).
-fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
-    let nav = app.keymap.nav;
-    let (ctrl, shift, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
+/// What a drag on the viewport means under the current navigation bindings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    Orbit,
+    Pan,
+}
 
-    // Which of our bindings is the drag that is happening?
-    let mut orbiting = false;
-    let mut panning = false;
-    for (button, egui_button) in [
-        (MouseButton::Left, egui::PointerButton::Primary),
-        (MouseButton::Middle, egui::PointerButton::Middle),
-        (MouseButton::Right, egui::PointerButton::Secondary),
-    ] {
-        if !response.dragged_by(egui_button) {
+/// Which navigation gesture a drag is, under `nav`. `held` says which buttons the
+/// drag is using, in `MouseButton` order.
+///
+/// Split out of `navigate` so acceptance criterion 29 -- remapping the orbit
+/// button and having navigation follow immediately -- can be asserted. Note that
+/// it takes `nav` as an argument and holds no state of its own: that is *why*
+/// there is nothing to restart, and a cached copy here is what would break it.
+pub fn nav_gesture(nav: &NavMap, held: [bool; 3], ctrl: bool, shift: bool, alt: bool) -> Option<Gesture> {
+    for (button, down) in [MouseButton::Left, MouseButton::Middle, MouseButton::Right].into_iter().zip(held) {
+        if !down {
             continue;
         }
         // Pan is tested first: it usually carries an extra modifier on top of
         // orbit's binding, and the exact-match rule keeps them apart.
         if nav.pan.matches(button, ctrl, shift, alt) {
-            panning = true;
-        } else if nav.orbit.matches(button, ctrl, shift, alt) {
-            orbiting = true;
+            return Some(Gesture::Pan);
+        }
+        if nav.orbit.matches(button, ctrl, shift, alt) {
+            return Some(Gesture::Orbit);
         }
     }
-    // A manipulator drag owns the pointer while it is running.
-    if app.drag.is_some() {
-        orbiting = false;
-        panning = false;
-    }
+    None
+}
 
-    let delta = response.drag_delta();
-    if orbiting {
-        app.scene.camera.yaw -= delta.x as f64 * 0.4;
-        app.scene.camera.pitch = (app.scene.camera.pitch + delta.y as f64 * 0.4).clamp(-89.9, 89.9);
+/// Apply a navigation gesture to the camera. `view` is only consulted for a pan,
+/// which has to know how many millimetres a pixel covers at the target.
+pub fn apply_gesture(camera: &mut Camera, gesture: Gesture, delta: egui::Vec2, view: &View) {
+    match gesture {
+        Gesture::Orbit => {
+            camera.yaw -= delta.x as f64 * 0.4;
+            camera.pitch = (camera.pitch + delta.y as f64 * 0.4).clamp(-89.9, 89.9);
+        }
+        Gesture::Pan => {
+            let (right, up) = view.basis();
+            let scale = view.mm_per_pixel_at(camera.target);
+            camera.target = camera.target - right * (delta.x as f64 * scale) + up * (delta.y as f64 * scale);
+        }
     }
-    if panning {
+}
+
+/// Apply a wheel scroll to the camera's distance, honouring the invert-zoom
+/// binding.
+pub fn apply_zoom(camera: &mut Camera, nav: &NavMap, scroll: f32) {
+    if scroll.abs() <= 0.01 {
+        return;
+    }
+    let direction = if nav.invert_zoom { -1.0 } else { 1.0 };
+    let factor = (-scroll as f64 * direction * 0.0015).exp();
+    camera.distance = (camera.distance * factor).clamp(0.05, 5.0e6);
+}
+
+/// Orbit, pan and zoom, all on remappable bindings that take effect immediately
+/// (spec section 8.2, acceptance criterion 29). The bindings are read from the
+/// keymap on every frame, so a rebinding applies to the very next drag.
+fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
+    let nav = app.keymap.nav;
+    let (ctrl, shift, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
+
+    let held = [
+        response.dragged_by(egui::PointerButton::Primary),
+        response.dragged_by(egui::PointerButton::Middle),
+        response.dragged_by(egui::PointerButton::Secondary),
+    ];
+    // A manipulator drag owns the pointer while it is running.
+    let gesture = if app.drag.is_some() { None } else { nav_gesture(&nav, held, ctrl, shift, alt) };
+
+    if let Some(gesture) = gesture {
         let view = app.current_view();
-        let (right, up) = view.basis();
-        let scale = view.mm_per_pixel_at(app.scene.camera.target);
-        app.scene.camera.target =
-            app.scene.camera.target - right * (delta.x as f64 * scale) + up * (delta.y as f64 * scale);
+        apply_gesture(&mut app.scene.camera, gesture, response.drag_delta(), &view);
     }
 
     if response.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        if scroll.abs() > 0.01 {
-            let direction = if nav.invert_zoom { -1.0 } else { 1.0 };
-            let factor = (-scroll as f64 * direction * 0.0015).exp();
-            app.scene.camera.distance = (app.scene.camera.distance * factor).clamp(0.05, 5.0e6);
-        }
+        apply_zoom(&mut app.scene.camera, &nav, ui.input(|i| i.smooth_scroll_delta.y));
     }
 }
 
@@ -450,4 +479,98 @@ fn draw_gizmo(app: &App, painter: &egui::Painter, ui: &egui::Ui, gizmo: &Gizmo, 
         }
     }
     painter.circle_filled(origin, 3.0, ui.visuals().strong_text_color());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scadstudio_core::keymap::{Drag as NavDrag, Keymap};
+
+    fn only(button: MouseButton) -> [bool; 3] {
+        [button == MouseButton::Left, button == MouseButton::Middle, button == MouseButton::Right]
+    }
+
+    fn view_of(camera: Camera) -> View {
+        View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)))
+    }
+
+    /// Spec acceptance criterion 29: remap the orbit mouse button and navigation
+    /// follows the new binding immediately, without a restart.
+    ///
+    /// "Without a restart" is the load-bearing half, and it is a property of
+    /// where the binding is read from: `navigate` passes the live `NavMap` in on
+    /// every frame rather than caching one. The test mutates the same keymap it
+    /// already queried and asserts the answer changes.
+    #[test]
+    fn remapping_the_orbit_button_takes_effect_without_a_restart() {
+        let mut keymap = Keymap::default();
+        let original = keymap.nav.orbit;
+        assert_eq!(nav_gesture(&keymap.nav, only(original.button), false, false, false), Some(Gesture::Orbit));
+
+        // Pick a button the default map does not already use for orbit.
+        let remapped = [MouseButton::Left, MouseButton::Middle, MouseButton::Right]
+            .into_iter()
+            .find(|&b| b != original.button && !keymap.nav.pan.matches(b, false, false, false))
+            .expect("a free button");
+        keymap.nav.orbit = NavDrag::new(remapped);
+
+        // The very next drag follows the new binding -- no reload of anything.
+        assert_eq!(nav_gesture(&keymap.nav, only(remapped), false, false, false), Some(Gesture::Orbit));
+        assert_ne!(
+            nav_gesture(&keymap.nav, only(original.button), false, false, false),
+            Some(Gesture::Orbit),
+            "the old button still orbits"
+        );
+
+        // And the camera really moves on the new binding, through the same call
+        // `navigate` makes.
+        let mut camera = Camera::default();
+        let before = camera.yaw;
+        let gesture = nav_gesture(&keymap.nav, only(remapped), false, false, false).unwrap();
+        let view = view_of(camera);
+        apply_gesture(&mut camera, gesture, egui::vec2(30.0, 0.0), &view);
+        assert_ne!(camera.yaw, before, "orbiting on the new binding did not turn the camera");
+    }
+
+    /// The same immediacy for pan and for the invert-zoom switch, and the rule
+    /// that keeps pan and orbit apart when pan is orbit's chord plus a modifier.
+    #[test]
+    fn pan_wins_over_orbit_on_the_same_button_with_a_modifier() {
+        let mut keymap = Keymap::default();
+        keymap.nav.orbit = NavDrag::new(MouseButton::Right);
+        keymap.nav.pan = NavDrag::with_shift(MouseButton::Right);
+
+        assert_eq!(nav_gesture(&keymap.nav, only(MouseButton::Right), false, false, false), Some(Gesture::Orbit));
+        assert_eq!(nav_gesture(&keymap.nav, only(MouseButton::Right), false, true, false), Some(Gesture::Pan));
+        // A modifier neither binding asks for matches nothing, rather than
+        // falling back to orbit.
+        assert_eq!(nav_gesture(&keymap.nav, only(MouseButton::Right), true, false, false), None);
+        assert_eq!(nav_gesture(&keymap.nav, only(MouseButton::Left), false, false, false), None);
+        assert_eq!(nav_gesture(&keymap.nav, [false; 3], false, false, false), None);
+    }
+
+    #[test]
+    fn inverting_the_zoom_reverses_which_way_the_wheel_goes() {
+        let mut keymap = Keymap::default();
+        keymap.nav.invert_zoom = false;
+        let mut normal = Camera::default();
+        apply_zoom(&mut normal, &keymap.nav, 10.0);
+
+        keymap.nav.invert_zoom = true;
+        let mut inverted = Camera::default();
+        apply_zoom(&mut inverted, &keymap.nav, 10.0);
+
+        let start = Camera::default().distance;
+        assert_ne!(normal.distance, start);
+        assert!(
+            (normal.distance - start).signum() != (inverted.distance - start).signum(),
+            "inverting the zoom did not reverse it: {} vs {}",
+            normal.distance,
+            inverted.distance
+        );
+        // Wheel noise below the threshold does nothing at all.
+        let mut still = Camera::default();
+        apply_zoom(&mut still, &keymap.nav, 0.001);
+        assert_eq!(still.distance, start);
+    }
 }
