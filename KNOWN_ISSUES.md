@@ -1,10 +1,38 @@
 # Known issues
 
-None outstanding. Everything the spec asks for is implemented and tested; the
-two entries that used to stand here are in "Resolved" below, with what actually
-turned out to be wrong in each case.
+**This file is the issue list.** Everything open lives here, newest first;
+anything fixed moves down to "Resolved" with a write-up of what was actually
+wrong. There is no separate tracker.
 
-Two things worth knowing rather than fixing:
+## Open
+
+### Acceptance criteria 26 and 28 are implemented but not asserted end to end
+
+Every other criterion is cited by name from the test that covers it
+(`grep -rn "criterion" crates/`). These two are not, and the gap is real rather
+than a missing comment:
+
+- **26 — nudge with the arrow keys, hold to repeat.** The behaviour is there:
+  `App::nudge` steps by `move_snap()` and passes a stable coalesce key
+  (`nudge:{id}:{mode}`) so a repeat run collapses into one undo step. What is
+  missing is a test tying the two together. The pieces are covered separately --
+  `undo::rapid_edits_to_one_field_are_one_step` proves coalescing works given a
+  stable key, and `gizmo::a_nudge_left_really_goes_left` proves the direction --
+  but nothing asserts that a nudge *run* is one step, or that the step equals the
+  snap increment.
+- **28 — restart after rebinding.** `keymap::a_keymap_round_trips_through_its_file_form`
+  covers the serialised form and `ui::menu_labels_show_the_current_binding`
+  covers the menus, but nothing exercises `config::save_keymap` ->
+  `config::load_keymap`, which is the actual on-disk path used at startup. The
+  "persisted across a restart" half rests on untested glue.
+
+Closing both wants a small refactor first, since the logic is currently
+unreachable from a test: lift the axis/sign/step arithmetic out of `App::nudge`
+(which needs a live `egui::Context` to construct) into `gizmo`, and give
+`config` `load_keymap_from(dir)`/`save_keymap_to(dir)` variants so the disk path
+can be driven against a temp directory instead of the user's real config.
+
+## Worth knowing rather than fixing
 
 - **The boolean kernel classifies planes with a fixed epsilon** (`csg_bsp::EPSILON`,
   1e-5 mm) rather than exact or rational arithmetic. Pathologically thin or

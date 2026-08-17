@@ -49,9 +49,11 @@ crates/
 
 ## Status
 
-All four crates are implemented, and all 29 of the spec's acceptance criteria
-are covered. `cargo test --workspace` runs 258 tests; there are no ignored or
-failing tests, and `KNOWN_ISSUES.md` has no outstanding entries.
+All four crates are implemented and all 29 of the spec's acceptance criteria are
+behaviourally met. `cargo test --workspace` runs 258 tests, none ignored or
+failing; 27 of the 29 criteria are asserted by a test that cites the criterion
+by name, and the two that are not — 26 and 28 — are the open entry in
+`KNOWN_ISSUES.md`, which is this project's issue list.
 
 Highlights worth knowing about:
 
