@@ -3,9 +3,19 @@ name = "scadstudio-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "ScadStudio - parametric 3D modelling with exact metric dimensions"
 
 [[bin]]
 name = "scadstudio"
 path = "src/main.rs"
 
 [dependencies]
+scadstudio-core = { path = "../scadstudio-core" }
+scadstudio-export = { path = "../scadstudio-export" }
+scadstudio-geom = { path = "../scadstudio-geom" }
+# The viewport is a from-scratch software rasterizer (see src/raster.rs), so
+# eframe only has to give us a window and 2D drawing. `default-features = false`
+# plus `glow` keeps wgpu, persistence and the web backend out of the build.
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+rfd = "0.17"
+egui = "0.36"
