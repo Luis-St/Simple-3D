@@ -61,6 +61,8 @@ fn big_scene() -> (Scene, Vec<NodeId>) {
 
 #[test]
 fn two_hundred_primitives_with_nested_booleans_evaluate_and_stay_valid() {
+    // Spec acceptance criterion 13, first half: the scene evaluates fast enough
+    // for the viewport to stay interactive.
     let (scene, holes) = big_scene();
     let primitives = scene.depth_first().into_iter().filter(|id| !scene.node(*id).is_group()).count();
     assert_eq!(primitives, 200, "the fixture is meant to hold 200 primitives");
@@ -84,8 +86,9 @@ fn two_hundred_primitives_with_nested_booleans_evaluate_and_stay_valid() {
 
 #[test]
 fn a_single_value_edit_reuses_the_cache() {
-    // The point of per-subtree caching: editing one dimension re-evaluates one
-    // assembly, not fifty.
+    // Spec acceptance criterion 13, second half: single-value edits still feel
+    // immediate. The point of per-subtree caching -- editing one dimension
+    // re-evaluates one assembly, not fifty.
     let (mut scene, holes) = big_scene();
     let mut evaluator = Evaluator::new();
     let started = Instant::now();
