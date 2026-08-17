@@ -74,21 +74,14 @@ fn two_hundred_primitives_with_nested_booleans_evaluate_and_stay_valid() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     assert!(result.mesh.manifold_issue().is_none(), "{:?}", result.mesh.manifold_issue());
     eprintln!("cold: {cold:?}, {} triangles", result.mesh.triangle_count());
-    // A loose ceiling: what this asserts is that it completes and stays valid.
-    // The interactive target itself is not met yet -- see KNOWN_ISSUES.md. An
+    // Generous enough not to be flaky on a loaded machine while still failing on
+    // an order-of-magnitude regression: a release build does this in ~0.2s. An
     // unoptimised build runs the kernel several times slower, so the ceiling has
     // to account for which one is being tested.
-    let ceiling = if cfg!(debug_assertions) { 180.0 } else { 40.0 };
+    let ceiling = if cfg!(debug_assertions) { 40.0 } else { 5.0 };
     assert!(cold.as_secs_f64() < ceiling, "a cold evaluation of 200 primitives took {cold:?}");
 }
 
-/// KNOWN FAILURE, kept as the statement of the target rather than relaxed to
-/// match today's behaviour. On this fixture a cold evaluation takes ~10s and a
-/// one-dimension edit ~9.6s, so the per-subtree cache is barely helping and the
-/// spec's "well under a second" is not met. The cost is in the fifty inner
-/// difference groups, not the root union (skipping the BSP for disjoint operands
-/// only moved 10.4s to 10.0s). See KNOWN_ISSUES.md.
-#[ignore = "known unmet performance target; see KNOWN_ISSUES.md"]
 #[test]
 fn a_single_value_edit_reuses_the_cache() {
     // The point of per-subtree caching: editing one dimension re-evaluates one
