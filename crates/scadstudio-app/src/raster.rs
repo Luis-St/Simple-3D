@@ -32,15 +32,21 @@ pub struct Vertex {
 }
 
 impl Frame {
-    pub fn new(width: usize, height: usize) -> Frame {
-        Frame { width, height, color: vec![0; width * height * 4], key: vec![f32::NEG_INFINITY; width * height] }
-    }
-
+    /// Fill every pixel with one colour and reset the depth buffer. The
+    /// renderer lays a gradient down instead, so this is now only how the
+    /// rasterizer's own tests get a known starting frame.
+    #[cfg(test)]
     pub fn clear(&mut self, background: Rgba) {
         for pixel in self.color.chunks_exact_mut(4) {
             pixel.copy_from_slice(&background);
         }
-        self.key.fill(f32::NEG_INFINITY);
+        for key in &mut self.key {
+            *key = f32::NEG_INFINITY;
+        }
+    }
+
+    pub fn new(width: usize, height: usize) -> Frame {
+        Frame { width, height, color: vec![0; width * height * 4], key: vec![f32::NEG_INFINITY; width * height] }
     }
 
     /// Depth-tested, optionally alpha-blended write. `write_depth` is false for
@@ -111,7 +117,14 @@ impl Frame {
     /// rather than tested per pixel. That matters for the origin axes and the
     /// ground grid, whose lines run far outside the viewport: stepping them
     /// end to end would cost thousands of rejected samples each.
+    /// Draw a line. `write_depth` false leaves the depth buffer alone, for
+    /// decoration -- a grid, an axis -- that must never win a depth tie against
+    /// the model it is drawn under.
     pub fn line(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32) {
+        self.line_with_depth(a, b, rgba, bias, true);
+    }
+
+    pub fn line_with_depth(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool) {
         let Some((a, b)) = self.clip_to_frame(a, b) else { return };
         let steps = ((b.pos.x - a.pos.x).abs().max((b.pos.y - a.pos.y).abs()).ceil() as usize).max(1);
         for step in 0..=steps {
@@ -126,7 +139,7 @@ impl Frame {
                 continue;
             }
             let key = a.key + (b.key - a.key) * t;
-            self.put(x, y, key + bias, rgba, true);
+            self.put(x, y, key + bias, rgba, write_depth);
         }
     }
 

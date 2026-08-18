@@ -147,10 +147,7 @@ impl App {
     /// on what happens to be in the developer's config directory, and so they
     /// cannot write to it.
     pub fn with_config_dir(ctx: &egui::Context, open: Option<PathBuf>, config_dir: PathBuf) -> App {
-        ctx.style_mut(|style| {
-            style.spacing.item_spacing = egui::vec2(6.0, 5.0);
-            style.spacing.button_padding = egui::vec2(7.0, 3.0);
-        });
+        crate::theme::apply(ctx);
         let settings = config::load_settings_from(&config_dir);
         let keymap = config::load_keymap_from(&config_dir);
         let mut app = App {
@@ -936,6 +933,7 @@ impl eframe::App for App {
 
         self.menu_bar(ctx);
         self.status_bar(ctx);
+        crate::panel_toolrail::show(self, ctx);
         panel_outliner::show(self, ctx);
         panel_properties::show(self, ctx);
         panel_viewport::show(self, ctx);
@@ -1001,6 +999,61 @@ mod tests {
         app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
         app.reevaluate_for_test();
         app
+    }
+
+    /// Draw one entire frame of the interface into a headless context. A panel
+    /// that panics, or a layout that divides by a width it does not have, fails
+    /// here rather than in front of someone.
+    fn draw_one_frame(app: &mut App) {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        // A real window size: the default raw input has an effectively infinite
+        // screen rect, and the viewport would ask for a texture larger than any
+        // GPU allows.
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 880.0))),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            app.menu_bar(ctx);
+            app.status_bar(ctx);
+            crate::panel_toolrail::show(app, ctx);
+            panel_outliner::show(app, ctx);
+            panel_properties::show(app, ctx);
+            panel_viewport::show(app, ctx);
+        });
+    }
+
+    #[test]
+    fn every_panel_draws_with_a_selection_and_with_none() {
+        // The two states put different panels on screen: with nothing selected
+        // the right dock swaps the property panels for the document's own
+        // settings, and that path has no other test that ever runs it.
+        let mut app = headless_app();
+        let id = app.scene.depth_first().into_iter().find(|&id| id != app.scene.root()).unwrap();
+        app.select_only(id);
+        draw_one_frame(&mut app);
+        app.clear_selection();
+        draw_one_frame(&mut app);
+
+        // A group selection reaches the boolean panel, which is a third layout
+        // again.
+        app.select_only(id);
+        app.run(Command::Group);
+        draw_one_frame(&mut app);
+    }
+
+    #[test]
+    fn an_empty_scene_still_draws_every_panel() {
+        let mut app = headless_app();
+        for id in app.scene.depth_first() {
+            if id != app.scene.root() {
+                app.scene.remove(id);
+            }
+        }
+        app.clear_selection();
+        app.reevaluate_for_test();
+        draw_one_frame(&mut app);
     }
 
     /// Spec acceptance criterion 28, the last link: `App` startup itself picks up

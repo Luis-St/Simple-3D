@@ -85,6 +85,9 @@ impl FieldBuffers {
             egui::TextEdit::singleline(&mut text)
                 .id(id)
                 .desired_width(f32::INFINITY)
+                // Tabular figures: a column of dimensions has to line up, and no
+                // digit may change width while a value is being scrubbed.
+                .font(egui::TextStyle::Monospace)
                 .horizontal_align(egui::Align::RIGHT),
         );
         let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
