@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- The same box glyph the tool rail draws (see crates/simple3d-app/src/icon.rs),
-     in the same house style: geometric strokes in the accent colour on the
-     darkest surface. Written out here because a desktop entry needs an icon
-     file on disk, which the single-binary build deliberately has none of. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- The `<svg` tag stays within the first bytes of the file: gdk-pixbuf
+       recognises an SVG by sniffing the start of it, and a comment above this
+       line pushes the tag out of that window, whereupon GNOME Shell shows an
+       empty tile instead of the icon. packaging/deb/build.sh checks this.
+
+       The glyph is the box the tool rail draws (crates/simple3d-app/src/icon.rs)
+       in the same house style: geometric strokes in the accent colour on the
+       darkest surface. Written out here because a desktop entry needs an icon
+       file on disk, which the single-binary build deliberately has none of. -->
   <rect width="64" height="64" rx="12" ry="12" fill="#15181C"/>
   <g transform="translate(6.4 6.4) scale(0.8)"
      fill="none" stroke="#E8A33D" stroke-width="5"

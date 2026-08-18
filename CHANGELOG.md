@@ -8,6 +8,16 @@ Versions follow [semantic versioning](https://semver.org). Until 1.0 the project
 file format may still change; when it does, a file written by an older version
 will still open, and `format` in the file says which version wrote it.
 
+## [0.0.2] — 2026-08-18
+
+### Fixed
+
+- **The application icon showed as an empty tile** in the GNOME applications
+  menu after installing the Debian package. GNOME loads menu icons through
+  gdk-pixbuf, which recognises an SVG by sniffing the start of the file, and the
+  comment the icon opened with pushed the `<svg>` tag past what is sniffed. The
+  packaging script now refuses to build a package whose icon has the same fault.
+
 ## [0.0.1] — 2026-08-18
 
 - **A Debian package** (`simple-3d_<version>_amd64.deb`) is built alongside the
