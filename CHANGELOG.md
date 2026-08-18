@@ -8,7 +8,7 @@ Versions follow [semantic versioning](https://semver.org). Until 1.0 the project
 file format may still change; when it does, a file written by an older version
 will still open, and `format` in the file says which version wrote it.
 
-## Unreleased
+## [0.0.1] — 2026-08-18
 
 - **A Debian package** (`simple-3d_<version>_amd64.deb`) is built alongside the
   Linux executable and attached to each release. It installs the same binary,

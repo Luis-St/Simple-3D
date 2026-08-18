@@ -62,8 +62,8 @@ as an argument opens it, so file associations work on both platforms.
 
 ## Status
 
-**v0.0.0** — the first release. All four crates are implemented and all 29 of
-the spec's acceptance criteria are behaviourally met.
+**v0.0.1** — the first release plus a Debian package. All four crates are
+implemented and all 29 of the spec's acceptance criteria are behaviourally met.
 
 `cargo test --workspace` runs **328 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
