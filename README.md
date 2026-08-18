@@ -93,7 +93,6 @@ a full test suite passing over them.
 | `CHANGELOG.md` | Released versions, user-facing |
 | `CHANGES.md` | The engineering report for the most recent pass; earlier ones are in git history |
 | `KNOWN_ISSUES.md` | The issue list — open items, things worth knowing, and a write-up of every fixed bug |
-| `simple-3d-prompt.md` | The full functional specification, including the 29 acceptance criteria |
 
 ## Why Rust, and why no external CSG/geometry crate
 

@@ -104,7 +104,7 @@ required.
 ### Verified
 
 - 328 tests across the workspace, none ignored or failing.
-- All 29 acceptance criteria in `simple-3d-prompt.md` asserted by a test that
+- All 29 acceptance criteria of the functional specification asserted by a test that
   cites the criterion by name, checked by `tools/criteria_audit.py`.
 - Pointer gestures — the header drag, the label scrub, the cube click, the cursor
   placement — replayed against a real frame by `egui_kittest`.
