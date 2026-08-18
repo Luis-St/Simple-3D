@@ -234,6 +234,11 @@ pub struct AppSettings {
     pub display_mode: DisplayMode,
     pub show_grid: bool,
     pub show_bounding_box: bool,
+    /// Draw hidden nodes as translucent ghosts rather than not at all. Off by
+    /// default: hiding something means it goes away, and a red shape still
+    /// sitting in the viewport is not that. It is worth having for positioning a
+    /// tool body that is about to be subtracted, which is why it is a setting
+    /// and not a removal.
     pub show_ghosts: bool,
     pub handle_frame: HandleFrame,
     /// Rotation snap in degrees. The move and resize snap comes from the scene's
@@ -257,7 +262,7 @@ impl Default for AppSettings {
             display_mode: DisplayMode::ShadedWithEdges,
             show_grid: true,
             show_bounding_box: false,
-            show_ghosts: true,
+            show_ghosts: false,
             handle_frame: HandleFrame::Object,
             rotate_snap_deg: 15.0,
             last_export_dir: None,

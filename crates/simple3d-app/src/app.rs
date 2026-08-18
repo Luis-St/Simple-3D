@@ -87,6 +87,9 @@ pub struct App {
     pub mode: Mode,
     pub drag: Option<Drag>,
     pub hover_handle: Option<Handle>,
+    /// The handle that was under the pointer when the button went down. What
+    /// starts a drag, rather than whatever the pointer has since slipped onto.
+    pub grabbed: Option<Handle>,
     pub viewport_rect: egui::Rect,
     pub texture: Option<egui::TextureHandle>,
     pub image_key: u64,
@@ -198,6 +201,7 @@ impl App {
             mode: Mode::Move,
             drag: None,
             hover_handle: None,
+            grabbed: None,
             viewport_rect: egui::Rect::NOTHING,
             texture: None,
             image_key: u64::MAX,

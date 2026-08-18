@@ -101,13 +101,13 @@ pub fn ray_box(origin: Vec3, dir: Vec3, lo: Vec3, hi: Vec3) -> Option<f64> {
     Some(t_min.max(0.0))
 }
 
-/// The visible node the ray hits first. Hidden nodes are skipped -- they are
-/// drawn as ghosts but are not part of the model, so clicking through them
-/// selects what is actually there.
+/// The visible node the ray hits first. Hidden nodes are skipped, and so is
+/// anything under a hidden group: a hidden node is not part of the model, so a
+/// click passes through it to whatever is actually there.
 pub fn pick(scene: &Scene, evaluated: &Evaluated, origin: Vec3, dir: Vec3) -> Option<NodeId> {
     let mut best: Option<(f64, NodeId)> = None;
     for (&id, mesh) in &evaluated.node_meshes {
-        if !visible_in_scene(scene, id) {
+        if !scene.contains(id) || !scene.is_shown(id) {
             continue;
         }
         if let Some(t) = ray_mesh(mesh, origin, dir) {
@@ -117,20 +117,6 @@ pub fn pick(scene: &Scene, evaluated: &Evaluated, origin: Vec3, dir: Vec3) -> Op
         }
     }
     best.map(|(_, id)| id)
-}
-
-/// A node counts as visible only if it and every ancestor are.
-fn visible_in_scene(scene: &Scene, mut id: NodeId) -> bool {
-    loop {
-        let Some(node) = scene.get(id) else { return false };
-        if !node.visible {
-            return false;
-        }
-        match node.parent {
-            Some(parent) => id = parent,
-            None => return true,
-        }
-    }
 }
 
 #[cfg(test)]

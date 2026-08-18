@@ -277,6 +277,20 @@ impl Scene {
         false
     }
 
+    /// Whether a node is actually drawn: hidden itself, or under anything
+    /// hidden, and it is not. Hiding a group hides everything in it, so asking
+    /// the node's own `visible` flag is not the same question.
+    pub fn is_shown(&self, id: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
+            if !node.visible {
+                return false;
+            }
+            at = node.parent;
+        }
+        true
+    }
+
     pub fn depth(&self, mut id: NodeId) -> usize {
         let mut d = 0;
         while let Some(parent) = self.nodes.get(&id).and_then(|n| n.parent) {

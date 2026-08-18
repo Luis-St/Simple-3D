@@ -33,7 +33,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             navigate(app, ui, &response);
             place_cursor(app, ui, &response, &view);
             let view = app.current_view();
-            manipulate(app, ui, &response, &view);
+            let owned = manipulate(app, ui, &response, &view);
+            // Picking is *outside* the manipulator, because it has to work when
+            // there is no manipulator: with nothing selected there is no primary
+            // node and no gizmo, and while this lived inside `manipulate` the
+            // first click into an empty selection was thrown away. Clicking a
+            // shape is how most people select one, so it cannot depend on
+            // already having selected one.
+            if !owned && response.clicked_by(egui::PointerButton::Primary) {
+                select_under_cursor(app, ui, &view);
+            }
         }
         let view = app.current_view();
         overlays(app, ui, rect, &view);
@@ -59,17 +68,21 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         // wrong factor -- the model would sit away from its own manipulator.
         let render_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let view = View::new(app.scene.camera, render_rect);
+        // A hidden node is hidden: no body, and no selection outline drawn
+        // around the body it does not have. Selecting it still gets a
+        // manipulator, so it can be put where it belongs before being shown.
         let selected: Vec<NodeId> = app
             .top_level_selection()
             .into_iter()
             .flat_map(|id| std::iter::once(id).chain(app.scene.descendants(id)))
+            .filter(|&id| app.scene.is_shown(id))
             .collect();
 
         let mut items: Vec<Item> = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
         // Ghosts before the selection outline, so the outline stays readable.
         if app.settings.show_ghosts {
             for (id, renderable) in &app.node_renderables {
-                if !app.scene.get(*id).map(|n| n.visible).unwrap_or(true) {
+                if !app.scene.is_shown(*id) {
                     items.push(Item { renderable, style: Style::Ghost });
                 }
             }
@@ -211,15 +224,20 @@ fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
 
 /// The manipulator: hover highlighting, starting and running a drag, and
 /// cancelling it with Escape.
-fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) {
+///
+/// Returns whether the pointer is the manipulator's this frame, so a click that
+/// grabbed a handle does not also re-select whatever is behind it.
+fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) -> bool {
     let Some(id) = app.primary() else {
         app.drag = None;
         app.hover_handle = None;
-        return;
+        app.grabbed = None;
+        return false;
     };
     let Some(gizmo) = app.gizmo_for(id) else {
         app.hover_handle = None;
-        return;
+        app.grabbed = None;
+        return false;
     };
     let is_group = app.scene.node(id).is_group();
     let cursor = ui.input(|i| i.pointer.hover_pos());
@@ -231,22 +249,40 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
         app.hover_handle = cursor.and_then(|cursor| gizmo.hit_test(view, cursor, is_group));
     }
 
+    // **What was under the pointer when the button went down**, remembered here
+    // and used to start the drag.
+    //
+    // A drag does not start until the pointer has moved past the toolkit's
+    // threshold, and by then the pointer has left the handle it pressed: a
+    // handle is grabbable within 9 px and the threshold is most of that. Asking
+    // where the pointer is *now* therefore found no handle about half the time,
+    // the press was reported as a plain click instead, and the object had to be
+    // grabbed again -- sometimes several times over.
+    let (pressed, press_origin) = ui.input(|i| (i.pointer.primary_pressed(), i.pointer.press_origin()));
+    if pressed {
+        app.grabbed = press_origin.and_then(|at| gizmo.hit_test(view, at, is_group));
+    }
+
     // Everything the pointer has to say this frame, read off the response in one
     // place so the decision below needs nothing from egui.
     let pointer = gizmo::PointerState {
         escape: ui.input(|i| i.key_pressed(egui::Key::Escape)),
         released: response.drag_stopped() || ui.input(|i| i.pointer.any_released()),
         started: response.drag_started_by(egui::PointerButton::Primary),
-        on_handle: app.hover_handle.is_some(),
+        on_handle: app.grabbed.is_some(),
         have_cursor: cursor.is_some(),
     };
     let phase = gizmo::drag_phase(dragging, pointer);
-    app.manipulate_step(&gizmo, view, id, phase, app.hover_handle, cursor, mods_from(ui));
+    // The drag is measured from where the button went down, not from where the
+    // pointer had already slipped to by the time the toolkit called it a drag.
+    let from = if phase == gizmo::DragPhase::Begin { press_origin.or(cursor) } else { cursor };
+    app.manipulate_step(&gizmo, view, id, phase, app.grabbed, from, mods_from(ui));
 
-    // A plain click that did not grab a handle selects whatever is under it.
-    if !dragging && response.clicked_by(egui::PointerButton::Primary) && app.hover_handle.is_none() {
-        select_under_cursor(app, ui, view);
+    let owned = app.drag.is_some() || app.grabbed.is_some();
+    if pointer.released {
+        app.grabbed = None;
     }
+    owned
 }
 
 fn select_under_cursor(app: &mut App, ui: &mut egui::Ui, view: &View) {
