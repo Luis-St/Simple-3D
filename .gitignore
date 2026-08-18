@@ -4,8 +4,12 @@
 # Local packaging artefacts; the release build makes its own in CI.
 *.zip
 
-# The working issue list; KNOWN_ISSUES.md is the tracked one.
+# Working notes. README.md is the only Markdown file this repository carries;
+# the rest are kept locally and are not part of what is published.
 issues.md
+CHANGELOG.md
+CHANGES.md
+KNOWN_ISSUES.md
 
 # Screen captures taken while working through the issue list.
 *.png
