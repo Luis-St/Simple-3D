@@ -22,6 +22,15 @@ eframe = { version = "0.32", default-features = false, features = ["glow", "defa
 rfd = "0.17"
 egui = "0.32"
 
+# Window decorations on Wayland. GNOME and the other wlroots-style compositors
+# draw none for the client, so a window is only given a title bar, minimise /
+# maximise / close buttons and resize edges if winit draws them itself -- and it
+# only does that with this feature on. eframe does not re-export it, so it is
+# turned on by naming winit directly: feature unification applies it to the very
+# winit eframe already builds. Nothing in this crate calls into winit.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+winit = { version = "0.30.12", default-features = false, features = ["wayland-csd-adwaita"] }
+
 [dev-dependencies]
 # Replays pointer events against a headless egui context, so the gestures that
 # only a pointer can perform are executed by a test rather than only reasoned

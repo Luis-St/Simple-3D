@@ -242,13 +242,10 @@ impl App {
         app
     }
 
-    /// A single plate, so the window is not empty on first run and the user has
-    /// something to type numbers into immediately.
+    /// An empty document. Nothing is added for the user: a shape they did not
+    /// ask for is a shape they have to notice and delete, and the palette is
+    /// one click away.
     fn starter_scene(&mut self) {
-        let root = self.scene.root();
-        if let Some(id) = self.scene.add_primitive("plate", root, 0) {
-            self.selection = vec![id];
-        }
         self.history.clear();
         self.saved_revision = self.history.revision();
         self.frame_all();
@@ -1195,8 +1192,18 @@ mod tests {
         dir
     }
 
+    /// An app with one plate in it. The application itself now opens on an
+    /// empty document, so the tests below -- which are about what happens *to*
+    /// a shape -- put the shape there themselves.
     fn headless_app() -> App {
-        app_in(temp_config_dir("headless"))
+        let mut app = app_in(temp_config_dir("headless"));
+        let root = app.scene.root();
+        let id = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        app.selection = vec![id];
+        app.history.clear();
+        app.saved_revision = app.history.revision();
+        app.reevaluate_for_test();
+        app
     }
 
     fn app_in(config_dir: PathBuf) -> App {
@@ -1290,6 +1297,25 @@ mod tests {
         // And nothing was written outside the directory we handed it.
         assert_eq!(second.config_dir(), dir.as_path());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_document_is_empty_and_unmodified() {
+        // A shape nobody asked for is a shape they have to notice and delete,
+        // and the palette is one click away. What matters as much: an untouched
+        // new document has nothing to save, so quitting it asks no question.
+        let mut app = app_in(temp_config_dir("empty-start"));
+        assert_eq!(app.scene.depth_first(), vec![app.scene.root()], "something was added to the new document");
+        assert!(app.primary().is_none());
+        assert!(!app.unsaved(), "an untouched new document already counts as modified");
+
+        // And File > New, from a document that does have something in it, gets
+        // back to exactly that.
+        let root = app.scene.root();
+        app.scene.add_primitive("box", root, 0).unwrap();
+        app.run(Command::New);
+        assert_eq!(app.scene.depth_first(), vec![app.scene.root()]);
+        assert!(!app.unsaved());
     }
 
     /// The default `App::new` still points at the user's real config directory --
@@ -1440,11 +1466,8 @@ mod tests {
     #[test]
     fn the_application_starts_with_no_graphics_at_all() {
         let mut app = headless_app();
-        assert!(!app.scene.depth_first().is_empty(), "the starter scene is empty");
-        assert!(app.primary().is_some(), "nothing is selected to type numbers into");
         assert_eq!(app.status, Status::Idle);
         assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-        assert!(app.evaluated.mesh.triangle_count() > 0, "the starter scene evaluated to nothing");
 
         // And it stays usable: a command runs and takes effect.
         app.run(Command::Duplicate);

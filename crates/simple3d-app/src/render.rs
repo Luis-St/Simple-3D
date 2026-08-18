@@ -265,8 +265,26 @@ fn shade(base: Rgba, normal: Vec3, view_dir: Vec3, alpha: u8) -> Rgba {
     ]
 }
 
+/// The direction from a triangle towards the eye, for back-face culling.
+///
+/// Under perspective that is the eye minus the triangle, and it has to be
+/// measured per triangle: a face at the edge of the frame is seen from a
+/// noticeably different direction than one at its centre. Under **orthographic**
+/// projection there is no eye to point at -- every ray runs along the view
+/// direction -- and using `eye - centroid` there is simply wrong. It answers
+/// correctly only near the middle of the frame, and the further a face sits from
+/// it the more the answer tilts, until a face within a few degrees of edge-on is
+/// culled although it is facing the viewer. That is what dropped the side wall
+/// off a plate seen almost from the side.
+fn to_eye(view: &View, centroid: Vec3) -> Vec3 {
+    if view.camera.orthographic {
+        -view.forward()
+    } else {
+        view.eye() - centroid
+    }
+}
+
 fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, alpha: u8) {
-    let eye = view.eye();
     let forward = view.forward();
     for tri in &item.mesh.indices {
         let world = [
@@ -282,7 +300,7 @@ fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, al
         // Back-face culling in world space, where it means something: for a
         // closed solid the far side is never visible, so this halves the work.
         let centroid = (world[0] + world[1] + world[2]) * (1.0 / 3.0);
-        if normal.dot(eye - centroid) <= 0.0 {
+        if normal.dot(to_eye(view, centroid)) <= 0.0 {
             continue;
         }
         let colour = shade(base, normal, forward, alpha);
@@ -582,6 +600,88 @@ mod tests {
         let painted = count_non_background(&frame, &req.palette);
         assert!(painted > 1000, "only {painted} pixels painted");
         assert!(painted < 160 * 120, "the model filled the entire viewport");
+    }
+
+    /// The convex hull of a set of screen points, counter-clockwise in
+    /// screen coordinates. Andrew's monotone chain.
+    fn hull(mut points: Vec<egui::Pos2>) -> Vec<egui::Pos2> {
+        points.sort_by(|a, b| (a.x, a.y).partial_cmp(&(b.x, b.y)).unwrap());
+        points.dedup();
+        let cross = |o: egui::Pos2, a: egui::Pos2, b: egui::Pos2| (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+        let mut out: Vec<egui::Pos2> = Vec::new();
+        for pass in 0..2 {
+            let start = (out.len() + 1).max(2);
+            let iter: Box<dyn Iterator<Item = &egui::Pos2>> =
+                if pass == 0 { Box::new(points.iter()) } else { Box::new(points.iter().rev()) };
+            for &p in iter {
+                while out.len() >= start && cross(out[out.len() - 2], out[out.len() - 1], p) <= 0.0 {
+                    out.pop();
+                }
+                out.push(p);
+            }
+            out.pop();
+        }
+        out
+    }
+
+    /// Pixels that lie at least `margin` inside the hull but were never painted.
+    /// For a convex solid the painted silhouette *is* the hull of its projected
+    /// vertices, so any such pixel means a face that faces the viewer was not
+    /// drawn.
+    fn unpainted_inside(hull: &[egui::Pos2], frame: &Frame, empty: &Frame, margin: f32) -> usize {
+        let mut missing = 0;
+        for row in 0..frame.height {
+            for x in 0..frame.width {
+                let p = egui::pos2(x as f32 + 0.5, row as f32 + 0.5);
+                let inside =
+                    hull.windows(2).chain(std::iter::once([hull[hull.len() - 1], hull[0]].as_slice())).all(|e| {
+                        let (a, b) = (e[0], e[1]);
+                        let n = egui::vec2(b.y - a.y, a.x - b.x);
+                        let len = n.length().max(1e-6);
+                        ((p - a).dot(n) / len) <= -margin
+                    });
+                let o = (row * frame.width + x) * 4;
+                if inside && frame.color[o..o + 4] == empty.color[o..o + 4] {
+                    missing += 1;
+                }
+            }
+        }
+        missing
+    }
+
+    #[test]
+    fn an_orthographic_box_away_from_the_centre_of_the_frame_keeps_all_its_faces() {
+        // Under orthographic projection every ray runs along the view direction,
+        // so which faces are turned towards the viewer cannot depend on where in
+        // the frame they land. Culling against `eye - centroid` made it depend on
+        // exactly that: it dropped a near-edge-on side wall out of the image, and
+        // the model was drawn a wall short down one side.
+        //
+        // A box is convex, so what it should cover is exactly the convex hull of
+        // its projected corners -- a missing wall is a slice of that hull left
+        // showing the background, which is what this counts. A hole in the middle
+        // would not do: a dropped wall is at the edge of the silhouette, not
+        // enclosed by it.
+        // 100 mm off the camera's target at a distance of 120 mm is nearly 40
+        // degrees between the two answers, and every wall inside that is lost.
+        let mesh = primitives::box_mesh(40.0, 20.0, 4.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        let prepared = Renderable::prepare(&mesh);
+        let camera = Camera { yaw: 2.0, pitch: -15.0, distance: 120.0, orthographic: true, ..Camera::default() };
+        let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)));
+
+        let mut empty = request(Vec::new(), DisplayMode::Shaded);
+        empty.view = view;
+        let empty = render(&empty);
+
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+        req.view = view;
+        let frame = render(&req);
+
+        assert!(count_non_background(&frame, &req.palette) > 500, "the box did not draw at all");
+        let corners: Vec<egui::Pos2> =
+            prepared.mesh.positions.iter().filter_map(|&p| view.project(p)).map(|(s, _)| s).collect();
+        let missing = unpainted_inside(&hull(corners), &frame, &empty, 1.0);
+        assert_eq!(missing, 0, "{missing} pixels inside the box's own silhouette were never drawn");
     }
 
     #[test]
