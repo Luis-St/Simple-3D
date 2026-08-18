@@ -1,0 +1,11 @@
+[package]
+name = "simple3d-geom"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Meshes, primitive generators, a BSP boolean CSG kernel and mesh repair. The geometry under Simple 3D."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }

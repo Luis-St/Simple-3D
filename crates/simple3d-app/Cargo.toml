@@ -1,0 +1,34 @@
+[package]
+name = "simple3d-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Simple 3D - parametric 3D modelling with exact metric dimensions"
+
+[[bin]]
+name = "simple-3d"
+path = "src/main.rs"
+
+[dependencies]
+simple3d-core = { path = "../simple3d-core" }
+simple3d-export = { path = "../simple3d-export" }
+simple3d-geom = { path = "../simple3d-geom" }
+# The viewport is a from-scratch software rasterizer (see src/raster.rs), so
+# eframe only has to give us a window and 2D drawing. `default-features = false`
+# plus `glow` keeps wgpu, persistence and the web backend out of the build.
+eframe = { version = "0.32", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+rfd = "0.17"
+egui = "0.32"
+
+[dev-dependencies]
+# Replays pointer events against a headless egui context, so the gestures that
+# only a pointer can perform are executed by a test rather than only reasoned
+# about. Pinned to the release built against the egui version above.
+egui_kittest = { version = "=0.32.3", default-features = false }
+# `egui_kittest` drives the interface through AccessKit, which is a feature of
+# egui and of the window integration under it. Naming it here rather than above
+# keeps it out of the shipped binary: with resolver 2 a dev-dependency's features
+# apply to the test build only.
+eframe = { version = "0.32", default-features = false, features = ["glow", "default_fonts", "wayland", "x11", "accesskit"] }

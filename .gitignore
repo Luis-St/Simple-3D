@@ -1,4 +1,5 @@
 /target
 **/*.rs.bk
 *.pdb
-scadstudio.zip
+# Local packaging artefacts; the release build makes its own in CI.
+*.zip

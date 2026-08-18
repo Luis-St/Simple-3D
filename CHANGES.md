@@ -51,7 +51,7 @@ of them improvements on their own terms:
   grip's id, and that id used to change if the panel relaid itself out mid-drag.
 - Nothing else. No test-only branch in any drawing code.
 
-The tests are `crates/scadstudio-app/src/gestures.rs`, eight of them:
+The tests are `crates/simple3d-app/src/gestures.rs`, eight of them:
 
 | Gesture | What is asserted |
 | --- | --- |

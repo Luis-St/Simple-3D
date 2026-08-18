@@ -58,7 +58,7 @@ function; the wiring between a real pointer and that arithmetic was not.
 
 `egui_kittest` **0.32.3 exists and is built against the pinned egui 0.32.3**, so
 the version bump the note feared was not needed. It is a dev-dependency, and
-`crates/scadstudio-app/src/gestures.rs` drives eight gestures through it: the
+`crates/simple3d-app/src/gestures.rs` drives eight gestures through it: the
 header drag and the header click (told apart), the label scrub and a scrub that
 runs off its label across two others, a cube face click and what that click must
 *not* do to the scene behind it, and the cursor placed on geometry and put back
@@ -91,7 +91,7 @@ binary still cannot be driven by a pointer -- only looked at.
 
 ### A long status message ran over the readout beside it (fixed)
 
-"Opened /a/deep/path/to/tray.scadstudio" was drawn straight across "4 ms ·
+"Opened /a/deep/path/to/tray.simple3d" was drawn straight across "4 ms ·
 5 nodes · 156 triangles" at the right end of the status bar: the message was an
 unbounded label in a left-to-right layout, and the readout is laid out from the
 right edge of the same row, so the two met in the middle. Found by opening a
@@ -245,7 +245,7 @@ The spec's acceptance criterion 13 scene -- fifty assemblies, each a plate with 
 hole and a slot cut from it plus a boss unioned on, so 200 primitives inside 100
 nested boolean groups -- took **~10 s** to evaluate cold and **~9.6 s** to update
 after a one-dimension edit, against a target of "well under a second". It now
-takes ~0.12 s and ~6 ms. `crates/scadstudio-core/tests/performance.rs` asserts
+takes ~0.12 s and ~6 ms. `crates/simple3d-core/tests/performance.rs` asserts
 both, and `a_single_value_edit_reuses_the_cache` is no longer `#[ignore]`d.
 
 The old note here blamed the fifty inner *difference* groups and said the root

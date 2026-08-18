@@ -58,7 +58,7 @@ required.
 - A 3D cursor placed with Shift+right-click; new shapes land there.
 - A status bar carrying the selection, its size, the snap, the unit, the last
   message and what the evaluation cost.
-- Three keymap presets (ScadStudio default, mesh editor, CAD) plus per-command
+- Three keymap presets (Simple 3D default, mesh editor, CAD) plus per-command
   rebinding, with conflicts named rather than silently taken. Rebinding takes
   effect immediately, without a restart.
 - Reduced-motion and ghost-display preferences, a scene settings window, and an
@@ -66,15 +66,15 @@ required.
 
 ### Files
 
-- **Projects** are `.scadstudio`: versioned, human-readable JSON that round trips
+- **Projects** are `.simple3d`: versioned, human-readable JSON that round trips
   exactly. A truncated or damaged file reports where it stopped rather than
   failing generically. Passing a path as an argument opens it.
 - **Export** to 3MF (with units recorded), STL (binary and ASCII), OBJ and PLY,
   with an optional export-time scale that never touches the model, a
   selection-only option, progress and cancellation, and a watertightness check
   before anything is written.
-- **Settings and keymaps** live in `%APPDATA%\ScadStudio` or
-  `$XDG_CONFIG_HOME/scadstudio`, or beside the executable in portable mode.
+- **Settings and keymaps** live in `%APPDATA%\Simple 3D` or
+  `$XDG_CONFIG_HOME/simple3d`, or beside the executable in portable mode.
 
 ### Performance
 
@@ -86,7 +86,7 @@ required.
 ### Verified
 
 - 328 tests across the workspace, none ignored or failing.
-- All 29 acceptance criteria in `scadstudio-prompt.md` asserted by a test that
+- All 29 acceptance criteria in `simple-3d-prompt.md` asserted by a test that
   cites the criterion by name, checked by `tools/criteria_audit.py`.
 - Pointer gestures — the header drag, the label scrub, the cube click, the cursor
   placement — replayed against a real frame by `egui_kittest`.

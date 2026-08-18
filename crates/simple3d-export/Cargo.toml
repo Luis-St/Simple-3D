@@ -1,0 +1,11 @@
+[package]
+name = "simple3d-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Mesh export for Simple 3D: 3MF, STL, OBJ and PLY, with a watertightness check before anything is written."
+
+[dependencies]
+simple3d-geom = { path = "../simple3d-geom" }
