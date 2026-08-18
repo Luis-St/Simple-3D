@@ -73,7 +73,7 @@ required.
   with an optional export-time scale that never touches the model, a
   selection-only option, progress and cancellation, and a watertightness check
   before anything is written.
-- **Settings and keymaps** live in `%APPDATA%\Simple 3D` or
+- **Settings and keymaps** live in `%APPDATA%\Simple3D` or
   `$XDG_CONFIG_HOME/simple3d`, or beside the executable in portable mode.
 
 ### Performance

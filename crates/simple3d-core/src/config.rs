@@ -301,7 +301,7 @@ pub fn config_dir() -> PathBuf {
     }
     if cfg!(windows) {
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            return PathBuf::from(appdata).join("Simple 3D");
+            return PathBuf::from(appdata).join("Simple3D");
         }
     } else if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
@@ -309,7 +309,7 @@ pub fn config_dir() -> PathBuf {
         }
     }
     match std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-        Some(home) if cfg!(windows) => PathBuf::from(home).join("Simple 3D"),
+        Some(home) if cfg!(windows) => PathBuf::from(home).join("Simple3D"),
         Some(home) => PathBuf::from(home).join(".config").join("simple3d"),
         // No home to write to: fall back to the working directory rather than
         // refusing to start.
@@ -382,7 +382,7 @@ mod tests {
             display_mode: DisplayMode::Wireframe,
             last_export_scale: 2.5,
             last_export_format: "stl".into(),
-            recent_files: vec![PathBuf::from("/tmp/a.scad3d")],
+            recent_files: vec![PathBuf::from("/tmp/a.simple3d")],
             ..AppSettings::default()
         };
         let text = serde_json::to_string(&settings).unwrap();
@@ -409,23 +409,25 @@ mod tests {
     fn recent_files_are_most_recent_first_deduplicated_and_bounded() {
         let mut settings = AppSettings::default();
         for i in 0..MAX_RECENT + 5 {
-            settings.remember_recent(Path::new(&format!("/tmp/p{i}.scad3d")));
+            settings.remember_recent(Path::new(&format!("/tmp/p{i}.simple3d")));
         }
         assert_eq!(settings.recent_files.len(), MAX_RECENT);
-        assert_eq!(settings.recent_files[0], PathBuf::from("/tmp/p14.scad3d"));
+        assert_eq!(settings.recent_files[0], PathBuf::from("/tmp/p14.simple3d"));
 
-        settings.remember_recent(Path::new("/tmp/p10.scad3d"));
-        assert_eq!(settings.recent_files[0], PathBuf::from("/tmp/p10.scad3d"));
-        assert_eq!(settings.recent_files.iter().filter(|p| p.ends_with("p10.scad3d")).count(), 1);
+        settings.remember_recent(Path::new("/tmp/p10.simple3d"));
+        assert_eq!(settings.recent_files[0], PathBuf::from("/tmp/p10.simple3d"));
+        assert_eq!(settings.recent_files.iter().filter(|p| p.ends_with("p10.simple3d")).count(), 1);
 
-        settings.forget_recent(Path::new("/tmp/p10.scad3d"));
-        assert!(!settings.recent_files.contains(&PathBuf::from("/tmp/p10.scad3d")));
+        settings.forget_recent(Path::new("/tmp/p10.simple3d"));
+        assert!(!settings.recent_files.contains(&PathBuf::from("/tmp/p10.simple3d")));
     }
 
     #[test]
     fn the_config_directory_is_absolute_and_named_for_the_app() {
         let dir = config_dir();
-        let text = dir.to_string_lossy().to_lowercase();
+        // Spaces removed as well as case: what matters is that the directory is
+        // named after the application, not how a platform likes to spell it.
+        let text = dir.to_string_lossy().to_lowercase().replace(' ', "");
         assert!(text.contains("simple3d"), "{dir:?}");
     }
 
