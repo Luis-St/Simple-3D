@@ -10,7 +10,7 @@ members = [
 # The release workflow rewrites `version` here from the pushed tag with a regex
 # anchored on this heading, so `version` stays the first key under it.
 [workspace.package]
-version = "0.1.0"
+version = "0.0.0"
 edition = "2021"
 rust-version = "1.97"
 license = "MIT"

@@ -8,7 +8,7 @@ Versions follow [semantic versioning](https://semver.org). Until 1.0 the project
 file format may still change; when it does, a file written by an older version
 will still open, and `format` in the file says which version wrote it.
 
-## [0.1.0] — 2026-08-18
+## [0.0.0] — 2026-08-18
 
 First release. Portable single-file executables for Linux (x86-64) and Windows
 (x64): no runtime, no installer, no network access, and no accelerated graphics
