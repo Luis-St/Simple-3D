@@ -8,12 +8,16 @@
 mod app;
 mod app_chrome;
 mod gizmo;
+mod icon;
 mod panel_outliner;
+mod panel_primitives;
 mod panel_properties;
+mod panel_toolrail;
 mod panel_viewport;
 mod pick;
 mod raster;
 mod render;
+mod theme;
 mod ui;
 mod view;
 mod worker;

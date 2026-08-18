@@ -115,6 +115,8 @@ with the version taken from the tag.
 | Why a boolean result is the shape it is | `scadstudio-geom/src/csg_bsp.rs`, then `repair.rs` and `planar.rs` |
 | Caching and invalidation | `scadstudio-core/src/eval.rs` (`subtree_key`) |
 | Manipulator handle behaviour and modifiers | `scadstudio-app/src/gizmo.rs` |
+| A colour, a row height or a type size | `scadstudio-app/src/theme.rs` — nothing else names one |
+| An icon, or a primitive's silhouette | `scadstudio-app/src/icon.rs` |
 | Keymap presets, rebinding and conflicts | `scadstudio-core/src/keymap.rs` |
 | Navigation bindings taking effect without a restart | `scadstudio-app/src/panel_viewport.rs` (`nav_gesture`) |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |

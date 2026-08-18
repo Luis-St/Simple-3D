@@ -64,7 +64,12 @@ pub fn feature_edges(mesh: &Mesh, angle_deg: f64) -> Vec<[u32; 2]> {
 /// light and dark system themes (spec section 7.4).
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
+    /// The top of the viewport's vertical gradient.
     pub background: Rgba,
+    /// The bottom of it. A flat field of one colour reads as a blank canvas;
+    /// a gradient this shallow is barely nameable but gives the ground plane
+    /// somewhere to sit.
+    pub background_low: Rgba,
     pub solid: Rgba,
     pub selected: Rgba,
     pub ghost: Rgba,
@@ -78,25 +83,33 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// The viewport's own reading of the interface palette. The names on the
+    /// left are `crate::theme::token`'s: surface-0 for the ground, the amber
+    /// accent for selection, the danger red for a body that is being subtracted.
     pub fn dark() -> Palette {
+        use crate::theme::token;
         Palette {
-            background: [30, 32, 36, 255],
-            solid: [176, 182, 192, 255],
-            selected: [255, 176, 64, 255],
-            ghost: [120, 170, 255, 70],
-            grid: [56, 60, 66, 255],
-            grid_major: [78, 84, 92, 255],
-            axis_x: [214, 82, 82, 255],
-            axis_y: [104, 190, 104, 255],
-            axis_z: [92, 140, 235, 255],
-            wire: [196, 202, 212, 255],
-            edge: [24, 26, 30, 255],
+            background: rgba(token::SURFACE_0),
+            background_low: rgba(token::SURFACE_0B),
+            solid: [0x9A, 0xA4, 0xB2, 255],
+            selected: rgba(token::ACCENT),
+            // A subtrahend is drawn as a translucent red ghost, so a cut can be
+            // seen before it is resolved.
+            ghost: fade(token::DANGER, 80),
+            grid: [0x28, 0x2D, 0x35, 255],
+            grid_major: rgba(token::SURFACE_3),
+            axis_x: rgba(token::AXIS_X),
+            axis_y: rgba(token::AXIS_Y),
+            axis_z: rgba(token::AXIS_Z),
+            wire: [0xC2, 0xCA, 0xD6, 255],
+            edge: [0x11, 0x13, 0x17, 255],
         }
     }
 
     pub fn light() -> Palette {
         Palette {
             background: [238, 240, 243, 255],
+            background_low: [226, 229, 234, 255],
             solid: [150, 158, 170, 255],
             selected: [226, 122, 12, 255],
             ghost: [40, 110, 220, 60],
@@ -115,6 +128,47 @@ impl Palette {
             Palette::dark()
         } else {
             Palette::light()
+        }
+    }
+}
+
+/// A palette token as the rasterizer's own pixel format.
+fn rgba(colour: egui::Color32) -> Rgba {
+    [colour.r(), colour.g(), colour.b(), 255]
+}
+
+/// The same, at a chosen alpha.
+fn fade(colour: egui::Color32, alpha: u8) -> Rgba {
+    [colour.r(), colour.g(), colour.b(), alpha]
+}
+
+impl Palette {
+    /// The background colour at `row` of a frame `height` rows tall. One
+    /// definition, used by the renderer and by anything that needs to ask
+    /// "was this pixel painted, or is it just the sky".
+    pub fn background_at(&self, row: usize, height: usize) -> Rgba {
+        if height <= 1 {
+            return self.background;
+        }
+        let t = row as f32 / (height - 1) as f32;
+        let mix = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+        [
+            mix(self.background[0], self.background_low[0]),
+            mix(self.background[1], self.background_low[1]),
+            mix(self.background[2], self.background_low[2]),
+            255,
+        ]
+    }
+}
+
+/// Lay the gradient down one row at a time, before anything else is drawn.
+fn fill_background(frame: &mut Frame, palette: &Palette) {
+    let height = frame.height;
+    for row in 0..height {
+        let colour = palette.background_at(row, height);
+        for column in 0..frame.width {
+            let offset = (row * frame.width + column) * 4;
+            frame.color[offset..offset + 4].copy_from_slice(&colour);
         }
     }
 }
@@ -155,7 +209,7 @@ pub struct Request<'a> {
 pub fn render(request: &Request<'_>) -> Frame {
     let [width, height] = request.size;
     let mut frame = Frame::new(width.max(1), height.max(1));
-    frame.clear(request.palette.background);
+    fill_background(&mut frame, &request.palette);
     if width == 0 || height == 0 {
         return frame;
     }
@@ -324,6 +378,18 @@ fn draw_wireframe(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgb
 /// crossing behind the eye does not project to nonsense. `bias` is a fraction of
 /// the line's own depth key, not an absolute amount.
 fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32) {
+    draw_world_line_with_depth(frame, view, a, b, colour, bias, true)
+}
+
+fn draw_world_line_with_depth(
+    frame: &mut Frame,
+    view: &View,
+    a: Vec3,
+    b: Vec3,
+    colour: Rgba,
+    bias: f32,
+    write_depth: bool,
+) {
     let (mut va, mut vb) = (view.to_view(a), view.to_view(b));
     if !view.camera.orthographic {
         if va.z < NEAR && vb.z < NEAR {
@@ -339,7 +405,11 @@ fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgb
     }
     let (va, vb) = (to_vertex(view, va), to_vertex(view, vb));
     let scale = (va.key.abs() + vb.key.abs()) * 0.5;
-    frame.line(va, vb, colour, bias * scale);
+    if write_depth {
+        frame.line(va, vb, colour, bias * scale);
+    } else {
+        frame.line_with_depth(va, vb, colour, bias * scale, false);
+    }
 }
 
 /// Grid spacing that is actually legible: step up in powers of ten until one
@@ -358,7 +428,7 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
     let spacing = effective_grid_spacing(view, grid.spacing);
     // Enough lines to fill the view, capped so an extreme zoom cannot cost
     // seconds.
-    let lines = 60i64;
+    let lines = 48i64;
     let half = spacing * lines as f64;
     // Snap the grid to the camera target so panning does not run off the end.
     let cx = (view.camera.target.x / spacing).round() * spacing;
@@ -367,35 +437,89 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
         let offset = i as f64 * spacing;
         let major = i % 10 == 0;
         let colour = if major { palette.grid_major } else { palette.grid };
-        draw_world_line(
+        faded_line(
             frame,
             view,
             Vec3::new(cx + offset, cy - half, 0.0),
             Vec3::new(cx + offset, cy + half, 0.0),
+            Vec3::new(cx, cy, 0.0),
+            half,
             colour,
             GRID_BIAS,
         );
-        draw_world_line(
+        faded_line(
             frame,
             view,
             Vec3::new(cx - half, cy + offset, 0.0),
             Vec3::new(cx + half, cy + offset, 0.0),
+            Vec3::new(cx, cy, 0.0),
+            half,
             colour,
             GRID_BIAS,
         );
     }
 }
 
-/// Origin axes in the consistent, labelled colours the interface uses
-/// everywhere: X red, Y green, Z blue.
+/// How many pieces a grid line is cut into to fade it. Enough that the steps
+/// between one piece's alpha and the next are invisible, few enough that the
+/// whole grid is still one pass of cheap segment drawing.
+const FADE_STEPS: usize = 24;
+
+/// Draw one grid line as a run of short segments whose alpha falls off with
+/// distance from the grid's centre. A grid that simply stops leaves a hard
+/// square edge in mid-air, and the eye reads that edge as part of the model.
+fn faded_line(
+    frame: &mut Frame,
+    view: &View,
+    from: Vec3,
+    to: Vec3,
+    centre: Vec3,
+    radius: f64,
+    colour: Rgba,
+    bias: f32,
+) {
+    for step in 0..FADE_STEPS {
+        let t0 = step as f64 / FADE_STEPS as f64;
+        let t1 = (step + 1) as f64 / FADE_STEPS as f64;
+        let a = from + (to - from) * t0;
+        let b = from + (to - from) * t1;
+        let mid = (a + b) * 0.5;
+        let distance = (mid - centre).length();
+        // Squared falloff: near the origin the grid is at full strength, and it
+        // is gone well before the last line rather than at it.
+        let fade = 1.0 - (distance / (radius * 0.8)).min(1.0).powi(2);
+        if fade <= 0.03 {
+            continue;
+        }
+        let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
+        // Never writes depth: the grid and the axes are drawn before the model
+        // and must lose every tie with it, including the exact ties a ground
+        // plane makes with a plate whose side walls it cuts.
+        draw_world_line_with_depth(frame, view, a, b, faded, bias, false);
+    }
+}
+
 fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
-    let length = effective_grid_spacing(view, grid.spacing) * 60.0;
+    let length = effective_grid_spacing(view, grid.spacing) * 48.0;
     for (dir, colour) in [
         (Vec3::new(1.0, 0.0, 0.0), palette.axis_x),
         (Vec3::new(0.0, 1.0, 0.0), palette.axis_y),
         (Vec3::new(0.0, 0.0, 1.0), palette.axis_z),
     ] {
-        draw_world_line(frame, view, dir * -length, dir * length, colour, AXIS_BIAS);
+        // Both halves fade outward from the origin, for the same reason the
+        // grid does: an axis that ends abruptly reads as an object.
+        for sign in [-1.0, 1.0] {
+            faded_line(
+                frame,
+                view,
+                Vec3::new(0.0, 0.0, 0.0),
+                dir * (length * sign),
+                Vec3::new(0.0, 0.0, 0.0),
+                length,
+                colour,
+                AXIS_BIAS,
+            );
+        }
     }
 }
 
@@ -424,7 +548,15 @@ mod tests {
     }
 
     fn count_non_background(frame: &Frame, palette: &Palette) -> usize {
-        frame.color.chunks_exact(4).filter(|p| *p != palette.background).count()
+        (0..frame.height * frame.width).filter(|&i| !is_background(frame, i, palette)).count()
+    }
+
+    /// Whether pixel `index` still holds the gradient it was cleared to.
+    fn is_background(frame: &Frame, index: usize, palette: &Palette) -> bool {
+        let offset = index * 4;
+        let pixel: Rgba =
+            [frame.color[offset], frame.color[offset + 1], frame.color[offset + 2], frame.color[offset + 3]];
+        pixel == palette.background_at(index / frame.width, frame.height)
     }
 
     #[test]
@@ -457,8 +589,10 @@ mod tests {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
         let frame = render(&req);
-        let mut shades: Vec<u8> =
-            frame.color.chunks_exact(4).filter(|p| *p != req.palette.background).map(|p| p[0]).collect();
+        let mut shades: Vec<u8> = (0..frame.width * frame.height)
+            .filter(|&i| !is_background(&frame, i, &req.palette))
+            .map(|i| frame.color[i * 4])
+            .collect();
         shades.sort_unstable();
         shades.dedup();
         assert!(shades.len() >= 3, "expected the three visible faces to differ, got {shades:?}");
@@ -555,6 +689,9 @@ mod tests {
     fn the_light_and_dark_palettes_differ_in_every_role() {
         let (dark, light) = (Palette::dark(), Palette::light());
         assert_ne!(dark.background, light.background);
+        assert_ne!(dark.background_low, light.background_low);
+        // The gradient runs one way only: the sky is never darker than the floor.
+        assert!(dark.background[0] < dark.background_low[0]);
         assert_ne!(dark.solid, light.solid);
         assert_ne!(dark.grid, light.grid);
         assert_eq!(Palette::for_dark_mode(true).background, dark.background);
@@ -575,17 +712,24 @@ mod tests {
             let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
             req.grid = Grid { visible: grid, spacing: 10.0 };
             req.view.camera.pitch = 10.0;
+            // The axes fade, so an axis pixel is a blend of the axis with
+            // whatever is under it -- which is the grid in one render and the
+            // background in the other. Making them invisible here leaves the
+            // question this test is actually asking: does the *grid* ever
+            // overwrite the model it is coplanar with.
+            for axis in [&mut req.palette.axis_x, &mut req.palette.axis_y, &mut req.palette.axis_z] {
+                axis[3] = 0;
+            }
             (render(&req), req.palette)
         };
         let (without, palette) = build(false);
         let (with, _) = build(true);
 
-        let axis_colours = [palette.axis_x, palette.axis_y, palette.axis_z];
         let mut checked = 0;
         for i in 0..(160 * 120) {
             let o = i * 4;
             let bare: Rgba = [without.color[o], without.color[o + 1], without.color[o + 2], without.color[o + 3]];
-            if bare == palette.background || axis_colours.contains(&bare) {
+            if is_background(&without, i, &palette) {
                 continue;
             }
             let gridded: Rgba = [with.color[o], with.color[o + 1], with.color[o + 2], with.color[o + 3]];

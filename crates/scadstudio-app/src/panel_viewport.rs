@@ -9,8 +9,9 @@ use crate::app::App;
 use crate::gizmo::{self, Gizmo, Handle, Mods};
 use crate::pick;
 use crate::render::{self, Grid, Item, Palette, Style};
+use crate::theme::{self, token};
 use crate::view::View;
-use scadstudio_core::config::DisplayMode;
+
 use scadstudio_core::keymap::{MouseButton, NavMap};
 use scadstudio_core::scene::{Camera, NodeId};
 use scadstudio_geom::Vec3;
@@ -271,11 +272,13 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
 
     if app.settings.show_bounding_box {
         if let Some((lo, hi)) = app.selection_bounds() {
-            draw_box(&painter, view, lo, hi, ui.visuals().selection.bg_fill, 1.5);
-            label_box(&painter, ui, view, lo, hi, app.unit(), ui.visuals().selection.bg_fill);
+            draw_box(&painter, view, lo, hi, token::ACCENT, 1.5);
+            // Dimensions are measurements, so they read in the measure colour,
+            // never in the selection's.
+            label_box(&painter, ui, view, lo, hi, app.unit(), token::MEASURE);
         }
         if let Some((lo, hi)) = app.evaluated.mesh.bounds() {
-            draw_box(&painter, view, lo, hi, ui.visuals().weak_text_color(), 1.0);
+            draw_box(&painter, view, lo, hi, token::TEXT_LO.gamma_multiply(0.5), 1.0);
         }
     }
 
@@ -285,54 +288,92 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
         }
     }
 
-    // Axis legend, in the same colours as the origin axes.
-    let mut cursor = rect.left_top() + egui::vec2(10.0, 10.0);
-    for (axis, name) in ["X", "Y", "Z"].iter().enumerate() {
-        painter.text(cursor, egui::Align2::LEFT_TOP, *name, egui::FontId::monospace(12.0), gizmo::axis_colour(axis));
-        cursor.x += 16.0;
-    }
-    let info_colour = ui.visuals().text_color();
-    let mut lines = vec![
-        format!(
-            "{} - {} - {} frame",
-            app.mode.label(),
-            if app.scene.camera.orthographic { "orthographic" } else { "perspective" },
-            app.settings.handle_frame.label()
-        ),
-        format!("{}", app.settings.display_mode.label()),
-        // Which measurement convention tessellation follows, stated in the
-        // interface because it decides whether a printed hole fits.
-        "Curves are circumscribed: a diameter of 50 measures 50 at its widest".to_string(),
-    ];
-    if app.settings.display_mode == DisplayMode::Wireframe {
-        lines.push("Wireframe shows creased edges only".into());
-    }
-    let mut y = rect.left_top().y + 28.0;
-    for line in lines {
-        painter.text(
-            egui::pos2(rect.left() + 10.0, y),
-            egui::Align2::LEFT_TOP,
-            line,
-            egui::FontId::proportional(11.0),
-            info_colour,
-        );
-        y += 15.0;
-    }
+    // The corner marks: an orientation cube bottom-right, and one line of state
+    // top-left. What used to sit here was four lines of prose in the same grey
+    // as the grid -- unreadable and, once the tool rail shows the same state as
+    // a lit button, redundant.
+    view_cube(app, &painter, rect, view);
+
+    let hud = format!(
+        "{} \u{00B7} {} \u{00B7} {} frame",
+        app.mode.label(),
+        if app.scene.camera.orthographic { "orthographic" } else { "perspective" },
+        app.settings.handle_frame.label().to_lowercase()
+    );
+    let galley = painter.layout_no_wrap(hud, egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
+    let at = rect.left_top() + egui::vec2(10.0, 8.0);
+    painter.rect_filled(
+        egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0)),
+        3.0,
+        token::SURFACE_1.gamma_multiply(0.72),
+    );
+    painter.galley(at, galley, token::TEXT_LO);
 
     // The live numeric value at the cursor during a drag.
     if let Some(drag) = &app.drag {
         if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
             let at = cursor + egui::vec2(14.0, -18.0);
-            let galley = painter.layout_no_wrap(
-                drag.readout.clone(),
-                egui::FontId::monospace(13.0),
-                ui.visuals().strong_text_color(),
+            // Cyan, in the numeric face: a measurement, not a message.
+            let galley = painter.layout_no_wrap(drag.readout.clone(), egui::FontId::monospace(13.0), token::MEASURE);
+            let background = egui::Rect::from_min_size(at, galley.size()).expand(5.0);
+            painter.rect_filled(background, 3.0, token::SURFACE_1.gamma_multiply(0.92));
+            painter.rect_stroke(
+                background,
+                3.0,
+                egui::Stroke::new(1.0_f32, token::MEASURE.gamma_multiply(0.5)),
+                egui::StrokeKind::Inside,
             );
-            let background = egui::Rect::from_min_size(at, galley.size()).expand(4.0);
-            painter.rect_filled(background, 3.0, ui.visuals().extreme_bg_color.gamma_multiply(0.9));
-            painter.galley(at, galley, ui.visuals().strong_text_color());
+            painter.galley(at, galley, token::MEASURE);
         }
     }
+}
+
+/// The orientation cube in the bottom-right corner: three labelled axes drawn
+/// with the live camera, so which way the model is facing is answerable without
+/// orbiting to find out.
+fn view_cube(app: &App, painter: &egui::Painter, rect: egui::Rect, view: &View) {
+    let side = theme::metric::VIEW_CUBE;
+    let box_rect =
+        egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(side + 12.0, side + 12.0), egui::Vec2::splat(side));
+    painter.rect_filled(box_rect, 3.0, token::SURFACE_1.gamma_multiply(0.72));
+    painter.rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0_f32, token::SURFACE_3), egui::StrokeKind::Inside);
+
+    let centre = box_rect.center();
+    let reach = side * 0.30;
+    // The camera's own rotation, applied to the three unit axes: the same yaw
+    // and pitch the viewport is using, so the cube can never disagree with it.
+    let yaw = app.scene.camera.yaw.to_radians();
+    let pitch = app.scene.camera.pitch.to_radians();
+    let project = |v: Vec3| -> (egui::Vec2, f64) {
+        let x = v.x * yaw.cos() + v.y * yaw.sin();
+        let y = -v.x * yaw.sin() + v.y * yaw.cos();
+        let depth = y * pitch.cos() - v.z * pitch.sin();
+        let up = y * pitch.sin() + v.z * pitch.cos();
+        (egui::vec2(x as f32, -up as f32) * reach, depth)
+    };
+
+    let axes = [
+        (Vec3::new(1.0, 0.0, 0.0), "X", 0usize),
+        (Vec3::new(0.0, 1.0, 0.0), "Y", 1),
+        (Vec3::new(0.0, 0.0, 1.0), "Z", 2),
+    ];
+    // Far axes first, so a near one draws over them rather than under.
+    let mut ordered: Vec<(egui::Vec2, f64, &str, usize)> = axes
+        .iter()
+        .map(|(v, name, axis)| {
+            let (p, d) = project(*v);
+            (p, d, *name, *axis)
+        })
+        .collect();
+    ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    for (offset, _, name, axis) in ordered {
+        let colour = crate::theme::axis_colour(axis);
+        let tip = centre + offset;
+        painter.line_segment([centre, tip], egui::Stroke::new(1.5_f32, colour));
+        painter.circle_filled(tip, 7.0, colour);
+        painter.text(tip, egui::Align2::CENTER_CENTER, name, egui::FontId::monospace(10.0), token::SURFACE_0);
+    }
+    let _ = view;
 }
 
 fn draw_box(painter: &egui::Painter, view: &View, lo: Vec3, hi: Vec3, colour: egui::Color32, width: f32) {

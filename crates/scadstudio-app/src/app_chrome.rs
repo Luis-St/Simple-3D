@@ -5,8 +5,9 @@
 use crate::app::{App, Modal, Status, APP_NAME, PROJECT_EXTENSION, VERSION};
 use crate::gizmo::Mode;
 use crate::render::Renderable;
+use crate::theme;
 use crate::ui;
-use scadstudio_core::config::{self, DisplayMode, HandleFrame};
+use scadstudio_core::config::{self, DisplayMode};
 use scadstudio_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use scadstudio_core::primitive;
 use scadstudio_core::scene::{GroupOp, NodeId};
@@ -83,16 +84,42 @@ impl App {
     }
 
     pub(crate) fn menu_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                self.file_menu(ui);
-                self.edit_menu(ui);
-                self.add_menu(ui);
-                self.view_menu(ui);
-                self.manipulate_menu(ui);
-                self.help_menu(ui);
-                ui.separator();
-                self.mode_toolbar(ui);
+        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 0,
+            bottom: 0,
+        });
+        egui::TopBottomPanel::top("menu").frame(frame).exact_height(theme::metric::MENU_BAR).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                // The application's own name, once, at the left -- the window
+                // title bar is the compositor's to style, not ours.
+                ui.add(
+                    egui::Label::new(egui::RichText::new(APP_NAME).size(13.0).strong().color(theme::token::TEXT_HI))
+                        .selectable(false),
+                );
+                ui.add_space(10.0);
+                egui::MenuBar::new().ui(ui, |ui| {
+                    self.file_menu(ui);
+                    self.edit_menu(ui);
+                    self.add_menu(ui);
+                    self.view_menu(ui);
+                    self.manipulate_menu(ui);
+                    self.help_menu(ui);
+                });
+                // The document, on the right of the same row: what is open and
+                // whether it still matches what is on disk.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let name = self
+                        .path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string());
+                    let marker = if self.unsaved() { " \u{2022}" } else { "" };
+                    ui.add(egui::Label::new(theme::hint(format!("{name}{marker}"))).selectable(false))
+                        .on_hover_text(if self.unsaved() { "Unsaved changes" } else { "Saved" });
+                });
             });
         });
     }
@@ -309,125 +336,139 @@ impl App {
         });
     }
 
-    fn mode_toolbar(&mut self, ui: &mut egui::Ui) {
-        for mode in Mode::ALL {
-            let command = match mode {
-                Mode::Move => Command::ModeMove,
-                Mode::Rotate => Command::ModeRotate,
-                Mode::Resize => Command::ModeResize,
-            };
-            let selected = self.mode == mode;
-            let response = ui.selectable_label(selected, mode.label()).on_hover_text(format!(
-                "{} ({})",
-                mode.label(),
-                self.keymap.shortcut_text(command)
-            ));
-            if response.clicked() {
-                self.run(command);
-            }
-        }
-        ui.separator();
-        if ui
-            .selectable_label(self.settings.handle_frame == HandleFrame::World, "World frame")
-            .on_hover_text(format!(
-                "Handles work in the {} frame ({})",
-                self.settings.handle_frame.label(),
-                self.keymap.shortcut_text(Command::ToggleHandleFrame)
-            ))
-            .clicked()
-        {
-            self.run(Command::ToggleHandleFrame);
-        }
-    }
-
     pub(crate) fn status_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                // Display unit, so what the numbers mean is never in doubt.
-                egui::ComboBox::from_id_salt("status-unit").selected_text(self.unit().suffix()).width(56.0).show_ui(
-                    ui,
-                    |ui| {
-                        for unit in Unit::ALL {
+        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 0,
+            bottom: 0,
+        });
+        egui::TopBottomPanel::bottom("status").frame(frame).exact_height(theme::metric::STATUS_BAR).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
+
+                // Left to right: what is selected, how big it is, what the
+                // numbers snap to, and what unit they are in.
+                ui.add(egui::Label::new(theme::value(self.selection_summary())).selectable(false));
+                dot(ui);
+                ui.add(egui::Label::new(theme::numeric(self.selection_size_text())).selectable(false));
+                dot(ui);
+                // Snap and grid are the same number here, and saying so is
+                // the point: "why did it jump 10" is answered on the bar.
+                let snap = scadstudio_core::unit::format_length(self.move_snap(), self.unit());
+                ui.add(
+                    egui::Label::new(theme::numeric(format!("Snap {snap} {}", self.unit().suffix()))).selectable(false),
+                )
+                .on_hover_text("Moves and resizes step by the grid spacing");
+                dot(ui);
+                ui.add(
+                    egui::Label::new(theme::numeric(format!("Grid {snap} {}", self.unit().suffix()))).selectable(false),
+                )
+                .on_hover_text("Ground grid spacing; set it in the Document panel");
+                dot(ui);
+
+                // The unit is a click, not a trip to a settings window: it is
+                // the one piece of document state read on every single field.
+                let unit = self.unit();
+                egui::ComboBox::from_id_salt("status-unit")
+                    .selected_text(theme::numeric(unit.suffix()))
+                    .width(52.0)
+                    .show_ui(ui, |ui| {
+                        for option in Unit::ALL {
                             // Switching never rescales the model: the unit only
                             // changes what the fields read (spec section 4).
-                            if ui.selectable_label(self.unit() == unit, unit.suffix()).clicked() {
-                                self.scene.settings.unit = unit;
+                            if ui.selectable_label(unit == option, option.suffix()).clicked() {
+                                self.scene.settings.unit = option;
                                 self.fields.clear();
                             }
                         }
-                    },
-                );
-                ui.separator();
+                    });
 
-                ui.label("Segments");
-                let mut segments = self.scene.settings.default_segments as f64;
-                let response =
-                    ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).speed(0.5).max_decimals(0));
-                if response.changed() {
-                    self.edit("Default segments", Some("scene:segments"));
-                    self.scene.settings.default_segments = segments.round() as u32;
-                }
-                response.on_hover_text(
-                    "Segments for curved surfaces. Vertices sit on the circumscribed circle, \
-                     so a cylinder of diameter 50 still measures 50 at its widest.",
-                );
-                ui.separator();
-
-                if ui.button("Export...").clicked() {
-                    self.run(Command::Export);
-                }
-                ui.separator();
+                dot(ui);
 
                 // The message area, and progress for whatever is in flight.
                 if let Some(job) = &self.export_job {
                     let fraction = job.fraction();
-                    ui.add(egui::ProgressBar::new(fraction).desired_width(120.0).show_percentage());
-                    ui.label(format!(
-                        "Exporting {} ({}s of {}s allowed)",
-                        job.format_label,
-                        job.elapsed().as_secs(),
-                        job.limit().as_secs()
-                    ));
-                    if ui.button("Cancel").clicked() {
+                    ui.add(egui::ProgressBar::new(fraction).desired_width(110.0).show_percentage());
+                    ui.add(
+                        egui::Label::new(theme::value(format!(
+                            "Exporting {} ({}s of {}s allowed)",
+                            job.format_label,
+                            job.elapsed().as_secs(),
+                            job.limit().as_secs()
+                        )))
+                        .selectable(false),
+                    );
+                    if ui.small_button("Cancel").clicked() {
                         job.cancel();
                     }
                 } else if self.worker.is_busy() {
-                    ui.add(egui::Spinner::new().size(14.0));
-                    ui.label("Evaluating...");
+                    ui.add(egui::Spinner::new().size(12.0));
+                    ui.add(egui::Label::new(theme::value("Evaluating\u{2026}")).selectable(false));
                 } else {
                     let colour = match &self.status {
-                        Status::Warning(_) => Some(ui.visuals().warn_fg_color),
-                        _ => None,
+                        Status::Warning(_) => theme::token::ACCENT,
+                        _ => theme::token::TEXT_LO,
                     };
-                    let text = egui::RichText::new(self.status_text());
-                    ui.label(match colour {
-                        Some(colour) => text.color(colour),
-                        None => text,
-                    });
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(self.status_text()).size(theme::font::LABEL).color(colour),
+                        )
+                        .selectable(false),
+                    );
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(ui::describe_counts(self.scene.len(), self.evaluated.mesh.triangle_count()));
+                    ui.add(
+                        egui::Label::new(theme::numeric(ui::describe_counts(
+                            self.scene.len(),
+                            self.evaluated.mesh.triangle_count(),
+                        )))
+                        .selectable(false),
+                    );
                     if let Some(elapsed) = self.worker.last_elapsed {
-                        ui.separator();
-                        ui.label(ui::describe_elapsed(elapsed));
+                        dot(ui);
+                        ui.add(egui::Label::new(theme::numeric(ui::describe_elapsed(elapsed))).selectable(false));
                     }
                     if !self.evaluated.errors.is_empty() {
-                        ui.separator();
+                        dot(ui);
                         let names: Vec<&str> = self.evaluated.errors.iter().map(|e| e.name.as_str()).collect();
-                        ui.colored_label(ui.visuals().error_fg_color, format!("Failed: {}", names.join(", ")))
-                            .on_hover_text(
-                                self.evaluated
-                                    .errors
-                                    .iter()
-                                    .map(|e| format!("{}: {}", e.name, e.message))
-                                    .collect::<Vec<_>>()
-                                    .join("\n"),
-                            );
+                        ui.colored_label(theme::token::DANGER, format!("Failed: {}", names.join(", "))).on_hover_text(
+                            self.evaluated
+                                .errors
+                                .iter()
+                                .map(|e| format!("{}: {}", e.name, e.message))
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
                     }
                 });
             });
         });
+    }
+
+    /// "2 selected", or the name when there is exactly one -- the name is more
+    /// use than the count when the count is one.
+    pub(crate) fn selection_summary(&self) -> String {
+        match self.selection.len() {
+            0 => "Nothing selected".to_string(),
+            1 => self.scene.node(self.selection[0]).name.clone(),
+            n => format!("{n} selected"),
+        }
+    }
+
+    /// The bounding size of what is selected, or of the whole scene when nothing
+    /// is -- the status bar's answer to "will this fit".
+    pub(crate) fn selection_size_text(&self) -> String {
+        let unit = self.unit();
+        let bounds = match self.primary() {
+            Some(id) => self.evaluated.node_world_bounds.get(&id).copied(),
+            None => self.evaluated.mesh.bounds(),
+        };
+        match bounds {
+            Some((lo, hi)) => ui::describe_size(hi - lo, unit),
+            None => format!("-- {}", unit.suffix()),
+        }
     }
 
     pub(crate) fn modals(&mut self, ctx: &egui::Context) {
@@ -895,4 +936,13 @@ impl App {
                 });
             });
     }
+}
+
+/// The status bar's separator: a dot, not a rule. A vertical line every few
+/// words turns a single sentence of state into a row of boxes.
+fn dot(ui: &mut egui::Ui) {
+    ui.add(
+        egui::Label::new(egui::RichText::new("\u{00B7}").size(theme::font::LABEL).color(theme::token::SURFACE_3))
+            .selectable(false),
+    );
 }
