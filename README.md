@@ -69,8 +69,9 @@ as an argument opens it, so file associations work on both platforms.
 
 ## Status
 
-**v0.0.2, plus unreleased work** — see `CHANGELOG.md`. All four crates are
-implemented and all 29 of the spec's acceptance criteria are behaviourally met.
+**v0.0.2, plus unreleased work.** All four crates are implemented and all 29 of
+the spec's acceptance criteria are behaviourally met. What each release changed
+is on its release page; the commit log is the record between them.
 
 `cargo test --workspace` runs **354 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
@@ -85,21 +86,12 @@ uncovered. Do not use `grep -rn "criterion" crates/` for this: it counts a doc
 comment as coverage, and four criteria were once passing that check without a
 test.
 
-`KNOWN_ISSUES.md` is this project's issue list. Read the top of that file rather
-than trusting a summary here: several bugs recorded in it — a drag that finished
-wherever the mouse button came up, an orientation cube a quarter turn out of
-step with the viewport, a side wall the orthographic camera culled although it
-faced the viewer — were all found by running the application with a full test
-suite passing over it.
-
-## Documentation
-
-| File | What it is |
-| --- | --- |
-| `README.md` | This file: what the application is and how to build it |
-| `CHANGELOG.md` | Released versions, user-facing |
-| `CHANGES.md` | The engineering report for the most recent pass; earlier ones are in git history |
-| `KNOWN_ISSUES.md` | The issue list — open items, things worth knowing, and a write-up of every fixed bug |
+A passing suite is not the same as a working application. Several of the bugs
+fixed so far — a drag that finished wherever the mouse button came up, an
+orientation cube a quarter turn out of step with the viewport, a side wall the
+orthographic camera culled although it faced the viewer — were all found by
+running the application with the full suite passing over it. Each of them is now
+covered by a test that fails without its fix.
 
 ## Why Rust, and why no external CSG/geometry crate
 
