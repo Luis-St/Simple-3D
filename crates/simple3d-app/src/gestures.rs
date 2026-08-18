@@ -38,10 +38,18 @@ fn harness(name: &str) -> Harness<'static, App> {
     std::fs::create_dir_all(&dir).unwrap();
 
     let mut app = App::with_config_dir(&egui::Context::default(), None, dir);
+    // The application opens on an empty document, and every gesture below needs
+    // something to perform itself on, so the shape the starter scene used to
+    // hold is put there here.
+    let root = app.scene.root();
+    let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+    app.select_only(plate);
     // The worker is asynchronous, and a test must not wait on it: evaluate the
-    // starting scene here so picking, the manipulator and the 3D cursor have
-    // geometry to work against.
+    // scene here so picking, the manipulator and the 3D cursor have geometry to
+    // work against.
     app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+    app.frame_all();
+    app.history.clear();
 
     let mut themed = false;
     let mut harness = Harness::builder().with_size(egui::vec2(1400.0, 880.0)).build_state(
