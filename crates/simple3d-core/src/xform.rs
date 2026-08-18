@@ -94,7 +94,7 @@ impl Xform {
             let rows: Vec<usize> = (0..3).filter(|&i| i != r).collect();
             let cols: Vec<usize> = (0..3).filter(|&i| i != c).collect();
             let minor = m[rows[0]][cols[0]] * m[rows[1]][cols[1]] - m[rows[0]][cols[1]] * m[rows[1]][cols[0]];
-            if (r + c) % 2 == 0 {
+            if (r + c).is_multiple_of(2) {
                 minor
             } else {
                 -minor
