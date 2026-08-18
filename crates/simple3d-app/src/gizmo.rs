@@ -12,7 +12,7 @@
 //!
 //! | Modifier | Effect |
 //! |---|---|
-//! | none  | snap to the increment (grid spacing for move and resize, 15 degrees for rotate) |
+//! | none  | snap to the increment (the scene step for move and resize, 15 degrees for rotate) |
 //! | Alt   | drag freely, no snapping |
 //! | Shift | snap coarsely (ten times the increment) |
 //! | Ctrl  | resize about the centre (faces) / preserve proportions (corners) |
@@ -734,7 +734,7 @@ pub fn nudge_axis(gizmo: &Gizmo, view: &View, command: Command) -> Option<(usize
     Some((axis, sign))
 }
 
-/// One press of a nudge key. `move_snap` is the grid spacing, which governs both
+/// One press of a nudge key. `move_snap` is the scene step, which governs both
 /// the move step and the resize step; `rotate_snap_deg` governs rotation.
 pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, rotate_snap_deg: f64) -> Option<Nudge> {
     let (axis, sign) = nudge_axis(gizmo, view, command)?;
@@ -1342,7 +1342,7 @@ mod tests {
     }
 
     /// Criterion 26's "step matches the snap increment" for the other two modes:
-    /// rotate steps by the rotation snap, resize by the grid spacing.
+    /// rotate steps by the rotation snap, resize by the scene step.
     #[test]
     fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
         let mut f = Fixture::new("box");
@@ -1363,7 +1363,7 @@ mod tests {
         let extent = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
         let step = nudge_step(&gizmo, &f.view, Command::NudgeRight, 2.5, 15.0).expect("a nudge command");
         let Nudge::Resize { extent: target, driver, .. } = step else { panic!("resize mode gave {step:?}") };
-        assert!((target - (extent + 2.5)).abs() < 1e-9, "resize did not step by the grid spacing");
+        assert!((target - (extent + 2.5)).abs() < 1e-9, "resize did not step by the scene step");
         let before = f.param(driver.param);
         step.apply(&gizmo, &mut f.scene, f.node);
         f.reevaluate();

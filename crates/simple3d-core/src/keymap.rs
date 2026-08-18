@@ -54,6 +54,9 @@ pub enum Command {
     ViewRight,
     ViewIsometric,
     ToggleGrid,
+    ToggleAxisX,
+    ToggleAxisY,
+    ToggleAxisZ,
     DisplayShaded,
     DisplayShadedEdges,
     DisplayWireframe,
@@ -127,6 +130,9 @@ impl Command {
         Command::ViewRight,
         Command::ViewIsometric,
         Command::ToggleGrid,
+        Command::ToggleAxisX,
+        Command::ToggleAxisY,
+        Command::ToggleAxisZ,
         Command::DisplayShaded,
         Command::DisplayShadedEdges,
         Command::DisplayWireframe,
@@ -178,6 +184,9 @@ impl Command {
             ViewRight => "View: right",
             ViewIsometric => "View: isometric",
             ToggleGrid => "Show grid",
+            ToggleAxisX => "Show the X axis",
+            ToggleAxisY => "Show the Y axis",
+            ToggleAxisZ => "Show the Z axis",
             DisplayShaded => "Display: shaded",
             DisplayShadedEdges => "Display: shaded with edges",
             DisplayWireframe => "Display: wireframe",
@@ -205,8 +214,10 @@ impl Command {
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility | MoveUp
             | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ToggleProjection | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
-            | ViewRight | ViewIsometric | ToggleGrid | DisplayShaded | DisplayShadedEdges | DisplayWireframe
-            | ToggleBoundingBox | ToggleGhosts | ToggleDocks | ResetLayout => Area::View,
+            | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
+            | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleGhosts | ToggleDocks | ResetLayout => {
+                Area::View
+            }
             ModeMove | ModeRotate | ModeResize | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp | NudgeDown
             | NudgeAway | NudgeToward => Area::Manipulate,
         }
@@ -238,6 +249,10 @@ impl Chord {
 
     pub fn shift(key: &str) -> Chord {
         Chord { shift: true, ..Chord::key(key) }
+    }
+
+    pub fn alt(key: &str) -> Chord {
+        Chord { alt: true, ..Chord::key(key) }
     }
 }
 
@@ -443,6 +458,11 @@ impl Keymap {
         set(ViewLeft, Chord::ctrl("3"));
         set(ViewIsometric, Chord::key("0"));
         set(ToggleGrid, Chord::key("5"));
+        // Alt+X / Y / Z: the axis is named by the key, and none of the three is
+        // spoken for by anything else in any preset.
+        set(ToggleAxisX, Chord::alt("X"));
+        set(ToggleAxisY, Chord::alt("Y"));
+        set(ToggleAxisZ, Chord::alt("Z"));
         set(DisplayShaded, Chord::key("8"));
         set(DisplayShadedEdges, Chord::key("9"));
         set(DisplayWireframe, Chord::key("6"));

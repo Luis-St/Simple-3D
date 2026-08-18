@@ -215,6 +215,20 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
             }
             ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
+        step_row(app, ui);
+        ui.horizontal(|ui| {
+            row_label(ui, "Axes");
+            for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+                let mut on = app.scene.settings.axes_visible[axis];
+                if ui
+                    .toggle_value(&mut on, name)
+                    .on_hover_text(format!("Draw the {name} axis through the origin"))
+                    .changed()
+                {
+                    app.scene.settings.axes_visible[axis] = on;
+                }
+            }
+        });
         ui.horizontal(|ui| {
             row_label(ui, "Segments");
             let mut segments = app.scene.settings.default_segments as f64;
@@ -646,6 +660,7 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
+    step_row(app, ui);
     ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
     if targets.len() > 1 {
         ui.add(
@@ -656,6 +671,29 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
             .selectable(false),
         );
     }
+}
+
+/// How far one step of a move or a resize goes, in the display unit.
+///
+/// It sits here, under the fields it governs, rather than only in the document
+/// settings: the step is something you change *while* nudging something into
+/// place, and going looking for it in another panel is the wrong five seconds.
+/// The same value is on the Document panel, so it is also reachable with nothing
+/// selected.
+pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
+    let unit = app.unit();
+    ui.horizontal(|ui| {
+        row_label(ui, "Step");
+        let mut step = unit.from_mm(app.scene.settings.snap_step);
+        let response = ui
+            .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
+            .on_hover_text("How far one nudge, and one snapped step of a move or resize drag, goes.");
+        if response.changed() {
+            app.edit("Step", Some("scene:step"));
+            app.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
+        }
+        ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
+    });
 }
 
 /// One labelled row of three axis fields, each preceded by its colour chip. The

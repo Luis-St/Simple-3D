@@ -281,6 +281,9 @@ impl App {
             ui.separator();
             for (on, command, label) in [
                 (self.scene.settings.grid_visible, Command::ToggleGrid, "Ground grid"),
+                (self.scene.settings.axes_visible[0], Command::ToggleAxisX, "X axis"),
+                (self.scene.settings.axes_visible[1], Command::ToggleAxisY, "Y axis"),
+                (self.scene.settings.axes_visible[2], Command::ToggleAxisZ, "Z axis"),
                 (self.settings.show_bounding_box, Command::ToggleBoundingBox, "Bounding box"),
                 (self.settings.show_ghosts, Command::ToggleGhosts, "Hidden nodes as ghosts"),
                 (!self.settings.layout.docks_hidden, Command::ToggleDocks, "Side docks"),
@@ -385,18 +388,16 @@ impl App {
                 dot(ui);
                 ui.add(egui::Label::new(theme::numeric(self.selection_size_text())).selectable(false));
                 dot(ui);
-                // Snap and grid are the same number here, and saying so is
-                // the point: "why did it jump 10" is answered on the bar.
-                let snap = simple3d_core::unit::format_length(self.move_snap(), self.unit());
-                ui.add(
-                    egui::Label::new(theme::numeric(format!("Snap {snap} {}", self.unit().suffix()))).selectable(false),
-                )
-                .on_hover_text("Moves and resizes step by the grid spacing");
+                // The step and the grid are two different numbers, and both are
+                // on the bar: "why did it jump 10" is answered here.
+                let unit = self.unit();
+                let step = simple3d_core::unit::format_length(self.move_snap(), unit);
+                let grid = simple3d_core::unit::format_length(self.scene.settings.grid_spacing, unit);
+                ui.add(egui::Label::new(theme::numeric(format!("Step {step} {}", unit.suffix()))).selectable(false))
+                    .on_hover_text("How far one nudge, and one snapped step of a drag, goes. Set it in Transform.");
                 dot(ui);
-                ui.add(
-                    egui::Label::new(theme::numeric(format!("Grid {snap} {}", self.unit().suffix()))).selectable(false),
-                )
-                .on_hover_text("Ground grid spacing; set it in the Document panel");
+                ui.add(egui::Label::new(theme::numeric(format!("Grid {grid} {}", unit.suffix()))).selectable(false))
+                    .on_hover_text("Ground grid spacing; set it in the Document panel");
                 dot(ui);
 
                 // The unit is a click, not a trip to a settings window: it is
@@ -654,11 +655,24 @@ impl App {
                     let mut spacing = unit.from_mm(self.scene.settings.grid_spacing);
                     if ui
                         .add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1))
-                        .on_hover_text("Also the snap increment for move and resize drags.")
+                        .on_hover_text("How far apart the ground grid's lines are drawn.")
                         .changed()
                     {
                         self.edit("Grid spacing", Some("scene:grid"));
                         self.scene.settings.grid_spacing = unit.to_mm(spacing).max(1e-6);
+                    }
+                    ui.label(unit.suffix());
+                    ui.end_row();
+
+                    ui.label("Step");
+                    let mut step = unit.from_mm(self.scene.settings.snap_step);
+                    if ui
+                        .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
+                        .on_hover_text("One nudge, and one snapped step of a move or resize drag.")
+                        .changed()
+                    {
+                        self.edit("Step", Some("scene:step"));
+                        self.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
                     }
                     ui.label(unit.suffix());
                     ui.end_row();
@@ -669,6 +683,14 @@ impl App {
 
                     ui.label("Show grid");
                     ui.checkbox(&mut self.scene.settings.grid_visible, "");
+                    ui.end_row();
+
+                    ui.label("Show axes");
+                    ui.horizontal(|ui| {
+                        for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+                            ui.checkbox(&mut self.scene.settings.axes_visible[axis], name);
+                        }
+                    });
                     ui.end_row();
                 });
                 ui.separator();

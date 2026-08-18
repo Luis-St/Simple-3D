@@ -98,7 +98,11 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
             size,
             mode: app.settings.display_mode,
             palette,
-            grid: Grid { visible: app.scene.settings.grid_visible, spacing: app.scene.settings.grid_spacing },
+            grid: Grid {
+                visible: app.scene.settings.grid_visible,
+                spacing: app.scene.settings.grid_spacing,
+                axes: app.scene.settings.axes_visible,
+            },
             items,
         };
         let frame = render::render(&request);
@@ -129,6 +133,7 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     (app.settings.display_mode as u8).hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
+    app.scene.settings.axes_visible.hash(&mut hasher);
     let camera = app.scene.camera;
     for value in
         [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]

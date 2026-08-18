@@ -325,9 +325,9 @@ impl App {
         self.scene.settings.unit
     }
 
-    /// The move and resize snap increment: the grid spacing (spec section 6.2).
+    /// The move and resize snap increment, in millimetres (spec section 6.2).
     pub fn move_snap(&self) -> f64 {
-        self.scene.settings.grid_spacing
+        self.scene.settings.snap_step.max(1e-6)
     }
 
     // -- files --------------------------------------------------------------
@@ -569,6 +569,9 @@ impl App {
             ViewRight => self.set_view(ViewPreset::Right),
             ViewIsometric => self.set_view(ViewPreset::Isometric),
             ToggleGrid => self.scene.settings.grid_visible = !self.scene.settings.grid_visible,
+            ToggleAxisX => self.toggle_axis(0),
+            ToggleAxisY => self.toggle_axis(1),
+            ToggleAxisZ => self.toggle_axis(2),
             DisplayShaded => self.settings.display_mode = DisplayMode::Shaded,
             DisplayShadedEdges => self.settings.display_mode = DisplayMode::ShadedWithEdges,
             DisplayWireframe => self.settings.display_mode = DisplayMode::Wireframe,
@@ -599,6 +602,13 @@ impl App {
             }
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
+    }
+
+    fn toggle_axis(&mut self, axis: usize) {
+        let on = !self.scene.settings.axes_visible[axis];
+        self.scene.settings.axes_visible[axis] = on;
+        let name = ["X", "Y", "Z"][axis];
+        self.status = Status::Info(format!("{name} axis {}", if on { "shown" } else { "hidden" }));
     }
 
     fn after_history(&mut self, message: &str) {
@@ -840,8 +850,8 @@ impl App {
                 self.fields.clear();
             }
             gizmo::DragPhase::Continue => {
+                let snap = self.move_snap();
                 let (Some(drag), Some(cursor)) = (self.drag.as_mut(), cursor) else { return };
-                let snap = self.scene.settings.grid_spacing;
                 let rotate_snap = self.settings.rotate_snap_deg;
                 let unit = self.scene.settings.unit;
                 drag.update(&mut self.scene, view, cursor, mods, snap, rotate_snap, unit);
@@ -1322,6 +1332,34 @@ mod tests {
         assert!(!app.unsaved());
     }
 
+    #[test]
+    fn the_step_governs_a_nudge_and_is_not_the_grid_spacing() {
+        // The two used to be one setting, so a step of 1 mm meant a 1 mm ground
+        // grid -- which is a solid block of lines. They are separate now, and
+        // it is the step that a nudge moves by.
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+        assert_eq!(app.move_snap(), 1.0, "the default step is one millimetre");
+
+        app.scene.settings.snap_step = 2.5;
+        app.scene.settings.grid_spacing = 10.0;
+        let before = app.scene.node(id).position;
+        app.run(Command::NudgeRight);
+        let moved = app.scene.node(id).position - before;
+        assert!((moved.length() - 2.5).abs() < 1e-9, "a nudge went {} rather than the 2.5 mm step", moved.length());
+        assert_eq!(app.scene.settings.grid_spacing, 10.0, "the step changed the grid spacing with it");
+    }
+
+    #[test]
+    fn each_origin_axis_has_its_own_switch() {
+        let mut app = headless_app();
+        assert_eq!(app.scene.settings.axes_visible, [true; 3], "the axes start shown");
+        app.run(Command::ToggleAxisY);
+        assert_eq!(app.scene.settings.axes_visible, [true, false, true], "toggling Y touched another axis");
+        app.run(Command::ToggleAxisY);
+        assert_eq!(app.scene.settings.axes_visible, [true; 3]);
+    }
+
     /// The default `App::new` still points at the user's real config directory --
     /// the test seam must not have changed where a shipped binary looks.
     #[test]
@@ -1675,7 +1713,7 @@ mod tests {
         let mut app = headless_app();
         let id = app.primary().expect("the starter scene leaves a plate selected");
         let snap = app.move_snap();
-        assert_eq!(snap, 10.0, "the default grid spacing changed; this test's arithmetic assumes it");
+        assert_eq!(snap, 1.0, "the default step changed; this test's arithmetic assumes it");
         let start = app.scene.node(id).position;
 
         // Something before the run, so "one undo step" is distinguishable from

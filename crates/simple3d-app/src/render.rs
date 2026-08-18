@@ -177,6 +177,9 @@ pub struct Grid {
     pub visible: bool,
     /// Spacing in millimetres.
     pub spacing: f64,
+    /// Which of the three origin axes to draw, X, Y, Z. The axes are laid out on
+    /// the grid's spacing, which is why they are described here with it.
+    pub axes: [bool; 3],
 }
 
 /// One thing to draw, in world space.
@@ -519,11 +522,17 @@ fn faded_line(
 
 fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
     let length = effective_grid_spacing(view, grid.spacing) * 48.0;
-    for (dir, colour) in [
+    for (axis, (dir, colour)) in [
         (Vec3::new(1.0, 0.0, 0.0), palette.axis_x),
         (Vec3::new(0.0, 1.0, 0.0), palette.axis_y),
         (Vec3::new(0.0, 0.0, 1.0), palette.axis_z),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if !grid.axes[axis] {
+            continue;
+        }
         // Both halves fade outward from the origin, for the same reason the
         // grid does: an axis that ends abruptly reads as an object.
         for sign in [-1.0, 1.0] {
@@ -560,7 +569,7 @@ mod tests {
             size: [160, 120],
             mode,
             palette: Palette::dark(),
-            grid: Grid { visible: false, spacing: 10.0 },
+            grid: Grid { visible: false, spacing: 10.0, axes: [true; 3] },
             items,
         }
     }
@@ -685,6 +694,43 @@ mod tests {
     }
 
     #[test]
+    fn each_origin_axis_can_be_turned_off_on_its_own() {
+        // Three switches, not one: an axis running through the model is a
+        // distraction when it is not the one being worked to.
+        let colours = |axes: [bool; 3]| {
+            let mut req = request(Vec::new(), DisplayMode::Shaded);
+            req.grid = Grid { visible: false, spacing: 10.0, axes };
+            let frame = render(&req);
+            let mut found: Vec<Rgba> = (0..frame.width * frame.height)
+                .filter(|&i| !is_background(&frame, i, &req.palette))
+                .map(|i| {
+                    let o = i * 4;
+                    [frame.color[o], frame.color[o + 1], frame.color[o + 2], 255]
+                })
+                .collect();
+            found.sort_unstable();
+            found.dedup();
+            found
+        };
+
+        assert!(colours([false, false, false]).is_empty(), "an axis was drawn with all three turned off");
+        let all = colours([true; 3]);
+        assert!(all.len() >= 3, "the three axes should be three colours, got {all:?}");
+        for axis in 0..3 {
+            let mut only = [false; 3];
+            only[axis] = true;
+            let drawn = colours(only);
+            assert!(!drawn.is_empty(), "axis {axis} drew nothing when it was the one turned on");
+            let mut without = [true; 3];
+            without[axis] = false;
+            let rest = colours(without);
+            for colour in &drawn {
+                assert!(!rest.contains(colour), "axis {axis} was still drawn after being turned off");
+            }
+        }
+    }
+
+    #[test]
     fn shading_makes_faces_facing_different_ways_different_shades() {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
@@ -749,7 +795,7 @@ mod tests {
     fn the_grid_and_axes_draw_in_their_own_colours() {
         let empty = Renderable::empty();
         let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid { visible: true, spacing: 10.0 };
+        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3] };
         let frame = render(&req);
         for (name, colour) in [
             ("grid", req.palette.grid),
@@ -766,7 +812,7 @@ mod tests {
     fn hiding_the_grid_hides_it() {
         let empty = Renderable::empty();
         let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid { visible: false, spacing: 10.0 };
+        req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3] };
         let frame = render(&req);
         assert_eq!(frame.color.chunks_exact(4).filter(|p| *p == req.palette.grid).count(), 0);
         // The axes are not part of the grid toggle.
@@ -810,7 +856,7 @@ mod tests {
         let prepared = Renderable::prepare(&primitives::box_mesh(60.0, 40.0, 4.0));
         let build = |grid: bool| {
             let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-            req.grid = Grid { visible: grid, spacing: 10.0 };
+            req.grid = Grid { visible: grid, spacing: 10.0, axes: [true; 3] };
             req.view.camera.pitch = 10.0;
             // The axes fade, so an axis pixel is a blend of the axis with
             // whatever is under it -- which is the grid in one render and the
@@ -845,7 +891,7 @@ mod tests {
         let build = || {
             let mut req =
                 request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
-            req.grid = Grid { visible: true, spacing: 10.0 };
+            req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3] };
             render(&req).color
         };
         assert_eq!(build(), build());

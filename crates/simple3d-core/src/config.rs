@@ -241,8 +241,8 @@ pub struct AppSettings {
     /// and not a removal.
     pub show_ghosts: bool,
     pub handle_frame: HandleFrame,
-    /// Rotation snap in degrees. The move and resize snap comes from the scene's
-    /// grid spacing, so it is a project setting rather than a user one.
+    /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
+    /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
     pub last_export_dir: Option<PathBuf>,
     pub last_export_format: String,
