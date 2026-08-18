@@ -57,6 +57,10 @@ pub mod metric {
     pub const MENU_BAR: f32 = 32.0;
     /// Height of the status bar.
     pub const STATUS_BAR: f32 = 24.0;
+    /// Room kept clear at the right end of the status bar for the timing, node
+    /// and triangle readout, so a long message is elided rather than being drawn
+    /// straight over it.
+    pub const STATUS_READOUT: f32 = 260.0;
     /// Side of the orientation cube in the viewport's bottom-right corner.
     pub const VIEW_CUBE: f32 = 72.0;
 }
@@ -148,9 +152,9 @@ pub const AXIS_CHIP_WIDTH: f32 = 6.0;
 
 /// Paint the small axis chip. It senses a drag: it is the only label an axis
 /// field has, so it is the label that scrubs it.
-pub fn axis_chip(ui: &mut egui::Ui, axis: usize) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(AXIS_CHIP_WIDTH, metric::INPUT_ROW - 8.0), egui::Sense::drag());
+pub fn axis_chip(ui: &mut egui::Ui, id: egui::Id, axis: usize) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(AXIS_CHIP_WIDTH, metric::INPUT_ROW - 8.0), egui::Sense::hover());
+    let response = ui.interact(rect, id, egui::Sense::drag());
     let colour = axis_colour(axis);
     let colour = if response.hovered() || response.dragged() { colour } else { colour.gamma_multiply(0.8) };
     ui.painter().rect_filled(rect, CornerRadius::same(1), colour);

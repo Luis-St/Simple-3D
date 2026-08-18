@@ -447,14 +447,28 @@ impl App {
                     // ago as though it had just happened.
                     let opacity = crate::app::status_opacity(&self.status, self.status_at.elapsed());
                     if opacity > 0.0 {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(self.status_text())
-                                    .size(theme::font::LABEL)
-                                    .color(colour.gamma_multiply(opacity)),
+                        // The message is the one thing on this bar whose length
+                        // is not ours to choose: a message that names a file
+                        // names its whole path. It gets what is left once the
+                        // readout at the right end has had its room, and is
+                        // elided into that -- running underneath the readout,
+                        // which is what an unbounded label does, leaves both
+                        // unreadable.
+                        let text = self.status_text();
+                        let room = (ui.available_width() - theme::metric::STATUS_READOUT).max(0.0);
+                        ui.scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(&text)
+                                        .size(theme::font::LABEL)
+                                        .color(colour.gamma_multiply(opacity)),
+                                )
+                                .truncate()
+                                .selectable(false),
                             )
-                            .selectable(false),
-                        );
+                            .on_hover_text(&text);
+                        });
                     }
                 }
 

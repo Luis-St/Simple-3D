@@ -388,6 +388,13 @@ pub fn snap_point(p: Vec3, step: f64) -> Vec3 {
     Vec3::new((p.x / step).round() * step, (p.y / step).round() * step, (p.z / step).round() * step)
 }
 
+/// The orientation cube's id. Fixed rather than derived from the viewport's Ui,
+/// so it is the same cube whatever else the panel contains -- and so a test can
+/// click a face of it.
+pub fn cube_id() -> egui::Id {
+    egui::Id::new("view-cube")
+}
+
 /// The orientation cube in the bottom-right corner.
 ///
 /// It answers which way the model faces, and it is also the fastest way to
@@ -398,7 +405,7 @@ fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) ->
     let side = theme::metric::VIEW_CUBE;
     let box_rect =
         egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(side + 12.0, side + 12.0), egui::Vec2::splat(side));
-    let response = ui.interact(box_rect, ui.id().with("view-cube"), egui::Sense::click());
+    let response = ui.interact(box_rect, cube_id(), egui::Sense::click());
     let painter = ui.painter_at(box_rect.expand(2.0));
     painter.rect_filled(box_rect, 3.0, token::SURFACE_1.gamma_multiply(0.80));
     painter.rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0_f32, token::SURFACE_3), egui::StrokeKind::Inside);

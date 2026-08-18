@@ -1,194 +1,123 @@
-# Change report — 2026-08-18 (fifth pass)
+# Change report — 2026-08-18 (sixth pass)
 
-The gaps the fourth pass listed against the ScadStudio UI design description,
-closed. The numeric input model, movable docks, a clickable view cube,
-multi-selection editing in the property panels, a 3D cursor, an inline
-confirmation for deleting a group, and messages that fade.
+One thing: **the four pointer gestures the fifth pass shipped are now performed
+by tests.** The dock header drag, the field-label scrub, the view-cube click and
+Shift+right-click to place the 3D cursor were all wired up last pass and none of
+them had ever been carried out — that was the single open entry in
+`KNOWN_ISSUES.md`, and it is closed.
 
-Nothing about geometry, evaluation, export or the file format changed.
-`cargo test --workspace` is 320 tests, up from 292, none failing.
+`cargo test --workspace` is **328 tests**, up from 320, none failing.
 `python3 tools/criteria_audit.py` is clean: all 29 acceptance criteria are still
-cited by at least one test.
+cited by at least one test. Nothing about geometry, evaluation, export or the
+file format changed.
 
-The previous pass's report is in git history; `KNOWN_ISSUES.md` is still the
-issue list, and this pass **opened one entry** in it: every pointer gesture added
-below -- the header drag, the label scrub, the cube click, the cursor placement --
-is unexecuted, because there is no way to press a button at a coordinate on this
-machine. The arithmetic under each of them is tested; the wiring between a real
-pointer and that arithmetic is not.
+## How a gesture is executed
 
-## The numeric input model
+`egui_kittest` 0.32.3 exists and is built against the pinned egui 0.32.3, so no
+version bump was needed. It is a **dev-dependency**, and so is the one feature it
+forces on the window integration:
 
-The design calls this the signature of the application, and none of it existed.
-It does now, and the whole of it is in
-`scadstudio-core::unit` — a field is a field, so a rule that holds in one holds
-in all of them.
+```toml
+[dev-dependencies]
+egui_kittest = { version = "=0.32.3", default-features = false }
+eframe = { version = "0.32", default-features = false,
+           features = ["glow", "default_fonts", "wayland", "x11", "accesskit"] }
+```
 
-A field accepts:
+`egui_kittest` drives egui through AccessKit, which is a *feature* of egui and of
+`egui-winit` underneath it — without that second line the test build fails to
+compile `egui-winit`, whose `PlatformOutput` pattern then misses a field. Naming
+`eframe` again under `[dev-dependencies]` turns the feature on for the test build
+only: with resolver 2 a dev-dependency's features do not reach `cargo build`. The
+shipped binary is unchanged.
 
-- **An expression.** `40/3`, `12+8`, `(2+3)*4`, `100 - 2*15`. Four operators,
-  parentheses, one leading sign per factor. Deliberately no functions and no
-  variables: this is arithmetic done in the field instead of in a calculator,
-  not a language.
-- **A value in another unit.** `4 cm` is 40 in a millimetre document and 0.04 in
-  a metre one, and the suffix binds to its own term, so `4cm + 5` is 45 mm. The
-  document's unit is what the field *shows*; it was never what the user had to
-  *think* in.
-- **A delta.** `+2` is two more than whatever is there. With several nodes
-  selected it resolves against each of them separately — "two millimetres wider"
-  means a different number for every shape it lands on, and that is the point of
-  having it.
-- **A drag on its label.** The label is the grip, not the field: a click in a
-  text field has to put a caret where it was clicked, and a drag in it has to
-  select text. The label beside it has no such job. Shift is fine, Ctrl is
-  coarse — the same two modifiers the manipulator already uses for the same two
-  meanings. On an axis row the colour chip is the grip, because the chip *is*
-  that field's label.
+Three things had to change in the application itself, all of them small and all
+of them improvements on their own terms:
 
-**A leading `-` is only a delta when a space or an `=` follows it** — `- 5` and
-`-= 5` adjust, `-5` is still minus five. This is a departure from the design,
-which asks for a leading `+` or `-`. A position field has to be able to hold a
-negative number, and no field can read the same six keystrokes two ways; `+` has
-no such conflict, so a bare `+5` is a delta. The alternative was to make `-5`
-mean "five less" and leave no way to type minus five at all.
+- **`App::ui(ctx)`** is the panels, the docks, the viewport and the modals, in
+  the order they stack, lifted out of `eframe::App::update`. A test drives *that*
+  — the same frame the window draws, not a re-creation of it. `update` now calls
+  it, and so does the whole-frame drawing test that already existed.
+- **The grips have names.** `dock::header_id(panel)`,
+  `panel_properties::grip_id(name)` and `panel_viewport::cube_id()` replace ids
+  that egui derived from where the widget happened to sit. A test asks the
+  context where a named widget was drawn and puts the pointer *there*, so a
+  layout change moves the test with it rather than breaking it. This also fixes
+  something that was latent: `App::scrub` remembers a gesture in flight by the
+  grip's id, and that id used to change if the panel relaid itself out mid-drag.
+- Nothing else. No test-only branch in any drawing code.
 
-**A scrub is one undo step.** The snapshot is taken on the frame the drag starts
-and every frame after it only touches the scene — the same shape the manipulator
-drag already had. `a_whole_scrub_is_one_undo_step` drags forty frames and checks
-the stack grew by one, and that one undo puts every node back.
+The tests are `crates/scadstudio-app/src/gestures.rs`, eight of them:
 
-**A refused value keeps the old one and marks the field.** It never clears it:
-the text that was typed is the thing that has to be corrected, and throwing it
-away to show the previous value is the least useful thing a field could do. The
-mark is the field's own frame in the danger colour, so it is impossible to read
-the number without also reading that it was refused. Nothing partial ever
-happens across a multi-selection: if one node cannot take the value, none of
-them do.
+| Gesture | What is asserted |
+| --- | --- |
+| Header drag | The header claims the drag (nothing underneath it does), the drop target reads as the right dock's first slot while the pointer is there, the panel ends up in that dock in that order — and is *drawn* on the right on the next frame. |
+| Header click | The same widget's other gesture: it rolls the panel up, does not move it, and a second click unrolls it. |
+| Label scrub | 60 px across the "Width (X)" label is 10 mm, in one undo step, and one Undo takes the whole drag back. |
+| Scrub that leaves its label | The pointer crosses the Depth and Thickness labels on its way; the field the drag *began* on is the one that changes and the other two do not. |
+| Cube face click | Clicking where the cube draws its front face asks the camera for the front view, from where the camera was. |
+| Cube click vs. the viewport | The click does not orbit the camera and does not reach the selection behind the cube (a viewport click on empty space clears it). |
+| Shift+right-click | The 3D cursor lands on the plate under the pointer, snapped to the move snap, without orbiting. |
+| Shift+right-click on nothing | With a point the view proves is neither geometry nor ground, the cursor goes back to the origin. |
 
-## Docking
+Two details worth keeping:
 
-`dock.rs` is new, and the layout model it drives is in
-`scadstudio_core::config::Layout`, beside the dock widths that were already
-persisted there.
+- **The face to click is computed from `cube_project`**, the same function the
+  cube draws itself with, rather than from a hardcoded corner of the cube. A
+  test that assumed where "front" is drawn would have agreed with last pass's
+  quarter-turn bug instead of catching it.
+- **The empty spot for the second cursor test is searched for, not guessed.**
+  From the starting view every pixel of the viewport meets the ground plane, so
+  the camera is tipped under it first and the test then finds a pixel where the
+  view itself reports no ground and no mesh. It asserts one exists.
 
-- Three panels — Outliner, Primitives, Properties — move between the two docks
-  and reorder within one by dragging their header. The tool rail, menu bar,
-  status bar and viewport are the window's frame and do not move: a rail that
-  can end up somewhere else is a rail you have to go looking for.
-- A header click rolls its panel up to that bar. The dock's leftover height goes
-  to the last panel that is not rolled up, so a dock of nothing but headers is a
-  reachable state and draws.
-- `Tab` hides both docks. Hiding is one flag rather than a saved copy of the
-  arrangement, so restoring is exact by construction rather than by care — the
-  test says so by comparing the layout across a hide and a show.
-- View ▸ Panels moves a panel without dragging, View ▸ Reset layout puts
-  everything back (`Ctrl+Shift+L`).
-- A layout file that has lost or duplicated a panel is **repaired** on load
-  rather than left as it is: a panel that appears in neither dock would have no
-  way back, and nothing in the interface could bring it there.
+## What executing them turned up
 
-**The layout is per user, not per document.** The prompt asked for per document
-and also asked that `AppSettings` be extended rather than a second store
-invented; those pull opposite ways, and this is the direction I took. Panel
-positions are how one person likes their window, not a property of the model,
-and putting them in the project file would mean opening a colleague's model
-rearranged your workspace — and would change the file format, which no pass has
-done.
-
-### One egui trap worth recording
-
-egui remembers a side panel by the rectangle its *contents* filled, not the one
-it was given. The property panel's contents happened to be narrower than the
-dock, so the dock shrank to fit them — and, being remembered, kept shrinking
-until it hit its minimum. The right dock came up 200 px wide instead of 320 with
-its own fields clipped off the edge of the window. The dock now claims its full
-width before drawing anything into it. This was found by looking at the window,
-not by a test, which is the second pass running where that has been true.
-
-## The view cube
-
-It was drawn but inert, and it was also **wrong**: its projection rotated its own
-way and disagreed with the viewport by a quarter turn — an isometric view
-showing a plate to the right of the origin labelled the visible faces TOP, LFT
-and FRT. An orientation cube that lies about orientation is worse than no cube.
-
-It is now a cube with faces, derived from the viewport's own basis — the same
-yaw and pitch, the same screen right, up and forward — so the two cannot come
-apart again. `the_cube_and_the_viewport_agree_about_which_way_is_which` checks
-across five cameras that every axis points the same way across, the same way up,
-and lands on the same side of the depth on both.
-
-- A face turns the camera to that view, over the design's 200 ms, easing in and
-  out, and taking the short way round: turning from 170° to -170° is twenty
-  degrees, not three hundred and forty.
-- The dot at the centre switches perspective and orthographic; a ring around it
-  says which it is now.
-- A face turned away from the eye is never what a click lands on, so the cube
-  can never ask for the side of itself you cannot see.
-- The presets are the existing `Command`s, so the cube and the View menu are the
-  same seven answers reached two ways.
-
-**Reduced motion is an application preference** (View ▸ Reduce motion), not a
-desktop one: egui 0.32 surfaces no such signal, and guessing at one from
-environment variables would be a worse lie than a checkbox. With it on the
-camera simply arrives.
-
-## Multi-selection in the property panels
-
-- A field shows the value when every selected node agrees and an **em dash**
-  when they do not. Typing over the dash applies to all of them; leaving it
-  alone edits nothing, so tabbing through a panel of mixed values cannot flatten
-  them.
-- Dimensions appear when every selected node is the *same* kind of shape. A
-  mixed selection says so in a sentence rather than showing an empty panel or a
-  set of fields that would quietly edit one of them without saying which.
-- Visible, Anchor, Position and Rotation apply to the whole selection. Name does
-  not: renaming four nodes to one name makes the outliner unreadable, so the
-  field says what is selected instead.
-- Measured still reports the primary node, and now says which one that is.
-
-## The smaller things
-
-- **A 3D cursor.** Shift+right-click puts it on whatever is under the pointer,
-  or on the ground plane when that is nothing, snapped to the same grid a move
-  snaps to. New shapes land there. The palette's hint line and every tile's
-  tooltip are generated from the same sentence, so they cannot come to disagree
-  about where a shape will go — which they would have, since the old hint said
-  "at the origin" in two places.
-- **Deleting a group asks.** "Delete" is two different actions wearing one word,
-  so the outliner asks in place — a strip in the tree, not a dialog over the
-  window, because the question is about the tree. The two answers are named for
-  what they do; neither of them is "OK". Keeping the children promotes them into
-  the group's own slot, in order.
-- **Messages fade** six seconds after they arrive, over a second. "Ready" never
-  fades: it is the state of the application, not news about it. The clock is
-  driven by watching the message rather than by stamping it, so no `status = …`
-  anywhere in the application can forget to.
-
-## Still not built, and why
-
-- **No `Layout` mode tab.** Unchanged from the last pass: there is no second
-  mode in this application to put behind one, and inventing an empty tab is
-  worse than not having it.
-- **Panel *sections* do not move.** Object, Dimensions, Transform and Measured
-  collapse but stay in the Properties panel. The design's docking language is
-  about panels, and making every section independently dockable would put four
-  more headers in the drag model for no question anyone is asking.
-- **No pointer gesture added this pass has ever been run.** The header drag, the
-  label scrub, the cube click and the cursor placement are covered as far as
-  their arithmetic and no further; there is no `xdotool` on this machine and
-  `egui_kittest` is not in the dependency tree, so a button cannot be pressed at
-  a coordinate either live or headlessly. This is the pass's one open issue and
-  is written up as such in `KNOWN_ISSUES.md`.
-- **The expression reader has no functions and no variables.** `sqrt`, `sin` and
-  a named dimension reused in three fields are all reasonable and none of them
-  are here.
-- **The 3D cursor is session state.** It is not saved with the project, because
-  saving it would change the file format.
+- **The `taken` guard in `panel_viewport::show` is belt and braces.** It exists so
+  a click on the cube does not also orbit or select behind it. Removing it and
+  re-running the gestures changes nothing: egui already hands a click, and in
+  fact a drag begun on the cube, to the cube. The guard is right about intent and
+  is kept — but it is not what makes the behaviour true, and the two cube tests
+  assert the behaviour rather than the guard.
+- **A long status message ran straight over the readout at the right end of the
+  status bar** — "Opened /very/long/path…" printed on top of "4 ms · 5 nodes ·
+  156 triangles". Found by opening a project from a deep directory and looking
+  at the window, not by any test. The message now gets what is left of the bar
+  after `theme::metric::STATUS_READOUT`, is elided into it, and carries the full
+  text on hover.
 
 ## What was checked by looking
 
-The binary was built and run under XWayland and the window grabbed with `xwd`,
-as the last two passes did. That is how the dock-width collapse and the cube's
-quarter-turn error were found; both are the kind of fault every test in the
-suite would have gone on passing through.
+Three models were built through the real core, written out as projects, and each
+one opened in the release binary under XWayland and photographed with `xwd`:
+
+| Model | Built from | Result |
+| --- | --- | --- |
+| Bracket | 60 × 25 × 4 plate less two ⌀5 holes | 60 × 25 × 4 mm, 5843.9 mm³ (6000 − 2 × 78.5), manifold |
+| Spacer | ⌀12 tube, ⌀8 bore, 10 tall | 12 × 12 × 10 mm, 624.3 mm³ (π × 20 × 10 at 32 segments), manifold |
+| Tray | 40 × 40 × 12 box less a 34 × 34 pocket, boss unioned back in | 40 × 40 × 12 mm, 11307.8 mm³, manifold |
+
+All three evaluate with no errors, export to 3MF and binary STL, and round trip
+through the project format byte for byte. All three render correctly in the
+window, with the outliner, the bounds readout and the status bar agreeing with
+the numbers above.
+
+## Still not built, and why
+
+- **The gestures still cannot be driven in the *running* window.** There is no
+  `xdotool` or `ydotool` on this machine, so what is executed is a real frame of
+  the real interface against a headless context, with real pointer events. That
+  covers which widget claims a gesture and what it does with it; it does not
+  cover the window system underneath egui.
+- **Panel *sections* do not move.** Unchanged: Object, Dimensions, Transform and
+  Measured collapse but stay in the Properties panel. The design's docking
+  language is about panels, and four more headers in the drag model answers no
+  question anyone is asking.
+- **No `Layout` mode tab.** Unchanged: there is no second mode to put behind one.
+- **The expression reader has no functions and no variables.** `sqrt(2)*10` and a
+  named dimension reused across three fields are both reasonable and neither
+  exists. A variable is a model change rather than a parser change — it would
+  have to live in the project file — and that decision was not taken here.
+- **The 3D cursor is still session state.** Not saved with the project, because
+  saving it would change the file format. That remains a decision to take
+  explicitly rather than by accident.

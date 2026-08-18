@@ -6,38 +6,18 @@ wrong. There is no separate tracker.
 
 ## Open
 
-### Every pointer gesture added this pass is unexecuted
-
-The fifth pass added four gestures that a pointer has to perform, and **not one
-of them has ever been run**: dragging a panel header between the docks,
-dragging a field label to scrub its value, clicking a face of the view cube, and
-Shift+right-click to place the 3D cursor.
-
-What *is* covered is the arithmetic under each of them, as pure functions with
-their own tests -- `dock::drop_index`, `Layout::move_to`, `ui::scrub_delta`,
-`view::cube_face_at`, `panel_properties::scrub_param` and `scrub_transform` --
-plus a headless whole-frame draw of every arrangement they can leave the window
-in. What is *not* covered is the wiring between a real pointer and those
-functions: which widget claims the drag, whether a press on the cube also orbits
-the camera behind it, whether a header click and a header drag can be told
-apart.
-
-That gap is not a judgement about how likely the wiring is to be right. It is
-that there is no `xdotool` on this machine and egui's test harness is not in the
-dependency tree, so there is no way to press a button at a coordinate -- and the
-last two passes have both found faults that every test kept passing through and
-only driving the application revealed (the drag bug below; this pass's view cube
-disagreeing with the viewport by a quarter turn, and the right dock collapsing
-to its minimum width).
-
-Closing it needs one of: `xdotool` (or `ydotool`, on Wayland) so the real binary
-can be driven and photographed; or `egui_kittest`, which replays pointer events
-against a headless context and would let these four gestures be asserted the way
-`app::drag_gesture` asserts a manipulator drag.
+Nothing.
 
 ## Worth knowing rather than fixing
 
-## Worth knowing rather than fixing
+- **A pointer can be replayed over a real frame.** `gestures.rs` builds an
+  `egui_kittest` harness around `App::ui`, pushes `egui::Event::PointerMoved` and
+  `PointerButton` into `harness.input_mut().events` and calls `harness.step()`
+  once per frame -- one frame per event, because a drag is decided across frames
+  and the panels relay themselves out in between. Find a widget with
+  `harness.ctx.read_response(id).rect` rather than by arithmetic on the window
+  size. Modifiers live on `RawInput` and persist across steps, which is what
+  holding a key means.
 
 - **`App` *is* reachable from a test.** Earlier notes here claimed the opposite,
   and used it to justify leaving criteria 26 and 28 unasserted. It is wrong:
@@ -67,6 +47,58 @@ against a headless context and would let these four gestures be asserted the way
   refuses the whole rebuild if it is less sound than what it replaced.
 
 ## Resolved
+
+### Every pointer gesture was unexecuted (fixed)
+
+The fifth pass added four gestures a pointer has to perform -- dragging a panel
+header between the docks, dragging a field label to scrub its value, clicking a
+face of the view cube, and Shift+right-click to place the 3D cursor -- and not
+one of them had ever been run. The arithmetic under each was tested as a pure
+function; the wiring between a real pointer and that arithmetic was not.
+
+`egui_kittest` **0.32.3 exists and is built against the pinned egui 0.32.3**, so
+the version bump the note feared was not needed. It is a dev-dependency, and
+`crates/scadstudio-app/src/gestures.rs` drives eight gestures through it: the
+header drag and the header click (told apart), the label scrub and a scrub that
+runs off its label across two others, a cube face click and what that click must
+*not* do to the scene behind it, and the cursor placed on geometry and put back
+from empty space.
+
+Three things that were needed, and are worth knowing:
+
+- **Add `accesskit` to `eframe` under `[dev-dependencies]`.** `egui_kittest`
+  drives egui through AccessKit, which is a feature of egui and of `egui-winit`
+  under it; without turning it on for the test build, `egui-winit` fails to
+  compile against the egui the harness selected. Resolver 2 keeps a
+  dev-dependency's features out of `cargo build`, so the shipped binary is
+  unchanged.
+- **A test must drive the frame the window draws.** `App::ui(ctx)` is that frame,
+  lifted out of `eframe::App::update`, which now calls it.
+- **Name the grips.** `dock::header_id`, `panel_properties::grip_id` and
+  `panel_viewport::cube_id` replace ids egui derived from where a widget sat, so
+  a test can ask the context where a named widget was drawn and put the pointer
+  there. `App::scrub` remembers a gesture in flight by the grip's id, so this
+  also stops a relayout mid-drag from changing that id underneath it.
+
+What executing them showed: the `taken` guard in `panel_viewport::show` is not
+what makes a cube click stay on the cube -- egui's own hit ordering already does
+that, and removing the guard changes nothing the gestures can see. It is kept for
+what it says, and the two cube tests assert the behaviour rather than the guard.
+
+Still not covered, and it is the reason this entry existed at all: the window
+system underneath egui. There is no `xdotool` or `ydotool` here, so the real
+binary still cannot be driven by a pointer -- only looked at.
+
+### A long status message ran over the readout beside it (fixed)
+
+"Opened /a/deep/path/to/tray.scadstudio" was drawn straight across "4 ms ·
+5 nodes · 156 triangles" at the right end of the status bar: the message was an
+unbounded label in a left-to-right layout, and the readout is laid out from the
+right edge of the same row, so the two met in the middle. Found by opening a
+project from a deep directory and grabbing the window.
+
+The message now gets the row minus `theme::metric::STATUS_READOUT`, truncates
+into it, and carries the whole text on hover.
 
 ### A drag chased its own tail, and finished wherever the mouse button came up (fixed)
 

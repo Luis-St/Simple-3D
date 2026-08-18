@@ -103,10 +103,19 @@ fn scrub_grip(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, step:
     })
 }
 
+/// The id of a scrub grip, named after the value it scrubs rather than taken
+/// from where the grip sits in the layout. A gesture in flight is remembered by
+/// this id (`App::scrub`), so a panel that relays itself out mid-drag -- a
+/// section collapsing, a dock being resized -- must not change it. It is also
+/// what lets a test put the pointer on a named grip.
+pub fn grip_id(name: &str) -> egui::Id {
+    egui::Id::new(("scrub-grip", name))
+}
+
 /// A label that scrubs: the same row label, but sensing a drag.
 fn scrub_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, theme::metric::INPUT_ROW), egui::Sense::drag());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, theme::metric::INPUT_ROW), egui::Sense::hover());
+    let response = ui.interact(rect, grip_id(text), egui::Sense::drag());
     let colour = if response.hovered() || response.dragged() { token::TEXT_HI } else { token::TEXT_LO };
     ui.painter().text(
         egui::pos2(rect.left(), rect.center().y),
@@ -666,7 +675,7 @@ fn axis_row(
         let gaps = 2.0 * ui.spacing().item_spacing.x;
         let each = ((available - chips - gaps) / 3.0).max(30.0);
         for axis in 0..3 {
-            let grip = theme::axis_chip(ui, axis);
+            let grip = theme::axis_chip(ui, grip_id(&format!("{label}:{axis}")), axis);
             ui.scope(|ui| {
                 ui.set_width(each);
                 field(app, ui, axis, &grip);

@@ -8,6 +8,9 @@
 mod app;
 mod app_chrome;
 mod dock;
+// Pointer gestures, executed rather than only reasoned about. Test-only.
+#[cfg(test)]
+mod gestures;
 mod gizmo;
 mod icon;
 mod panel_outliner;
