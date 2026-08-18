@@ -62,6 +62,40 @@ impl HandleFrame {
     }
 }
 
+/// Where a new shape lands (spec section 8.1 leaves this to the application).
+///
+/// The origin used to be the only answer, with the 3D cursor as an override
+/// nobody could see they had. Making it a named choice puts the four reasonable
+/// answers in one control, and says which one is in force.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Placement {
+    /// 0, 0, 0.
+    #[default]
+    Origin,
+    /// Where Shift+right-click put the 3D cursor; the origin until it is placed.
+    Cursor,
+    /// What the camera is looking at, rounded to the step.
+    ViewCentre,
+    /// Clear of what is selected, along +X, so the new shape does not land
+    /// inside it.
+    BesideSelection,
+}
+
+impl Placement {
+    pub const ALL: [Placement; 4] =
+        [Placement::Origin, Placement::Cursor, Placement::ViewCentre, Placement::BesideSelection];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Placement::Origin => "Origin",
+            Placement::Cursor => "3D cursor",
+            Placement::ViewCentre => "View centre",
+            Placement::BesideSelection => "Beside selection",
+        }
+    }
+}
+
 /// A dock: which side of the window a panel sits on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -241,6 +275,9 @@ pub struct AppSettings {
     /// and not a removal.
     pub show_ghosts: bool,
     pub handle_frame: HandleFrame,
+    /// Where a new shape lands.
+    #[serde(default)]
+    pub placement: Placement,
     /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
     /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
@@ -264,6 +301,7 @@ impl Default for AppSettings {
             show_bounding_box: false,
             show_ghosts: false,
             handle_frame: HandleFrame::Object,
+            placement: Placement::Origin,
             rotate_snap_deg: 15.0,
             last_export_dir: None,
             // 3MF by default, because it records units.

@@ -9,9 +9,10 @@ use crate::ui::FieldBuffers;
 use crate::view::{frame_bounds, CameraMove, ViewPreset};
 use crate::worker::{EvalWorker, ExportJob};
 use simple3d_core::clipboard::{self, Clip};
-use simple3d_core::config::{self, AppSettings, DisplayMode, HandleFrame, Side};
+use simple3d_core::config::{self, AppSettings, DisplayMode, HandleFrame, Placement, Side};
 use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::{Chord, Command, Keymap};
+use simple3d_core::library;
 use simple3d_core::project;
 use simple3d_core::scene::{GroupOp, NodeId, Scene};
 use simple3d_core::undo::History;
@@ -58,6 +59,8 @@ pub enum Modal {
     About,
     /// A failure worth stopping for, shown in a scrollable, copyable window.
     Error,
+    /// Naming a group, or a whole project, to keep on the palette.
+    SavePrimitive,
     /// Quitting with unsaved changes.
     ConfirmQuit,
 }
@@ -133,6 +136,14 @@ pub struct App {
     pub modal: Modal,
     pub error_title: String,
     pub error_detail: String,
+
+    /// The subtree waiting to be saved to the library, and what to call it.
+    pub primitive_clip: Option<Clip>,
+    pub primitive_name: String,
+    /// The library, as it was last read off disk. Re-read when it changes rather
+    /// than on every frame -- the palette draws sixty times a second and the
+    /// library lives in a directory.
+    pub library: Vec<library::Entry>,
 
     pub keymap_search: String,
     pub recording: Option<Command>,
@@ -227,6 +238,9 @@ impl App {
             modal: Modal::None,
             error_title: String::new(),
             error_detail: String::new(),
+            primitive_clip: None,
+            primitive_name: String::new(),
+            library: Vec::new(),
             keymap_search: String::new(),
             recording: None,
             keymap_conflict: None,
@@ -237,6 +251,7 @@ impl App {
         };
         app.export_format = Format::from_id(&app.settings.last_export_format).unwrap_or(Format::ThreeMf);
         app.export_scale = simple3d_core::unit::format_number(app.settings.last_export_scale, 4);
+        app.refresh_library();
         match open {
             // Opening a project by passing its path on the command line, so file
             // associations work on both platforms (spec section 10).
@@ -895,21 +910,162 @@ impl App {
     pub fn add_node(&mut self, type_id: Option<&str>, op: GroupOp) {
         self.edit("Add", None);
         let (parent, index) = self.scene.insertion_point(self.primary());
+        let at = self.insertion_point_world();
         let created = match type_id {
             Some(type_id) => self.scene.add_primitive(type_id, parent, index),
             None => Some(self.scene.add_group(op, parent, index)),
         };
         match created {
             Some(id) => {
-                // New shapes land at the 3D cursor when one has been placed, and
-                // at the origin otherwise -- the palette's hint says which.
-                if let (Some(at), Some(node)) = (self.cursor, self.scene.get_mut(id)) {
+                // Where a new shape lands is the user's choice; the palette's
+                // hint line says which choice is in force.
+                if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
                 self.select_only(id);
                 self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
             }
             None => self.status = Status::Warning("Unknown primitive type".into()),
+        }
+    }
+
+    /// Where the next shape goes, in world millimetres, under the current
+    /// placement choice.
+    ///
+    /// World rather than parent-frame: adding into a rotated group would
+    /// otherwise put the shape somewhere else entirely. `Node::position` is in
+    /// the parent's coordinates, so the answer is carried back through the
+    /// parent's frame before it is written.
+    pub fn insertion_point_world(&self) -> Vec3 {
+        let world = match self.settings.placement {
+            Placement::Origin => Vec3::ZERO,
+            Placement::Cursor => self.cursor.unwrap_or(Vec3::ZERO),
+            Placement::ViewCentre => {
+                let step = self.move_snap();
+                let t = self.scene.camera.target;
+                Vec3::new((t.x / step).round() * step, (t.y / step).round() * step, (t.z / step).round() * step)
+            }
+            Placement::BesideSelection => match self.selection_bounds() {
+                // Clear of the selection along +X with one step of air, so the
+                // new shape is next to what is selected rather than inside it.
+                Some((lo, hi)) => Vec3::new(hi.x + self.move_snap(), (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5),
+                None => Vec3::ZERO,
+            },
+        };
+        let (parent, _) = self.scene.insertion_point(self.primary());
+        match self.evaluated.node_frames.get(&parent) {
+            // The frame stored for a node is its *parent's*; a child of `parent`
+            // is placed in `parent`'s own frame, which is that composed with its
+            // transform.
+            Some(frame) => {
+                let node = self.scene.node(parent);
+                frame
+                    .compose(&simple3d_core::xform::Xform::from_pos_rot(node.position, node.rotation))
+                    .inverse()
+                    .point(world)
+            }
+            None => world,
+        }
+    }
+
+    // -- the saved-primitive library ----------------------------------------
+
+    pub fn refresh_library(&mut self) {
+        self.library = library::list(&self.config_dir);
+    }
+
+    /// Open the naming window for the current selection.
+    pub fn save_selection_as_primitive(&mut self) {
+        match clipboard::copy(&self.scene, &self.selection) {
+            Some(clip) => {
+                let name = self.primary().map(|id| self.scene.node(id).name.clone()).unwrap_or_default();
+                self.begin_save_primitive(clip, name);
+            }
+            None => self.status = Status::Warning("Select something to save as a primitive".into()),
+        }
+    }
+
+    /// The same, for everything in the document. A project *is* a primitive as
+    /// far as another project is concerned.
+    pub fn save_project_as_primitive(&mut self) {
+        let top: Vec<NodeId> = self.scene.node(self.scene.root()).children.clone();
+        match clipboard::copy(&self.scene, &top) {
+            Some(clip) => {
+                let name = self
+                    .path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Untitled".to_string());
+                self.begin_save_primitive(clip, name);
+            }
+            None => self.status = Status::Warning("There is nothing in this project to save".into()),
+        }
+    }
+
+    fn begin_save_primitive(&mut self, clip: Clip, name: String) {
+        self.primitive_name = name;
+        self.primitive_clip = Some(clip);
+        self.modal = Modal::SavePrimitive;
+    }
+
+    /// Write the pending subtree to the library under the typed name.
+    pub fn confirm_save_primitive(&mut self) {
+        let Some(clip) = self.primitive_clip.clone() else { return };
+        let name = self.primitive_name.clone();
+        match library::save(&self.config_dir, &name, &clip) {
+            Ok(_) => {
+                self.primitive_clip = None;
+                self.modal = Modal::None;
+                self.refresh_library();
+                self.status =
+                    Status::Info(format!("Saved \u{201C}{}\u{201D} to the palette", library::sanitise(&name)));
+            }
+            Err(e) => self.fail("Could not save the primitive", &format!("{name}\n\n{e}")),
+        }
+    }
+
+    pub fn cancel_save_primitive(&mut self) {
+        self.primitive_clip = None;
+        self.modal = Modal::None;
+    }
+
+    /// Drop a saved primitive into the scene, at the current placement.
+    pub fn add_library_entry(&mut self, entry: &library::Entry) {
+        let Some(clip) = library::load(&entry.path) else {
+            return self.fail(
+                "Could not read that saved primitive",
+                &format!("{}\n\nIt may have been written by a newer version, or edited by hand.", entry.path.display()),
+            );
+        };
+        self.edit("Add", None);
+        let at = self.insertion_point_world();
+        let target = self.primary();
+        let created = clipboard::insert(&mut self.scene, &clip, target, false);
+        if created.is_empty() {
+            self.status = Status::Warning(format!("\u{201C}{}\u{201D} has nothing in it", entry.name));
+            return;
+        }
+        // The saved subtree keeps its own internal arrangement; what moves is
+        // where the whole thing sits.
+        let anchor = self.scene.node(created[0]).position;
+        for id in &created {
+            if let Some(node) = self.scene.get_mut(*id) {
+                node.position = node.position - anchor + at;
+            }
+        }
+        self.selection = created;
+        self.on_selection_changed();
+        self.status = Status::Info(format!("Added {}", entry.name));
+    }
+
+    pub fn delete_library_entry(&mut self, entry: &library::Entry) {
+        match library::remove(&entry.path) {
+            Ok(()) => {
+                self.refresh_library();
+                self.status = Status::Info(format!("Removed {} from the palette", entry.name));
+            }
+            Err(e) => self.fail("Could not remove that saved primitive", &format!("{}\n\n{e}", entry.path.display())),
         }
     }
 
@@ -1066,15 +1222,22 @@ fn children_plural(n: usize) -> &'static str {
 /// line and in every tile's tooltip, so the two can never disagree about it.
 pub fn insertion_hint(app: &App) -> String {
     let unit = app.unit();
-    match app.cursor {
-        Some(at) => format!(
-            "Lands at the 3D cursor: {}, {}, {} {}.",
-            simple3d_core::unit::format_length(at.x, unit),
-            simple3d_core::unit::format_length(at.y, unit),
-            simple3d_core::unit::format_length(at.z, unit),
-            unit.suffix()
-        ),
-        None => "Lands at the origin. Shift+right-click in the viewport to put the 3D cursor somewhere else.".into(),
+    let at = app.insertion_point_world();
+    let where_ = format!(
+        "{}, {}, {} {}",
+        simple3d_core::unit::format_length(at.x, unit),
+        simple3d_core::unit::format_length(at.y, unit),
+        simple3d_core::unit::format_length(at.z, unit),
+        unit.suffix()
+    );
+    match app.settings.placement {
+        Placement::Origin => format!("Lands at the origin: {where_}."),
+        Placement::Cursor if app.cursor.is_some() => format!("Lands at the 3D cursor: {where_}."),
+        Placement::Cursor => {
+            format!("Lands at {where_}. Shift+right-click in the viewport to put the 3D cursor somewhere else.")
+        }
+        Placement::ViewCentre => format!("Lands at what the camera is looking at: {where_}."),
+        Placement::BesideSelection => format!("Lands beside the selection: {where_}."),
     }
 }
 
@@ -1266,6 +1429,39 @@ mod tests {
     }
 
     #[test]
+    fn every_modal_draws_and_so_does_a_palette_with_saved_primitives_on_it() {
+        // A window that panics, or a layout that divides by a width it does not
+        // have, fails here rather than in front of someone.
+        let dir = temp_config_dir("modals");
+        let mut app = app_in(dir);
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).unwrap();
+        app.select_only(plate);
+
+        // Saving one gives the palette a Saved section to draw, and the naming
+        // window something to name.
+        app.save_selection_as_primitive();
+        draw_one_frame(&mut app);
+        app.confirm_save_primitive();
+        assert_eq!(app.library.len(), 1);
+        draw_one_frame(&mut app);
+
+        for modal in [
+            Modal::Export,
+            Modal::Keymap,
+            Modal::SceneSettings,
+            Modal::About,
+            Modal::Error,
+            Modal::ConfirmQuit,
+            Modal::SavePrimitive,
+        ] {
+            app.modal = modal;
+            draw_one_frame(&mut app);
+        }
+        app.modal = Modal::None;
+    }
+
+    #[test]
     fn an_empty_scene_still_draws_every_panel() {
         let mut app = headless_app();
         for id in app.scene.depth_first() {
@@ -1360,6 +1556,67 @@ mod tests {
         assert_eq!(app.scene.settings.axes_visible, [true; 3]);
     }
 
+    #[test]
+    fn a_group_saved_as_a_primitive_comes_back_into_a_fresh_document() {
+        // The library is per user, not per project: what is saved out of one
+        // document is on the palette of the next one.
+        let dir = temp_config_dir("library");
+        let mut app = app_in(dir.clone());
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).unwrap();
+        app.select_only(plate);
+        app.run(Command::Group);
+        let group = app.primary().unwrap();
+        if let Some(node) = app.scene.get_mut(group) {
+            node.name = "Bracket".into();
+        }
+
+        app.save_selection_as_primitive();
+        assert_eq!(app.modal, Modal::SavePrimitive, "saving did not ask for a name");
+        assert_eq!(app.primitive_name, "Bracket", "the name was not offered from the node");
+        app.confirm_save_primitive();
+        assert_eq!(app.modal, Modal::None);
+        assert_eq!(app.library.len(), 1, "the palette did not pick the new entry up");
+
+        // A second application on the same config directory -- which is what
+        // opening the program again is -- has it on the palette.
+        let mut fresh = app_in(dir);
+        assert_eq!(fresh.library.len(), 1);
+        let entry = fresh.library[0].clone();
+        assert_eq!(entry.name, "Bracket");
+
+        fresh.settings.placement = Placement::Origin;
+        fresh.add_library_entry(&entry);
+        let added = fresh.primary().expect("nothing was added");
+        assert_eq!(fresh.scene.node(added).name, "Bracket", "it arrived under some other name");
+        assert!(fresh.scene.node(added).is_group());
+        assert_eq!(fresh.scene.node(added).children.len(), 1, "the group arrived without its child");
+        assert_eq!(fresh.scene.node(added).position, Vec3::ZERO);
+
+        // And it can be taken off the palette again.
+        fresh.delete_library_entry(&entry);
+        assert!(fresh.library.is_empty());
+    }
+
+    #[test]
+    fn a_saved_primitive_lands_at_the_placement_rather_than_where_it_was_saved_from() {
+        let dir = temp_config_dir("library-placement");
+        let mut app = app_in(dir.clone());
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).unwrap();
+        app.scene.get_mut(plate).unwrap().position = Vec3::new(70.0, 0.0, 0.0);
+        app.select_only(plate);
+        app.save_selection_as_primitive();
+        app.confirm_save_primitive();
+
+        let mut fresh = app_in(dir);
+        fresh.settings.placement = Placement::Cursor;
+        fresh.cursor = Some(Vec3::new(-5.0, 8.0, 0.0));
+        let entry = fresh.library[0].clone();
+        fresh.add_library_entry(&entry);
+        assert_eq!(fresh.scene.node(fresh.primary().unwrap()).position, Vec3::new(-5.0, 8.0, 0.0));
+    }
+
     /// The default `App::new` still points at the user's real config directory --
     /// the test seam must not have changed where a shipped binary looks.
     #[test]
@@ -1421,17 +1678,64 @@ mod tests {
     }
 
     #[test]
-    fn a_new_shape_lands_at_the_three_d_cursor_and_the_hint_says_so() {
+    fn a_new_shape_lands_where_the_placement_says_and_the_hint_agrees() {
         let mut app = headless_app();
+        assert_eq!(app.settings.placement, Placement::Origin);
         assert!(insertion_hint(&app).contains("origin"), "{}", insertion_hint(&app));
         app.add_node(Some("sphere"), GroupOp::Union);
         assert_eq!(app.scene.node(app.primary().unwrap()).position, Vec3::ZERO);
 
+        app.settings.placement = Placement::Cursor;
         app.cursor = Some(Vec3::new(30.0, -10.0, 5.0));
         let hint = insertion_hint(&app);
         assert!(hint.contains("cursor") && hint.contains("30"), "{hint}");
         app.add_node(Some("sphere"), GroupOp::Union);
         assert_eq!(app.scene.node(app.primary().unwrap()).position, Vec3::new(30.0, -10.0, 5.0));
+
+        // What the camera is looking at, rounded to the step.
+        app.settings.placement = Placement::ViewCentre;
+        app.scene.settings.snap_step = 5.0;
+        app.scene.camera.target = Vec3::new(12.0, -3.0, 0.0);
+        assert_eq!(app.insertion_point_world(), Vec3::new(10.0, -5.0, 0.0));
+        assert!(insertion_hint(&app).contains("camera"), "{}", insertion_hint(&app));
+
+        // Beside the selection: clear of it, not inside it.
+        app.clear_selection();
+        let plate = app.scene.depth_first().into_iter().find(|&id| id != app.scene.root()).unwrap();
+        app.select_only(plate);
+        app.reevaluate_for_test();
+        app.settings.placement = Placement::BesideSelection;
+        let (_, hi) = app.selection_bounds().expect("the plate has bounds");
+        assert_eq!(app.insertion_point_world().x, hi.x + app.move_snap());
+    }
+
+    #[test]
+    fn a_shape_added_into_a_rotated_group_still_lands_where_the_placement_says() {
+        // `Node::position` is in the parent's coordinates. Writing a world point
+        // into it unchanged would put the shape somewhere else entirely as soon
+        // as the group it goes into is turned or moved.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.select_only(plate);
+        app.run(Command::Group);
+        let group = app.primary().unwrap();
+        if let Some(node) = app.scene.get_mut(group) {
+            node.position = Vec3::new(50.0, 0.0, 0.0);
+            node.rotation = Vec3::new(0.0, 0.0, 90.0);
+        }
+        app.reevaluate_for_test();
+
+        app.settings.placement = Placement::Cursor;
+        app.cursor = Some(Vec3::new(10.0, 0.0, 0.0));
+        app.select_only(group);
+        app.add_node(Some("sphere"), GroupOp::Union);
+        let added = app.primary().unwrap();
+        assert_eq!(app.scene.node(added).parent, Some(group), "the sphere did not go into the group");
+
+        app.reevaluate_for_test();
+        let world = app.evaluated.node_meshes[&added].bounds().expect("the sphere has bounds");
+        let centre = (world.0 + world.1) * 0.5;
+        assert!((centre - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-6, "the sphere landed at {centre:?}");
     }
 
     #[test]

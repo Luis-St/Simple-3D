@@ -161,6 +161,25 @@ impl App {
             ui.separator();
             self.command_item(ui, Command::Export, true);
             ui.separator();
+            let has_selection = !self.selection.is_empty();
+            if ui
+                .add_enabled(has_selection, egui::Button::new("Save selection as primitive\u{2026}"))
+                .on_hover_text("Keep the selection on the palette, to use in any project")
+                .clicked()
+            {
+                self.save_selection_as_primitive();
+                ui.close();
+            }
+            let has_content = !self.scene.node(self.scene.root()).children.is_empty();
+            if ui
+                .add_enabled(has_content, egui::Button::new("Save project as primitive\u{2026}"))
+                .on_hover_text("Keep the whole document on the palette, to use in any project")
+                .clicked()
+            {
+                self.save_project_as_primitive();
+                ui.close();
+            }
+            ui.separator();
             if ui.button("Scene settings...").clicked() {
                 self.modal = Modal::SceneSettings;
                 ui.close();
@@ -535,6 +554,7 @@ impl App {
             Modal::About => self.about_window(ctx),
             Modal::Error => self.error_window(ctx),
             Modal::ConfirmQuit => self.confirm_quit_window(ctx),
+            Modal::SavePrimitive => self.save_primitive_window(ctx),
         }
     }
 
@@ -983,6 +1003,69 @@ impl App {
             });
         if !open {
             self.modal = Modal::None;
+        }
+    }
+
+    /// Naming a group, or a whole project, before it goes on the palette.
+    ///
+    /// A window rather than an inline field because the name is going into the
+    /// user's library, not into the document: it outlives this project, and it
+    /// is the only thing the palette will show, so it is worth stopping to type.
+    fn save_primitive_window(&mut self, ctx: &egui::Context) {
+        let mut open = true;
+        let mut save = false;
+        egui::Window::new("Save as primitive")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let count = self.primitive_clip.as_ref().map(|c| c.nodes.len()).unwrap_or(0);
+                ui.label(format!(
+                    "{count} node{} will be kept on the palette, ready to drop into any project.",
+                    if count == 1 { "" } else { "s" }
+                ));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.label("Name");
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut self.primitive_name).desired_width(240.0).hint_text("Bracket"),
+                    );
+                    field.request_focus();
+                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        save = true;
+                    }
+                });
+                let tidied = simple3d_core::library::sanitise(&self.primitive_name);
+                if tidied.is_empty() {
+                    ui.add(egui::Label::new(theme::hint("A saved primitive needs a name.")).selectable(false));
+                } else if tidied != self.primitive_name.trim() {
+                    ui.add(
+                        egui::Label::new(theme::hint(format!("It will be saved as \u{201C}{tidied}\u{201D}.")))
+                            .selectable(false),
+                    );
+                } else if simple3d_core::library::exists(self.config_dir(), &tidied) {
+                    ui.add(
+                        egui::Label::new(theme::hint(format!(
+                            "\u{201C}{tidied}\u{201D} is already on the palette; saving replaces it."
+                        )))
+                        .selectable(false),
+                    );
+                }
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(!tidied.is_empty(), egui::Button::new("Save")).clicked() {
+                        save = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.cancel_save_primitive();
+                    }
+                });
+            });
+        if save {
+            self.confirm_save_primitive();
+        } else if !open {
+            self.cancel_save_primitive();
         }
     }
 
