@@ -6,41 +6,15 @@ wrong. There is no separate tracker.
 
 ## Open
 
-### A completed manipulator drag is not asserted to undo in one step
+Nothing. The two entries that were here are fixed and written up below, the
+audit (`python3 tools/criteria_audit.py`) reports all 29 acceptance criteria
+asserted by a test that names them, and the fixes were confirmed by driving the
+running application, not only by their tests.
 
-Acceptance criterion 23's other four clauses are covered
-(`gizmo::a_move_drag_snaps_to_the_increment_and_a_modifier_frees_it`,
-`escape_restores_the_pre_drag_state_exactly`, `the_readout_is_in_the_display_unit`),
-but "a completed drag undoes in one step" is not. The behaviour is there and is
-one line: `panel_viewport::manipulate` calls `app.edit("Move", None)` once, on
-`drag_started_by`, and the frames during the drag call `app.touch()` instead.
-
-What makes it hard is that the record sits inside `manipulate`, which is driven
-entirely by an `egui::Response` — `drag_started_by`, `clicked_by`,
-`input().pointer` — and a `Response` cannot be synthesised outside a running
-frame. `gizmo::Drag` itself is fully testable and well covered; it is only the
-begin/continue/end bookkeeping around it that is not. Closing this wants the
-same treatment `nudge` just had: lift the "which phase is this drag in, and does
-it open an undo step" decision out of `manipulate` into a function taking plain
-booleans, and leave only the `Response`-to-booleans translation in the panel.
-
-### `App::new` reads the user's real config directory
-
-Now that `App` turns out to be constructible headlessly (see below), this is a
-test hazard rather than a theoretical one: `App::new` calls
-`config::load_settings()` and `config::load_keymap()`, so an `App`-level test
-picks up whatever is in the developer's `~/.config/scadstudio`. The tests in
-`app::tests` work around it by overwriting `settings` and `keymap` with defaults
-straight after construction, which is a workaround and not a fix — anything else
-`App::new` derives from the loaded settings (currently `export_format` and
-`export_scale`) is still machine-dependent.
-
-The fix is to give `App::new` an explicit config directory, defaulting to
-`config::config_dir()`, and to thread it through to the `save_*` calls too. That
-would also close the one remaining untested link in criterion 28: the on-disk
-round trip is now covered by `config::a_rebinding_survives_a_restart_and_the_menus_follow`
-against a temp directory, but `App::new`'s call to `config::load_keymap()` — the
-line that makes a restart pick the saved map up — is not.
+That is a statement about this moment, checked at this moment. It is not a claim
+that the code is without fault -- the drag bug written up below had been shipping
+for as long as drags have existed, and no test or reading of the code found it;
+driving the app did.
 
 ## Worth knowing rather than fixing
 
@@ -49,8 +23,15 @@ line that makes a restart pick the saved map up — is not.
   `egui::Context::default()` needs no window, no display and no GPU, so
   `App::new(&egui::Context::default(), None)` builds a working application in a
   test, and `App::run(command)` dispatches commands through the real path. This
-  is what `app::tests` is built on. The caveat above about the config directory
-  is the one real cost.
+  is what `app::tests` is built on. Give each such test its own config directory
+  via `App::with_config_dir`; `App::new` reads the user's real one.
+
+- **A one-frame drag test proves less than it looks.** `Drag::update` is called
+  every frame against a gizmo the viewport rebuilds every frame, and a bug can
+  hide entirely in the difference between the first call and the second -- one
+  did, for as long as drags have existed (see below). A drag test that calls
+  `update` once cannot see that class of fault at all. Drive several frames, and
+  rebuild the gizmo between them, as `app::drag_gesture` does.
 
 - **The boolean kernel classifies planes with a fixed epsilon** (`csg_bsp::EPSILON`,
   1e-5 mm) rather than exact or rational arithmetic. Pathologically thin or
@@ -65,6 +46,78 @@ line that makes a restart pick the saved map up — is not.
   refuses the whole rebuild if it is less sound than what it replaced.
 
 ## Resolved
+
+### A drag chased its own tail, and finished wherever the mouse button came up (fixed)
+
+Found by driving the running application while checking the two fixes below --
+no test caught it, and reading the code did not either.
+
+`Drag::update` was handed the **live** gizmo every frame, and the gizmo is
+rebuilt each frame from the very node the drag is moving. Its `origin` therefore
+slid along with the result. `ray_axis(cursor, origin, axis)` measures the cursor
+*relative to that origin*, so once the node had moved 10 mm the cursor measured
+10 mm nearer, the computed delta fell to zero, and `write_position` -- which
+works from `start_position` -- put the node back where it began. The next frame
+the origin was back at the start, the delta was 10 mm again, and the node moved.
+Frame by frame the position flipped between the two, and a completed drag
+finished at whichever of them the last frame happened to land on.
+
+Live symptom: drag the X handle 10 mm and release, and the plate returns to
+where it started about half the time. Against the previous build the same
+scripted gesture ended at 10 mm; a rebuild of the same commit ended at 0.
+
+Why nothing caught it: every existing drag test called `Drag::update` **once**,
+against the gizmo built before the move. One update is always correct -- the
+oscillation needs a second frame with a rebuilt gizmo. The test written for
+criterion 23 in this same pass had the same blind spot until the app disproved
+it.
+
+The fix is for `Drag` to own the `Gizmo` it began against and measure everything
+in that frame, which is what a drag means: `update` no longer takes a gizmo at
+all. `app::a_drag_lands_in_the_same_place_however_many_frames_it_took` drives 1,
+2, 3, 4, 5, 20 and 21-frame gestures through all five handle kinds, rebuilding
+the gizmo every frame as the viewport does, and requires the same landing from
+each. Restoring the old behaviour fails it on the 2-frame case.
+
+### A cancelled drag left a dead undo step (fixed)
+
+`manipulate` recorded an undo snapshot when a drag began and never took it back
+when Escape cancelled. Escape already restores the pre-drag values itself, so the
+snapshot described the state the scene was already in: the next Ctrl+Z appeared
+to do nothing, and the user had to press it twice to reach the edit before the
+drag. `History::discard_last` drops a recorded-then-abandoned snapshot, and the
+`Cancel` phase calls it. Covered by `app::a_cancelled_drag_leaves_no_undo_step_behind`
+and confirmed in the running app: nudge, drag, Escape, one Ctrl+Z, and the status
+bar reads "Undid Nudge".
+
+### Criterion 23's "a completed drag undoes in one step" was not asserted (fixed)
+
+The record sat inside `panel_viewport::manipulate`, which was driven entirely by
+an `egui::Response` -- and a `Response` cannot be built outside a running frame.
+The phase decision is now `gizmo::drag_phase(dragging, PointerState) -> DragPhase`
+over plain booleans, and carrying it out is `App::manipulate_step`; `manipulate`
+is reduced to translating the `Response` into that `PointerState`. The undo
+record happens on `Begin` and on no other phase, which is the whole mechanism, so
+`a_completed_drag_undoes_in_one_step_however_many_frames_it_took` can drive a
+twenty-frame gesture and require exactly one step. Verified live as well.
+
+### `App::new` read the user's real config directory (fixed)
+
+`App` now holds a `config_dir`, `App::new` defaults it to `config::config_dir()`
+and `App::with_config_dir` overrides it; `config` gained
+`load_settings_from`/`save_settings_to` to match the keymap pair. Every save site
+goes through `App::persist_keymap`, so a running application cannot read one
+directory and write another. `app::tests` each get their own temp directory
+instead of overwriting `settings` and `keymap` after construction, and
+`the_default_config_directory_is_the_users_own` keeps a shipped binary pointed at
+the right place.
+
+This also closes criterion 28's last untested link:
+`a_restarted_app_starts_on_the_keymap_the_last_one_saved` builds an `App`, rebinds,
+persists, drops it, and builds a second `App` over the same directory. Confirmed
+in the running app too -- orbit remapped to the middle button, quit, relaunch, and
+the new binding is both in the dialog and in effect.
+
 
 ### Four criteria were cited only from a doc comment, not from a test (fixed)
 
