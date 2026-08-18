@@ -21,6 +21,7 @@ pub fn tool(mode: Mode) -> (Glyph, Command) {
         Mode::Move => (Glyph::Move, Command::ModeMove),
         Mode::Rotate => (Glyph::Rotate, Command::ModeRotate),
         Mode::Resize => (Glyph::Resize, Command::ModeResize),
+        Mode::Scale => (Glyph::Scale, Command::ModeScale),
     }
 }
 

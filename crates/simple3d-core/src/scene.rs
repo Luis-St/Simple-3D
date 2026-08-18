@@ -86,6 +86,14 @@ pub struct Node {
     pub position: Vec3,
     /// Degrees, applied X then Y then Z.
     pub rotation: Vec3,
+    /// A factor per axis, applied in the node's own axes before its rotation.
+    ///
+    /// Distinct from a *resize*, which rewrites the dimension a shape is defined
+    /// by and leaves nothing behind. A scale is a factor the node carries, it
+    /// applies to a whole group as readily as to one shape, and it is the only
+    /// way to make something a proportion of what it was without touching every
+    /// number underneath. `1, 1, 1` is no scale at all.
+    pub scale: Vec3,
     pub anchor: Anchor,
     /// Hidden nodes are excluded from evaluation and export entirely.
     pub visible: bool,
@@ -97,6 +105,15 @@ pub struct Node {
 }
 
 impl Node {
+    /// The smallest a scale factor may get. Zero collapses a solid into a plane
+    /// and negative turns it inside out, and neither is a thing to export.
+    pub const MIN_SCALE: f64 = 1e-4;
+
+    /// A scale with every axis clamped into the range that produces a solid.
+    pub fn sane_scale(scale: Vec3) -> Vec3 {
+        Vec3::new(scale.x.max(Node::MIN_SCALE), scale.y.max(Node::MIN_SCALE), scale.z.max(Node::MIN_SCALE))
+    }
+
     pub fn is_group(&self) -> bool {
         matches!(self.body, Body::Group { .. })
     }
@@ -216,6 +233,7 @@ impl Scene {
             name: "Scene".to_string(),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
             segments: None,
@@ -358,6 +376,7 @@ impl Scene {
             name: self.unique_name(parent, spec.label),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
             segments: None,
@@ -377,6 +396,7 @@ impl Scene {
             name: self.unique_name(parent, "Group"),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
             segments: None,
@@ -527,6 +547,7 @@ impl Scene {
             op,
             position: node.position,
             rotation: node.rotation,
+            scale: node.scale,
             anchor: node.anchor,
             visible: node.visible,
             segments: node.segments,
@@ -551,6 +572,7 @@ impl Scene {
             name: if data.name.is_empty() { "Node".to_string() } else { data.name.clone() },
             position: data.position,
             rotation: data.rotation,
+            scale: Node::sane_scale(data.scale),
             anchor: data.anchor,
             visible: data.visible,
             segments: data.segments,
@@ -580,6 +602,7 @@ impl Scene {
             root.body = Body::Group { op: data.op.unwrap_or_default() };
             root.position = data.position;
             root.rotation = data.rotation;
+            root.scale = Node::sane_scale(data.scale);
             root.anchor = data.anchor;
             root.visible = data.visible;
             root.segments = data.segments;
@@ -619,6 +642,11 @@ pub struct NodeData {
     pub position: Vec3,
     #[serde(default = "Vec3_zero")]
     pub rotation: Vec3,
+    /// Left out of the file entirely when it is `1, 1, 1`, which is almost
+    /// always, so a project written by this version still diffs cleanly against
+    /// one written before scale existed.
+    #[serde(default = "Vec3_one", skip_serializing_if = "is_unit_scale")]
+    pub scale: Vec3,
     #[serde(default)]
     pub anchor: Anchor,
     #[serde(default = "default_true")]
@@ -634,6 +662,15 @@ pub struct NodeData {
 #[allow(non_snake_case)]
 fn Vec3_zero() -> Vec3 {
     Vec3::ZERO
+}
+
+#[allow(non_snake_case)]
+fn Vec3_one() -> Vec3 {
+    Vec3::ONE
+}
+
+fn is_unit_scale(scale: &Vec3) -> bool {
+    *scale == Vec3::ONE
 }
 
 #[cfg(test)]
@@ -811,6 +848,7 @@ mod tests {
             op: Some(GroupOp::Union),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
             segments: None,
@@ -821,6 +859,7 @@ mod tests {
                 op: None,
                 position: Vec3::ZERO,
                 rotation: Vec3::ZERO,
+                scale: Vec3::ONE,
                 anchor: Anchor::Centre,
                 visible: true,
                 segments: None,

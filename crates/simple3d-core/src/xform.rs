@@ -1,4 +1,5 @@
-//! Affine transforms: rotate by a node's Euler angles, then translate.
+//! Affine transforms: scale a node's own axes, rotate by its Euler angles, then
+//! translate.
 //!
 //! A matrix rather than a stack of Euler triples, so nesting depth is unbounded
 //! and composing a group's transform with its children's is exact. The rotation
@@ -29,9 +30,15 @@ impl Xform {
     }
 
     pub fn from_pos_rot(position: Vec3, rotation_deg: Vec3) -> Xform {
-        let x = Vec3::new(1.0, 0.0, 0.0).rotate_xyz_deg(rotation_deg);
-        let y = Vec3::new(0.0, 1.0, 0.0).rotate_xyz_deg(rotation_deg);
-        let z = Vec3::new(0.0, 0.0, 1.0).rotate_xyz_deg(rotation_deg);
+        Xform::from_pos_rot_scale(position, rotation_deg, Vec3::ONE)
+    }
+
+    /// Scale first, in the node's own axes, then rotate, then translate -- the
+    /// order the mesh transform performs, so the two cannot disagree.
+    pub fn from_pos_rot_scale(position: Vec3, rotation_deg: Vec3, scale: Vec3) -> Xform {
+        let x = Vec3::new(1.0, 0.0, 0.0).rotate_xyz_deg(rotation_deg) * scale.x;
+        let y = Vec3::new(0.0, 1.0, 0.0).rotate_xyz_deg(rotation_deg) * scale.y;
+        let z = Vec3::new(0.0, 0.0, 1.0).rotate_xyz_deg(rotation_deg) * scale.z;
         Xform { m: [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]], t: position }
     }
 
@@ -51,7 +58,14 @@ impl Xform {
 
     /// The world-space direction of local axis 0, 1 or 2.
     pub fn axis(&self, axis: usize) -> Vec3 {
-        Vec3::new(self.m[0][axis], self.m[1][axis], self.m[2][axis]).normalized()
+        self.axis_vector(axis).normalized()
+    }
+
+    /// The same, unnormalised: its length is how many world units one unit along
+    /// that local axis covers -- the accumulated scale, this node's and every
+    /// ancestor's.
+    pub fn axis_vector(&self, axis: usize) -> Vec3 {
+        Vec3::new(self.m[0][axis], self.m[1][axis], self.m[2][axis])
     }
 
     /// `self` applied after `inner`.
@@ -65,18 +79,42 @@ impl Xform {
         Xform { m, t: self.point(inner.t) }
     }
 
-    /// The rotation part is orthonormal by construction, so the inverse is its
-    /// transpose. Used to turn a world-space drag back into the parent-frame
-    /// coordinates a node's `position` is stored in.
+    /// The general 3x3 inverse. Used to turn a world-space drag back into the
+    /// parent-frame coordinates a node's `position` is stored in.
+    ///
+    /// Not the transpose: once a node can carry a scale the linear part is no
+    /// longer orthonormal, and transposing it would divide by the scale where it
+    /// should multiply. A degenerate matrix -- which only a zero scale can
+    /// produce, and nothing lets one through -- inverts to the identity rotation
+    /// with the translation undone, so a caller gets something finite rather than
+    /// a field of NaN.
     pub fn inverse(&self) -> Xform {
-        let mut m = [[0.0; 3]; 3];
-        for r in 0..3 {
-            for c in 0..3 {
-                m[r][c] = self.m[c][r];
+        let m = self.m;
+        let cofactor = |r: usize, c: usize| {
+            let rows: Vec<usize> = (0..3).filter(|&i| i != r).collect();
+            let cols: Vec<usize> = (0..3).filter(|&i| i != c).collect();
+            let minor = m[rows[0]][cols[0]] * m[rows[1]][cols[1]] - m[rows[0]][cols[1]] * m[rows[1]][cols[0]];
+            if (r + c) % 2 == 0 {
+                minor
+            } else {
+                -minor
             }
-        }
-        let inv = Xform { m, t: Vec3::ZERO };
-        Xform { m, t: -inv.vector(self.t) }
+        };
+        let det = (0..3).map(|c| m[0][c] * cofactor(0, c)).sum::<f64>();
+        let linear = if det.abs() < 1e-18 {
+            Xform::IDENTITY.m
+        } else {
+            // The inverse is the transposed cofactor matrix over the determinant.
+            let mut out = [[0.0; 3]; 3];
+            for r in 0..3 {
+                for c in 0..3 {
+                    out[r][c] = cofactor(c, r) / det;
+                }
+            }
+            out
+        };
+        let inv = Xform { m: linear, t: Vec3::ZERO };
+        Xform { m: linear, t: -inv.vector(self.t) }
     }
 }
 
@@ -128,6 +166,37 @@ mod tests {
             assert!(close(inv.point(xf.point(p)), p), "{p:?}");
             assert!(close(xf.point(inv.point(p)), p), "{p:?}");
         }
+    }
+
+    #[test]
+    fn a_scaled_transform_inverts_and_composes_like_any_other() {
+        // The inverse used to be the transpose, which is only right while the
+        // linear part is orthonormal. A scale is exactly what makes it not.
+        let xf = Xform::from_pos_rot_scale(
+            Vec3::new(3.0, -7.0, 2.0),
+            Vec3::new(20.0, 35.0, -50.0),
+            Vec3::new(2.0, 0.5, 3.0),
+        );
+        let inv = xf.inverse();
+        for p in [Vec3::ZERO, Vec3::new(11.0, 2.0, -3.0), Vec3::new(-1.0, 0.25, 8.0)] {
+            assert!(close(inv.point(xf.point(p)), p), "{p:?} -> {:?}", inv.point(xf.point(p)));
+            assert!(close(xf.point(inv.point(p)), p), "{p:?}");
+        }
+
+        // And the scale is applied in the node's own axes, before the rotation.
+        let scaled = Xform::from_pos_rot_scale(Vec3::ZERO, Vec3::new(0.0, 0.0, 90.0), Vec3::new(2.0, 1.0, 1.0));
+        assert!(close(scaled.point(Vec3::new(1.0, 0.0, 0.0)), Vec3::new(0.0, 2.0, 0.0)));
+
+        let outer = Xform::from_pos_rot_scale(Vec3::new(1.0, 0.0, 0.0), Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0));
+        let inner = Xform::from_pos_rot(Vec3::new(0.0, 2.0, 0.0), Vec3::ZERO);
+        let combined = outer.compose(&inner);
+        for p in [Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0)] {
+            assert!(close(combined.point(p), outer.point(inner.point(p))), "{p:?}");
+        }
+
+        // A zero scale cannot be inverted; it must still return something finite.
+        let flat = Xform::from_pos_rot_scale(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO, Vec3::ZERO);
+        assert!(flat.inverse().point(Vec3::ZERO).length().is_finite());
     }
 
     #[test]

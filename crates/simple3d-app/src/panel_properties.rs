@@ -12,8 +12,8 @@ use crate::app::{App, Status};
 use crate::theme::{self, token};
 use crate::ui::{self, Commit};
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
-use simple3d_core::scene::{Anchor, Body, GroupOp, NodeId};
-use simple3d_core::unit::{format_angle, format_length, Unit};
+use simple3d_core::scene::{Anchor, Body, GroupOp, Node, NodeId};
+use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
 use simple3d_geom::Vec3;
 
 /// A collapsible panel in the right dock: a header bar, and a padded body that
@@ -660,6 +660,59 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
+    // Scale is a factor, not a measurement, so it has no unit and reads in the
+    // same three-column row as the two above it. It is the one control that
+    // resizes a *group*: a group has no dimensions of its own to type into.
+    axis_row(app, ui, "Scale (x)", |app, ui, axis, grip| {
+        if let Some(scrubbed) = scrub_grip(app, ui, grip, 0.05) {
+            scrub_scale(app, targets, axis, scrubbed.delta, scrubbed.started);
+        }
+        let field_id = ui.id().with((primary, "scale", axis));
+        let shown = ui::shared_text(
+            targets.iter().map(|t| format_number(component(Node::sane_scale(app.scene.node(*t).scale), axis), 4)),
+        );
+        if let Some(text) = app.fields.field(ui, field_id, &shown) {
+            if text.trim() == ui::MIXED {
+                app.fields.accept(field_id);
+                return;
+            }
+            let mut resolved: Vec<(NodeId, f64)> = Vec::new();
+            for target in targets {
+                let current = component(Node::sane_scale(app.scene.node(*target).scale), axis);
+                match ui::commit_factor(&text, current) {
+                    Some(value) => resolved.push((*target, value)),
+                    None => {
+                        app.fields.reject(field_id, text.clone());
+                        app.status = Status::Info(format!("\"{text}\" is not a number this field can take"));
+                        return;
+                    }
+                }
+            }
+            app.fields.accept(field_id);
+            app.edit("Set scale", Some(&format!("scale:{primary}:{axis}")));
+            for (target, value) in resolved {
+                if let Some(node) = app.scene.get_mut(target) {
+                    let mut s = Node::sane_scale(node.scale);
+                    set_component(&mut s, axis, value);
+                    node.scale = s;
+                }
+            }
+        }
+    });
+    if targets.iter().any(|t| app.scene.node(*t).scale != Vec3::ONE) {
+        ui.horizontal(|ui| {
+            ui.add(egui::Label::new(theme::hint("Scale is a factor on top of the dimensions.")).selectable(false));
+            if ui.small_button("Reset to 1").clicked() {
+                app.edit("Reset scale", None);
+                for target in targets {
+                    if let Some(node) = app.scene.get_mut(*target) {
+                        node.scale = Vec3::ONE;
+                    }
+                }
+            }
+        });
+    }
+
     step_row(app, ui);
     ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
     if targets.len() > 1 {
@@ -768,6 +821,24 @@ fn scrub_transform(app: &mut App, targets: &[NodeId], axis: usize, delta: f64, r
         } else {
             node.position = v;
         }
+    }
+    app.touch();
+    app.fields.clear();
+}
+
+/// One frame of a scrub on a scale field. The grip steps by 0.05 -- a twentieth
+/// is a visible change on any shape, where a millimetre-sized step would be
+/// nothing on a factor.
+fn scrub_scale(app: &mut App, targets: &[NodeId], axis: usize, delta: f64, started: bool) {
+    if started {
+        app.edit("Scrub scale", None);
+    }
+    for target in targets {
+        let Some(node) = app.scene.get_mut(*target) else { continue };
+        let mut s = Node::sane_scale(node.scale);
+        let next = (crate::gizmo::get_axis(s, axis) + delta).max(Node::MIN_SCALE);
+        set_component(&mut s, axis, next);
+        node.scale = s;
     }
     app.touch();
     app.fields.clear();

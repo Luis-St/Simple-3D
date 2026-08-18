@@ -19,6 +19,7 @@ pub enum Glyph {
     Move,
     Rotate,
     Resize,
+    Scale,
     Frame,
     // Object actions.
     Group,
@@ -175,6 +176,14 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.closed(&[(0.14, 0.14), (0.62, 0.14), (0.62, 0.62), (0.14, 0.62)]);
             pen.line(&[(0.62, 0.86), (0.86, 0.86), (0.86, 0.62)]);
             pen.arrow((0.52, 0.52), (0.84, 0.84));
+        }
+        // A small square growing into a large one: the same shape, a factor
+        // bigger. Resize's glyph shows a corner being pulled, which is the
+        // other question -- what size, rather than how many times.
+        Glyph::Scale => {
+            pen.closed(&[(0.12, 0.56), (0.44, 0.56), (0.44, 0.88), (0.12, 0.88)]);
+            pen.closed(&[(0.44, 0.12), (0.88, 0.12), (0.88, 0.56), (0.44, 0.56)]);
+            pen.arrow((0.30, 0.72), (0.66, 0.34));
         }
         Glyph::Frame => {
             pen.line(&[(0.16, 0.84), (0.16, 0.16)]);

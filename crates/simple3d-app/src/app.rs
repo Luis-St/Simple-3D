@@ -611,6 +611,7 @@ impl App {
             ModeMove => self.mode = Mode::Move,
             ModeRotate => self.mode = Mode::Rotate,
             ModeResize => self.mode = Mode::Resize,
+            ModeScale => self.mode = Mode::Scale,
             ToggleHandleFrame => {
                 self.settings.handle_frame = self.settings.handle_frame.toggled();
                 self.status = Status::Info(format!("Handles: {} frame", self.settings.handle_frame.label()));
@@ -882,6 +883,7 @@ impl App {
                         Mode::Move => "Move",
                         Mode::Rotate => "Rotate",
                         Mode::Resize => "Resize",
+                        Mode::Scale => "Scale",
                     },
                     None,
                 );

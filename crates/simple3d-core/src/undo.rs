@@ -180,11 +180,12 @@ mod tests {
         for id in scene.depth_first() {
             let node = scene.node(id);
             out.push_str(&format!(
-                "{}|{}|{:?}|{:?}|{:?}|{}|{}|{:?};",
+                "{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{}|{:?};",
                 scene.depth(id),
                 node.name,
                 node.position,
                 node.rotation,
+                node.scale,
                 node.anchor,
                 node.visible,
                 node.segments.unwrap_or(0),

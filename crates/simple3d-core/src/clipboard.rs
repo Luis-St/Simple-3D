@@ -115,6 +115,22 @@ mod tests {
     }
 
     #[test]
+    fn a_scale_travels_with_a_copied_subtree() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        let child = scene.add_primitive("box", group, 0).unwrap();
+        scene.get_mut(group).unwrap().scale = Vec3::new(2.0, 1.0, 0.5);
+        scene.get_mut(child).unwrap().scale = Vec3::new(1.0, 3.0, 1.0);
+
+        let clip = copy(&scene, &[group]).unwrap();
+        let pasted = paste(&mut scene, &clip, Some(group))[0];
+        assert_eq!(scene.node(pasted).scale, Vec3::new(2.0, 1.0, 0.5));
+        let pasted_child = scene.node(pasted).children[0];
+        assert_eq!(scene.node(pasted_child).scale, Vec3::new(1.0, 3.0, 1.0));
+    }
+
+    #[test]
     fn a_pasted_copy_lands_exactly_on_the_original() {
         // Spec acceptance criterion 20.
         let mut scene = Scene::new();

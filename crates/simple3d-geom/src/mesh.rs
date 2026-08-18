@@ -38,6 +38,14 @@ impl Mesh {
         Mesh { positions, indices: self.indices.clone() }
     }
 
+    /// Componentwise scale about the mesh's own origin. A factor of zero or
+    /// less on any axis would collapse or invert the solid, so callers clamp
+    /// before they get here; this does the arithmetic and nothing else.
+    pub fn scaled(&self, factor: Vec3) -> Mesh {
+        let positions = self.positions.iter().map(|p| p.scaled_by(factor)).collect();
+        Mesh { positions, indices: self.indices.clone() }
+    }
+
     pub fn translated(&self, offset: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| *p + offset).collect();
         Mesh { positions, indices: self.indices.clone() }
