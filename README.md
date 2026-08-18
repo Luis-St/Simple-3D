@@ -50,7 +50,7 @@ crates/
 ## Status
 
 All four crates are implemented and all 29 of the spec's acceptance criteria are
-behaviourally met. `cargo test --workspace` runs 272 tests, none ignored or
+behaviourally met. `cargo test --workspace` runs 278 tests, none ignored or
 failing, and every one of the 29 criteria is asserted by a test that cites the
 criterion by name.
 
@@ -59,9 +59,12 @@ prints the test covering each criterion and exits non-zero if any is uncovered.
 Do not use `grep -rn "criterion" crates/` for this: it counts a doc comment as
 coverage, and four criteria were passing that check without a test.
 
-Two items are open in `KNOWN_ISSUES.md`, which is this project's issue list:
-a manipulator drag is not asserted to undo in one step, and `App::new` reads the
-user's real config directory. Both are recorded there with what makes them hard.
+`KNOWN_ISSUES.md` is this project's issue list, and its "Open" section is empty
+as of the last pass. Read the top of that file before trusting this sentence:
+"empty" is a statement about a moment, and the most recent bug fixed there — a
+drag that finished wherever the mouse button came up — had been shipping since
+drags existed, with a full test suite passing over it. It was found by running
+the application, which is worth doing for any change to the manipulator.
 
 Highlights worth knowing about:
 

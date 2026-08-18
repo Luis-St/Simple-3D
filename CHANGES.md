@@ -1,3 +1,85 @@
+# Change report — 2026-08-18 (third pass)
+
+Closing the last two entries in `KNOWN_ISSUES.md`, and the bug that closing them
+turned up: **a manipulator drag finished wherever the mouse button happened to
+come up**. That one was found by driving the running application, not by a test.
+
+`KNOWN_ISSUES.md` is this project's issue list. Its "Open" section is empty as of
+this pass — checked, not assumed. The write-ups of what was actually wrong are
+there; this file is the index.
+
+## The one that mattered
+
+**A drag chased its own tail.** `Drag::update` was handed the *live* gizmo each
+frame, and the gizmo is rebuilt each frame from the very node the drag is moving.
+`ray_axis` measures the cursor relative to `gizmo.origin`, so once the node had
+moved 10 mm the cursor measured 10 mm nearer, the delta fell to zero, and
+`write_position` — which works from `start_position` — put the node back at the
+start. Next frame the origin was back too, the delta was 10 mm again, and it
+moved. The position flipped between the two every frame; a completed drag landed
+on whichever the last frame gave.
+
+Every existing drag test called `update` **once**, against the gizmo built before
+the move — and one update is always right. The oscillation needs a second frame
+with a rebuilt gizmo. The criterion-23 test written earlier in this same pass had
+the same blind spot, and would have gone on asserting a lie.
+
+`Drag` now owns the `Gizmo` it began against and measures everything in that
+frame, which is what a drag means; `update` no longer takes a gizmo at all.
+`a_drag_lands_in_the_same_place_however_many_frames_it_took` drives 1, 2, 3, 4,
+5, 20 and 21-frame gestures through all five handle kinds, rebuilding the gizmo
+every frame as the viewport does, and requires the same landing from each.
+Restoring the old behaviour fails it on the 2-frame case.
+
+## Also fixed
+
+- **A cancelled drag left a dead undo step.** Escape restores the pre-drag values
+  itself, so the snapshot taken when the drag opened described the state the
+  scene was already in — the next Ctrl+Z did nothing visible.
+  `History::discard_last` drops it. (`scadstudio-core/src/undo.rs`)
+- **Criterion 23's "a completed drag undoes in one step" was not asserted.** The
+  record sat inside a function driven entirely by an `egui::Response`. The phase
+  decision is now `gizmo::drag_phase(dragging, PointerState) -> DragPhase` over
+  plain booleans and `App::manipulate_step` carries it out; `manipulate` only
+  translates the `Response`.
+- **`App::new` read the user's real config directory.** `App` holds a
+  `config_dir`, with `App::with_config_dir` for tests and `App::new` still
+  defaulting to `config::config_dir()`. `config` gained
+  `load_settings_from`/`save_settings_to`; every keymap save goes through
+  `App::persist_keymap`. This also closes criterion 28's last untested link.
+
+## Verified in the running application
+
+Driven over XWayland with synthetic input, reading the result out of the property
+editor rather than out of the code:
+
+| | |
+|---|---|
+| Criterion 26 | five right-arrow presses → Position X = 50 mm (5 × the 10 mm grid); one Ctrl+Z → 0 |
+| Criterion 23 | 15-frame drag of the X handle → X = 10 mm and it **stays**; one Ctrl+Z → 0 |
+| Cancelled drag | nudge → X = 10, drag, Escape → back to 10, one Ctrl+Z → 0, status "Undid Nudge" |
+| Criterion 29 | orbit remapped to Middle: right-drag changes 0 pixels, middle-drag orbits — no restart |
+| Criterion 28 | quit, relaunch: the dialog shows Orbit = Middle and middle-drag orbits |
+
+The regression was caught by running the same scripted gesture against a build of
+the previous commit: it ended at 10 mm, the new one at 0.
+
+## Verification
+
+    cargo test --workspace                 278 passed, 0 failed, 0 ignored
+    cargo test --workspace --release       278 passed, 0 failed, 0 ignored
+    cargo fmt --all --check                clean
+    python3 tools/criteria_audit.py        all 29 criteria cited by a test
+
+    performance    cold 117 ms, one-dimension edit 6.4 ms, 11,400 triangles
+    boolean_cost   228 triangles, manifold yes
+
+`cargo clippy --workspace --all-targets`: 24 warnings, all stylistic. Three are
+"too many arguments" on the functions this pass extracted, matching the ones
+already beside them.
+
+---
+
 # Change report — 2026-08-18 (second pass)
 
 Closing the open entry in `KNOWN_ISSUES.md` (acceptance criteria 26 and 28), plus
