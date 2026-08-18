@@ -3,3 +3,10 @@
 *.pdb
 # Local packaging artefacts; the release build makes its own in CI.
 *.zip
+
+# The working issue list; KNOWN_ISSUES.md is the tracked one.
+issues.md
+
+# Screen captures taken while working through the issue list.
+*.png
+*.webm
