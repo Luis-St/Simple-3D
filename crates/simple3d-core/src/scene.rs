@@ -138,6 +138,24 @@ pub struct SceneSettings {
     pub notes: String,
     pub grid_spacing: f64,
     pub grid_visible: bool,
+    /// How far one step of a move or resize goes: the increment a drag snaps to
+    /// and one press of a nudge key covers. Its own setting rather than the grid
+    /// spacing, which is about what the ground looks like -- 1 mm is the step
+    /// most people want and a 1 mm grid is unreadable.
+    #[serde(default = "default_snap_step")]
+    pub snap_step: f64,
+    /// The three origin axes, each on its own. An axis running through the model
+    /// is a distraction when it is not the one being worked to.
+    #[serde(default = "all_axes")]
+    pub axes_visible: [bool; 3],
+}
+
+fn default_snap_step() -> f64 {
+    1.0
+}
+
+fn all_axes() -> [bool; 3] {
+    [true; 3]
 }
 
 impl Default for SceneSettings {
@@ -150,6 +168,8 @@ impl Default for SceneSettings {
             notes: String::new(),
             grid_spacing: 10.0,
             grid_visible: true,
+            snap_step: default_snap_step(),
+            axes_visible: all_axes(),
         }
     }
 }
