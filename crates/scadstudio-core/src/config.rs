@@ -156,15 +156,25 @@ pub fn config_dir() -> PathBuf {
 /// Load settings, falling back to defaults for anything missing or unreadable --
 /// a corrupt settings file must never stop the application starting.
 pub fn load_settings() -> AppSettings {
-    std::fs::read_to_string(config_dir().join(SETTINGS_FILE))
+    load_settings_from(&config_dir())
+}
+
+pub fn save_settings(settings: &AppSettings) -> std::io::Result<()> {
+    save_settings_to(&config_dir(), settings)
+}
+
+/// `load_settings` against an explicit directory, so a test can drive the real
+/// startup path against a temp directory instead of the user's own config.
+pub fn load_settings_from(dir: &Path) -> AppSettings {
+    std::fs::read_to_string(dir.join(SETTINGS_FILE))
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
 }
 
-pub fn save_settings(settings: &AppSettings) -> std::io::Result<()> {
-    let dir = config_dir();
-    std::fs::create_dir_all(&dir)?;
+/// `save_settings` against an explicit directory.
+pub fn save_settings_to(dir: &Path, settings: &AppSettings) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
     let text = serde_json::to_string_pretty(settings).expect("settings always serialise");
     std::fs::write(dir.join(SETTINGS_FILE), text + "\n")
 }
