@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/scadstudio-core",
-    "crates/scadstudio-geom",
-    "crates/scadstudio-export",
-    "crates/scadstudio-app",
+    "crates/simple3d-core",
+    "crates/simple3d-geom",
+    "crates/simple3d-export",
+    "crates/simple3d-app",
 ]
 
 # The release workflow rewrites `version` here from the pushed tag with a regex

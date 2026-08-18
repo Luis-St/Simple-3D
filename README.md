@@ -1,4 +1,4 @@
-# ScadStudio
+# Simple 3D
 
 Parametric 3D modelling with exact metric dimensions. Assemble models out of
 primitives (boxes, prisms, spheres, cylinders, cones, pyramids, tori, regular
@@ -20,14 +20,14 @@ from the tag by `.github/workflows/release.yml` and attached to each release:
 
 | Platform | File |
 | --- | --- |
-| Linux x86-64 | `scadstudio-linux-x86_64` (`chmod +x` and run) |
-| Windows x64 | `scadstudio-windows-x86_64.exe` |
+| Linux x86-64 | `simple-3d-linux-x86_64` (`chmod +x` and run) |
+| Windows x64 | `simple-3d-windows-x86_64.exe` |
 
 Put a file named `portable` (or `portable.txt`) beside the executable and it
 keeps its settings there instead of in the user profile — otherwise they live in
-`%APPDATA%\ScadStudio` or `$XDG_CONFIG_HOME/scadstudio`.
+`%APPDATA%\Simple 3D` or `$XDG_CONFIG_HOME/simple3d`.
 
-Projects are `.scadstudio` files (JSON, versioned, human-readable). Passing one
+Projects are `.simple3d` files (JSON, versioned, human-readable). Passing one
 as an argument opens it, so file associations work on both platforms.
 
 ## What it does
@@ -48,7 +48,7 @@ as an argument opens it, so file associations work on both platforms.
   panel layout puts them back. The arrangement survives a restart. The
   orientation cube turns the camera to a face, and its centre dot switches
   perspective and orthographic.
-- **Keys and mouse buttons are yours.** Three presets (ScadStudio default, mesh
+- **Keys and mouse buttons are yours.** Three presets (Simple 3D default, mesh
   editor, CAD) and per-command rebinding, with conflicts named rather than
   silently taken. A rebinding applies to the next gesture, without a restart.
 - **It starts on anything.** The viewport is a from-scratch software rasterizer:
@@ -87,7 +87,7 @@ a full test suite passing over them.
 | `CHANGELOG.md` | Released versions, user-facing |
 | `CHANGES.md` | The engineering report for the most recent pass; earlier ones are in git history |
 | `KNOWN_ISSUES.md` | The issue list — open items, things worth knowing, and a write-up of every fixed bug |
-| `scadstudio-prompt.md` | The full functional specification, including the 29 acceptance criteria |
+| `simple-3d-prompt.md` | The full functional specification, including the 29 acceptance criteria |
 
 ## Why Rust, and why no external CSG/geometry crate
 
@@ -98,7 +98,7 @@ a full test suite passing over them.
   crates.io at *any* published version (0.18–0.20.1) because it has a
   mandatory, non-optional dependency on `core2`, and **every version of
   `core2` has been yanked from crates.io**. Rather than depend on a git fork
-  (which would break reproducible builds), `crates/scadstudio-geom` has its own
+  (which would break reproducible builds), `crates/simple3d-geom` has its own
   small, from-scratch BSP boolean CSG kernel and a QuickHull-style convex hull
   implementation.
 - The viewport is a from-scratch software rasterizer, so the app starts and
@@ -109,19 +109,19 @@ a full test suite passing over them.
 
 ```
 crates/
-  scadstudio-geom/     Vec3, Mesh, primitive generators, BSP CSG boolean
+  simple3d-geom/     Vec3, Mesh, primitive generators, BSP CSG boolean
                        kernel, convex hull, post-boolean mesh repair and
                        flat-region retriangulation. Pure math; depends on
                        none of the others.
-  scadstudio-core/     Domain model: Node/Scene tree, the declarative
+  simple3d-core/     Domain model: Node/Scene tree, the declarative
                        primitive parameter registry, scene evaluation with
                        per-subtree caching and cancellation, undo, clipboard,
                        units, project files, settings, keymaps.
-  scadstudio-export/   STL (binary and ASCII), OBJ, PLY and 3MF writers, with
+  simple3d-export/   STL (binary and ASCII), OBJ, PLY and 3MF writers, with
                        pre-write watertightness verification, progress
                        reporting and cancellation. Includes a minimal zip
                        writer for the 3MF container.
-  scadstudio-app/      eframe/egui desktop UI: outliner, property editor,
+  simple3d-app/      eframe/egui desktop UI: outliner, property editor,
                        software-rasterized viewport, direct-manipulation
                        handles, docks, menus and dialogs, evaluation worker
                        thread.
@@ -142,12 +142,12 @@ Engineering highlights worth knowing about:
 - **Evaluation is deterministic, cached per subtree and cancellable.** The
   spec's 200-primitive scene (fifty assemblies, 100 nested boolean groups)
   evaluates cold in ~0.12 s and updates after a one-dimension edit in ~6 ms.
-  See `crates/scadstudio-core/tests/performance.rs`.
+  See `crates/simple3d-core/tests/performance.rs`.
 - **Boolean output is retriangulated per flat region**, so a plate with a hole,
   a slot and a boss comes out at ~230 triangles rather than the ~1500 a
-  plane-clipping BSP leaves behind. See `crates/scadstudio-geom/src/planar.rs`.
+  plane-clipping BSP leaves behind. See `crates/simple3d-geom/src/planar.rs`.
 - **Pointer gestures are executed by tests**, not only reasoned about:
-  `crates/scadstudio-app/src/gestures.rs` replays real pointer events over a
+  `crates/simple3d-app/src/gestures.rs` replays real pointer events over a
   real frame with `egui_kittest`.
 
 ## Building
@@ -155,12 +155,12 @@ Engineering highlights worth knowing about:
 ```
 cargo build --workspace --release
 cargo test --workspace
-cargo run --release -p scadstudio-app          # or: target/release/scadstudio
-cargo run --release -p scadstudio-app -- my-project.scadstudio
+cargo run --release -p simple3d-app          # or: target/release/simple-3d
+cargo run --release -p simple3d-app -- my-project.simple3d
 
 # What one boolean chain costs, step by step -- the first thing to run when a
 # scene starts feeling slow or an export comes out unexpectedly large.
-cargo run --release -p scadstudio-geom --example boolean_cost
+cargo run --release -p simple3d-geom --example boolean_cost
 ```
 
 The toolchain is pinned by `rust-toolchain.toml`. On Linux the usual X11/Wayland
@@ -176,20 +176,20 @@ attaches the two executables to the GitHub release.
 
 | If you are looking for | Start at |
 |---|---|
-| A new primitive type | `scadstudio-core/src/primitive.rs` — one declaration drives the Add menu, the property editor and the project file |
-| Boolean semantics and operand ordering | `scadstudio-geom/src/lib.rs` (`evaluate_boolean`) |
-| Why a boolean result is the shape it is | `scadstudio-geom/src/csg_bsp.rs`, then `repair.rs` and `planar.rs` |
-| Caching and invalidation | `scadstudio-core/src/eval.rs` (`subtree_key`) |
-| Manipulator handle behaviour and modifiers | `scadstudio-app/src/gizmo.rs` |
-| What a numeric field accepts | `scadstudio-core/src/unit.rs` |
-| The docks, and what moves between them | `scadstudio-app/src/dock.rs` |
-| A colour, a row height or a type size | `scadstudio-app/src/theme.rs` — nothing else names one |
-| An icon, or a primitive's silhouette | `scadstudio-app/src/icon.rs` |
-| Keymap presets, rebinding and conflicts | `scadstudio-core/src/keymap.rs` |
-| Navigation bindings taking effect without a restart | `scadstudio-app/src/panel_viewport.rs` (`nav_gesture`) |
-| Driving a pointer gesture in a test | `scadstudio-app/src/gestures.rs` |
+| A new primitive type | `simple3d-core/src/primitive.rs` — one declaration drives the Add menu, the property editor and the project file |
+| Boolean semantics and operand ordering | `simple3d-geom/src/lib.rs` (`evaluate_boolean`) |
+| Why a boolean result is the shape it is | `simple3d-geom/src/csg_bsp.rs`, then `repair.rs` and `planar.rs` |
+| Caching and invalidation | `simple3d-core/src/eval.rs` (`subtree_key`) |
+| Manipulator handle behaviour and modifiers | `simple3d-app/src/gizmo.rs` |
+| What a numeric field accepts | `simple3d-core/src/unit.rs` |
+| The docks, and what moves between them | `simple3d-app/src/dock.rs` |
+| A colour, a row height or a type size | `simple3d-app/src/theme.rs` — nothing else names one |
+| An icon, or a primitive's silhouette | `simple3d-app/src/icon.rs` |
+| Keymap presets, rebinding and conflicts | `simple3d-core/src/keymap.rs` |
+| Navigation bindings taking effect without a restart | `simple3d-app/src/panel_viewport.rs` (`nav_gesture`) |
+| Driving a pointer gesture in a test | `simple3d-app/src/gestures.rs` |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |
-| File format and migration | `scadstudio-core/src/project.rs` |
+| File format and migration | `simple3d-core/src/project.rs` |
 
 ## Licence
 

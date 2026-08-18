@@ -2339,42 +2339,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scadstudio-app"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "egui_kittest",
- "rfd",
- "scadstudio-core",
- "scadstudio-export",
- "scadstudio-geom",
-]
-
-[[package]]
-name = "scadstudio-core"
-version = "0.1.0"
-dependencies = [
- "scadstudio-geom",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "scadstudio-export"
-version = "0.1.0"
-dependencies = [
- "scadstudio-geom",
-]
-
-[[package]]
-name = "scadstudio-geom"
-version = "0.1.0"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "scoped-tls"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2483,6 +2447,42 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "simple3d-app"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "egui_kittest",
+ "rfd",
+ "simple3d-core",
+ "simple3d-export",
+ "simple3d-geom",
+]
+
+[[package]]
+name = "simple3d-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "simple3d-geom",
+]
+
+[[package]]
+name = "simple3d-export"
+version = "0.1.0"
+dependencies = [
+ "simple3d-geom",
+]
+
+[[package]]
+name = "simple3d-geom"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "slab"

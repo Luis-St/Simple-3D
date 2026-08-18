@@ -24,12 +24,12 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
-            artefact: scadstudio-linux-x86_64
-            binary: scadstudio
+            artefact: simple-3d-linux-x86_64
+            binary: simple-3d
           - target: x86_64-pc-windows-msvc
             os: windows-2022
-            artefact: scadstudio-windows-x86_64.exe
-            binary: scadstudio.exe
+            artefact: simple-3d-windows-x86_64.exe
+            binary: simple-3d.exe
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
         run: cargo test --workspace --release --target ${{ matrix.target }}
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }} -p scadstudio-app
+        run: cargo build --release --target ${{ matrix.target }} -p simple3d-app
 
       - name: Stage the artefact
         shell: bash
