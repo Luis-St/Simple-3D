@@ -62,11 +62,19 @@ pub fn copy(scene: &Scene, selection: &[NodeId]) -> Option<Clip> {
 /// or as a sibling of the selected leaf. Returns the new nodes, which the caller
 /// leaves selected so a nudge or a drag can follow immediately.
 pub fn paste(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>) -> Vec<NodeId> {
+    insert(scene, clip, selection, true)
+}
+
+/// Paste, saying whether the arriving node is a *copy* of something already
+/// here. It is for the clipboard, and it is not for a saved primitive dropped in
+/// from the library: that is not a copy of anything in this project, and calling
+/// it "Bracket copy" would be a lie the user then has to correct.
+pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy: bool) -> Vec<NodeId> {
     let (parent, index) = scene.insertion_point(selection);
     let mut created = Vec::new();
     for (offset, data) in clip.nodes.iter().enumerate() {
         let mut data = data.clone();
-        data.name = suffixed(scene, parent, &data.name);
+        data.name = unique_name(scene, parent, &data.name, as_copy);
         if let Some(id) = scene.import_subtree(&data, parent, index + offset) {
             created.push(id);
         }
@@ -74,12 +82,13 @@ pub fn paste(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>) -> Vec<N
     created
 }
 
-/// `Plate` -> `Plate copy` -> `Plate copy 2`. Only the pasted node's own name is
+/// `Plate` -> `Plate copy` -> `Plate copy 2`, or `Bracket` -> `Bracket 2` when
+/// the node is not a copy of anything. Only the arriving node's own name is
 /// touched; descendants keep theirs, since they are unambiguous inside their
 /// parent.
-fn suffixed(scene: &Scene, parent: NodeId, name: &str) -> String {
+fn unique_name(scene: &Scene, parent: NodeId, name: &str, as_copy: bool) -> String {
     let taken: Vec<&str> = scene.node(parent).children.iter().map(|c| scene.node(*c).name.as_str()).collect();
-    let base = format!("{name} copy");
+    let base = if as_copy { format!("{name} copy") } else { name.to_string() };
     if !taken.contains(&base.as_str()) {
         return base;
     }

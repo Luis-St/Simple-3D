@@ -7,6 +7,7 @@
 use crate::app::App;
 use crate::icon::{self, Glyph};
 use crate::theme::{self, token};
+use simple3d_core::config::Placement;
 use simple3d_core::primitive;
 use simple3d_core::scene::GroupOp;
 
@@ -31,15 +32,83 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         for category in primitive::categories() {
             category_block(app, ui, category, empty);
         }
-        ui.add_space(2.0);
+        saved_block(app, ui);
+        ui.add_space(4.0);
+        placement_row(app, ui);
         ui.horizontal_wrapped(|ui| {
             ui.add_space(theme::metric::PANEL_PAD);
-            // The hint has to say where a shape actually lands, and where it
-            // lands depends on whether a 3D cursor has been placed.
+            // The hint has to say where a shape actually lands, and the
+            // placement choice decides that.
             ui.add(egui::Label::new(theme::hint(crate::app::insertion_hint(app))).selectable(false));
         });
         ui.add_space(4.0);
     });
+}
+
+/// Where a new shape lands: four named answers in one control.
+///
+/// It sits with the shapes rather than in a settings window, because the answer
+/// is part of adding a shape and is worth changing between one shape and the
+/// next.
+fn placement_row(app: &mut App, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.add_space(theme::metric::PANEL_PAD);
+        ui.add(egui::Label::new(theme::hint("Add at")).selectable(false));
+        egui::ComboBox::from_id_salt("palette-placement")
+            .selected_text(theme::value(app.settings.placement.label()))
+            .width(140.0)
+            .show_ui(ui, |ui| {
+                for option in Placement::ALL {
+                    ui.selectable_value(&mut app.settings.placement, option, option.label());
+                }
+            });
+    });
+}
+
+/// Groups and whole projects the user has kept for reuse. Empty until something
+/// has been saved, and then it is the first place to look -- so it goes at the
+/// end of the palette, where a growing list can grow.
+fn saved_block(app: &mut App, ui: &mut egui::Ui) {
+    if app.library.is_empty() {
+        return;
+    }
+    let full = ui.available_width();
+    let (bar, _) = ui.allocate_exact_size(egui::vec2(full, 18.0), egui::Sense::hover());
+    ui.painter().text(
+        egui::pos2(bar.left() + theme::metric::PANEL_PAD + 12.0, bar.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Saved",
+        egui::FontId::proportional(theme::font::SMALL),
+        token::TEXT_LO,
+    );
+
+    let mut add: Option<usize> = None;
+    let mut forget: Option<usize> = None;
+    for (index, entry) in app.library.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.add_space(theme::metric::PANEL_PAD);
+            let response = ui
+                .add(egui::Button::new(theme::value(entry.name.clone())).min_size(egui::vec2(full - 40.0, 20.0)))
+                .on_hover_text("Add it to the scene. Right-click to remove it from the palette.");
+            if response.clicked() {
+                add = Some(index);
+            }
+            response.context_menu(|ui| {
+                if ui.button("Remove from the palette").clicked() {
+                    forget = Some(index);
+                    ui.close();
+                }
+            });
+        });
+    }
+    if let Some(index) = add {
+        let entry = app.library[index].clone();
+        app.add_library_entry(&entry);
+    }
+    if let Some(index) = forget {
+        let entry = app.library[index].clone();
+        app.delete_library_entry(&entry);
+    }
 }
 
 fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, force_open: bool) {

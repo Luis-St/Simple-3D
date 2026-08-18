@@ -9,6 +9,7 @@
 use crate::app::{App, DropTarget, Status};
 use crate::icon::{self, Glyph};
 use crate::theme::{self, metric, token};
+use simple3d_core::keymap::Keymap;
 use simple3d_core::scene::{GroupOp, NodeId, Scene};
 
 /// Where a pointer at `fraction` down a row would drop: into the row's node, or
@@ -323,6 +324,8 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
         }
     }
 
+    context_menu(app, &response, id, is_root);
+
     // Drop indicator.
     if let Some(source) = dragging {
         if response.hovered() {
@@ -355,6 +358,84 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
             }
         }
     }
+}
+
+/// The right-click menu on an outliner row.
+///
+/// Everything here is also a command with a keyboard binding and a place in the
+/// menu bar -- that is deliberate. The menu is not a second way of doing things,
+/// it is the same commands where the tree is, so the shortcut is learned by
+/// reading the row you are already looking at.
+fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: bool) {
+    use simple3d_core::keymap::Command;
+
+    /// One command in the menu. What was picked is collected rather than run on
+    /// the spot: labelling a button borrows the keymap, and running a command
+    /// wants the whole application.
+    fn item(ui: &mut egui::Ui, keymap: &Keymap, chosen: &mut Option<Command>, command: Command, enabled: bool) {
+        if ui.add_enabled(enabled, egui::Button::new(crate::ui::menu_label(keymap, command))).clicked() {
+            *chosen = Some(command);
+            ui.close();
+        }
+    }
+
+    response.context_menu(|ui| {
+        // Right-clicking a row that is not in the selection acts on that row,
+        // not on whatever happened to be selected before -- guessing the other
+        // way round is how a delete takes the wrong node.
+        if !app.is_selected(id) {
+            app.select_only(id);
+        }
+        let hidden = !app.scene.node(id).visible;
+        let multiple = app.selection.len() > 1;
+        let have_clipboard = app.clipboard.is_some();
+
+        // Named for what it does rather than for the flag it flips, because
+        // which of the two "Toggle visibility" means depends on the row.
+        let show_hide = format!(
+            "{}\t{}",
+            if hidden { "Show" } else { "Hide" },
+            app.keymap.shortcut_text(Command::ToggleVisibility)
+        );
+
+        let mut chosen: Option<Command> = None;
+        let mut save_as_primitive = false;
+        let keymap = &app.keymap;
+
+        item(ui, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
+        item(ui, keymap, &mut chosen, Command::Duplicate, !is_root);
+        ui.separator();
+        item(ui, keymap, &mut chosen, Command::Copy, !is_root);
+        item(ui, keymap, &mut chosen, Command::Cut, !is_root);
+        item(ui, keymap, &mut chosen, Command::Paste, have_clipboard);
+        ui.separator();
+        item(ui, keymap, &mut chosen, Command::Group, !is_root);
+        item(ui, keymap, &mut chosen, Command::MoveUp, !is_root);
+        item(ui, keymap, &mut chosen, Command::MoveDown, !is_root);
+        ui.separator();
+        if ui.add_enabled(!is_root, egui::Button::new(show_hide)).clicked() {
+            chosen = Some(Command::ToggleVisibility);
+            ui.close();
+        }
+        ui.separator();
+        if ui
+            .button("Save as primitive\u{2026}")
+            .on_hover_text("Keep this, and everything under it, on the palette to use in any project")
+            .clicked()
+        {
+            save_as_primitive = true;
+            ui.close();
+        }
+        ui.separator();
+        item(ui, &app.keymap, &mut chosen, Command::Delete, !is_root);
+
+        if save_as_primitive {
+            app.save_selection_as_primitive();
+        }
+        if let Some(command) = chosen {
+            app.run(command);
+        }
+    });
 }
 
 fn hover_text(
