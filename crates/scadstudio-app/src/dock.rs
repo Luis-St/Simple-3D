@@ -29,6 +29,12 @@ pub fn drop_index(headers: &[f32], y: f32) -> usize {
     headers.iter().filter(|centre| **centre < y).count()
 }
 
+/// The id of a panel's header bar: the grip that is clicked to roll the panel up
+/// and dragged to move it.
+pub fn header_id(panel: Panel) -> egui::Id {
+    egui::Id::new(("dock-header", panel))
+}
+
 /// Draw one dock. Returns nothing: everything it changes, it changes on `app`.
 pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
     if app.settings.layout.docks_hidden {
@@ -130,7 +136,11 @@ fn strip(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side, from_top: b
 fn header(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side) -> f32 {
     let collapsed = app.settings.layout.is_collapsed(panel);
     let full = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::click_and_drag());
+    // The bar's id names the panel rather than being taken from where the bar
+    // happens to sit, so a header keeps its identity across a move -- and so a
+    // test can find the bar it means to drag.
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::hover());
+    let response = ui.interact(rect, header_id(panel), egui::Sense::click_and_drag());
     let dragging = app.dock_drag.panel == Some(panel);
     let fill = if dragging || response.hovered() { token::SURFACE_3 } else { token::SURFACE_2 };
     ui.painter().rect_filled(rect, 0.0, fill);

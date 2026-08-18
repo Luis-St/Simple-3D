@@ -1086,6 +1086,27 @@ pub fn status_opacity(status: &Status, age: Duration) -> f32 {
     }
 }
 
+impl App {
+    /// Everything the window is, in the order it stacks: the bars, the tool
+    /// rail, the two docks, the viewport, the drag that may be crossing between
+    /// them, and whatever modal is open over the lot.
+    ///
+    /// Separate from `update` so a test can drive a real frame -- the same
+    /// panels in the same order -- against a headless context and replay a
+    /// pointer over it. A gesture that is only ever performed by hand is a
+    /// gesture nothing checks.
+    pub fn ui(&mut self, ctx: &egui::Context) {
+        self.menu_bar(ctx);
+        self.status_bar(ctx);
+        crate::panel_toolrail::show(self, ctx);
+        crate::dock::show(self, ctx, Side::Left);
+        crate::dock::show(self, ctx, Side::Right);
+        panel_viewport::show(self, ctx);
+        crate::dock::resolve_drag(self, ctx);
+        self.modals(ctx);
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // A new message restarts its clock. Watching the value rather than
@@ -1119,14 +1140,7 @@ impl eframe::App for App {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
         self.handle_shortcuts(ctx);
 
-        self.menu_bar(ctx);
-        self.status_bar(ctx);
-        crate::panel_toolrail::show(self, ctx);
-        crate::dock::show(self, ctx, Side::Left);
-        crate::dock::show(self, ctx, Side::Right);
-        panel_viewport::show(self, ctx);
-        crate::dock::resolve_drag(self, ctx);
-        self.modals(ctx);
+        self.ui(ctx);
 
         // Confirmation on quit (spec section 7.4): intercept the window's own
         // close button as well as the Quit command.
@@ -1208,15 +1222,7 @@ mod tests {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 880.0))),
             ..Default::default()
         };
-        let _ = ctx.run(input, |ctx| {
-            app.menu_bar(ctx);
-            app.status_bar(ctx);
-            crate::panel_toolrail::show(app, ctx);
-            crate::dock::show(app, ctx, Side::Left);
-            crate::dock::show(app, ctx, Side::Right);
-            panel_viewport::show(app, ctx);
-            crate::dock::resolve_drag(app, ctx);
-        });
+        let _ = ctx.run(input, |ctx| app.ui(ctx));
     }
 
     #[test]
