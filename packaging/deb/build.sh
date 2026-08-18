@@ -34,6 +34,16 @@ install -Dm644 "$here/$appid.desktop" "$tree/usr/share/applications/$appid.deskt
 install -Dm644 "$here/$appid.svg" "$tree/usr/share/icons/hicolor/scalable/apps/$appid.svg"
 install -Dm644 "$here/$appid.xml" "$tree/usr/share/mime/packages/$appid.xml"
 
+# gdk-pixbuf identifies an SVG by sniffing the first bytes of the file rather
+# than by its extension, and GNOME Shell loads menu icons through gdk-pixbuf.
+# Anything long ahead of the `<svg` tag -- a comment, most easily -- pushes it
+# past what is sniffed, and the icon silently becomes an empty tile. Cheaper to
+# assert here than to discover in the applications menu.
+if [ "$(head -c 200 "$here/$appid.svg" | grep -c '<svg')" -eq 0 ]; then
+    echo "build.sh: <svg> must start within the first 200 bytes of $appid.svg" >&2
+    exit 1
+fi
+
 # The desktop and MIME caches are refreshed by the file triggers that
 # desktop-file-utils and shared-mime-info already declare on these directories,
 # so the package needs no maintainer scripts of its own.
