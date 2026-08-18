@@ -25,7 +25,7 @@ from the tag by `.github/workflows/release.yml` and attached to each release:
 
 Put a file named `portable` (or `portable.txt`) beside the executable and it
 keeps its settings there instead of in the user profile — otherwise they live in
-`%APPDATA%\Simple 3D` or `$XDG_CONFIG_HOME/simple3d`.
+`%APPDATA%\Simple3D` or `$XDG_CONFIG_HOME/simple3d`.
 
 Projects are `.simple3d` files (JSON, versioned, human-readable). Passing one
 as an argument opens it, so file associations work on both platforms.
