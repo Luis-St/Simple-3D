@@ -132,14 +132,6 @@ pub fn twisty(painter: &egui::Painter, centre: egui::Pos2, open: bool, colour: C
     painter.add(egui::Shape::convex_polygon(points, colour, Stroke::NONE));
 }
 
-/// A 1 px divider between panels. Panels are separated by lines, never by
-/// shadows.
-pub fn divider(ui: &mut egui::Ui) {
-    let full = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(full, 1.0), egui::Sense::hover());
-    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0_f32, token::SURFACE_3));
-}
-
 /// The colour chip that stands in front of an axis field, so a row of three
 /// numbers says which is which without spelling out X, Y and Z.
 pub fn axis_colour(axis: usize) -> Color32 {
@@ -150,10 +142,19 @@ pub fn axis_colour(axis: usize) -> Color32 {
     }
 }
 
-/// Paint the small axis chip and return the width it consumed.
-pub fn axis_chip(ui: &mut egui::Ui, axis: usize) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(3.0, metric::INPUT_ROW - 8.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, CornerRadius::same(1), axis_colour(axis));
+/// Width of the axis chip. Wide enough to be grabbed, since it doubles as the
+/// scrub grip for the field behind it -- a 3 px target could not be.
+pub const AXIS_CHIP_WIDTH: f32 = 6.0;
+
+/// Paint the small axis chip. It senses a drag: it is the only label an axis
+/// field has, so it is the label that scrubs it.
+pub fn axis_chip(ui: &mut egui::Ui, axis: usize) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(AXIS_CHIP_WIDTH, metric::INPUT_ROW - 8.0), egui::Sense::drag());
+    let colour = axis_colour(axis);
+    let colour = if response.hovered() || response.dragged() { colour } else { colour.gamma_multiply(0.8) };
+    ui.painter().rect_filled(rect, CornerRadius::same(1), colour);
+    response
 }
 
 /// Install the palette and the metrics on a context. Called once, at startup.

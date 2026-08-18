@@ -22,37 +22,24 @@ pub fn columns(width: f32) -> usize {
 }
 
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
-    // An empty document opens the palette on its own: with nothing in the
-    // scene, the shapes are the only thing worth reading.
+    // An empty document opens every category: with nothing in the scene, the
+    // shapes are the only thing worth reading.
     let empty = app.scene.node(app.scene.root()).children.is_empty();
-    let frame = egui::Frame::NONE.fill(token::SURFACE_1);
-    egui::TopBottomPanel::bottom("primitives")
-        .frame(frame)
-        .resizable(true)
-        .default_height(190.0)
-        .height_range(60.0..=420.0)
-        .show_inside(ui, |ui| {
-            theme::divider(ui);
-            theme::panel_header(ui, "Primitives", |_ui| {});
-            ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, theme::metric::GAP);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.add_space(2.0);
-                for category in primitive::categories() {
-                    category_block(app, ui, category, empty);
-                }
-                if empty {
-                    ui.add_space(2.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.add_space(theme::metric::PANEL_PAD);
-                        ui.add(
-                            egui::Label::new(theme::hint("Pick a shape to start. It lands at the origin."))
-                                .selectable(false),
-                        );
-                    });
-                    ui.add_space(4.0);
-                }
-            });
+    ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, theme::metric::GAP);
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(2.0);
+        for category in primitive::categories() {
+            category_block(app, ui, category, empty);
+        }
+        ui.add_space(2.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(theme::metric::PANEL_PAD);
+            // The hint has to say where a shape actually lands, and where it
+            // lands depends on whether a 3D cursor has been placed.
+            ui.add(egui::Label::new(theme::hint(crate::app::insertion_hint(app))).selectable(false));
         });
+        ui.add_space(4.0);
+    });
 }
 
 fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, force_open: bool) {
@@ -87,8 +74,9 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
         ui.horizontal(|ui| {
             ui.add_space(theme::metric::PANEL_PAD - theme::metric::GAP);
             for spec in chunk {
+                let hint = crate::app::insertion_hint(app);
                 let response = icon::button(ui, Glyph::for_primitive(spec.type_id), TILE, false, true)
-                    .on_hover_text(format!("{}\nAdds a {} at the origin", spec.label, spec.label.to_lowercase()));
+                    .on_hover_text(format!("{}\n{hint}", spec.label));
                 if response.clicked() {
                     app.add_node(Some(spec.type_id), GroupOp::Union);
                 }

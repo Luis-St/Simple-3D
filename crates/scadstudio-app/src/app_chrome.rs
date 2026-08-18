@@ -7,7 +7,7 @@ use crate::gizmo::Mode;
 use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
-use scadstudio_core::config::{self, DisplayMode};
+use scadstudio_core::config::{self, DisplayMode, Panel, Side};
 use scadstudio_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use scadstudio_core::primitive;
 use scadstudio_core::scene::{GroupOp, NodeId};
@@ -283,12 +283,44 @@ impl App {
                 (self.scene.settings.grid_visible, Command::ToggleGrid, "Ground grid"),
                 (self.settings.show_bounding_box, Command::ToggleBoundingBox, "Bounding box"),
                 (self.settings.show_ghosts, Command::ToggleGhosts, "Hidden nodes as ghosts"),
+                (!self.settings.layout.docks_hidden, Command::ToggleDocks, "Side docks"),
             ] {
                 let text = format!("{} {label}\t{}", if on { "*" } else { " " }, self.keymap.shortcut_text(command));
                 if ui.button(text).clicked() {
                     self.run(command);
                     ui.close();
                 }
+            }
+            ui.separator();
+            // Where the panels are is a view decision, so it lives here with the
+            // rest of them rather than in a preferences window.
+            ui.menu_button("Panels", |ui| {
+                for panel in Panel::ALL {
+                    let side = self.settings.layout.side_of(panel);
+                    let collapsed = self.settings.layout.is_collapsed(panel);
+                    ui.menu_button(panel.label(), |ui| {
+                        for option in Side::ALL {
+                            let text = format!("{} {}", if side == option { "*" } else { " " }, option.label());
+                            if ui.button(text).clicked() {
+                                let index = self.settings.layout.panels(option).len();
+                                self.settings.layout.move_to(panel, option, index);
+                                ui.close();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button(if collapsed { "* Rolled up" } else { "  Rolled up" }).clicked() {
+                            self.settings.layout.toggle_collapsed(panel);
+                            ui.close();
+                        }
+                    });
+                }
+            });
+            self.command_item(ui, Command::ResetLayout, true);
+            ui.separator();
+            let text = format!("{} Reduce motion", if self.settings.reduce_motion { "*" } else { " " });
+            if ui.button(text).on_hover_text("Turn the camera to a new view instantly, with no transition").clicked() {
+                self.settings.reduce_motion = !self.settings.reduce_motion;
+                ui.close();
             }
         });
     }
@@ -410,12 +442,20 @@ impl App {
                         Status::Warning(_) => theme::token::ACCENT,
                         _ => theme::token::TEXT_LO,
                     };
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(self.status_text()).size(theme::font::LABEL).color(colour),
-                        )
-                        .selectable(false),
-                    );
+                    // A message fades out once it has had time to be read, so
+                    // the bar stops reporting something that finished minutes
+                    // ago as though it had just happened.
+                    let opacity = crate::app::status_opacity(&self.status, self.status_at.elapsed());
+                    if opacity > 0.0 {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(self.status_text())
+                                    .size(theme::font::LABEL)
+                                    .color(colour.gamma_multiply(opacity)),
+                            )
+                            .selectable(false),
+                        );
+                    }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

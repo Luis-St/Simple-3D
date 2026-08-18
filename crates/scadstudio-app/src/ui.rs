@@ -3,57 +3,122 @@
 
 use scadstudio_core::keymap::{Chord, Command, Keymap};
 use scadstudio_core::primitive::{ParamKind, ParamValue};
-use scadstudio_core::unit::{format_angle, format_length, format_number, parse_number, Unit};
-use std::collections::HashMap;
+use scadstudio_core::unit::{format_angle, format_length, format_number, parse_entry, parse_entry_plain, Unit};
+use std::collections::{HashMap, HashSet};
 
 /// What a text field's content should do to the model when the user commits it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Commit {
     /// A new value to store.
     Value(ParamValue),
-    /// Unparseable: restore the previous value silently, no dialog (spec
-    /// section 4, acceptance criterion 14).
+    /// Unparseable: keep the previous value and mark the field (spec section 4,
+    /// acceptance criterion 14). The text the user typed stays where it is --
+    /// clearing it would throw away the very thing they need to correct.
     Revert,
 }
 
 /// Interpret typed text for a parameter of the given kind. Out-of-range values
 /// are clamped rather than rejected -- the user's intent is clear, and refusing a
 /// number they can see in the field is more confusing than adjusting it.
-pub fn commit_param(text: &str, kind: ParamKind, unit: Unit) -> Commit {
-    let Some(raw) = parse_number(text) else { return Commit::Revert };
+///
+/// `current` is what the parameter holds now, in stored terms (millimetres for
+/// a length, degrees for an angle). It is needed because the field accepts a
+/// *delta*: `+2` means "two more than whatever this is", and with several nodes
+/// selected that resolves differently for each of them.
+pub fn commit_param(text: &str, kind: ParamKind, unit: Unit, current: f64) -> Commit {
+    // A length is the only kind a unit suffix means anything to; an angle typed
+    // as "4 cm" would otherwise silently become forty degrees.
+    let entry = match kind {
+        ParamKind::Length { .. } => parse_entry(text, unit),
+        _ => parse_entry_plain(text),
+    };
+    let Some(entry) = entry else { return Commit::Revert };
+    let current_shown = match kind {
+        ParamKind::Length { .. } => unit.from_mm(current),
+        _ => current,
+    };
+    Commit::Value(value_from_display(kind, unit, entry.resolve(current_shown)))
+}
+
+/// Store a number expressed in the field's own display terms as a value of the
+/// given kind, with the same clamping `commit_param` applies. The scrub gesture
+/// goes through here rather than through text, so a drag and a typed number
+/// cannot disagree about what is in range.
+pub fn value_from_display(kind: ParamKind, unit: Unit, shown: f64) -> ParamValue {
     match kind {
-        ParamKind::Length { min } => {
-            let mm = unit.to_mm(raw);
-            if mm < min {
-                Commit::Value(ParamValue::Length(min))
-            } else {
-                Commit::Value(ParamValue::Length(mm))
-            }
-        }
-        ParamKind::Angle { min, max } => Commit::Value(ParamValue::Angle(raw.clamp(min, max))),
+        ParamKind::Length { min } => ParamValue::Length(unit.to_mm(shown).max(min)),
+        ParamKind::Angle { min, max } => ParamValue::Angle(shown.clamp(min, max)),
         ParamKind::Count { min, max } => {
-            if raw < 0.0 {
-                return Commit::Value(ParamValue::Count(min));
+            if shown < 0.0 {
+                ParamValue::Count(min)
+            } else {
+                ParamValue::Count((shown.round() as u32).clamp(min, max))
             }
-            Commit::Value(ParamValue::Count((raw.round() as u32).clamp(min, max)))
         }
-        ParamKind::Bool => Commit::Value(ParamValue::Bool(raw != 0.0)),
+        ParamKind::Bool => ParamValue::Bool(shown != 0.0),
         ParamKind::Choice { options } => {
-            let index = (raw.max(0.0) as u32).min(options.len().saturating_sub(1) as u32);
-            Commit::Value(ParamValue::Choice(index))
+            ParamValue::Choice((shown.max(0.0) as u32).min(options.len().saturating_sub(1) as u32))
         }
     }
 }
 
-/// A position or rotation component. Positions may be negative, so there is no
-/// minimum; rotations are free too, since a node may be turned any way.
-pub fn commit_length(text: &str, unit: Unit) -> Option<f64> {
-    parse_number(text).map(|v| unit.to_mm(v))
+/// The stored number a parameter holds, for resolving a delta against.
+pub fn param_number(value: ParamValue) -> f64 {
+    match value {
+        ParamValue::Length(mm) => mm,
+        ParamValue::Angle(deg) => deg,
+        ParamValue::Count(n) => n as f64,
+        ParamValue::Choice(n) => n as f64,
+        ParamValue::Bool(b) => b as u8 as f64,
+    }
 }
 
-pub fn commit_angle(text: &str) -> Option<f64> {
-    parse_number(text)
+/// A position component, in stored millimetres. Positions may be negative, so
+/// there is no minimum; `current` is what the field holds now, so `+2` and
+/// `- 5` adjust it.
+pub fn commit_length(text: &str, unit: Unit, current: f64) -> Option<f64> {
+    let entry = parse_entry(text, unit)?;
+    Some(unit.to_mm(entry.resolve(unit.from_mm(current))))
 }
+
+/// A rotation component in degrees. Rotations are free, since a node may be
+/// turned any way.
+pub fn commit_angle(text: &str, current: f64) -> Option<f64> {
+    let entry = parse_entry_plain(text)?;
+    Some(entry.resolve(current))
+}
+
+/// The em dash a field shows when the nodes it covers do not agree. Typing over
+/// it applies to all of them; leaving it alone leaves each as it was.
+pub const MIXED: &str = "\u{2014}";
+
+/// What a field shows for a set of values: the value when they agree, and an em
+/// dash when they do not.
+pub fn shared_text(mut values: impl Iterator<Item = String>) -> String {
+    let Some(first) = values.next() else { return String::new() };
+    if values.all(|v| v == first) {
+        first
+    } else {
+        MIXED.to_string()
+    }
+}
+
+/// How much one horizontal pixel of a label scrub is worth.
+///
+/// Shift is fine, Ctrl is coarse -- the same two modifiers the manipulator uses
+/// for the same two meanings, so there is one thing to learn rather than two.
+pub fn scrub_step(step: f64, fine: bool, coarse: bool) -> f64 {
+    let factor = match (fine, coarse) {
+        (true, _) => 0.1,
+        (false, true) => 10.0,
+        _ => 1.0,
+    };
+    step * factor / PIXELS_PER_STEP
+}
+
+/// Pixels of drag per one step of the value. Slow enough that a value can be
+/// landed on, fast enough that a field can be crossed.
+pub const PIXELS_PER_STEP: f64 = 6.0;
 
 /// How a parameter's current value is shown in its field.
 pub fn show_param(value: ParamValue, unit: Unit) -> String {
@@ -69,8 +134,16 @@ pub fn show_param(value: ParamValue, unit: Unit) -> String {
 /// Text fields keep their own in-progress buffer while focused, so a half-typed
 /// `1.` is not parsed as it is typed and does not fight the value the model
 /// holds. Keyed by widget id.
+///
+/// It also remembers which fields were last given something unreadable. A
+/// rejected field keeps the text that was typed into it and wears a red frame:
+/// the value the model holds is untouched, and the thing the user has to
+/// correct is still in front of them.
 #[derive(Default)]
-pub struct FieldBuffers(HashMap<egui::Id, String>);
+pub struct FieldBuffers {
+    buffers: HashMap<egui::Id, String>,
+    errors: HashSet<egui::Id>,
+}
 
 impl FieldBuffers {
     /// Draw a single-line field. Returns the committed text when the user
@@ -80,37 +153,99 @@ impl FieldBuffers {
     /// edited, which is what makes a manipulator drag update the property editor
     /// live and typing move the handles -- one source of truth, both directions.
     pub fn field(&mut self, ui: &mut egui::Ui, id: egui::Id, current: &str) -> Option<String> {
-        let mut text = self.0.get(&id).cloned().unwrap_or_else(|| current.to_string());
-        let response = ui.add(
-            egui::TextEdit::singleline(&mut text)
-                .id(id)
-                .desired_width(f32::INFINITY)
-                // Tabular figures: a column of dimensions has to line up, and no
-                // digit may change width while a value is being scrubbed.
-                .font(egui::TextStyle::Monospace)
-                .horizontal_align(egui::Align::RIGHT),
-        );
+        let mut text = self.buffers.get(&id).cloned().unwrap_or_else(|| current.to_string());
+        let rejected = self.is_rejected(id);
+        let response = ui
+            .scope(|ui| {
+                if rejected {
+                    // The mark is the field's own frame, so it is impossible to
+                    // read the number without also reading that it was refused.
+                    let visuals = ui.visuals_mut();
+                    visuals.extreme_bg_color = crate::theme::token::DANGER.gamma_multiply(0.16);
+                    let danger = egui::Stroke::new(1.0_f32, crate::theme::token::DANGER);
+                    visuals.widgets.inactive.bg_stroke = danger;
+                    visuals.widgets.hovered.bg_stroke = danger;
+                    visuals.widgets.active.bg_stroke = danger;
+                    visuals.selection.stroke = danger;
+                }
+                ui.add(
+                    egui::TextEdit::singleline(&mut text)
+                        .id(id)
+                        .desired_width(f32::INFINITY)
+                        // Tabular figures: a column of dimensions has to line up,
+                        // and no digit may change width while a value is scrubbed.
+                        .font(egui::TextStyle::Monospace)
+                        .horizontal_align(egui::Align::RIGHT),
+                )
+            })
+            .inner;
         let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if response.has_focus() && !entered {
-            self.0.insert(id, text);
+            self.buffers.insert(id, text);
             return None;
         }
         if response.lost_focus() || entered {
-            let committed = self.0.remove(&id).unwrap_or(text);
+            let committed = self.buffers.remove(&id).unwrap_or(text);
             if committed != current {
                 return Some(committed);
             }
+            self.errors.remove(&id);
             return None;
         }
         if response.changed() {
-            self.0.insert(id, text);
+            self.buffers.insert(id, text);
         }
         None
     }
 
+    /// The field took the value: drop any mark it was wearing.
+    pub fn accept(&mut self, id: egui::Id) {
+        self.errors.remove(&id);
+    }
+
+    /// The field's text could not be read. Put it back and mark it -- never
+    /// clear it, and never touch the model.
+    pub fn reject(&mut self, id: egui::Id, text: String) {
+        self.buffers.insert(id, text);
+        self.errors.insert(id);
+    }
+
+    /// Whether a field is currently wearing the mark.
+    pub fn is_rejected(&self, id: egui::Id) -> bool {
+        self.errors.contains(&id)
+    }
+
     /// Forget every in-progress edit, for when the selection changes underneath.
     pub fn clear(&mut self) {
-        self.0.clear();
+        self.buffers.clear();
+        self.errors.clear();
+    }
+}
+
+/// A drag on a field's *label*, which scrubs the value.
+///
+/// The whole gesture is one undo step: the snapshot is taken when the drag
+/// starts, and every frame after it only touches the scene. Forty snapshots for
+/// one drag would make undo useless exactly where it is needed most. The id is
+/// held so a pointer that runs off one label and over another cannot hand the
+/// gesture to a field the user never grabbed.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Scrub {
+    pub id: Option<egui::Id>,
+}
+
+/// This frame's pointer movement as a change in the field's own units.
+pub fn scrub_delta(dx: f32, step: f64, fine: bool, coarse: bool) -> f64 {
+    dx as f64 * scrub_step(step, fine, coarse)
+}
+
+/// The scrub increment for a field of a given kind, in the unit the field
+/// shows. One millimetre in a millimetre document, one degree, one segment.
+pub fn scrub_increment(kind: ParamKind, unit: Unit) -> f64 {
+    match kind {
+        ParamKind::Length { .. } => unit.from_mm(1.0),
+        ParamKind::Angle { .. } => 1.0,
+        _ => 1.0,
     }
 }
 
@@ -148,6 +283,17 @@ pub fn describe_size(size: scadstudio_geom::Vec3, unit: Unit) -> String {
     )
 }
 
+/// A point, in the display unit, for a message that names one.
+pub fn describe_point(p: scadstudio_geom::Vec3, unit: Unit) -> String {
+    format!(
+        "{}, {}, {} {}",
+        format_length(p.x, unit),
+        format_length(p.y, unit),
+        format_length(p.z, unit),
+        unit.suffix()
+    )
+}
+
 /// The status bar's triangle and node counts.
 pub fn describe_counts(nodes: usize, triangles: usize) -> String {
     format!("{nodes} node{}  {triangles} triangle{}", plural(nodes), plural(triangles))
@@ -179,11 +325,11 @@ mod tests {
     #[test]
     fn a_length_is_read_in_the_display_unit() {
         assert_eq!(
-            commit_param("1.8", ParamKind::Length { min: 0.0 }, Unit::Metre),
+            commit_param("1.8", ParamKind::Length { min: 0.0 }, Unit::Metre, 0.0),
             Commit::Value(ParamValue::Length(1800.0))
         );
         assert_eq!(
-            commit_param("1,8", ParamKind::Length { min: 0.0 }, Unit::Millimetre),
+            commit_param("1,8", ParamKind::Length { min: 0.0 }, Unit::Millimetre, 0.0),
             Commit::Value(ParamValue::Length(1.8))
         );
     }
@@ -192,45 +338,49 @@ mod tests {
     fn garbage_reverts_rather_than_raising_a_dialog() {
         // Spec acceptance criterion 14.
         for bad in ["", "  ", "abc", "1.2.3", "--4", "NaN", "inf", "12mmm"] {
-            assert_eq!(commit_param(bad, ParamKind::Length { min: 0.0 }, Unit::Millimetre), Commit::Revert, "{bad:?}");
-            assert_eq!(commit_length(bad, Unit::Millimetre), None, "{bad:?}");
-            assert_eq!(commit_angle(bad), None, "{bad:?}");
+            assert_eq!(
+                commit_param(bad, ParamKind::Length { min: 0.0 }, Unit::Millimetre, 10.0),
+                Commit::Revert,
+                "{bad:?}"
+            );
+            assert_eq!(commit_length(bad, Unit::Millimetre, 10.0), None, "{bad:?}");
+            assert_eq!(commit_angle(bad, 10.0), None, "{bad:?}");
         }
     }
 
     #[test]
     fn a_dimension_below_its_minimum_is_clamped_not_rejected() {
         let kind = ParamKind::Length { min: 1e-3 };
-        assert_eq!(commit_param("0", kind, Unit::Millimetre), Commit::Value(ParamValue::Length(1e-3)));
-        assert_eq!(commit_param("-5", kind, Unit::Millimetre), Commit::Value(ParamValue::Length(1e-3)));
-        assert_eq!(commit_param("5", kind, Unit::Millimetre), Commit::Value(ParamValue::Length(5.0)));
+        assert_eq!(commit_param("0", kind, Unit::Millimetre, 4.0), Commit::Value(ParamValue::Length(1e-3)));
+        assert_eq!(commit_param("-5", kind, Unit::Millimetre, 4.0), Commit::Value(ParamValue::Length(1e-3)));
+        assert_eq!(commit_param("5", kind, Unit::Millimetre, 4.0), Commit::Value(ParamValue::Length(5.0)));
     }
 
     #[test]
     fn a_count_is_rounded_and_clamped_to_its_range() {
         let kind = ParamKind::Count { min: 3, max: 128 };
-        assert_eq!(commit_param("6", kind, Unit::Millimetre), Commit::Value(ParamValue::Count(6)));
-        assert_eq!(commit_param("6.7", kind, Unit::Millimetre), Commit::Value(ParamValue::Count(7)));
-        assert_eq!(commit_param("1", kind, Unit::Millimetre), Commit::Value(ParamValue::Count(3)));
-        assert_eq!(commit_param("999", kind, Unit::Millimetre), Commit::Value(ParamValue::Count(128)));
-        assert_eq!(commit_param("-4", kind, Unit::Millimetre), Commit::Value(ParamValue::Count(3)));
+        assert_eq!(commit_param("6", kind, Unit::Millimetre, 32.0), Commit::Value(ParamValue::Count(6)));
+        assert_eq!(commit_param("6.7", kind, Unit::Millimetre, 32.0), Commit::Value(ParamValue::Count(7)));
+        assert_eq!(commit_param("1", kind, Unit::Millimetre, 32.0), Commit::Value(ParamValue::Count(3)));
+        assert_eq!(commit_param("999", kind, Unit::Millimetre, 32.0), Commit::Value(ParamValue::Count(128)));
+        assert_eq!(commit_param("-4", kind, Unit::Millimetre, 32.0), Commit::Value(ParamValue::Count(3)));
     }
 
     #[test]
     fn an_angle_is_clamped_to_its_range_and_stays_in_degrees() {
         let kind = ParamKind::Angle { min: 1.0, max: 360.0 };
         // Angles are always degrees regardless of the length unit.
-        assert_eq!(commit_param("90", kind, Unit::Metre), Commit::Value(ParamValue::Angle(90.0)));
-        assert_eq!(commit_param("999", kind, Unit::Millimetre), Commit::Value(ParamValue::Angle(360.0)));
-        assert_eq!(commit_param("0", kind, Unit::Millimetre), Commit::Value(ParamValue::Angle(1.0)));
+        assert_eq!(commit_param("90", kind, Unit::Metre, 45.0), Commit::Value(ParamValue::Angle(90.0)));
+        assert_eq!(commit_param("999", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(360.0)));
+        assert_eq!(commit_param("0", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(1.0)));
     }
 
     #[test]
     fn a_choice_index_cannot_run_off_the_end() {
         let kind = ParamKind::Choice { options: &["Across corners", "Across flats"] };
-        assert_eq!(commit_param("1", kind, Unit::Millimetre), Commit::Value(ParamValue::Choice(1)));
-        assert_eq!(commit_param("7", kind, Unit::Millimetre), Commit::Value(ParamValue::Choice(1)));
-        assert_eq!(commit_param("-1", kind, Unit::Millimetre), Commit::Value(ParamValue::Choice(0)));
+        assert_eq!(commit_param("1", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Choice(1)));
+        assert_eq!(commit_param("7", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Choice(1)));
+        assert_eq!(commit_param("-1", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Choice(0)));
     }
 
     #[test]
@@ -250,7 +400,11 @@ mod tests {
                 ParamValue::Choice(_) => ParamKind::Choice { options: &["a", "b"] },
                 ParamValue::Bool(_) => ParamKind::Bool,
             };
-            assert_eq!(commit_param(&shown, kind, unit), Commit::Value(value), "{shown:?} in {unit:?}");
+            assert_eq!(
+                commit_param(&shown, kind, unit, param_number(value)),
+                Commit::Value(value),
+                "{shown:?} in {unit:?}"
+            );
         }
     }
 

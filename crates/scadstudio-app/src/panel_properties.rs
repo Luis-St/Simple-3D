@@ -65,35 +65,114 @@ fn row_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     response
 }
 
-pub fn show(app: &mut App, ctx: &egui::Context) {
-    let mut width = app.settings.properties_width;
-    let frame = egui::Frame::NONE.fill(token::SURFACE_1);
-    egui::SidePanel::right("properties")
-        .frame(frame)
-        .resizable(true)
-        .default_width(width)
-        .width_range(240.0..=620.0)
-        .show(ctx, |ui| {
-            width = ui.available_width();
-            ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                let Some(id) = app.primary() else {
-                    document(app, ui);
-                    return;
-                };
-                section(ui, "Object", |ui| common(app, ui, id));
-                match app.scene.node(id).body.clone() {
-                    Body::Group { op } => section(ui, "Boolean", |ui| group(app, ui, id, op)),
-                    Body::Primitive { type_id, .. } => {
-                        let note = scadstudio_core::primitive::lookup(&type_id).map(|s| s.label).unwrap_or("");
-                        section_titled(ui, "Dimensions", note, |ui| primitive(app, ui, id, &type_id));
-                    }
-                }
-                section(ui, "Transform", |ui| placement(app, ui, id));
-                section(ui, "Measured", |ui| measurements(app, ui, id));
-            });
-        });
-    app.settings.properties_width = width;
+/// What a scrub gesture did this frame.
+struct Scrubbed {
+    /// True on the frame the drag began: the one frame that takes an undo
+    /// snapshot, so the whole drag collapses into a single step.
+    started: bool,
+    /// Change to apply, in the unit the field displays.
+    delta: f64,
+}
+
+/// A label the value can be dragged from. Returns `Some` on every frame of a
+/// drag, including the first.
+///
+/// The label is the grip rather than the field itself because the field has to
+/// stay a text field: a click in it must put a caret where it was clicked, and a
+/// drag in it must select text. The label next to it has no such job, which is
+/// what makes it free to carry the gesture.
+fn scrub_grip(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, step: f64) -> Option<Scrubbed> {
+    let id = response.id;
+    if response.hovered() || app.scrub.id == Some(id) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if response.drag_started() {
+        app.scrub.id = Some(id);
+    }
+    if app.scrub.id != Some(id) {
+        return None;
+    }
+    if !response.dragged() {
+        app.scrub.id = None;
+        return None;
+    }
+    let (fine, coarse) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
+    Some(Scrubbed {
+        started: response.drag_started(),
+        delta: ui::scrub_delta(response.drag_delta().x, step, fine, coarse),
+    })
+}
+
+/// A label that scrubs: the same row label, but sensing a drag.
+fn scrub_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, theme::metric::INPUT_ROW), egui::Sense::drag());
+    let colour = if response.hovered() || response.dragged() { token::TEXT_HI } else { token::TEXT_LO };
+    ui.painter().text(
+        egui::pos2(rect.left(), rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        text,
+        egui::FontId::proportional(theme::font::LABEL),
+        colour,
+    );
+    response
+}
+
+/// The panel's contents, without the dock around them, so the same panel can be
+/// drawn in either dock.
+pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        // Everything the panel edits, primary last -- the same order the
+        // selection itself is in, so "the one being edited" is unambiguous.
+        let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
+        let Some(primary) = app.primary() else {
+            document(app, ui);
+            return;
+        };
+        section(ui, "Object", |ui| common(app, ui, &targets));
+        match shared_type(app, &targets) {
+            Some(type_id) => {
+                let label = scadstudio_core::primitive::lookup(&type_id).map(|s| s.label).unwrap_or("");
+                let note =
+                    if targets.len() > 1 { format!("{} \u{00D7} {label}", targets.len()) } else { label.to_string() };
+                section_titled(ui, "Dimensions", &note, |ui| primitive(app, ui, &targets, &type_id));
+            }
+            None => match app.scene.node(primary).body.clone() {
+                Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
+                // A selection of different types has no shared dimension to
+                // offer. Saying so beats an empty panel or a set of fields that
+                // would edit only one of them without saying which.
+                _ => section(ui, "Dimensions", |ui| {
+                    ui.add(
+                        egui::Label::new(theme::hint(
+                            "The selection mixes shapes, so there is no dimension they share. Transform below still \
+                             applies to all of them.",
+                        ))
+                        .selectable(false),
+                    );
+                }),
+            },
+        }
+        section(ui, "Transform", |ui| placement(app, ui, &targets));
+        section(ui, "Measured", |ui| measurements(app, ui, primary, targets.len()));
+    });
+}
+
+/// The primitive type every selected node has, or `None` when they are not all
+/// the same kind of thing. This is what decides whether a Dimensions panel can
+/// speak for the whole selection.
+fn shared_type(app: &App, targets: &[NodeId]) -> Option<String> {
+    let mut found: Option<String> = None;
+    for id in targets {
+        let Body::Primitive { type_id, .. } = &app.scene.node(*id).body else { return None };
+        match &found {
+            Some(first) if first != type_id => return None,
+            Some(_) => {}
+            None => found = Some(type_id.clone()),
+        }
+    }
+    found
 }
 
 /// With nothing selected the dock shows the document, not a set of disabled
@@ -159,16 +238,22 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-fn common(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
+    let Some(&id) = targets.last() else { return };
     let node = app.scene.node(id);
     let is_root = id == app.scene.root();
     let mut name = node.name.clone();
-    let mut visible = node.visible;
+    let mut visible = targets.iter().all(|t| app.scene.node(*t).visible);
     let mut anchor = node.anchor;
+    let many = targets.len() > 1;
 
     ui.horizontal(|ui| {
         row_label(ui, "Name");
-        if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
+        if many {
+            // Renaming several nodes to one name would make the outliner
+            // unreadable, so the field says what is selected instead.
+            ui.add(egui::Label::new(theme::value(format!("{} objects selected", targets.len()))).selectable(false));
+        } else if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
             app.edit("Rename", Some(&format!("name:{id}")));
             if let Some(node) = app.scene.get_mut(id) {
                 node.name = name;
@@ -180,8 +265,10 @@ fn common(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         row_label(ui, "Visible");
         if ui.add_enabled(!is_root, egui::Checkbox::new(&mut visible, "")).changed() {
             app.edit("Toggle visibility", None);
-            if let Some(node) = app.scene.get_mut(id) {
-                node.visible = visible;
+            for target in targets {
+                if let Some(node) = app.scene.get_mut(*target) {
+                    node.visible = visible;
+                }
             }
         }
     });
@@ -189,12 +276,16 @@ fn common(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.horizontal(|ui| {
         row_label(ui, "Anchor")
             .on_hover_text("Where this node's origin sits. Changing it moves the origin, never the shape.");
+        let mixed = targets.iter().any(|t| app.scene.node(*t).anchor != anchor);
         for option in Anchor::ALL {
-            if ui.selectable_label(anchor == option, option.label()).clicked() && anchor != option {
+            let showing = !mixed && anchor == option;
+            if ui.selectable_label(showing, option.label()).clicked() && (mixed || anchor != option) {
                 anchor = option;
                 app.edit("Anchor", None);
-                if let Some(node) = app.scene.get_mut(id) {
-                    node.anchor = anchor;
+                for target in targets {
+                    if let Some(node) = app.scene.get_mut(*target) {
+                        node.anchor = anchor;
+                    }
                 }
             }
         }
@@ -279,11 +370,17 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     }
 }
 
-fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
+/// What one node currently holds for a parameter.
+fn param_value(app: &App, id: NodeId, key: &str, default: ParamValue) -> ParamValue {
+    app.scene.node(id).params().and_then(|p| p.get(key).copied()).unwrap_or(default)
+}
+
+fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str) {
     let Some(spec) = scadstudio_core::primitive::lookup(type_id) else {
         ui.colored_label(token::DANGER, format!("Unknown primitive type \"{type_id}\""));
         return;
     };
+    let Some(&id) = targets.last() else { return };
     let unit = app.unit();
     let params = app.scene.node(id).params().cloned().unwrap_or_default();
 
@@ -304,8 +401,10 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                             {
                                 chosen = index as u32;
                                 app.edit("Set measurement", None);
-                                set_param(app, id, param.key, ParamValue::Choice(chosen));
-                                sync_wall_mode(app, id, param.key, chosen);
+                                for target in targets {
+                                    set_param(app, *target, param.key, ParamValue::Choice(chosen));
+                                    sync_wall_mode(app, *target, param.key, chosen);
+                                }
                             }
                         }
                     });
@@ -317,13 +416,21 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                     let mut on = value.as_bool();
                     if ui.checkbox(&mut on, "").changed() {
                         app.edit("Set flag", None);
-                        set_param(app, id, param.key, ParamValue::Bool(on));
+                        for target in targets {
+                            set_param(app, *target, param.key, ParamValue::Bool(on));
+                        }
                     }
                 });
             }
             kind => {
                 ui.horizontal(|ui| {
-                    row_label(ui, param.label);
+                    // The label is the scrub grip: dragging it changes the value
+                    // without going near the keyboard.
+                    let grip = scrub_label(ui, param.label);
+                    let step = ui::scrub_increment(kind, unit);
+                    if let Some(scrubbed) = scrub_grip(app, ui, &grip, step) {
+                        scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
+                    }
                     // A lock toggle where the type offers one: a sphere's three
                     // diameters, a cylinder's two.
                     if param.lock_group != 0 {
@@ -351,7 +458,11 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                     let suffix_width = if suffix.is_empty() { 0.0 } else { 26.0 };
                     let field_width = (ui.available_width() - suffix_width).max(40.0);
                     let field_id = ui.id().with((id, param.key));
-                    let shown = ui::show_param(value, unit);
+                    // With several nodes selected, a field shows the value they
+                    // agree on and an em dash when they do not.
+                    let shown = ui::shared_text(
+                        targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)),
+                    );
                     let committed = ui
                         .scope(|ui| {
                             ui.set_width(field_width);
@@ -362,17 +473,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                         ui.add(egui::Label::new(theme::hint(suffix)).selectable(false));
                     }
                     if let Some(text) = committed {
-                        match ui::commit_param(&text, kind, unit) {
-                            Commit::Value(new_value) => {
-                                app.edit(&format!("Set {}", param.label), Some(&format!("param:{id}:{}", param.key)));
-                                set_param(app, id, param.key, new_value);
-                                apply_lock(app, id, param.lock_group, param.key, new_value);
-                            }
-                            // Silently restore the previous value: no dialog.
-                            Commit::Revert => {
-                                app.status = Status::Info(format!("\"{text}\" is not a number"));
-                            }
-                        }
+                        set_shared_param(app, targets, param, kind, unit, field_id, text);
                     }
                 });
             }
@@ -386,8 +487,10 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
             if ui.checkbox(&mut overridden, "").changed() {
                 app.edit("Segment override", None);
                 let default = app.scene.settings.default_segments;
-                if let Some(node) = app.scene.get_mut(id) {
-                    node.segments = if overridden { Some(default) } else { None };
+                for target in targets {
+                    if let Some(node) = app.scene.get_mut(*target) {
+                        node.segments = if overridden { Some(default) } else { None };
+                    }
                 }
             }
             let default = app.scene.settings.default_segments;
@@ -396,8 +499,10 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
                     let mut value = current as f64;
                     if ui.add(egui::DragValue::new(&mut value).range(3.0..=512.0).max_decimals(0)).changed() {
                         app.edit("Segments", Some(&format!("segments:{id}")));
-                        if let Some(node) = app.scene.get_mut(id) {
-                            node.segments = Some(value.round() as u32);
+                        for target in targets {
+                            if let Some(node) = app.scene.get_mut(*target) {
+                                node.segments = Some(value.round() as u32);
+                            }
                         }
                     }
                 }
@@ -409,74 +514,225 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, id: NodeId, type_id: &str) {
     }
 }
 
-fn placement(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+/// Apply one typed value to every selected node.
+///
+/// An absolute entry gives them all the same number; a delta (`+2`) is resolved
+/// against each node's own value, which is the whole point of having one --
+/// "two millimetres wider" means something different for every shape it is
+/// applied to.
+///
+/// A value none of them can read leaves every one of them alone and marks the
+/// field. Nothing partial: the selection does not end up half-edited.
+fn set_shared_param(
+    app: &mut App,
+    targets: &[NodeId],
+    param: &scadstudio_core::primitive::ParamSpec,
+    kind: ParamKind,
+    unit: Unit,
+    field_id: egui::Id,
+    text: String,
+) {
+    // The em dash is what the field shows for a disagreement; leaving it there
+    // and tabbing away must not write it to anything.
+    if text.trim() == ui::MIXED {
+        app.fields.accept(field_id);
+        return;
+    }
+    let mut resolved: Vec<(NodeId, ParamValue)> = Vec::new();
+    for target in targets {
+        let current = ui::param_number(param_value(app, *target, param.key, param.default));
+        match ui::commit_param(&text, kind, unit, current) {
+            Commit::Value(value) => resolved.push((*target, value)),
+            Commit::Revert => {
+                app.fields.reject(field_id, text.clone());
+                app.status = Status::Info(format!("\"{text}\" is not a number this field can take"));
+                return;
+            }
+        }
+    }
+    app.fields.accept(field_id);
+    let coalesce = format!("param:{:?}:{}", targets.last(), param.key);
+    app.edit(&format!("Set {}", param.label), Some(&coalesce));
+    for (target, value) in resolved {
+        set_param(app, target, param.key, value);
+        apply_lock(app, target, param.lock_group, param.key, value);
+    }
+}
+
+fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let unit = app.unit();
-    let node = app.scene.node(id);
-    let position = node.position;
-    let rotation = node.rotation;
+    let Some(&primary) = targets.last() else { return };
 
     // Three columns of numbers, each fronted by its axis colour: the row says
-    // which axis is which without spending a character on saying so.
-    axis_row(ui, &format!("Position ({})", unit.suffix()), |ui, axis| {
-        let field_id = ui.id().with((id, "pos", axis));
-        let shown = format_length(component(position, axis), unit);
+    // which axis is which without spending a character on saying so. The chip
+    // is also that field's scrub grip -- it is the only label the field has.
+    axis_row(app, ui, &format!("Position ({})", unit.suffix()), |app, ui, axis, grip| {
+        if let Some(scrubbed) = scrub_grip(app, ui, grip, unit.from_mm(app.move_snap())) {
+            scrub_transform(app, targets, axis, unit.to_mm(scrubbed.delta), false, scrubbed.started);
+        }
+        let field_id = ui.id().with((primary, "pos", axis));
+        let shown =
+            ui::shared_text(targets.iter().map(|t| format_length(component(app.scene.node(*t).position, axis), unit)));
         if let Some(text) = app.fields.field(ui, field_id, &shown) {
-            match ui::commit_length(&text, unit) {
-                Some(value) => {
-                    app.edit("Set position", Some(&format!("pos:{id}:{axis}")));
-                    if let Some(node) = app.scene.get_mut(id) {
-                        let mut p = node.position;
-                        set_component(&mut p, axis, value);
-                        node.position = p;
+            if text.trim() == ui::MIXED {
+                app.fields.accept(field_id);
+                return;
+            }
+            let mut resolved: Vec<(NodeId, f64)> = Vec::new();
+            for target in targets {
+                let current = component(app.scene.node(*target).position, axis);
+                match ui::commit_length(&text, unit, current) {
+                    Some(value) => resolved.push((*target, value)),
+                    None => {
+                        app.fields.reject(field_id, text.clone());
+                        app.status = Status::Info(format!("\"{text}\" is not a number this field can take"));
+                        return;
                     }
                 }
-                None => app.status = Status::Info(format!("\"{text}\" is not a number")),
+            }
+            app.fields.accept(field_id);
+            app.edit("Set position", Some(&format!("pos:{primary}:{axis}")));
+            for (target, value) in resolved {
+                if let Some(node) = app.scene.get_mut(target) {
+                    let mut p = node.position;
+                    set_component(&mut p, axis, value);
+                    node.position = p;
+                }
             }
         }
     });
 
-    axis_row(ui, "Rotation (deg)", |ui, axis| {
-        let field_id = ui.id().with((id, "rot", axis));
-        let shown = format_angle(component(rotation, axis));
+    axis_row(app, ui, "Rotation (deg)", |app, ui, axis, grip| {
+        if let Some(scrubbed) = scrub_grip(app, ui, grip, app.settings.rotate_snap_deg.max(1.0)) {
+            scrub_transform(app, targets, axis, scrubbed.delta, true, scrubbed.started);
+        }
+        let field_id = ui.id().with((primary, "rot", axis));
+        let shown = ui::shared_text(targets.iter().map(|t| format_angle(component(app.scene.node(*t).rotation, axis))));
         if let Some(text) = app.fields.field(ui, field_id, &shown) {
-            match ui::commit_angle(&text) {
-                Some(value) => {
-                    app.edit("Set rotation", Some(&format!("rot:{id}:{axis}")));
-                    if let Some(node) = app.scene.get_mut(id) {
-                        let mut r = node.rotation;
-                        set_component(&mut r, axis, value);
-                        node.rotation = r;
+            if text.trim() == ui::MIXED {
+                app.fields.accept(field_id);
+                return;
+            }
+            let mut resolved: Vec<(NodeId, f64)> = Vec::new();
+            for target in targets {
+                let current = component(app.scene.node(*target).rotation, axis);
+                match ui::commit_angle(&text, current) {
+                    Some(value) => resolved.push((*target, value)),
+                    None => {
+                        app.fields.reject(field_id, text.clone());
+                        app.status = Status::Info(format!("\"{text}\" is not a number this field can take"));
+                        return;
                     }
                 }
-                None => app.status = Status::Info(format!("\"{text}\" is not a number")),
+            }
+            app.fields.accept(field_id);
+            app.edit("Set rotation", Some(&format!("rot:{primary}:{axis}")));
+            for (target, value) in resolved {
+                if let Some(node) = app.scene.get_mut(target) {
+                    let mut r = node.rotation;
+                    set_component(&mut r, axis, value);
+                    node.rotation = r;
+                }
             }
         }
     });
 
     ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
+    if targets.len() > 1 {
+        ui.add(
+            egui::Label::new(theme::hint(
+                "A value applies to all of them; a delta (\u{201C}+2\u{201D}, \u{201C}- 5\u{201D}) applies to each \
+                 from where it already is.",
+            ))
+            .selectable(false),
+        );
+    }
 }
 
-/// One labelled row of three axis fields, each preceded by its colour chip.
-fn axis_row(ui: &mut egui::Ui, label: &str, mut field: impl FnMut(&mut egui::Ui, usize)) {
+/// One labelled row of three axis fields, each preceded by its colour chip. The
+/// chip is handed to the caller as that field's scrub grip.
+fn axis_row(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    label: &str,
+    mut field: impl FnMut(&mut App, &mut egui::Ui, usize, &egui::Response),
+) {
     ui.horizontal(|ui| {
         row_label(ui, label);
         // Three fields, three chips, and the gaps between them all have to come
         // out of the row: getting this wrong pushes the Z field off the panel.
         let available = ui.available_width();
-        let chips = 3.0 * (3.0 + ui.spacing().item_spacing.x);
+        let chips = 3.0 * (theme::AXIS_CHIP_WIDTH + ui.spacing().item_spacing.x);
         let gaps = 2.0 * ui.spacing().item_spacing.x;
         let each = ((available - chips - gaps) / 3.0).max(30.0);
         for axis in 0..3 {
-            theme::axis_chip(ui, axis);
+            let grip = theme::axis_chip(ui, axis);
             ui.scope(|ui| {
                 ui.set_width(each);
-                field(ui, axis);
+                field(app, ui, axis, &grip);
             });
         }
     });
 }
 
-fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+/// One frame of a scrub on a dimension.
+///
+/// `started` is the only frame that takes an undo snapshot. Every frame after
+/// it goes through `touch`, which re-evaluates without recording -- so a drag
+/// across forty pixels is one step to undo, not forty.
+fn scrub_param(
+    app: &mut App,
+    targets: &[NodeId],
+    param: &scadstudio_core::primitive::ParamSpec,
+    kind: ParamKind,
+    unit: Unit,
+    delta: f64,
+    started: bool,
+) {
+    if started {
+        app.edit(&format!("Scrub {}", param.label), None);
+    }
+    for target in targets {
+        let current = ui::param_number(param_value(app, *target, param.key, param.default));
+        let shown = match kind {
+            ParamKind::Length { .. } => unit.from_mm(current),
+            _ => current,
+        };
+        let next = ui::value_from_display(kind, unit, shown + delta);
+        set_param(app, *target, param.key, next);
+        apply_lock(app, *target, param.lock_group, param.key, next);
+    }
+    app.touch();
+    app.fields.clear();
+}
+
+/// One frame of a scrub on a position (millimetres) or a rotation (degrees).
+fn scrub_transform(app: &mut App, targets: &[NodeId], axis: usize, delta: f64, rotation: bool, started: bool) {
+    if started {
+        app.edit(if rotation { "Scrub rotation" } else { "Scrub position" }, None);
+    }
+    for target in targets {
+        let Some(node) = app.scene.get_mut(*target) else { continue };
+        let mut v = if rotation { node.rotation } else { node.position };
+        let next = crate::gizmo::get_axis(v, axis) + delta;
+        set_component(&mut v, axis, next);
+        if rotation {
+            node.rotation = v;
+        } else {
+            node.position = v;
+        }
+    }
+    app.touch();
+    app.fields.clear();
+}
+
+fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selected: usize) {
+    if selected > 1 {
+        ui.add(
+            egui::Label::new(theme::hint(format!("Measured from {}, the last one selected.", app.scene.node(id).name)))
+                .selectable(false),
+        );
+    }
     let unit = app.unit();
     match app.evaluated.node_world_bounds.get(&id).copied() {
         Some((lo, hi)) => {
@@ -609,6 +865,162 @@ mod tests {
     use super::*;
     use scadstudio_core::primitive;
     use scadstudio_core::scene::Scene;
+
+    /// An `App` on a headless context, pointed at a throwaway config directory
+    /// so a test cannot read or write the developer's own.
+    fn headless_app() -> App {
+        let dir = std::env::temp_dir().join(format!(
+            "scadstudio-props-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        App::with_config_dir(&egui::Context::default(), None, dir)
+    }
+
+    /// Two plates of different widths, selected together.
+    fn two_plates(app: &mut App) -> (NodeId, NodeId) {
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("plate", root, 0).unwrap();
+        let b = app.scene.add_primitive("plate", root, 1).unwrap();
+        set_param(app, a, "width", ParamValue::Length(40.0));
+        set_param(app, b, "width", ParamValue::Length(60.0));
+        app.selection = vec![a, b];
+        (a, b)
+    }
+
+    fn width_of(app: &App, id: NodeId) -> f64 {
+        app.scene.node(id).params().unwrap().num("width")
+    }
+
+    fn width_spec() -> &'static primitive::ParamSpec {
+        primitive::lookup("plate").unwrap().params.iter().find(|p| p.key == "width").unwrap()
+    }
+
+    #[test]
+    fn a_field_over_a_multi_selection_shows_the_shared_value_or_an_em_dash() {
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        let unit = app.unit();
+        let shown = |app: &App, ids: &[NodeId]| {
+            ui::shared_text(
+                ids.iter().map(|t| ui::show_param(param_value(app, *t, "width", ParamValue::Length(0.0)), unit)),
+            )
+        };
+        assert_eq!(shown(&app, &[a, b]), ui::MIXED, "two different widths must not claim to be one");
+        assert_eq!(shown(&app, &[a]), "40");
+        set_param(&mut app, b, "width", ParamValue::Length(40.0));
+        assert_eq!(shown(&app, &[a, b]), "40", "two equal widths are one value, not a dash");
+    }
+
+    #[test]
+    fn an_absolute_value_applies_to_the_whole_selection_and_a_delta_applies_per_node() {
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        let unit = app.unit();
+        let param = width_spec();
+        let field = egui::Id::new("width-field");
+
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "25".into());
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (25.0, 25.0), "an absolute value is one value for all");
+
+        set_param(&mut app, a, "width", ParamValue::Length(40.0));
+        set_param(&mut app, b, "width", ParamValue::Length(60.0));
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "+2".into());
+        assert_eq!(
+            (width_of(&app, a), width_of(&app, b)),
+            (42.0, 62.0),
+            "a delta is relative to each node's own value"
+        );
+
+        // And the field's other tricks reach the model the same way.
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "4cm".into());
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (40.0, 40.0), "a value in another unit did not convert");
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "12+8".into());
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (20.0, 20.0), "an expression was not evaluated");
+    }
+
+    #[test]
+    fn an_em_dash_left_alone_edits_nothing() {
+        // Tabbing through a panel of mixed values must not flatten them.
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        let unit = app.unit();
+        let param = width_spec();
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, egui::Id::new("f"), ui::MIXED.into());
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (40.0, 60.0));
+    }
+
+    #[test]
+    fn a_value_that_cannot_be_read_leaves_every_node_alone_and_marks_the_field() {
+        // Acceptance criterion 14, and the design's rule that the typed text
+        // stays put: it is the thing the user has to correct.
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        let unit = app.unit();
+        let param = width_spec();
+        let field = egui::Id::new("width-field");
+        let before = app.history.revision();
+
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "wide-ish".into());
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (40.0, 60.0), "a rejected entry changed the model");
+        assert_eq!(app.history.revision(), before, "a rejected entry took an undo step");
+        assert!(app.fields.is_rejected(field), "the field was not marked");
+
+        // Correcting it clears the mark.
+        set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "30".into());
+        assert!(!app.fields.is_rejected(field));
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (30.0, 30.0));
+    }
+
+    #[test]
+    fn a_whole_scrub_is_one_undo_step() {
+        // Forty snapshots for one drag would make undo useless exactly where it
+        // is needed most.
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        let unit = app.unit();
+        let param = width_spec();
+        let steps = app.history.undo_len();
+
+        for frame in 0..40 {
+            scrub_param(&mut app, &[a, b], param, param.kind, unit, 0.5, frame == 0);
+        }
+        assert_eq!(width_of(&app, a), 60.0, "the scrub did not accumulate");
+        assert_eq!(width_of(&app, b), 80.0, "each node scrubs from its own value");
+        assert_eq!(app.history.undo_len(), steps + 1, "the drag left more than one step to undo");
+
+        app.history.undo(&mut app.scene);
+        assert_eq!((width_of(&app, a), width_of(&app, b)), (40.0, 60.0), "one undo did not put the drag back");
+    }
+
+    #[test]
+    fn a_position_scrub_moves_every_selected_node_by_the_same_amount() {
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        app.scene.get_mut(b).unwrap().position = Vec3::new(10.0, 0.0, 0.0);
+        for frame in 0..10 {
+            scrub_transform(&mut app, &[a, b], 0, 1.0, false, frame == 0);
+        }
+        assert_eq!(app.scene.node(a).position.x, 10.0);
+        assert_eq!(app.scene.node(b).position.x, 20.0);
+        app.history.undo(&mut app.scene);
+        assert_eq!(app.scene.node(a).position.x, 0.0);
+        assert_eq!(app.scene.node(b).position.x, 10.0);
+    }
+
+    #[test]
+    fn a_selection_of_one_kind_of_shape_gets_a_dimensions_panel_and_a_mixed_one_does_not() {
+        let mut app = headless_app();
+        let (a, b) = two_plates(&mut app);
+        assert_eq!(shared_type(&app, &[a, b]).as_deref(), Some("plate"));
+        let root = app.scene.root();
+        let sphere = app.scene.add_primitive("sphere", root, 2).unwrap();
+        assert_eq!(shared_type(&app, &[a, sphere]), None, "a plate and a sphere share no dimension");
+        let group = app.scene.add_group(GroupOp::Union, root, 3);
+        assert_eq!(shared_type(&app, &[group]), None, "a group has no dimensions of its own");
+    }
 
     #[test]
     fn every_registry_parameter_maps_to_a_field_kind_the_editor_draws() {

@@ -6,15 +6,36 @@ wrong. There is no separate tracker.
 
 ## Open
 
-Nothing. The two entries that were here are fixed and written up below, the
-audit (`python3 tools/criteria_audit.py`) reports all 29 acceptance criteria
-asserted by a test that names them, and the fixes were confirmed by driving the
-running application, not only by their tests.
+### Every pointer gesture added this pass is unexecuted
 
-That is a statement about this moment, checked at this moment. It is not a claim
-that the code is without fault -- the drag bug written up below had been shipping
-for as long as drags have existed, and no test or reading of the code found it;
-driving the app did.
+The fifth pass added four gestures that a pointer has to perform, and **not one
+of them has ever been run**: dragging a panel header between the docks,
+dragging a field label to scrub its value, clicking a face of the view cube, and
+Shift+right-click to place the 3D cursor.
+
+What *is* covered is the arithmetic under each of them, as pure functions with
+their own tests -- `dock::drop_index`, `Layout::move_to`, `ui::scrub_delta`,
+`view::cube_face_at`, `panel_properties::scrub_param` and `scrub_transform` --
+plus a headless whole-frame draw of every arrangement they can leave the window
+in. What is *not* covered is the wiring between a real pointer and those
+functions: which widget claims the drag, whether a press on the cube also orbits
+the camera behind it, whether a header click and a header drag can be told
+apart.
+
+That gap is not a judgement about how likely the wiring is to be right. It is
+that there is no `xdotool` on this machine and egui's test harness is not in the
+dependency tree, so there is no way to press a button at a coordinate -- and the
+last two passes have both found faults that every test kept passing through and
+only driving the application revealed (the drag bug below; this pass's view cube
+disagreeing with the viewport by a quarter turn, and the right dock collapsing
+to its minimum width).
+
+Closing it needs one of: `xdotool` (or `ydotool`, on Wayland) so the real binary
+can be driven and photographed; or `egui_kittest`, which replays pointer events
+against a headless context and would let these four gestures be asserted the way
+`app::drag_gesture` asserts a manipulator drag.
+
+## Worth knowing rather than fixing
 
 ## Worth knowing rather than fixing
 

@@ -199,6 +199,108 @@ impl ViewPreset {
     }
 }
 
+/// The shortest way round from one yaw to another, in degrees. Turning from
+/// 170 to -170 is twenty degrees, not three hundred and forty: a view cube that
+/// spins the long way round to an adjacent face reads as a glitch.
+pub fn shortest_turn(from: f64, to: f64) -> f64 {
+    let mut delta = (to - from) % 360.0;
+    if delta > 180.0 {
+        delta -= 360.0;
+    }
+    if delta < -180.0 {
+        delta += 360.0;
+    }
+    delta
+}
+
+/// The transition curve: ease in and out, so the camera starts and stops rather
+/// than jumping into motion at full speed.
+pub fn ease(t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// How long a view change takes. The design's number, and short enough that it
+/// reads as the same camera moving rather than as a wait.
+pub const TRANSITION: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// A camera turn in flight.
+#[derive(Clone, Copy, Debug)]
+pub struct CameraMove {
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    pub started: std::time::Instant,
+}
+
+impl CameraMove {
+    /// Yaw and pitch at this moment, and whether the move is over.
+    pub fn at(&self, now: std::time::Instant) -> ((f64, f64), bool) {
+        let t = now.duration_since(self.started).as_secs_f64() / TRANSITION.as_secs_f64();
+        let done = t >= 1.0;
+        let e = ease(t);
+        ((self.from.0 + (self.to.0 - self.from.0) * e, self.from.1 + (self.to.1 - self.from.1) * e), done)
+    }
+}
+
+/// The six faces of the orientation cube, as an outward normal and the view
+/// each one gives. Driven from here so the cube and the View menu cannot come
+/// to disagree about which way "front" is.
+pub const CUBE_FACES: [([i32; 3], ViewPreset, &str); 6] = [
+    ([1, 0, 0], ViewPreset::Right, "RGT"),
+    ([-1, 0, 0], ViewPreset::Left, "LFT"),
+    ([0, 1, 0], ViewPreset::Back, "BCK"),
+    ([0, -1, 0], ViewPreset::Front, "FRT"),
+    ([0, 0, 1], ViewPreset::Top, "TOP"),
+    ([0, 0, -1], ViewPreset::Bottom, "BTM"),
+];
+
+/// Project a unit-cube direction onto the orientation cube's face, given the
+/// camera's yaw and pitch. Returns the offset from the cube's centre in points,
+/// scaled by `reach`, and a depth that is negative towards the eye.
+///
+/// This is the cube's own little projection rather than the viewport's, because
+/// the cube is always drawn the same size whatever the camera distance and
+/// whatever the projection mode.
+pub fn cube_project(yaw_deg: f64, pitch_deg: f64, v: Vec3, reach: f32) -> (egui::Vec2, f64) {
+    // The viewport's own basis, written out: screen right, screen up and the
+    // direction the camera looks. Deriving it from the same two angles is what
+    // makes the cube unable to disagree with the view behind it -- and the
+    // previous cube, which rotated its own way, disagreed with it by a quarter
+    // turn.
+    let (y, p) = (yaw_deg.to_radians(), pitch_deg.to_radians());
+    let right = Vec3::new(-y.sin(), y.cos(), 0.0);
+    let up = Vec3::new(-y.cos() * p.sin(), -y.sin() * p.sin(), p.cos());
+    let forward = Vec3::new(-p.cos() * y.cos(), -p.cos() * y.sin(), -p.sin());
+    // Screen y grows downward, so up is negated. Depth is negative towards the
+    // eye, which is what makes a face visible.
+    (egui::vec2(v.dot(right) as f32, -v.dot(up) as f32) * reach, v.dot(forward))
+}
+
+/// Which face of the orientation cube a point `offset` from its centre falls
+/// on: the nearest face centre among the faces that are turned towards the eye.
+/// `None` when the point is outside the cube altogether.
+///
+/// Faces pointing away are excluded rather than being the nearest match, so a
+/// click never turns the camera to the side of the cube you cannot see.
+pub fn cube_face_at(yaw_deg: f64, pitch_deg: f64, offset: egui::Vec2, reach: f32) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (index, (normal, _, _)) in CUBE_FACES.iter().enumerate() {
+        let n = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+        let (at, depth) = cube_project(yaw_deg, pitch_deg, n, reach);
+        if depth >= 0.0 {
+            continue;
+        }
+        let distance = (offset - at).length();
+        if distance > reach * 0.9 {
+            continue;
+        }
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((index, distance));
+        }
+    }
+    best.map(|(index, _)| index)
+}
+
 /// Move and zoom the camera so `bounds` fills the viewport with a little margin
 /// (frame-selection and frame-all).
 pub fn frame_bounds(camera: &mut Camera, lo: Vec3, hi: Vec3, aspect: f64) {
@@ -335,6 +437,125 @@ mod tests {
         let (right, up) = v.basis();
         assert!(right.length() > 0.9 && up.length() > 0.9);
         assert!(right.dot(up).abs() < 1e-6, "basis is not orthogonal");
+    }
+
+    #[test]
+    fn a_turn_takes_the_short_way_round() {
+        assert_eq!(shortest_turn(170.0, -170.0), 20.0);
+        assert_eq!(shortest_turn(-170.0, 170.0), -20.0);
+        assert_eq!(shortest_turn(0.0, 90.0), 90.0);
+        assert_eq!(shortest_turn(0.0, 180.0), 180.0);
+        assert_eq!(shortest_turn(10.0, 10.0), 0.0);
+        // However many times the camera has been orbited round.
+        assert_eq!(shortest_turn(720.0 + 10.0, 20.0), 10.0);
+    }
+
+    #[test]
+    fn a_transition_starts_where_it_was_and_ends_where_it_was_asked_for() {
+        let started = std::time::Instant::now();
+        let m = CameraMove { from: (0.0, 0.0), to: (-90.0, 30.0), started };
+        let ((yaw, pitch), done) = m.at(started);
+        assert_eq!((yaw, pitch), (0.0, 0.0));
+        assert!(!done);
+        let ((yaw, pitch), done) = m.at(started + TRANSITION);
+        assert!((yaw + 90.0).abs() < 1e-9 && (pitch - 30.0).abs() < 1e-9, "{yaw} {pitch}");
+        assert!(done, "the move never finished");
+        // And it eases: halfway through the time is halfway through the turn,
+        // but a quarter of the way through is less than a quarter of the turn.
+        let quarter = m.at(started + TRANSITION / 4).0 .0;
+        assert!(quarter > -22.5, "the curve does not ease in: {quarter}");
+    }
+
+    #[test]
+    fn the_cube_and_the_viewport_agree_about_which_way_is_which() {
+        // The previous cube rotated its own way and disagreed with the view
+        // behind it by a quarter turn, which makes an orientation cube worse
+        // than none. Both are driven from yaw and pitch, so this can be checked
+        // directly rather than looked at.
+        for (yaw, pitch) in [(-55.0, 28.0), (-90.0, 0.0), (0.0, 0.0), (140.0, -35.0), (20.0, 60.0)] {
+            let mut v = view();
+            v.camera.yaw = yaw;
+            v.camera.pitch = pitch;
+            v.camera.orthographic = true;
+            for axis in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
+                let (screen, _) = v.project(v.camera.target + axis * 10.0).unwrap();
+                let on_screen = screen - v.centre;
+                let (on_cube, depth) = cube_project(yaw, pitch, axis, 20.0);
+                assert_eq!(
+                    on_screen.x.abs() < 1e-3,
+                    on_cube.x.abs() < 1e-3,
+                    "{axis:?} at yaw {yaw} pitch {pitch}: one says edge-on, the other does not"
+                );
+                if on_screen.x.abs() > 1e-3 {
+                    assert_eq!(on_screen.x > 0.0, on_cube.x > 0.0, "{axis:?} points the other way across");
+                }
+                if on_screen.y.abs() > 1e-3 {
+                    assert_eq!(on_screen.y > 0.0, on_cube.y > 0.0, "{axis:?} points the other way up");
+                }
+                // And an axis pointing towards the eye is the one drawn in
+                // front: negative depth on the cube, nearer in the viewport. An
+                // axis lying edge-on has no side to be on, so it is skipped.
+                if depth.abs() > 1e-6 {
+                    let nearer = v.to_view(v.camera.target + axis * 10.0).z < v.to_view(v.camera.target).z;
+                    assert_eq!(
+                        nearer,
+                        depth < 0.0,
+                        "{axis:?} at yaw {yaw} pitch {pitch} is drawn on the wrong side of the cube"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn clicking_a_face_of_the_cube_asks_for_the_view_that_face_shows() {
+        let reach = 20.0_f32;
+        for (yaw, pitch) in [ViewPreset::Isometric.angles(), (-30.0, 15.0), (120.0, -40.0)] {
+            for (index, (normal, _, label)) in CUBE_FACES.iter().enumerate() {
+                let n = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+                let (at, depth) = cube_project(yaw, pitch, n, reach);
+                if depth >= 0.0 {
+                    // Turned away: it must not be clickable at all, or the cube
+                    // would answer for a face nobody can see.
+                    continue;
+                }
+                assert_eq!(cube_face_at(yaw, pitch, at, reach), Some(index), "{label} at yaw {yaw} pitch {pitch}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_face_turned_away_is_never_what_a_click_lands_on() {
+        // Straight down the +Y axis: the back face is dead behind the front one,
+        // and a click in the middle must be the front.
+        let (yaw, pitch) = ViewPreset::Front.angles();
+        let reach = 20.0_f32;
+        let index = cube_face_at(yaw, pitch, egui::vec2(0.0, 0.0), reach).unwrap();
+        let (normal, preset, _) = CUBE_FACES[index];
+        assert_eq!(normal, [0, -1, 0], "the click landed on a face pointing away from the eye");
+        assert_eq!(preset, ViewPreset::Front);
+        // And a point outside the cube is not a face at all.
+        assert_eq!(cube_face_at(yaw, pitch, egui::vec2(200.0, 0.0), reach), None);
+    }
+
+    #[test]
+    fn every_cube_face_names_a_different_view() {
+        let mut seen: Vec<&str> = Vec::new();
+        for (normal, preset, label) in CUBE_FACES {
+            assert!(!seen.contains(&label), "two faces are labelled {label}");
+            seen.push(label);
+            // The face you can see is the side the camera would be on.
+            let (yaw, pitch) = preset.angles();
+            let mut v = view();
+            v.camera.yaw = yaw;
+            v.camera.pitch = pitch;
+            let eye = v.eye() - v.camera.target;
+            let normal = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+            assert!(
+                eye.normalized().dot(normal) > 0.99,
+                "clicking {label} would put the camera somewhere other than that face"
+            );
+        }
     }
 
     #[test]
