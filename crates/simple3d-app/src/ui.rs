@@ -88,6 +88,14 @@ pub fn commit_angle(text: &str, current: f64) -> Option<f64> {
     Some(entry.resolve(current))
 }
 
+/// A scale factor. Unitless, and clamped to something that still produces a
+/// solid: a factor of zero flattens a shape into a plane and a negative one
+/// turns it inside out, and neither is a thing to hand a slicer.
+pub fn commit_factor(text: &str, current: f64) -> Option<f64> {
+    let entry = parse_entry_plain(text)?;
+    Some(entry.resolve(current).max(simple3d_core::scene::Node::MIN_SCALE))
+}
+
 /// The em dash a field shows when the nodes it covers do not agree. Typing over
 /// it applies to all of them; leaving it alone leaves each as it was.
 pub const MIXED: &str = "\u{2014}";

@@ -349,11 +349,10 @@ impl App {
 
     fn manipulate_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Manipulate", |ui| {
-            for (mode, command) in [
-                (Mode::Move, Command::ModeMove),
-                (Mode::Rotate, Command::ModeRotate),
-                (Mode::Resize, Command::ModeResize),
-            ] {
+            // Driven from `Mode::ALL`, so a tool the manipulator gains cannot
+            // be missing from the menu.
+            for mode in Mode::ALL {
+                let command = crate::panel_toolrail::tool(mode).1;
                 let text = format!(
                     "{} {}\t{}",
                     if self.mode == mode { "*" } else { " " },

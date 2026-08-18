@@ -68,6 +68,7 @@ pub enum Command {
     ModeMove,
     ModeRotate,
     ModeResize,
+    ModeScale,
     ToggleHandleFrame,
     NudgeLeft,
     NudgeRight,
@@ -143,6 +144,7 @@ impl Command {
         Command::ModeMove,
         Command::ModeRotate,
         Command::ModeResize,
+        Command::ModeScale,
         Command::ToggleHandleFrame,
         Command::NudgeLeft,
         Command::NudgeRight,
@@ -197,6 +199,7 @@ impl Command {
             ModeMove => "Manipulator: move",
             ModeRotate => "Manipulator: rotate",
             ModeResize => "Manipulator: resize",
+            ModeScale => "Manipulator: scale",
             ToggleHandleFrame => "Handle frame: object / world",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
@@ -218,8 +221,8 @@ impl Command {
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleGhosts | ToggleDocks | ResetLayout => {
                 Area::View
             }
-            ModeMove | ModeRotate | ModeResize | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp | NudgeDown
-            | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp
+            | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }
@@ -485,6 +488,7 @@ impl Keymap {
                 set(ModeMove, Chord::key("W"));
                 set(ModeRotate, Chord::key("E"));
                 set(ModeResize, Chord::key("R"));
+                set(ModeScale, Chord::key("T"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Right),
                     pan: Drag::with_shift(MouseButton::Right),
@@ -495,6 +499,7 @@ impl Keymap {
                 set(ModeMove, Chord::key("G"));
                 set(ModeRotate, Chord::key("R"));
                 set(ModeResize, Chord::key("S"));
+                set(ModeScale, Chord::shift("S"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Middle),
                     pan: Drag::with_shift(MouseButton::Middle),
@@ -505,6 +510,7 @@ impl Keymap {
                 set(ModeMove, Chord::key("M"));
                 set(ModeRotate, Chord::key("R"));
                 set(ModeResize, Chord::key("T"));
+                set(ModeScale, Chord::shift("T"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Middle),
                     pan: Drag::with_ctrl(MouseButton::Middle),

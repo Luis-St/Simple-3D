@@ -10,6 +10,7 @@ pub struct Vec3 {
 
 impl Vec3 {
     pub const ZERO: Vec3 = Vec3 { x: 0.0, y: 0.0, z: 0.0 };
+    pub const ONE: Vec3 = Vec3 { x: 1.0, y: 1.0, z: 1.0 };
 
     pub const fn new(x: f64, y: f64, z: f64) -> Self {
         Vec3 { x, y, z }
@@ -42,6 +43,12 @@ impl Vec3 {
 
     pub fn lerp(self, o: Vec3, t: f64) -> Vec3 {
         self + (o - self) * t
+    }
+
+    /// Componentwise product. A scale is three independent factors, not a
+    /// direction, so it multiplies this way rather than through `Mul<f64>`.
+    pub fn scaled_by(self, o: Vec3) -> Vec3 {
+        Vec3::new(self.x * o.x, self.y * o.y, self.z * o.z)
     }
 
     pub fn min(self, o: Vec3) -> Vec3 {

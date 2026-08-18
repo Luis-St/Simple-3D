@@ -21,7 +21,7 @@ use crate::view::View;
 use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::Command;
 use simple3d_core::primitive::{AxisDriver, ParamValue, Params};
-use simple3d_core::scene::{NodeId, Scene};
+use simple3d_core::scene::{Node, NodeId, Scene};
 use simple3d_core::undo::History;
 use simple3d_core::unit::{format_angle, format_length, Unit};
 use simple3d_core::xform::Xform;
@@ -40,17 +40,23 @@ pub enum Mode {
     #[default]
     Move,
     Rotate,
+    /// Rewrite the dimension the shape is defined by. Exact, and only offered on
+    /// an axis some parameter actually governs.
     Resize,
+    /// Multiply what is there by a factor. Works on a group, and on an axis no
+    /// parameter governs, because it does not have to know what anything means.
+    Scale,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 3] = [Mode::Move, Mode::Rotate, Mode::Resize];
+    pub const ALL: [Mode; 4] = [Mode::Move, Mode::Rotate, Mode::Resize, Mode::Scale];
 
     pub fn label(self) -> &'static str {
         match self {
             Mode::Move => "Move",
             Mode::Rotate => "Rotate",
             Mode::Resize => "Resize",
+            Mode::Scale => "Scale",
         }
     }
 }
@@ -130,6 +136,12 @@ pub struct Gizmo {
     /// Which parameter governs each local extent. `None` means no resize handle
     /// on that axis, rather than one that silently does nothing.
     pub drivers: [Option<AxisDriver>; 3],
+    /// The node's own scale factors.
+    pub own_scale: Vec3,
+    /// How many world millimetres one local millimetre covers along each of the
+    /// node's axes -- its own scale times every ancestor's. What turns a drag
+    /// measured on screen into a change to a dimension.
+    pub axis_scale: [f64; 3],
 }
 
 impl Gizmo {
@@ -139,7 +151,8 @@ impl Gizmo {
             return None;
         }
         let parent = *evaluated.node_frames.get(&id)?;
-        let own = parent.compose(&Xform::from_pos_rot(node.position, node.rotation));
+        let own =
+            parent.compose(&Xform::from_pos_rot_scale(node.position, node.rotation, Node::sane_scale(node.scale)));
         let axes = if world_frame {
             [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)]
         } else {
@@ -150,7 +163,19 @@ impl Gizmo {
             (Some(spec), Some(params)) => (spec.axes)(params),
             _ => [None, None, None],
         };
-        Some(Gizmo { mode, origin: parent.point(node.position), axes, own, parent, local_lo, local_hi, drivers })
+        let axis_scale = [0, 1, 2].map(|a| own.axis_vector(a).length().max(1e-9));
+        Some(Gizmo {
+            mode,
+            origin: parent.point(node.position),
+            axes,
+            own,
+            parent,
+            local_lo,
+            local_hi,
+            drivers,
+            own_scale: Node::sane_scale(node.scale),
+            axis_scale,
+        })
     }
 
     /// The handles to draw and hit-test, in the order they should be tested --
@@ -164,6 +189,16 @@ impl Gizmo {
                 out
             }
             Mode::Rotate => (0..3).map(Handle::RotateRing).collect(),
+            // Scale asks nothing of the shape underneath it: every axis and
+            // every corner, on a group as readily as on a primitive.
+            Mode::Scale => {
+                let mut out: Vec<Handle> = CORNERS.iter().map(|c| Handle::ResizeCorner(*c)).collect();
+                for axis in 0..3 {
+                    out.push(Handle::ResizeFace(axis, false));
+                    out.push(Handle::ResizeFace(axis, true));
+                }
+                out
+            }
             Mode::Resize => {
                 // Resize handles on groups are out of scope for this version:
                 // scaling a group truthfully means rewriting every descendant's
@@ -334,6 +369,7 @@ pub struct Drag {
     gizmo: Gizmo,
     pub start_position: Vec3,
     pub start_rotation: Vec3,
+    pub start_scale: Vec3,
     pub start_params: Params,
     pub start_local_lo: Vec3,
     pub start_local_hi: Vec3,
@@ -364,6 +400,7 @@ impl Drag {
             gizmo: gizmo.clone(),
             start_position: n.position,
             start_rotation: n.rotation,
+            start_scale: Node::sane_scale(n.scale),
             start_params: n.params().cloned().unwrap_or_default(),
             start_local_lo: gizmo.local_lo,
             start_local_hi: gizmo.local_hi,
@@ -461,7 +498,7 @@ impl Drag {
                 let anchor = gizmo.own.point(gizmo.face_centre(axis, positive));
                 let Some(along) = view.ray_axis(cursor, anchor, gizmo.axes[axis]) else { return };
                 let outward = mods.snap(along - self.grab, move_snap) * if positive { 1.0 } else { -1.0 };
-                let applied = self.resize_axis(scene, axis, outward, mods.symmetric, positive);
+                let applied = self.size_axis(scene, axis, outward, mods.symmetric, positive);
                 self.readout = match applied {
                     Some(extent) => format!("{} {}", axis_name(axis), format_length(extent, unit)),
                     None => "not resizable on this axis".to_string(),
@@ -478,7 +515,7 @@ impl Drag {
                     // fraction to the others.
                     let mut best = 0.0;
                     for axis in 0..3 {
-                        if self.drivable(axis).is_none() {
+                        if !self.sizeable(axis) {
                             continue;
                         }
                         let extent = self.start_extent(axis);
@@ -494,14 +531,14 @@ impl Drag {
                 }
                 let mut parts: Vec<String> = Vec::new();
                 for axis in 0..3 {
-                    if self.drivable(axis).is_none() {
+                    if !self.sizeable(axis) {
                         continue;
                     }
                     let outward = match ratio {
                         Some(r) => self.start_extent(axis) * (r - 1.0),
                         None => mods.snap(raw.dot(gizmo.axes[axis]), move_snap) * if sides[axis] { 1.0 } else { -1.0 },
                     };
-                    if let Some(extent) = self.resize_axis(scene, axis, outward, false, sides[axis]) {
+                    if let Some(extent) = self.size_axis(scene, axis, outward, false, sides[axis]) {
                         parts.push(format!("{} {}", axis_name(axis), format_length(extent, unit)));
                     }
                 }
@@ -514,52 +551,76 @@ impl Drag {
         self.gizmo.drivers[axis]
     }
 
-    fn start_extent(&self, axis: usize) -> f64 {
-        get_axis(self.start_local_hi, axis) - get_axis(self.start_local_lo, axis)
+    /// Whether this axis can be sized at all under the current mode. Resize
+    /// needs a parameter to write; scale needs nothing.
+    fn sizeable(&self, axis: usize) -> bool {
+        self.gizmo.mode == Mode::Scale || self.drivable(axis).is_some()
     }
 
-    /// Grow the given local axis by `outward` millimetres on the given side.
-    /// Returns the extent actually achieved.
+    /// The node's extent along one of its own axes **in world millimetres** at
+    /// the moment the drag began -- the local extent times every scale between
+    /// it and the world.
     ///
-    /// This is the heart of "resize writes dimensions": it solves the driver's
-    /// `extent = value * factor` for the value that produces the extent asked
-    /// for, and shifts the node by half the change so the opposite face does not
-    /// move -- no scale factor is involved anywhere.
-    fn resize_axis(
-        &self,
-        scene: &mut Scene,
-        axis: usize,
-        outward: f64,
-        symmetric: bool,
-        positive: bool,
-    ) -> Option<f64> {
-        let driver = self.drivable(axis)?;
-        if driver.factor.abs() < 1e-12 {
-            return None;
-        }
+    /// World, because that is what a drag measures. The conversion back into a
+    /// dimension, or into a factor, happens in one place, in `size_axis`.
+    fn start_extent(&self, axis: usize) -> f64 {
+        let local = get_axis(self.start_local_hi, axis) - get_axis(self.start_local_lo, axis);
+        local * self.gizmo.axis_scale[axis]
+    }
+
+    /// Grow the given axis by `outward` world millimetres on the given side, and
+    /// return the extent actually achieved.
+    ///
+    /// The two sizing modes part company only in what they write. **Resize**
+    /// solves the driver's `extent = value * factor` for the value that produces
+    /// the extent asked for -- that is the whole of "resize writes dimensions",
+    /// and no scale factor is involved. **Scale** multiplies the node's own
+    /// factor by however much bigger the extent got, which needs nothing of the
+    /// shape underneath and so works on a group too.
+    ///
+    /// Both then shift the node by half the change, in the direction of the face
+    /// being dragged, so the opposite face stays exactly where it was.
+    fn size_axis(&self, scene: &mut Scene, axis: usize, outward: f64, symmetric: bool, positive: bool) -> Option<f64> {
+        let scaling = self.gizmo.mode == Mode::Scale;
         let start_extent = self.start_extent(axis);
-        let target_extent = if symmetric { start_extent + outward * 2.0 } else { start_extent + outward };
         // A dimension cannot go to zero or negative; clamp rather than let the
         // generator produce inverted geometry.
-        let target_extent = target_extent.max(1e-3);
-        let value = target_extent / driver.factor;
+        let target_extent = (start_extent + outward * if symmetric { 2.0 } else { 1.0 }).max(MIN_EXTENT);
+
+        if scaling {
+            // Nothing to be a factor *of*: an axis with no extent cannot be
+            // scaled into one.
+            if start_extent <= MIN_EXTENT {
+                return None;
+            }
+            let factor = target_extent / start_extent;
+            let mut scale = self.start_scale;
+            let grown = (get_axis(self.start_scale, axis) * factor).max(Node::MIN_SCALE);
+            set_axis(&mut scale, axis, grown);
+            scene.get_mut(self.node)?.scale = scale;
+        } else {
+            let driver = self.drivable(axis)?;
+            if driver.factor.abs() < 1e-12 {
+                return None;
+            }
+            let local_extent = target_extent / self.gizmo.axis_scale[axis];
+            let params = scene.get_mut(self.node)?.params_mut()?;
+            params.insert(driver.param.to_string(), ParamValue::Length(local_extent / driver.factor));
+        }
 
         let node = scene.get_mut(self.node)?;
-        let params = node.params_mut()?;
-        params.insert(driver.param.to_string(), ParamValue::Length(value));
-
-        // The generator centres the shape on its own origin, so growing an extent
-        // moves both faces by half the change. Shifting the node by that half in
-        // the direction of the dragged face leaves the opposite face exactly
-        // where it was.
-        if !symmetric {
-            let change = target_extent - start_extent;
+        if symmetric {
+            node.position = self.start_position;
+        } else {
+            // `position` is in the parent's frame, so the shift is measured
+            // there: the world change divided by whatever the ancestors scale
+            // by, which is everything in `axis_scale` except this node's own.
+            let ancestor = (self.gizmo.axis_scale[axis] / get_axis(self.start_scale, axis)).max(1e-9);
+            let change = (target_extent - start_extent) / ancestor;
             let mut local_shift = Vec3::ZERO;
             set_axis(&mut local_shift, axis, change / 2.0 * if positive { 1.0 } else { -1.0 });
             let parent_shift = Xform::from_pos_rot(Vec3::ZERO, self.start_rotation).vector(local_shift);
             node.position = self.start_position + parent_shift;
-        } else {
-            node.position = self.start_position;
         }
         Some(target_extent)
     }
@@ -579,6 +640,7 @@ impl Drag {
         if let Some(node) = scene.get_mut(self.node) {
             node.position = self.start_position;
             node.rotation = self.start_rotation;
+            node.scale = self.start_scale;
             if let Some(params) = node.params_mut() {
                 *params = self.start_params.clone();
             }
@@ -672,6 +734,8 @@ pub enum Nudge {
     Rotate { axis: usize, degrees: f64 },
     /// Rewrite `driver`'s parameter so the extent along `axis` becomes `extent`.
     Resize { axis: usize, driver: AxisDriver, extent: f64 },
+    /// Set the node's own scale factor on `axis` to `factor`.
+    Scale { axis: usize, factor: f64 },
     /// A resize nudge on an axis no parameter governs: nothing to write, and the
     /// caller says so rather than silently doing nothing.
     NoDimension { axis: usize },
@@ -704,6 +768,13 @@ impl Nudge {
             Nudge::Resize { driver, extent, .. } => {
                 if let Some(params) = scene.get_mut(id).and_then(|n| n.params_mut()) {
                     params.insert(driver.param.to_string(), ParamValue::Length(extent / driver.factor));
+                }
+            }
+            Nudge::Scale { axis, factor } => {
+                if let Some(node) = scene.get_mut(id) {
+                    let mut scale = Node::sane_scale(node.scale);
+                    set_axis(&mut scale, axis, factor);
+                    node.scale = scale;
                 }
             }
             // Nothing this axis can be resized by. The caller says so; silently
@@ -748,6 +819,20 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
             }
             None => Nudge::NoDimension { axis },
         },
+        // A scale nudge moves the face by the step, the same distance a resize
+        // nudge would -- expressed as the factor that produces it, since that is
+        // what a scale writes.
+        Mode::Scale => {
+            let local = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
+            let world = local * gizmo.axis_scale[axis];
+            if world <= MIN_EXTENT {
+                Nudge::NoDimension { axis }
+            } else {
+                let factor = ((world + move_snap * sign).max(MIN_EXTENT)) / world;
+                let grown = (get_axis(gizmo.own_scale, axis) * factor).max(Node::MIN_SCALE);
+                Nudge::Scale { axis, factor: grown }
+            }
+        }
     })
 }
 
@@ -889,11 +974,18 @@ mod tests {
 
     /// Drag a handle from where it sits to where the given world point projects.
     fn drag_to(f: &mut Fixture, handle: Handle, target: Vec3, mods: Mods, snap: f64) -> Drag {
-        let gizmo = f.gizmo(match handle {
+        let mode = match handle {
             Handle::MoveAxis(_) | Handle::MovePlane(_) => Mode::Move,
             Handle::RotateRing(_) => Mode::Rotate,
             _ => Mode::Resize,
-        });
+        };
+        drag_in(f, mode, handle, target, mods, snap)
+    }
+
+    /// The same, in a mode the handle does not imply: a face handle is a resize
+    /// in one mode and a scale in the other.
+    fn drag_in(f: &mut Fixture, mode: Mode, handle: Handle, target: Vec3, mods: Mods, snap: f64) -> Drag {
+        let gizmo = f.gizmo(mode);
         let from = f.view.project(gizmo.handle_point(handle, &f.view)).unwrap().0;
         let to = f.view.project(target).unwrap().0;
         let mut drag = Drag::begin(&f.scene, &gizmo, f.node, handle, &f.view, from).unwrap();
@@ -1048,6 +1140,125 @@ mod tests {
         // The third dimension scaled by the same ratio too.
         let scale = f.param("width") / 40.0;
         assert!((f.param("thickness") - 4.0 * scale).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_scale_drag_writes_a_factor_and_leaves_the_dimension_alone() {
+        // The difference between the two sizing tools, in one assertion: resize
+        // rewrites the number the shape is defined by, scale multiplies what is
+        // there and leaves that number where it was.
+        let mut f = Fixture::new("box");
+        let width = f.param("width");
+        let (lo, hi) = f.world_bounds();
+        let handle = Handle::ResizeFace(0, true);
+        let gizmo = f.gizmo(Mode::Scale);
+        let face = gizmo.handle_point(handle, &f.view);
+
+        // Out along +X by the width again: twice as wide.
+        drag_in(&mut f, Mode::Scale, handle, face + Vec3::new(width, 0.0, 0.0), Mods::default(), 1.0);
+
+        assert!((f.param("width") - width).abs() < 1e-9, "scaling rewrote the dimension");
+        let scale = f.scene.node(f.node).scale;
+        assert!((scale.x - 2.0).abs() < 0.05, "the X factor came out {}", scale.x);
+        assert_eq!((scale.y, scale.z), (1.0, 1.0), "one axis was dragged and three were scaled");
+
+        let (nlo, nhi) = f.world_bounds();
+        assert!((nhi.x - nlo.x - (hi.x - lo.x) * 2.0).abs() < 0.2, "it is not twice as wide on screen");
+        // The face that was not dragged did not move.
+        assert!((nlo.x - lo.x).abs() < 0.05, "the opposite face moved: {nlo:?} vs {lo:?}");
+    }
+
+    #[test]
+    fn a_group_can_be_scaled_although_it_cannot_be_resized() {
+        // Resize refuses a group -- scaling one truthfully would mean rewriting
+        // every descendant. A factor needs none of that, and it is the only way
+        // to make an assembly a proportion of what it was.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(simple3d_core::scene::GroupOp::Union, root, 0);
+        let child = scene.add_primitive("box", group, 0).unwrap();
+        scene.get_mut(child).unwrap().position = Vec3::new(10.0, 0.0, 0.0);
+        scene.camera = Camera { yaw: -55.0, pitch: 28.0, distance: 160.0, ..Camera::default() };
+        let mut evaluator = Evaluator::new();
+        let evaluated = evaluator.evaluate(&scene, &Cancel::new());
+        let view = View::new(scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
+
+        assert!(
+            Gizmo::build(&scene, &evaluated, group, Mode::Resize, false).unwrap().handles(true).is_empty(),
+            "resize offered a group handles"
+        );
+        let gizmo = Gizmo::build(&scene, &evaluated, group, Mode::Scale, false).unwrap();
+        assert!(!gizmo.handles(true).is_empty(), "scale offered a group no handles");
+
+        let handle = Handle::ResizeFace(0, true);
+        let face = gizmo.handle_point(handle, &view);
+        let from = view.project(face).unwrap().0;
+        let to = view.project(face + Vec3::new(20.0, 0.0, 0.0)).unwrap().0;
+        let mut drag = Drag::begin(&scene, &gizmo, group, handle, &view, from).unwrap();
+        drag.update(&mut scene, &view, to, Mods { free: true, ..Default::default() }, 1.0, 15.0, Unit::Millimetre);
+
+        assert!(scene.node(group).scale.x > 1.5, "the group was not scaled: {:?}", scene.node(group).scale);
+        let after = evaluator.evaluate(&scene, &Cancel::new());
+        let (lo, hi) = after.node_meshes[&child].bounds().unwrap();
+        assert!((hi.x - lo.x) > 12.0, "the child did not grow with the group it is in");
+    }
+
+    #[test]
+    fn a_resize_on_a_scaled_node_still_lands_on_the_dimension_that_was_dragged_to() {
+        // A drag is measured on screen, and the screen shows the node *after*
+        // its scale. Writing the on-screen distance straight into the dimension
+        // would resize by the factor again.
+        let mut f = Fixture::new("box");
+        f.scene.get_mut(f.node).unwrap().scale = Vec3::new(2.0, 1.0, 1.0);
+        f.reevaluate();
+        let handle = Handle::ResizeFace(0, true);
+        let gizmo = f.gizmo(Mode::Resize);
+        let face = gizmo.handle_point(handle, &f.view);
+        let width = f.param("width");
+
+        // Ten world millimetres out is five of the node's own, at a factor of 2.
+        drag_in(
+            &mut f,
+            Mode::Resize,
+            handle,
+            face + Vec3::new(10.0, 0.0, 0.0),
+            Mods { free: true, ..Default::default() },
+            1.0,
+        );
+        assert!((f.param("width") - (width + 5.0)).abs() < 0.2, "the width came out {}", f.param("width"));
+        assert_eq!(f.scene.node(f.node).scale, Vec3::new(2.0, 1.0, 1.0), "the resize touched the scale");
+    }
+
+    #[test]
+    fn a_scale_cannot_be_dragged_to_zero_or_through_it() {
+        let mut f = Fixture::new("box");
+        let handle = Handle::ResizeFace(0, true);
+        let gizmo = f.gizmo(Mode::Scale);
+        let face = gizmo.handle_point(handle, &f.view);
+        // Far past the opposite face, which would invert the solid.
+        drag_in(
+            &mut f,
+            Mode::Scale,
+            handle,
+            face - Vec3::new(500.0, 0.0, 0.0),
+            Mods { free: true, ..Default::default() },
+            1.0,
+        );
+        assert!(f.scene.node(f.node).scale.x >= Node::MIN_SCALE, "{:?}", f.scene.node(f.node).scale);
+        assert!(f.world_bounds().1.x > f.world_bounds().0.x, "the solid was turned inside out");
+    }
+
+    #[test]
+    fn escape_puts_a_scale_back_where_a_drag_found_it() {
+        let mut f = Fixture::new("box");
+        f.scene.get_mut(f.node).unwrap().scale = Vec3::new(1.5, 1.0, 1.0);
+        f.reevaluate();
+        let handle = Handle::ResizeFace(0, true);
+        let target = f.gizmo(Mode::Scale).handle_point(handle, &f.view) + Vec3::new(25.0, 0.0, 0.0);
+        let drag = drag_in(&mut f, Mode::Scale, handle, target, Mods::default(), 1.0);
+        assert_ne!(f.scene.node(f.node).scale.x, 1.5);
+        drag.cancel(&mut f.scene);
+        assert_eq!(f.scene.node(f.node).scale, Vec3::new(1.5, 1.0, 1.0));
     }
 
     #[test]

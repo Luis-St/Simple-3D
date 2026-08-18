@@ -160,6 +160,7 @@ mod tests {
         scene.get_mut(hole).unwrap().rotation = Vec3::new(0.0, 0.0, 30.0);
         scene.get_mut(hole).unwrap().segments = Some(64);
         scene.get_mut(hole).unwrap().visible = false;
+        scene.get_mut(plate).unwrap().scale = Vec3::new(1.5, 1.0, 0.25);
         scene.get_mut(hole).unwrap().params_mut().unwrap().insert("diameter_x".into(), ParamValue::Length(6.0));
         scene
     }
@@ -169,11 +170,12 @@ mod tests {
         for id in scene.depth_first() {
             let node = scene.node(id);
             out.push_str(&format!(
-                "{}|{}|{:?}|{:?}|{:?}|{}|{:?}|{:?};",
+                "{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{:?}|{:?};",
                 scene.depth(id),
                 node.name,
                 node.position,
                 node.rotation,
+                node.scale,
                 node.anchor,
                 node.visible,
                 node.segments,
