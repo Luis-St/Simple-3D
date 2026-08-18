@@ -102,6 +102,19 @@ impl History {
         }
     }
 
+    /// Drop the most recent snapshot without restoring it, for an edit that was
+    /// recorded and then abandoned -- a drag cancelled with Escape, which puts
+    /// the pre-drag values back itself. Keeping the snapshot would leave an undo
+    /// step that restores the state it is already in.
+    ///
+    /// Does *not* touch the redo stack: `record` cleared it when the abandoned
+    /// edit opened, and a cancel cannot bring it back.
+    pub fn discard_last(&mut self) -> bool {
+        self.close();
+        self.revision += 1;
+        self.past.pop().is_some()
+    }
+
     /// Ends any open coalescing run, so the next edit definitely starts a new
     /// step. Called when the selection changes or a field loses focus.
     pub fn close(&mut self) {
