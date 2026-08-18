@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The same box glyph the tool rail draws (see crates/simple3d-app/src/icon.rs),
+     in the same house style: geometric strokes in the accent colour on the
+     darkest surface. Written out here because a desktop entry needs an icon
+     file on disk, which the single-binary build deliberately has none of. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" ry="12" fill="#15181C"/>
+  <g transform="translate(6.4 6.4) scale(0.8)"
+     fill="none" stroke="#E8A33D" stroke-width="5"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.4 21.76 L32 8.96 L57.6 21.76 L57.6 46.08 L32 58.88 L6.4 46.08 Z"/>
+    <path d="M6.4 21.76 L32 33.28 L57.6 21.76"/>
+    <path d="M32 33.28 L32 58.88"/>
+  </g>
+</svg>

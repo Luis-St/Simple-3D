@@ -21,7 +21,13 @@ from the tag by `.github/workflows/release.yml` and attached to each release:
 | Platform | File |
 | --- | --- |
 | Linux x86-64 | `simple-3d-linux-x86_64` (`chmod +x` and run) |
+| Linux x86-64, Debian/Ubuntu | `simple-3d_<version>_amd64.deb` (`sudo apt install ./simple-3d_<version>_amd64.deb`) |
 | Windows x64 | `simple-3d-windows-x86_64.exe` |
+
+The `.deb` is the same executable, packaged: it adds only the desktop entry,
+icon and MIME type that put Simple 3D in the applications menu and let a file
+manager open `.simple3d` files with it. It is built by `packaging/deb/build.sh`
+from the binary the same job produced.
 
 Put a file named `portable` (or `portable.txt`) beside the executable and it
 keeps its settings there instead of in the user profile — otherwise they live in
@@ -125,6 +131,9 @@ crates/
                        software-rasterized viewport, direct-manipulation
                        handles, docks, menus and dialogs, evaluation worker
                        thread.
+packaging/
+  deb/               Debian package: desktop entry, icon, MIME type and the
+                       script that assembles them around the built binary.
 ```
 
 Engineering highlights worth knowing about:
@@ -170,7 +179,12 @@ release workflow lists the same set.
 
 Releases are cut by pushing a `v*` tag: `.github/workflows/release.yml` takes the
 version from the tag, tests and builds both targets from that one commit, and
-attaches the two executables to the GitHub release.
+attaches the two executables and the Debian package to the GitHub release. The
+package can be built by hand from any release binary:
+
+```bash
+packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
+```
 
 ## Where things live
 
@@ -189,6 +203,7 @@ attaches the two executables to the GitHub release.
 | Navigation bindings taking effect without a restart | `simple3d-app/src/panel_viewport.rs` (`nav_gesture`) |
 | Driving a pointer gesture in a test | `simple3d-app/src/gestures.rs` |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |
+| What the Debian package installs, and what it depends on | `packaging/deb/build.sh` |
 | File format and migration | `simple3d-core/src/project.rs` |
 
 ## Licence
