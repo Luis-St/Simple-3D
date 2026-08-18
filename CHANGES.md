@@ -1,149 +1,194 @@
-# Change report — 2026-08-18 (fourth pass)
+# Change report — 2026-08-18 (fifth pass)
 
-A visual pass over the whole interface, against the ScadStudio UI design
-description. Nothing about geometry, evaluation, export or the file format
-changed. `cargo test --workspace` is 292 tests, up from 288, none failing.
+The gaps the fourth pass listed against the ScadStudio UI design description,
+closed. The numeric input model, movable docks, a clickable view cube,
+multi-selection editing in the property panels, a 3D cursor, an inline
+confirmation for deleting a group, and messages that fade.
+
+Nothing about geometry, evaluation, export or the file format changed.
+`cargo test --workspace` is 320 tests, up from 292, none failing.
+`python3 tools/criteria_audit.py` is clean: all 29 acceptance criteria are still
+cited by at least one test.
 
 The previous pass's report is in git history; `KNOWN_ISSUES.md` is still the
-issue list and this pass opened no entries in it.
+issue list, and this pass **opened one entry** in it: every pointer gesture added
+below -- the header drag, the label scrub, the cube click, the cursor placement --
+is unexecuted, because there is no way to press a button at a coordinate on this
+machine. The arithmetic under each of them is tested; the wiring between a real
+pointer and that arithmetic is not.
 
-## What the window looked like before
+## The numeric input model
 
-Default egui dark theme, one `style_mut` call setting two spacing values, and
-every colour decision left to the toolkit. The tool modes were three words in a
-row of the menu bar. Adding a shape meant Add ▸ category ▸ name. The viewport's
-corner carried four lines of grey prose, in the same grey as the grid.
+The design calls this the signature of the application, and none of it existed.
+It does now, and the whole of it is in
+`scadstudio-core::unit` — a field is a field, so a rule that holds in one holds
+in all of them.
 
-Screenshots of before and after were taken by running the real binary under
-XWayland and grabbing the window with `xwd` — the manipulator bug found the last
-pass is the standing argument for looking at the thing rather than at its tests.
+A field accepts:
 
-## The visual language, in one place
+- **An expression.** `40/3`, `12+8`, `(2+3)*4`, `100 - 2*15`. Four operators,
+  parentheses, one leading sign per factor. Deliberately no functions and no
+  variables: this is arithmetic done in the field instead of in a calculator,
+  not a language.
+- **A value in another unit.** `4 cm` is 40 in a millimetre document and 0.04 in
+  a metre one, and the suffix binds to its own term, so `4cm + 5` is 45 mm. The
+  document's unit is what the field *shows*; it was never what the user had to
+  *think* in.
+- **A delta.** `+2` is two more than whatever is there. With several nodes
+  selected it resolves against each of them separately — "two millimetres wider"
+  means a different number for every shape it lands on, and that is the point of
+  having it.
+- **A drag on its label.** The label is the grip, not the field: a click in a
+  text field has to put a caret where it was clicked, and a drag in it has to
+  select text. The label beside it has no such job. Shift is fine, Ctrl is
+  coarse — the same two modifiers the manipulator already uses for the same two
+  meanings. On an axis row the colour chip is the grip, because the chip *is*
+  that field's label.
 
-`crates/scadstudio-app/src/theme.rs` is new and is now the only file that names a
-colour, a row height or a type size:
+**A leading `-` is only a delta when a space or an `=` follows it** — `- 5` and
+`-= 5` adjust, `-5` is still minus five. This is a departure from the design,
+which asks for a leading `+` or `-`. A position field has to be able to hold a
+negative number, and no field can read the same six keystrokes two ways; `+` has
+no such conflict, so a bare `+5` is a delta. The alternative was to make `-5`
+mean "five less" and leave no way to type minus five at all.
 
-- **`theme::token`** — the design's palette: `SURFACE_0..3`, `TEXT_HI/LO`, the
-  amber `ACCENT`, the cyan `MEASURE`, the red `DANGER`, and the three axis
-  colours. Amber for selection and cyan for measurement is the one deliberate
-  departure from the blue every 3D tool defaults to, and it is what keeps the
-  selection colour clear of the X/Y/Z handles — blue selection never manages
-  that.
-- **`theme::metric`** — 22 px list rows, 24 px input rows, 8 px panel padding,
-  4 px gaps, a 40 px rail, a 32 px menu bar, a 24 px status bar.
-- **`theme::apply`** — installs the whole `egui::Visuals` and `Spacing` at
-  startup. Four distinct widget states, hover as a *surface* change rather than a
-  text tint, and the active state as an accent **fill**, not a tint: which tool
-  is in force must not be a shade of guesswork.
+**A scrub is one undo step.** The snapshot is taken on the frame the drag starts
+and every frame after it only touches the scene — the same shape the manipulator
+drag already had. `a_whole_scrub_is_one_undo_step` drags forty frames and checks
+the stack grew by one, and that one undo puts every node back.
 
-`render.rs`'s viewport palette now reads those same tokens rather than repeating
-hex literals, so the ground plane and the docks cannot drift apart.
+**A refused value keeps the old one and marks the field.** It never clears it:
+the text that was typed is the thing that has to be corrected, and throwing it
+away to show the previous value is the least useful thing a field could do. The
+mark is the field's own frame in the danger colour, so it is impossible to read
+the number without also reading that it was refused. Nothing partial ever
+happens across a multi-selection: if one node cannot take the value, none of
+them do.
 
-## Structure
+## Docking
 
-- **A tool rail** (`panel_toolrail.rs`), 40 px on the far left, icons only.
-  Move/rotate/resize, the handle frame, the three booleans, group and delete, and
-  the view state at its foot. This is where the menu bar's word-toolbar went, and
-  the row it occupied went back to the viewport.
-  - The boolean buttons are momentary actions, never modes, and are **dimmed with
-    a sentence** when the selection cannot be combined — `combine_blocked` states
-    the two cases once and the tooltip shows it verbatim.
-  - The tools are driven from `Mode::ALL`, so a new manipulator mode without a
-    rail button does not compile.
-- **A primitive palette** (`panel_primitives.rs`) under the outliner: every shape
-  in the registry as a silhouette tile, in collapsible category blocks. One
-  gesture and a glance instead of two gestures and a read. The Add menu is
-  untouched and still lists all of them.
-- **The right dock follows the selection.** Collapsible sections — Object,
-  Dimensions, Transform, Measured, and Boolean for a group. With **nothing**
-  selected it shows a **Document** panel (unit, grid, default segments, scene
-  bounds) instead of a column of dead fields.
-- **The status bar** reads left to right as one sentence of state: what is
-  selected → its size → snap → grid → unit → message, with counts and timing on
-  the right. Separated by dots; a vertical rule every few words turned it into a
-  row of boxes.
+`dock.rs` is new, and the layout model it drives is in
+`scadstudio_core::config::Layout`, beside the dock widths that were already
+persisted there.
 
-## The outliner
+- Three panels — Outliner, Primitives, Properties — move between the two docks
+  and reorder within one by dragging their header. The tool rail, menu bar,
+  status bar and viewport are the window's frame and do not move: a rail that
+  can end up somewhere else is a rail you have to go looking for.
+- A header click rolls its panel up to that bar. The dock's leftover height goes
+  to the last panel that is not rolled up, so a dock of nothing but headers is a
+  reachable state and draws.
+- `Tab` hides both docks. Hiding is one flag rather than a saved copy of the
+  arrangement, so restoring is exact by construction rather than by care — the
+  test says so by comparing the layout across a hide and a show.
+- View ▸ Panels moves a panel without dragging, View ▸ Reset layout puts
+  everything back (`Ctrl+Shift+L`).
+- A layout file that has lost or duplicated a panel is **repaired** on load
+  rather than left as it is: a panel that appears in neither dock would have no
+  way back, and nothing in the interface could bring it there.
 
-Rewritten as drawn 22 px rows rather than stacked widgets:
+**The layout is per user, not per document.** The prompt asked for per document
+and also asked that `AppSettings` be extended rather than a second store
+invented; those pull opposite ways, and this is the direction I took. Panel
+positions are how one person likes their window, not a property of the model,
+and putting them in the project file would mean opening a colleague's model
+rearranged your workspace — and would change the file format, which no pass has
+done.
 
-- Selection is an accent tint plus a solid bar at the left edge, and the
-  **primary** node of a multi-selection is a stronger tint than the rest — so the
-  node the property editor is actually editing is identifiable without a second
-  colour.
-- Visibility is an eye glyph, always drawn, **dimmed rather than hidden** when
-  off. The eye owns its own clicks: pressing it no longer also selects the row.
-- **Operator badges** are inline. A group wears its own operator; a child that is
-  being subtracted wears the cut mark in the danger colour; the base of a
-  difference wears nothing, because it is what is being cut, not a cut. The root
-  wears nothing either — everything is in the scene by definition.
+### One egui trap worth recording
 
-The set-theory symbols `∪ ∖ ∩` would have been the obvious badge and were the
-first attempt. The bundled UI face has no glyph for any of them, so the tree drew
-three identical tofu boxes. The badges are now the same drawn shapes the rail's
-boolean buttons carry, which is better anyway: one vocabulary, two places.
+egui remembers a side panel by the rectangle its *contents* filled, not the one
+it was given. The property panel's contents happened to be narrower than the
+dock, so the dock shrank to fit them — and, being remembered, kept shrinking
+until it hit its minimum. The right dock came up 200 px wide instead of 320 with
+its own fields clipped off the edge of the window. The dock now claims its full
+width before drawing anything into it. This was found by looking at the window,
+not by a test, which is the second pass running where that has been true.
 
-## Icons
+## The view cube
 
-`icon.rs` is new: every glyph is a handful of strokes in a unit square, scaled
-into whatever rectangle it is given. No icon font and no SVG loader, because the
-single self-contained binary is a hard constraint — and it stays crisp at
-fractional DPI, which a bitmap sheet would not. A test asserts every primitive in
-the registry has its own silhouette rather than falling back to the box.
+It was drawn but inert, and it was also **wrong**: its projection rotated its own
+way and disagreed with the viewport by a quarter turn — an isometric view
+showing a plate to the right of the origin labelled the visible faces TOP, LFT
+and FRT. An orientation cube that lies about orientation is worse than no cube.
 
-## The viewport
+It is now a cube with faces, derived from the viewport's own basis — the same
+yaw and pitch, the same screen right, up and forward — so the two cannot come
+apart again. `the_cube_and_the_viewport_agree_about_which_way_is_which` checks
+across five cameras that every axis points the same way across, the same way up,
+and lands on the same side of the depth on both.
 
-- **The grid fades with distance** instead of stopping. A grid that simply ends
-  leaves a hard square edge in mid-air and the eye reads that edge as part of the
-  model. The axes fade the same way, for the same reason.
-- **The grid and the axes no longer write depth.** They are drawn before the
-  model, so they must lose every tie with it — including the exact tie a ground
-  plane makes with a plate whose side walls it cuts. Fading made that old tie
-  visible as dark dashes across the plate; not writing depth removes the tie
-  rather than biasing around it.
-- **An orientation cube** in the bottom-right corner, drawn with the live camera,
-  so which way the model faces is answerable without orbiting to find out.
-- The four lines of grey prose are one line. Everything they said — the display
-  mode, the projection, the grid — is now a lit button on the rail.
-- **Drag readouts are cyan and monospaced**: a measurement, not a message. The
-  selection box is amber; its dimension labels are cyan.
+- A face turns the camera to that view, over the design's 200 ms, easing in and
+  out, and taking the short way round: turning from 170° to -170° is twenty
+  degrees, not three hundred and forty.
+- The dot at the centre switches perspective and orthographic; a ring around it
+  says which it is now.
+- A face turned away from the eye is never what a click lands on, so the cube
+  can never ask for the side of itself you cannot see.
+- The presets are the existing `Command`s, so the cube and the View menu are the
+  same seven answers reached two ways.
 
-## Numbers
+**Reduced motion is an application preference** (View ▸ Reduce motion), not a
+desktop one: egui 0.32 surfaces no such signal, and guessing at one from
+environment variables would be a worse lie than a checkbox. With it on the
+camera simply arrives.
 
-Every value field is monospaced with tabular figures. A column of dimensions has
-to line up, and no digit may change width while a value is being scrubbed — that
-is the typographic tell that this application is about measurement. Units sit at
-the right-hand end of a row, one size down and in the label colour, so they never
-compete with the number they qualify. Axis fields carry a colour chip instead of
-spelling out X, Y and Z.
+## Multi-selection in the property panels
 
-## Tests worth knowing about
+- A field shows the value when every selected node agrees and an **em dash**
+  when they do not. Typing over the dash applies to all of them; leaving it
+  alone edits nothing, so tabbing through a panel of mixed values cannot flatten
+  them.
+- Dimensions appear when every selected node is the *same* kind of shape. A
+  mixed selection says so in a sentence rather than showing an empty panel or a
+  set of fields that would quietly edit one of them without saying which.
+- Visible, Anchor, Position and Rotation apply to the whole selection. Name does
+  not: renaming four nodes to one name makes the outliner unreadable, so the
+  field says what is selected instead.
+- Measured still reports the primary node, and now says which one that is.
 
-- `app::every_panel_draws_with_a_selection_and_with_none` and
-  `an_empty_scene_still_draws_every_panel` render whole frames headlessly through
-  every panel, in the three states that lay out differently (shape selected,
-  nothing selected, group selected). A panel that panics or a layout that divides
-  by a width it has not got now fails here.
-- `theme::every_axis_has_its_own_colour` asserts the accent collides with none of
-  them, which is the reason it is amber.
-- `panel_outliner::a_group_wears_its_own_operator_and_a_cut_child_wears_the_cut`
-  pins the badge rule, including that the base of a difference carries none.
-- `render::the_grid_never_draws_over_geometry_it_is_coplanar_with` still holds.
-  It had to stop skipping pixels *by axis colour*: a faded axis pixel is a blend
-  of the axis with whatever is under it, which is the grid in one render and the
-  background in the other. The axes are made invisible for that comparison
-  instead, which leaves the question the test is actually asking.
+## The smaller things
 
-## Known gaps against the design description
+- **A 3D cursor.** Shift+right-click puts it on whatever is under the pointer,
+  or on the ground plane when that is nothing, snapped to the same grid a move
+  snaps to. New shapes land there. The palette's hint line and every tile's
+  tooltip are generated from the same sentence, so they cannot come to disagree
+  about where a shape will go — which they would have, since the old hint said
+  "at the origin" in two places.
+- **Deleting a group asks.** "Delete" is two different actions wearing one word,
+  so the outliner asks in place — a strip in the tree, not a dialog over the
+  window, because the question is about the tree. The two answers are named for
+  what they do; neither of them is "OK". Keeping the children promotes them into
+  the group's own slot, in order.
+- **Messages fade** six seconds after they arrive, over a second. "Ready" never
+  fades: it is the state of the application, not news about it. The clock is
+  driven by watching the message rather than by stamping it, so no `status = …`
+  anywhere in the application can forget to.
 
-Stated rather than quietly skipped:
+## Still not built, and why
 
-- No `Layout` mode tab. There is no second mode in this application to put behind
-  one, and inventing an empty tab is worse than not having it.
-- Numeric fields do not yet do drag-scrub on the label, expression evaluation,
-  relative `+`/`-` entry or unit-suffixed input (`4 cm` in a millimetre
-  document). The parsing lives in `scadstudio-core::unit::parse_number` and is a
-  model change, not a visual one.
-- Panels are not draggable between the docks, and `Tab` does not hide them.
-- The view cube shows orientation but is not yet clickable for a face view; the
-  View menu's camera presets are still how you get one.
+- **No `Layout` mode tab.** Unchanged from the last pass: there is no second
+  mode in this application to put behind one, and inventing an empty tab is
+  worse than not having it.
+- **Panel *sections* do not move.** Object, Dimensions, Transform and Measured
+  collapse but stay in the Properties panel. The design's docking language is
+  about panels, and making every section independently dockable would put four
+  more headers in the drag model for no question anyone is asking.
+- **No pointer gesture added this pass has ever been run.** The header drag, the
+  label scrub, the cube click and the cursor placement are covered as far as
+  their arithmetic and no further; there is no `xdotool` on this machine and
+  `egui_kittest` is not in the dependency tree, so a button cannot be pressed at
+  a coordinate either live or headlessly. This is the pass's one open issue and
+  is written up as such in `KNOWN_ISSUES.md`.
+- **The expression reader has no functions and no variables.** `sqrt`, `sin` and
+  a named dimension reused in three fields are all reasonable and none of them
+  are here.
+- **The 3D cursor is session state.** It is not saved with the project, because
+  saving it would change the file format.
+
+## What was checked by looking
+
+The binary was built and run under XWayland and the window grabbed with `xwd`,
+as the last two passes did. That is how the dock-width collapse and the cube's
+quarter-turn error were found; both are the kind of fault every test in the
+suite would have gone on passing through.

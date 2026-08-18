@@ -56,6 +56,12 @@ impl History {
         self.revision
     }
 
+    /// How many steps are on the undo stack. A gesture that should be one step
+    /// can be checked against this rather than against how it feels.
+    pub fn undo_len(&self) -> usize {
+        self.past.len()
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.past.is_empty()
     }

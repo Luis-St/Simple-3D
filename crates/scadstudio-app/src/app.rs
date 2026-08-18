@@ -3,15 +3,13 @@
 //! (spec section 7).
 
 use crate::gizmo::{self, Drag, Gizmo, Handle, Mode};
-use crate::panel_outliner;
-use crate::panel_properties;
 use crate::panel_viewport;
 use crate::render::Renderable;
 use crate::ui::FieldBuffers;
-use crate::view::{frame_bounds, ViewPreset};
+use crate::view::{frame_bounds, CameraMove, ViewPreset};
 use crate::worker::{EvalWorker, ExportJob};
 use scadstudio_core::clipboard::{self, Clip};
-use scadstudio_core::config::{self, AppSettings, DisplayMode, HandleFrame};
+use scadstudio_core::config::{self, AppSettings, DisplayMode, HandleFrame, Side};
 use scadstudio_core::eval::Evaluated;
 use scadstudio_core::keymap::{Chord, Command, Keymap};
 use scadstudio_core::project;
@@ -97,10 +95,32 @@ pub struct App {
     saved_revision: u64,
 
     pub status: Status,
+    /// When the current message was set, so a message that has been read can
+    /// fade out instead of sitting there looking current.
+    pub status_at: std::time::Instant,
     pub fields: FieldBuffers,
+    /// Which field label is being dragged, if any. Held on the app rather than
+    /// in widget state so the gesture survives the panel being relaid out.
+    pub scrub: crate::ui::Scrub,
     pub rename: Option<(NodeId, String)>,
     pub outliner_drag: Option<NodeId>,
     pub drop_target: Option<DropTarget>,
+
+    /// The 3D cursor: where a new shape lands. `None` means the origin, which
+    /// is also where it goes back to.
+    pub cursor: Option<Vec3>,
+    /// A deletion waiting on the outliner's confirmation strip: which nodes,
+    /// with the question of what happens to their children still open.
+    pub pending_delete: Option<Vec<NodeId>>,
+    /// A view change in flight. The camera is the scene's, so the move writes
+    /// into it every frame rather than holding a second copy of the truth.
+    pub camera_move: Option<CameraMove>,
+    /// Which panel header is being dragged between docks, and where to.
+    pub dock_drag: crate::dock::DockDrag,
+    /// Header centres and the outer rectangle of each dock, collected while the
+    /// docks draw and consumed by the drag resolution after them.
+    pub dock_headers: Vec<(Side, Vec<f32>)>,
+    pub dock_rects: Vec<(Side, egui::Rect)>,
 
     pub export_job: Option<ExportJob>,
     pub export_format: Format,
@@ -121,6 +141,9 @@ pub struct App {
     /// directory and writing another.
     config_dir: PathBuf,
 
+    /// The message the fade clock is running for, so any assignment to `status`
+    /// anywhere restarts it without having to remember to.
+    last_status: Status,
     /// True while a run of held-down nudge keys is coalescing into one undo step.
     nudging: bool,
     /// Set once a quit has been confirmed, so the event loop can close the window.
@@ -181,10 +204,18 @@ impl App {
             path: None,
             saved_revision: 0,
             status: Status::Idle,
+            status_at: std::time::Instant::now(),
             fields: FieldBuffers::default(),
+            scrub: crate::ui::Scrub::default(),
             rename: None,
             outliner_drag: None,
             drop_target: None,
+            cursor: None,
+            pending_delete: None,
+            camera_move: None,
+            dock_drag: crate::dock::DockDrag::default(),
+            dock_headers: Vec::new(),
+            dock_rects: Vec::new(),
             export_job: None,
             export_format: Format::ThreeMf,
             export_scale: "1".to_string(),
@@ -196,6 +227,7 @@ impl App {
             recording: None,
             keymap_conflict: None,
             config_dir,
+            last_status: Status::Idle,
             nudging: false,
             quit_now: false,
         };
@@ -446,9 +478,36 @@ impl App {
 
     pub fn set_view(&mut self, preset: ViewPreset) {
         let (yaw, pitch) = preset.angles();
+        self.turn_camera_to(yaw, pitch);
+        self.status = Status::Info(format!("View: {}", preset.label()));
+    }
+
+    /// Turn the camera to face a given way, over the design's 200 ms, taking
+    /// the short way round. Under a reduced-motion preference it simply arrives:
+    /// the transition is there to show that this is the same camera moving, and
+    /// someone who does not want things moving does not need to be shown that.
+    pub fn turn_camera_to(&mut self, yaw: f64, pitch: f64) {
+        let from = (self.scene.camera.yaw, self.scene.camera.pitch);
+        let to = (from.0 + crate::view::shortest_turn(from.0, yaw), pitch);
+        if self.settings.reduce_motion {
+            self.scene.camera.yaw = to.0;
+            self.scene.camera.pitch = to.1;
+            self.camera_move = None;
+            return;
+        }
+        self.camera_move = Some(CameraMove { from, to, started: std::time::Instant::now() });
+    }
+
+    /// Advance a view change. Called once a frame; does nothing when none is in
+    /// flight.
+    pub fn advance_camera(&mut self) {
+        let Some(move_) = self.camera_move else { return };
+        let ((yaw, pitch), done) = move_.at(std::time::Instant::now());
         self.scene.camera.yaw = yaw;
         self.scene.camera.pitch = pitch;
-        self.status = Status::Info(format!("View: {}", preset.label()));
+        if done {
+            self.camera_move = None;
+        }
     }
 
     // -- commands -----------------------------------------------------------
@@ -514,6 +573,21 @@ impl App {
             DisplayWireframe => self.settings.display_mode = DisplayMode::Wireframe,
             ToggleBoundingBox => self.settings.show_bounding_box = !self.settings.show_bounding_box,
             ToggleGhosts => self.settings.show_ghosts = !self.settings.show_ghosts,
+            ToggleDocks => {
+                self.settings.layout.docks_hidden = !self.settings.layout.docks_hidden;
+                self.status = Status::Info(
+                    if self.settings.layout.docks_hidden {
+                        "Docks hidden; press it again to bring them back exactly as they were"
+                    } else {
+                        "Docks restored"
+                    }
+                    .into(),
+                );
+            }
+            ResetLayout => {
+                crate::dock::reset(self);
+                self.status = Status::Info("Panel layout reset".into());
+            }
 
             ModeMove => self.mode = Mode::Move,
             ModeRotate => self.mode = Mode::Rotate,
@@ -603,13 +677,63 @@ impl App {
             self.status = Status::Info("Nothing to delete".into());
             return;
         }
+        // Deleting a group is two different actions wearing one word: the
+        // children can go with it, or stay. Rather than guess, or open a dialog
+        // over the model, the outliner asks in place.
+        if targets.iter().any(|id| self.scene.node(*id).is_group() && !self.scene.node(*id).children.is_empty()) {
+            self.pending_delete = Some(targets);
+            return;
+        }
+        self.delete_now(&targets, false);
+    }
+
+    /// How many nodes the pending deletion would take with it, if the children
+    /// go too.
+    pub fn pending_delete_count(&self) -> usize {
+        let Some(targets) = &self.pending_delete else { return 0 };
+        targets.iter().map(|id| 1 + self.scene.descendants(*id).len()).sum()
+    }
+
+    /// Carry out the deletion the outliner asked about. `promote` keeps the
+    /// children by moving them up into the group's own place first.
+    pub fn confirm_delete(&mut self, promote: bool) {
+        let Some(targets) = self.pending_delete.take() else { return };
+        self.delete_now(&targets, promote);
+    }
+
+    pub fn cancel_delete(&mut self) {
+        if self.pending_delete.take().is_some() {
+            self.status = Status::Info("Nothing deleted".into());
+        }
+    }
+
+    fn delete_now(&mut self, targets: &[NodeId], promote: bool) {
         self.edit("Delete", None);
-        for id in &targets {
+        let mut promoted = 0;
+        for id in targets {
+            if promote {
+                // Into the group's own slot, in order, so the tree reads the
+                // same afterwards minus one level of nesting.
+                let node = self.scene.node(*id);
+                let children = node.children.clone();
+                if let Some(parent) = node.parent {
+                    let at = self.scene.node(parent).children.iter().position(|c| c == id).unwrap_or(0);
+                    for (offset, child) in children.iter().enumerate() {
+                        if self.scene.reparent(*child, parent, at + offset).is_ok() {
+                            promoted += 1;
+                        }
+                    }
+                }
+            }
             self.scene.remove(*id);
         }
         self.clear_selection();
-        self.status =
-            Status::Info(format!("Deleted {} node{}", targets.len(), if targets.len() == 1 { "" } else { "s" }));
+        let removed = targets.len();
+        self.status = Status::Info(if promote {
+            format!("Deleted {removed} group{}, kept {promoted} child{}", plural(removed), children_plural(promoted))
+        } else {
+            format!("Deleted {removed} node{}", plural(removed))
+        });
     }
 
     fn group_selection(&mut self) {
@@ -766,6 +890,11 @@ impl App {
         };
         match created {
             Some(id) => {
+                // New shapes land at the 3D cursor when one has been placed, and
+                // at the origin otherwise -- the palette's hint says which.
+                if let (Some(at), Some(node)) = (self.cursor, self.scene.get_mut(id)) {
+                    node.position = at;
+                }
                 self.select_only(id);
                 self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
             }
@@ -906,8 +1035,66 @@ impl App {
     }
 }
 
+fn plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
+fn children_plural(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "ren"
+    }
+}
+
+/// Where the next shape will land, in words. The palette says this in its hint
+/// line and in every tile's tooltip, so the two can never disagree about it.
+pub fn insertion_hint(app: &App) -> String {
+    let unit = app.unit();
+    match app.cursor {
+        Some(at) => format!(
+            "Lands at the 3D cursor: {}, {}, {} {}.",
+            scadstudio_core::unit::format_length(at.x, unit),
+            scadstudio_core::unit::format_length(at.y, unit),
+            scadstudio_core::unit::format_length(at.z, unit),
+            unit.suffix()
+        ),
+        None => "Lands at the origin. Shift+right-click in the viewport to put the 3D cursor somewhere else.".into(),
+    }
+}
+
+/// How long a message stays at full strength before fading out. Long enough to
+/// read twice, short enough that the bar is not still reporting an export that
+/// finished ten minutes ago.
+pub const STATUS_LIFETIME: Duration = Duration::from_secs(6);
+
+/// How readable a message is now: 1 while it is current, falling to 0 over the
+/// second after its lifetime. `Idle` never fades -- "Ready" is a state, not news.
+pub fn status_opacity(status: &Status, age: Duration) -> f32 {
+    if matches!(status, Status::Idle) {
+        return 1.0;
+    }
+    let over = age.as_secs_f32() - STATUS_LIFETIME.as_secs_f32();
+    if over <= 0.0 {
+        1.0
+    } else {
+        (1.0 - over).clamp(0.0, 1.0)
+    }
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // A new message restarts its clock. Watching the value rather than
+        // stamping it at every assignment means no `status = ...` anywhere in
+        // the application can forget to.
+        if self.status != self.last_status {
+            self.last_status = self.status.clone();
+            self.status_at = std::time::Instant::now();
+        }
         if let Some(result) = self.worker.poll() {
             let first = self.evaluation_generation == 0;
             self.evaluated = result;
@@ -926,6 +1113,7 @@ impl eframe::App for App {
             self.dirty = false;
         }
         self.poll_export();
+        self.advance_camera();
         self.refresh_node_renderables();
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
@@ -934,9 +1122,10 @@ impl eframe::App for App {
         self.menu_bar(ctx);
         self.status_bar(ctx);
         crate::panel_toolrail::show(self, ctx);
-        panel_outliner::show(self, ctx);
-        panel_properties::show(self, ctx);
+        crate::dock::show(self, ctx, Side::Left);
+        crate::dock::show(self, ctx, Side::Right);
         panel_viewport::show(self, ctx);
+        crate::dock::resolve_drag(self, ctx);
         self.modals(ctx);
 
         // Confirmation on quit (spec section 7.4): intercept the window's own
@@ -955,7 +1144,12 @@ impl eframe::App for App {
         }
         // Keep animating while work is in flight, so progress and the preview
         // update without the user having to move the mouse.
-        if self.worker.is_busy() || self.export_job.is_some() || self.drag.is_some() {
+        if self.worker.is_busy()
+            || self.export_job.is_some()
+            || self.drag.is_some()
+            || self.camera_move.is_some()
+            || status_opacity(&self.status, self.status_at.elapsed()) > 0.0 && self.status != Status::Idle
+        {
             ctx.request_repaint();
         }
     }
@@ -1018,9 +1212,10 @@ mod tests {
             app.menu_bar(ctx);
             app.status_bar(ctx);
             crate::panel_toolrail::show(app, ctx);
-            panel_outliner::show(app, ctx);
-            panel_properties::show(app, ctx);
+            crate::dock::show(app, ctx, Side::Left);
+            crate::dock::show(app, ctx, Side::Right);
             panel_viewport::show(app, ctx);
+            crate::dock::resolve_drag(app, ctx);
         });
     }
 
@@ -1104,6 +1299,129 @@ mod tests {
         fn reevaluate_for_test(&mut self) {
             self.evaluated = Evaluator::new().evaluate(&self.scene, &Cancel::new());
         }
+    }
+
+    #[test]
+    fn deleting_a_group_asks_what_should_happen_to_its_children() {
+        // Two readings of one word, so it is asked rather than guessed.
+        let mut app = headless_app();
+        let plate = app.scene.depth_first().into_iter().find(|&id| id != app.scene.root()).unwrap();
+        app.select_only(plate);
+        app.run(Command::Group);
+        let group = app.primary().unwrap();
+        assert!(app.scene.node(group).is_group());
+
+        app.run(Command::Delete);
+        assert!(app.pending_delete.is_some(), "a group with children was deleted without asking");
+        assert!(app.scene.contains(group), "the model changed before the question was answered");
+        assert_eq!(app.pending_delete_count(), 2, "the group and its one child");
+
+        // Cancelling leaves everything alone.
+        app.cancel_delete();
+        assert!(app.pending_delete.is_none());
+        assert!(app.scene.contains(group) && app.scene.contains(plate));
+
+        // Keeping the children promotes them into the group's own place.
+        app.select_only(group);
+        app.run(Command::Delete);
+        app.confirm_delete(true);
+        assert!(!app.scene.contains(group), "the group survived");
+        assert!(app.scene.contains(plate), "the child was deleted despite being kept");
+        assert_eq!(app.scene.node(plate).parent, Some(app.scene.root()), "the child was not promoted");
+
+        // And taking the children takes them.
+        app.select_only(plate);
+        app.run(Command::Group);
+        let group = app.primary().unwrap();
+        app.run(Command::Delete);
+        app.confirm_delete(false);
+        assert!(!app.scene.contains(group) && !app.scene.contains(plate));
+
+        // A shape on its own is not a question, so it just goes.
+        let root = app.scene.root();
+        let lone = app.scene.add_primitive("sphere", root, 0).unwrap();
+        app.select_only(lone);
+        app.run(Command::Delete);
+        assert!(app.pending_delete.is_none(), "deleting one shape asked a question it did not need to");
+        assert!(!app.scene.contains(lone));
+    }
+
+    #[test]
+    fn a_new_shape_lands_at_the_three_d_cursor_and_the_hint_says_so() {
+        let mut app = headless_app();
+        assert!(insertion_hint(&app).contains("origin"), "{}", insertion_hint(&app));
+        app.add_node(Some("sphere"), GroupOp::Union);
+        assert_eq!(app.scene.node(app.primary().unwrap()).position, Vec3::ZERO);
+
+        app.cursor = Some(Vec3::new(30.0, -10.0, 5.0));
+        let hint = insertion_hint(&app);
+        assert!(hint.contains("cursor") && hint.contains("30"), "{hint}");
+        app.add_node(Some("sphere"), GroupOp::Union);
+        assert_eq!(app.scene.node(app.primary().unwrap()).position, Vec3::new(30.0, -10.0, 5.0));
+    }
+
+    #[test]
+    fn a_message_fades_once_it_has_been_read_and_ready_never_does() {
+        let message = Status::Info("Saved".into());
+        assert_eq!(status_opacity(&message, Duration::from_secs(0)), 1.0);
+        assert_eq!(status_opacity(&message, STATUS_LIFETIME), 1.0);
+        assert!(status_opacity(&message, STATUS_LIFETIME + Duration::from_millis(500)) < 1.0);
+        assert_eq!(status_opacity(&message, STATUS_LIFETIME + Duration::from_secs(2)), 0.0);
+        // "Ready" is the state of the application, not news about it.
+        assert_eq!(status_opacity(&Status::Idle, Duration::from_secs(600)), 1.0);
+    }
+
+    #[test]
+    fn the_view_cube_and_the_view_menu_reach_the_same_camera() {
+        let mut app = headless_app();
+        app.settings.reduce_motion = true;
+        for (normal, preset, label) in crate::view::CUBE_FACES {
+            app.run(Command::ViewIsometric);
+            app.set_view(preset);
+            // The angles may differ by a whole turn -- the camera takes the
+            // short way round, so "left" can arrive at -180 rather than 180 --
+            // so compare where the eye ends up, which is the thing that matters.
+            let looking = app.current_view().offset_dir();
+            let face = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+            assert!(looking.dot(face) > 0.99, "{label}: the camera ended up at {looking:?}");
+        }
+
+        // With motion allowed the camera is on its way rather than already
+        // there, and it gets there.
+        app.settings.reduce_motion = false;
+        app.run(Command::ViewIsometric);
+        app.advance_camera();
+        assert!(app.camera_move.is_some(), "the transition never started");
+        let target = app.camera_move.unwrap().to;
+        app.camera_move = Some(CameraMove {
+            started: std::time::Instant::now() - crate::view::TRANSITION,
+            ..app.camera_move.unwrap()
+        });
+        app.advance_camera();
+        assert!(app.camera_move.is_none(), "the transition never finished");
+        assert!((app.scene.camera.yaw - target.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn every_panel_still_draws_wherever_it_has_been_docked() {
+        // Panels are movable, so the layouts that used to be impossible -- a
+        // dock with nothing in it, three panels in one column, everything rolled
+        // up -- are now reachable and have to draw.
+        use scadstudio_core::config::{Panel, Side};
+        let mut app = headless_app();
+        for panel in Panel::ALL {
+            app.settings.layout.move_to(panel, Side::Right, 0);
+        }
+        draw_one_frame(&mut app);
+        for panel in Panel::ALL {
+            app.settings.layout.toggle_collapsed(panel);
+        }
+        draw_one_frame(&mut app);
+        app.settings.layout.docks_hidden = true;
+        draw_one_frame(&mut app);
+        app.run(Command::ResetLayout);
+        assert_eq!(app.settings.layout, scadstudio_core::config::Layout::default());
+        draw_one_frame(&mut app);
     }
 
     /// Spec acceptance criterion 19: the application starts and stays usable on a

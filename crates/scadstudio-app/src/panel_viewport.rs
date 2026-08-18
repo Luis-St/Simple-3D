@@ -5,7 +5,7 @@
 //! manipulator, the bounding box and the drag readout are drawn on top with the
 //! toolkit's 2D painter, so they are always visible and can be hovered.
 
-use crate::app::App;
+use crate::app::{App, Status};
 use crate::gizmo::{self, Gizmo, Handle, Mods};
 use crate::pick;
 use crate::render::{self, Grid, Item, Palette, Style};
@@ -25,9 +25,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
         let dark = ui.visuals().dark_mode;
         paint_scene(app, ui, rect, dark);
-        navigate(app, ui, &response);
         let view = app.current_view();
-        manipulate(app, ui, &response, &view);
+        // The cube gets the pointer before the viewport does, or a click on a
+        // face would also orbit the camera it just turned.
+        let taken = view_cube(app, ui, rect, &view);
+        if !taken {
+            navigate(app, ui, &response);
+            place_cursor(app, ui, &response, &view);
+            let view = app.current_view();
+            manipulate(app, ui, &response, &view);
+        }
+        let view = app.current_view();
         overlays(app, ui, rect, &view);
     });
 }
@@ -288,11 +296,8 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
         }
     }
 
-    // The corner marks: an orientation cube bottom-right, and one line of state
-    // top-left. What used to sit here was four lines of prose in the same grey
-    // as the grid -- unreadable and, once the tool rail shows the same state as
-    // a lit button, redundant.
-    view_cube(app, &painter, rect, view);
+    // The 3D cursor, where the next shape would land.
+    draw_cursor(app, &painter, view);
 
     let hud = format!(
         "{} \u{00B7} {} \u{00B7} {} frame",
@@ -328,52 +333,173 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     }
 }
 
-/// The orientation cube in the bottom-right corner: three labelled axes drawn
-/// with the live camera, so which way the model is facing is answerable without
-/// orbiting to find out.
-fn view_cube(app: &App, painter: &egui::Painter, rect: egui::Rect, view: &View) {
+/// Where a shape would land: the 3D cursor, drawn as a small set of crosshairs
+/// so it reads as a position rather than as a piece of the model.
+fn draw_cursor(app: &App, painter: &egui::Painter, view: &View) {
+    let Some(at) = app.cursor else { return };
+    let Some((screen, _)) = view.project(at) else { return };
+    let r = 9.0;
+    for (dx, dy) in [(1.0, 0.0), (0.0, 1.0)] {
+        painter.line_segment(
+            [screen - egui::vec2(dx, dy) * r, screen + egui::vec2(dx, dy) * r],
+            egui::Stroke::new(1.0_f32, token::MEASURE),
+        );
+    }
+    painter.circle_stroke(screen, r * 0.55, egui::Stroke::new(1.0_f32, token::MEASURE));
+}
+
+/// Shift and the orbit button's opposite -- the right button -- puts the cursor
+/// on whatever is under the pointer, or on the ground plane when that is
+/// nothing. Shift+right-click again on empty space away from the ground puts it
+/// back at the origin.
+fn place_cursor(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) {
+    let shift = ui.input(|i| i.modifiers.shift);
+    let pressed = ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary));
+    if !shift || !pressed {
+        return;
+    }
+    let Some(pointer) = response.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.hover_pos())) else {
+        return;
+    };
+    // Prefer the surface actually under the pointer: placing a shape against
+    // another shape is the reason to move the cursor at all.
+    let (origin, dir) = view.ray(pointer);
+    let hit = pick::ray_mesh(&app.evaluated.mesh, origin, dir).map(|t| origin + dir * t);
+    let at = hit.or_else(|| view.ray_plane(pointer, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
+    match at {
+        Some(at) => {
+            let snapped = snap_point(at, app.move_snap());
+            app.cursor = Some(snapped);
+            app.status = Status::Info(format!("3D cursor at {}", crate::ui::describe_point(snapped, app.unit())));
+        }
+        None => {
+            app.cursor = None;
+            app.status = Status::Info("3D cursor back at the origin".into());
+        }
+    }
+}
+
+/// The cursor snaps to the same grid a move does, so a shape placed with it
+/// lands on the same numbers a shape moved with the handles does.
+pub fn snap_point(p: Vec3, step: f64) -> Vec3 {
+    if step <= 0.0 {
+        return p;
+    }
+    Vec3::new((p.x / step).round() * step, (p.y / step).round() * step, (p.z / step).round() * step)
+}
+
+/// The orientation cube in the bottom-right corner.
+///
+/// It answers which way the model faces, and it is also the fastest way to
+/// change that: a face turns the camera to look at it straight on, the dot at
+/// its centre switches between perspective and orthographic. Returns true when
+/// it took the pointer, so a click on it does not also orbit.
+fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) -> bool {
     let side = theme::metric::VIEW_CUBE;
     let box_rect =
         egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(side + 12.0, side + 12.0), egui::Vec2::splat(side));
-    painter.rect_filled(box_rect, 3.0, token::SURFACE_1.gamma_multiply(0.72));
+    let response = ui.interact(box_rect, ui.id().with("view-cube"), egui::Sense::click());
+    let painter = ui.painter_at(box_rect.expand(2.0));
+    painter.rect_filled(box_rect, 3.0, token::SURFACE_1.gamma_multiply(0.80));
     painter.rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0_f32, token::SURFACE_3), egui::StrokeKind::Inside);
 
     let centre = box_rect.center();
     let reach = side * 0.30;
-    // The camera's own rotation, applied to the three unit axes: the same yaw
-    // and pitch the viewport is using, so the cube can never disagree with it.
-    let yaw = app.scene.camera.yaw.to_radians();
-    let pitch = app.scene.camera.pitch.to_radians();
-    let project = |v: Vec3| -> (egui::Vec2, f64) {
-        let x = v.x * yaw.cos() + v.y * yaw.sin();
-        let y = -v.x * yaw.sin() + v.y * yaw.cos();
-        let depth = y * pitch.cos() - v.z * pitch.sin();
-        let up = y * pitch.sin() + v.z * pitch.cos();
-        (egui::vec2(x as f32, -up as f32) * reach, depth)
+    let (yaw, pitch) = (app.scene.camera.yaw, app.scene.camera.pitch);
+    let project = |v: Vec3| crate::view::cube_project(yaw, pitch, v, reach);
+    let corner = |i: usize| {
+        Vec3::new(
+            if i & 1 == 0 { -1.0 } else { 1.0 },
+            if i & 2 == 0 { -1.0 } else { 1.0 },
+            if i & 4 == 0 { -1.0 } else { 1.0 },
+        )
     };
 
-    let axes = [
-        (Vec3::new(1.0, 0.0, 0.0), "X", 0usize),
-        (Vec3::new(0.0, 1.0, 0.0), "Y", 1),
-        (Vec3::new(0.0, 0.0, 1.0), "Z", 2),
-    ];
-    // Far axes first, so a near one draws over them rather than under.
-    let mut ordered: Vec<(egui::Vec2, f64, &str, usize)> = axes
+    let hover = response.hover_pos();
+    let centre_radius = side * 0.11;
+    let over_centre = hover.is_some_and(|p| (p - centre).length() < centre_radius);
+    // Which face the pointer is over: the nearest one that is turned towards
+    // the eye, so a click never asks for the side of the cube you cannot see.
+    let hovered_face = match (over_centre, hover) {
+        (false, Some(p)) => crate::view::cube_face_at(yaw, pitch, p - centre, reach),
+        _ => None,
+    };
+    let faces: Vec<(usize, egui::Pos2, f64)> = crate::view::CUBE_FACES
         .iter()
-        .map(|(v, name, axis)| {
-            let (p, d) = project(*v);
-            (p, d, *name, *axis)
+        .enumerate()
+        .map(|(index, (normal, _, _))| {
+            let n = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
+            let (offset, depth) = project(n);
+            (index, centre + offset, depth)
         })
         .collect();
-    ordered.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    for (offset, _, name, axis) in ordered {
-        let colour = crate::theme::axis_colour(axis);
-        let tip = centre + offset;
-        painter.line_segment([centre, tip], egui::Stroke::new(1.5_f32, colour));
-        painter.circle_filled(tip, 7.0, colour);
-        painter.text(tip, egui::Align2::CENTER_CENTER, name, egui::FontId::monospace(10.0), token::SURFACE_0);
+
+    // Far faces first, so a near one draws over them.
+    let mut order: Vec<usize> = (0..crate::view::CUBE_FACES.len()).collect();
+    order.sort_by(|a, b| faces[*b].2.partial_cmp(&faces[*a].2).unwrap_or(std::cmp::Ordering::Equal));
+    for index in order {
+        let (normal, _, label) = crate::view::CUBE_FACES[index];
+        let (_, at, depth) = faces[index];
+        if depth >= 0.0 {
+            continue;
+        }
+        // The face as a quad: the four cube corners that share this normal.
+        let axis = normal.iter().position(|c| *c != 0).unwrap_or(0);
+        let sign = normal[axis] as f64;
+        let quad: Vec<egui::Pos2> = (0..8)
+            .filter(|i| crate::gizmo::get_axis(corner(*i), axis) * sign > 0.0)
+            .map(|i| centre + project(corner(i)).0)
+            .collect();
+        let quad = sort_ring(quad, at);
+        let tint = crate::theme::axis_colour(axis);
+        let fill = if hovered_face == Some(index) {
+            token::ACCENT.gamma_multiply(0.55)
+        } else {
+            tint.gamma_multiply(0.16).blend(token::SURFACE_2)
+        };
+        painter.add(egui::Shape::convex_polygon(
+            quad,
+            fill,
+            egui::Stroke::new(1.0_f32, token::SURFACE_3.gamma_multiply(0.9)),
+        ));
+        let text_colour = if hovered_face == Some(index) { token::SURFACE_0 } else { token::TEXT_LO };
+        // Pushed a little away from the cube's centre: in an isometric view the
+        // three visible face centres meet at the near corner, and that is where
+        // the projection dot lives.
+        let text_at = centre + (at - centre) * 1.2;
+        painter.text(text_at, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(9.0), text_colour);
+    }
+
+    // The centre dot: projection. It sits where no face label does, so it never
+    // covers one.
+    let dot = if over_centre { token::ACCENT } else { token::TEXT_LO };
+    painter.circle_filled(centre, centre_radius * 0.45, dot);
+    if !app.scene.camera.orthographic {
+        painter.circle_stroke(centre, centre_radius * 0.8, egui::Stroke::new(1.0_f32, dot.gamma_multiply(0.6)));
+    }
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.clicked() {
+        if over_centre {
+            app.run(scadstudio_core::keymap::Command::ToggleProjection);
+        } else if let Some(index) = hovered_face {
+            app.set_view(crate::view::CUBE_FACES[index].1);
+        }
     }
     let _ = view;
+    response.hovered() || response.clicked()
+}
+
+/// Put the corners of a face in ring order around its centre, so the quad drawn
+/// from them is the face and not a bow tie.
+fn sort_ring(mut points: Vec<egui::Pos2>, centre: egui::Pos2) -> Vec<egui::Pos2> {
+    points.sort_by(|a, b| {
+        let angle = |p: &egui::Pos2| (p.y - centre.y).atan2(p.x - centre.x);
+        angle(a).partial_cmp(&angle(b)).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    points
 }
 
 fn draw_box(painter: &egui::Painter, view: &View, lo: Vec3, hi: Vec3, colour: egui::Color32, width: f32) {

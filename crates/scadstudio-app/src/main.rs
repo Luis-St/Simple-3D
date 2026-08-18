@@ -7,6 +7,7 @@
 
 mod app;
 mod app_chrome;
+mod dock;
 mod gizmo;
 mod icon;
 mod panel_outliner;

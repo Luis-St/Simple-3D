@@ -72,55 +72,102 @@ fn symbol(op: GroupOp) -> Glyph {
     }
 }
 
-pub fn show(app: &mut App, ctx: &egui::Context) {
-    let mut width = app.settings.outliner_width;
-    let frame = egui::Frame::NONE.fill(token::SURFACE_1);
-    egui::SidePanel::left("outliner")
-        .frame(frame)
-        .resizable(true)
-        .default_width(width)
-        .width_range(220.0..=520.0)
-        .show(ctx, |ui| {
-            width = ui.available_width();
-            ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
-
-            crate::panel_primitives::show_inside(app, ui);
-
-            theme::panel_header(ui, "Outliner", |ui| {
-                let count = app.selection.len();
-                if count > 0 {
-                    ui.add(egui::Label::new(theme::hint(format!("{count} selected"))).selectable(false));
-                }
-            });
-
-            let dragging = app.outliner_drag;
-            app.drop_target = None;
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                ui.add_space(2.0);
-                let ids = app.scene.depth_first();
-                for id in ids {
-                    row(app, ui, id, dragging);
-                }
-                // Dropping in the empty space below the tree means "at the end of
-                // the root", which is otherwise awkward to reach.
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
-                    egui::Sense::hover(),
-                );
-                if dragging.is_some() && response.hovered() {
-                    let root = app.scene.root();
-                    app.drop_target =
-                        Some(DropTarget { parent: root, index: app.scene.node(root).children.len(), into: None });
-                    ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
-                }
-            });
-
-            // Finish the drag on release, wherever the pointer ended up.
-            if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
-                finish_drag(app);
-            }
+/// The outliner's contents, without a dock around them: the dock owns the
+/// header bar and decides which side of the window this is on.
+pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
+    if !app.selection.is_empty() {
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.add_space(theme::metric::PANEL_PAD);
+            ui.add(egui::Label::new(theme::hint(format!("{} selected", app.selection.len()))).selectable(false));
         });
-    app.settings.outliner_width = width;
+    }
+
+    confirm_strip(app, ui);
+
+    let dragging = app.outliner_drag;
+    app.drop_target = None;
+    let ctx = ui.ctx().clone();
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(2.0);
+        let ids = app.scene.depth_first();
+        for id in ids {
+            row(app, ui, id, dragging);
+        }
+        // Dropping in the empty space below the tree means "at the end of the
+        // root", which is otherwise awkward to reach.
+        let (rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
+            egui::Sense::hover(),
+        );
+        if dragging.is_some() && response.hovered() {
+            let root = app.scene.root();
+            app.drop_target = Some(DropTarget { parent: root, index: app.scene.node(root).children.len(), into: None });
+            ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
+        }
+    });
+
+    // Finish the drag on release, wherever the pointer ended up.
+    if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
+        finish_drag(app);
+    }
+}
+
+/// The inline confirmation for deleting a group.
+///
+/// It is a strip in the outliner rather than a dialog over the window because
+/// the question is about the tree, and the answer is easier to give while
+/// still looking at it. The two answers are named for what they do -- neither
+/// of them is "OK".
+fn confirm_strip(app: &mut App, ui: &mut egui::Ui) {
+    if app.pending_delete.is_none() {
+        return;
+    }
+    let names: Vec<String> = app
+        .pending_delete
+        .as_ref()
+        .map(|ids| ids.iter().map(|id| app.scene.node(*id).name.clone()).collect())
+        .unwrap_or_default();
+    let total = app.pending_delete_count();
+    let groups = names.len();
+    let children = total - groups;
+
+    egui::Frame::NONE
+        .fill(token::DANGER.gamma_multiply(0.16))
+        .stroke(egui::Stroke::new(1.0_f32, token::DANGER.gamma_multiply(0.7)))
+        .inner_margin(egui::Margin { left: 8, right: 8, top: 6, bottom: 6 })
+        .show(ui, |ui| {
+            let what = if groups == 1 { format!("\u{201C}{}\u{201D}", names[0]) } else { format!("{groups} groups") };
+            ui.add(
+                egui::Label::new(theme::value(format!(
+                    "Delete {what}? It holds {children} node{}.",
+                    if children == 1 { "" } else { "s" }
+                )))
+                .selectable(false)
+                .wrap(),
+            );
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Delete the children too").on_hover_text("The group and everything inside it").clicked() {
+                    app.confirm_delete(false);
+                }
+                if ui
+                    .button("Keep the children")
+                    .on_hover_text("The children move up into the group's own place; only the group goes")
+                    .clicked()
+                {
+                    app.confirm_delete(true);
+                }
+                if ui.button("Cancel").clicked() {
+                    app.cancel_delete();
+                }
+            });
+        });
+    // Escape is the way out of everything else in this application, so it is
+    // the way out of this too.
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.cancel_delete();
+    }
 }
 
 fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {

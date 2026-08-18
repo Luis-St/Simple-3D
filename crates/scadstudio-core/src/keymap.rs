@@ -59,6 +59,8 @@ pub enum Command {
     DisplayWireframe,
     ToggleBoundingBox,
     ToggleGhosts,
+    ToggleDocks,
+    ResetLayout,
 
     ModeMove,
     ModeRotate,
@@ -130,6 +132,8 @@ impl Command {
         Command::DisplayWireframe,
         Command::ToggleBoundingBox,
         Command::ToggleGhosts,
+        Command::ToggleDocks,
+        Command::ResetLayout,
         Command::ModeMove,
         Command::ModeRotate,
         Command::ModeResize,
@@ -179,6 +183,8 @@ impl Command {
             DisplayWireframe => "Display: wireframe",
             ToggleBoundingBox => "Show bounding box",
             ToggleGhosts => "Show hidden nodes as ghosts",
+            ToggleDocks => "Hide / show the side docks",
+            ResetLayout => "Reset panel layout",
             ModeMove => "Manipulator: move",
             ModeRotate => "Manipulator: rotate",
             ModeResize => "Manipulator: resize",
@@ -200,7 +206,7 @@ impl Command {
             | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ToggleProjection | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | DisplayShaded | DisplayShadedEdges | DisplayWireframe
-            | ToggleBoundingBox | ToggleGhosts => Area::View,
+            | ToggleBoundingBox | ToggleGhosts | ToggleDocks | ResetLayout => Area::View,
             ModeMove | ModeRotate | ModeResize | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp | NudgeDown
             | NudgeAway | NudgeToward => Area::Manipulate,
         }
@@ -442,6 +448,9 @@ impl Keymap {
         set(DisplayWireframe, Chord::key("6"));
         set(ToggleBoundingBox, Chord::key("B"));
         set(ToggleGhosts, Chord::shift("H"));
+        // Tab clears the docks to leave the viewport alone with the model.
+        set(ToggleDocks, Chord::key("Tab"));
+        set(ResetLayout, Chord::ctrl_shift("L"));
 
         set(NudgeLeft, Chord::key("Left"));
         set(NudgeRight, Chord::key("Right"));
