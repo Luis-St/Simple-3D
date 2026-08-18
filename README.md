@@ -1,13 +1,93 @@
 # ScadStudio
 
-A desktop app for assembling 3D models out of parametric primitives (boxes,
-prisms, spheres, cylinders, cones, pyramids, tori, regular polyhedra) with
-boolean operations and exact metric dimensions, exporting to 3MF/STL/OBJ/PLY.
-Full spec: `scadstudio-prompt.md`, checked in beside this file.
+Parametric 3D modelling with exact metric dimensions. Assemble models out of
+primitives (boxes, prisms, spheres, cylinders, cones, pyramids, tori, regular
+polyhedra), combine them with booleans, and export to 3MF, STL, OBJ or PLY for a
+slicer.
 
 Nothing is entered as a scale factor and nothing is stored as one: a 40 mm box
 is 40 mm because its width parameter says 40, and dragging its right face
-rewrites that parameter rather than stretching anything.
+rewrites that parameter rather than stretching anything. Every dimension typed
+in is reproduced exactly in the exported mesh.
+
+One self-contained binary. No runtime, no installer, no network, no accelerated
+graphics required.
+
+## Download
+
+Portable single-file executables for Linux (x86-64) and Windows (x64) are built
+from the tag by `.github/workflows/release.yml` and attached to each release:
+
+| Platform | File |
+| --- | --- |
+| Linux x86-64 | `scadstudio-linux-x86_64` (`chmod +x` and run) |
+| Windows x64 | `scadstudio-windows-x86_64.exe` |
+
+Put a file named `portable` (or `portable.txt`) beside the executable and it
+keeps its settings there instead of in the user profile — otherwise they live in
+`%APPDATA%\ScadStudio` or `$XDG_CONFIG_HOME/scadstudio`.
+
+Projects are `.scadstudio` files (JSON, versioned, human-readable). Passing one
+as an argument opens it, so file associations work on both platforms.
+
+## What it does
+
+- **Typing is the primary interface.** Every numeric field takes an expression
+  (`40/3`, `(2+3)*4`), a value in another unit (`4cm` in a millimetre document),
+  or a delta (`+2`, `- 5`) that resolves against each selected shape separately.
+  Dragging a field's label scrubs its value; Shift is fine, Ctrl is coarse.
+- **Direct manipulation writes parameters.** Move, rotate and resize handles
+  rewrite the shape's own dimensions and position — a completed drag is one undo
+  step, and Escape during one puts everything back.
+- **Booleans that hold up.** Union, difference, intersection and hull, nested
+  arbitrarily. Results are checked for manifoldness on every evaluation; a
+  boolean that cannot be evaluated names its own node in the outliner while the
+  rest of the scene still previews, and export refuses while the error stands.
+- **A window you can rearrange.** Panels move between the two docks by dragging
+  their header and roll up by clicking it; Tab hides both docks and View ▸ Reset
+  panel layout puts them back. The arrangement survives a restart. The
+  orientation cube turns the camera to a face, and its centre dot switches
+  perspective and orthographic.
+- **Keys and mouse buttons are yours.** Three presets (ScadStudio default, mesh
+  editor, CAD) and per-command rebinding, with conflicts named rather than
+  silently taken. A rebinding applies to the next gesture, without a restart.
+- **It starts on anything.** The viewport is a from-scratch software rasterizer:
+  there is no shader to fail to compile and no GPU to be missing.
+
+## Status
+
+**v0.1.0** — the first release. All four crates are implemented and all 29 of
+the spec's acceptance criteria are behaviourally met.
+
+`cargo test --workspace` runs **328 tests**, none ignored or failing, and every
+one of the 29 criteria is asserted by a test that cites it by name. Check that
+last claim rather than trusting it:
+
+```
+python3 tools/criteria_audit.py
+```
+
+It prints the test covering each criterion and exits non-zero if any is
+uncovered. Do not use `grep -rn "criterion" crates/` for this: it counts a doc
+comment as coverage, and four criteria were once passing that check without a
+test.
+
+`KNOWN_ISSUES.md` is this project's issue list, and its "Open" section is empty
+as of this release. Read the top of that file before trusting that sentence:
+"empty" is a statement about a moment, and two bugs recorded there — a drag that
+finished wherever the mouse button came up, and an orientation cube a quarter
+turn out of step with the viewport — were found by running the application with
+a full test suite passing over them.
+
+## Documentation
+
+| File | What it is |
+| --- | --- |
+| `README.md` | This file: what the application is and how to build it |
+| `CHANGELOG.md` | Released versions, user-facing |
+| `CHANGES.md` | The engineering report for the most recent pass; earlier ones are in git history |
+| `KNOWN_ISSUES.md` | The issue list — open items, things worth knowing, and a write-up of every fixed bug |
+| `scadstudio-prompt.md` | The full functional specification, including the 29 acceptance criteria |
 
 ## Why Rust, and why no external CSG/geometry crate
 
@@ -23,8 +103,7 @@ rewrites that parameter rather than stretching anything.
   implementation.
 - The viewport is a from-scratch software rasterizer, so the app starts and
   stays usable on a machine with no accelerated graphics (acceptance criterion
-  19). `eframe` only has to provide a window and 2D drawing; there is no shader
-  to fail to compile.
+  19). `eframe` only has to provide a window and 2D drawing.
 
 ## Workspace layout
 
@@ -44,29 +123,11 @@ crates/
                        writer for the 3MF container.
   scadstudio-app/      eframe/egui desktop UI: outliner, property editor,
                        software-rasterized viewport, direct-manipulation
-                       handles, menus and dialogs, evaluation worker thread.
+                       handles, docks, menus and dialogs, evaluation worker
+                       thread.
 ```
 
-## Status
-
-All four crates are implemented and all 29 of the spec's acceptance criteria are
-behaviourally met. `cargo test --workspace` runs 278 tests, none ignored or
-failing, and every one of the 29 criteria is asserted by a test that cites the
-criterion by name.
-
-Check that last claim rather than trusting it — `python3 tools/criteria_audit.py`
-prints the test covering each criterion and exits non-zero if any is uncovered.
-Do not use `grep -rn "criterion" crates/` for this: it counts a doc comment as
-coverage, and four criteria were passing that check without a test.
-
-`KNOWN_ISSUES.md` is this project's issue list, and its "Open" section is empty
-as of the last pass. Read the top of that file before trusting this sentence:
-"empty" is a statement about a moment, and the most recent bug fixed there — a
-drag that finished wherever the mouse button came up — had been shipping since
-drags existed, with a full test suite passing over it. It was found by running
-the application, which is worth doing for any change to the manipulator.
-
-Highlights worth knowing about:
+Engineering highlights worth knowing about:
 
 - **Every primitive from the spec's table**: box, rounded box, wedge, regular
   prism, sphere/ellipsoid, spherical cap, cylinder, tube, capsule, torus (full
@@ -78,9 +139,6 @@ Highlights worth knowing about:
 - **Booleans are watertight and manifold** for the degenerate cases that are
   the normal case in practice — coplanar faces, coincident surfaces, operands
   touching at a single edge, fully contained and fully disjoint operands.
-  `Mesh::manifold_issue` gates every evaluation result; a boolean that cannot
-  be evaluated names its own node in the outliner while the rest of the scene
-  still previews, and export refuses while the error stands.
 - **Evaluation is deterministic, cached per subtree and cancellable.** The
   spec's 200-primitive scene (fifty assemblies, 100 nested boolean groups)
   evaluates cold in ~0.12 s and updates after a one-dimension edit in ~6 ms.
@@ -88,6 +146,9 @@ Highlights worth knowing about:
 - **Boolean output is retriangulated per flat region**, so a plate with a hole,
   a slot and a boss comes out at ~230 triangles rather than the ~1500 a
   plane-clipping BSP leaves behind. See `crates/scadstudio-geom/src/planar.rs`.
+- **Pointer gestures are executed by tests**, not only reasoned about:
+  `crates/scadstudio-app/src/gestures.rs` replays real pointer events over a
+  real frame with `egui_kittest`.
 
 ## Building
 
@@ -102,9 +163,14 @@ cargo run --release -p scadstudio-app -- my-project.scadstudio
 cargo run --release -p scadstudio-geom --example boolean_cost
 ```
 
-The toolchain is pinned by `rust-toolchain.toml`. `.github/workflows/release.yml`
-builds portable single-file executables for Linux and Windows from one commit,
-with the version taken from the tag.
+The toolchain is pinned by `rust-toolchain.toml`. On Linux the usual X11/Wayland
+development packages are needed (`libx11-dev libxcursor-dev libxi-dev
+libxrandr-dev libxkbcommon-dev libwayland-dev` on Debian and Ubuntu); the
+release workflow lists the same set.
+
+Releases are cut by pushing a `v*` tag: `.github/workflows/release.yml` takes the
+version from the tag, tests and builds both targets from that one commit, and
+attaches the two executables to the GitHub release.
 
 ## Where things live
 
@@ -115,9 +181,16 @@ with the version taken from the tag.
 | Why a boolean result is the shape it is | `scadstudio-geom/src/csg_bsp.rs`, then `repair.rs` and `planar.rs` |
 | Caching and invalidation | `scadstudio-core/src/eval.rs` (`subtree_key`) |
 | Manipulator handle behaviour and modifiers | `scadstudio-app/src/gizmo.rs` |
+| What a numeric field accepts | `scadstudio-core/src/unit.rs` |
+| The docks, and what moves between them | `scadstudio-app/src/dock.rs` |
 | A colour, a row height or a type size | `scadstudio-app/src/theme.rs` — nothing else names one |
 | An icon, or a primitive's silhouette | `scadstudio-app/src/icon.rs` |
 | Keymap presets, rebinding and conflicts | `scadstudio-core/src/keymap.rs` |
 | Navigation bindings taking effect without a restart | `scadstudio-app/src/panel_viewport.rs` (`nav_gesture`) |
+| Driving a pointer gesture in a test | `scadstudio-app/src/gestures.rs` |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |
 | File format and migration | `scadstudio-core/src/project.rs` |
+
+## Licence
+
+MIT. See `LICENSE`.

@@ -1,5 +1,9 @@
 # Change report — 2026-08-18 (sixth pass)
 
+*The engineering report for one pass of work: what changed, why, and what was
+deliberately not built. `CHANGELOG.md` is the user-facing record of releases;
+earlier reports are in git history.*
+
 One thing: **the four pointer gestures the fifth pass shipped are now performed
 by tests.** The dock header drag, the field-label scrub, the view-cube click and
 Shift+right-click to place the 3D cursor were all wired up last pass and none of
