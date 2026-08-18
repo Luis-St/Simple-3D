@@ -5,10 +5,12 @@ primitives (boxes, prisms, spheres, cylinders, cones, pyramids, tori, regular
 polyhedra), combine them with booleans, and export to 3MF, STL, OBJ or PLY for a
 slicer.
 
-Nothing is entered as a scale factor and nothing is stored as one: a 40 mm box
-is 40 mm because its width parameter says 40, and dragging its right face
-rewrites that parameter rather than stretching anything. Every dimension typed
-in is reproduced exactly in the exported mesh.
+Nothing has to be entered as a scale factor: a 40 mm box is 40 mm because its
+width parameter says 40, and dragging its right face rewrites that parameter
+rather than stretching anything. Every dimension typed in is reproduced exactly
+in the exported mesh. A scale tool exists alongside that, for the question
+dimensions cannot answer — making a whole *group* a proportion of what it was —
+and it is a factor the node carries, never something a resize writes.
 
 One self-contained binary. No runtime, no installer, no network, no accelerated
 graphics required.
@@ -44,7 +46,12 @@ as an argument opens it, so file associations work on both platforms.
   Dragging a field's label scrubs its value; Shift is fine, Ctrl is coarse.
 - **Direct manipulation writes parameters.** Move, rotate and resize handles
   rewrite the shape's own dimensions and position — a completed drag is one undo
-  step, and Escape during one puts everything back.
+  step, and Escape during one puts everything back. The fourth tool, scale,
+  writes a factor instead, and is the one that works on a group.
+- **A palette you can add to.** Save a group, or a whole project, as a primitive
+  and it is on the palette of every project afterwards. New shapes land where you
+  choose: the origin, the 3D cursor, what the camera is looking at, or clear of
+  the selection.
 - **Booleans that hold up.** Union, difference, intersection and hull, nested
   arbitrarily. Results are checked for manifoldness on every evaluation; a
   boolean that cannot be evaluated names its own node in the outliner while the
@@ -62,10 +69,10 @@ as an argument opens it, so file associations work on both platforms.
 
 ## Status
 
-**v0.0.2** — the first release plus a Debian package. All four crates are
+**v0.0.2, plus unreleased work** — see `CHANGELOG.md`. All four crates are
 implemented and all 29 of the spec's acceptance criteria are behaviourally met.
 
-`cargo test --workspace` runs **328 tests**, none ignored or failing, and every
+`cargo test --workspace` runs **354 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
@@ -78,12 +85,12 @@ uncovered. Do not use `grep -rn "criterion" crates/` for this: it counts a doc
 comment as coverage, and four criteria were once passing that check without a
 test.
 
-`KNOWN_ISSUES.md` is this project's issue list, and its "Open" section is empty
-as of this release. Read the top of that file before trusting that sentence:
-"empty" is a statement about a moment, and two bugs recorded there — a drag that
-finished wherever the mouse button came up, and an orientation cube a quarter
-turn out of step with the viewport — were found by running the application with
-a full test suite passing over them.
+`KNOWN_ISSUES.md` is this project's issue list. Read the top of that file rather
+than trusting a summary here: several bugs recorded in it — a drag that finished
+wherever the mouse button came up, an orientation cube a quarter turn out of
+step with the viewport, a side wall the orthographic camera culled although it
+faced the viewer — were all found by running the application with a full test
+suite passing over it.
 
 ## Documentation
 

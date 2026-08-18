@@ -6,7 +6,25 @@ wrong. There is no separate tracker.
 
 ## Open
 
-Nothing.
+Raised on 2026-08-18 and deliberately left for a later pass:
+
+- **The origin axes are pinned to the origin** and read as three fixed lines
+  rather than behaving the way other 3D software's do.
+- **`.simple3d` has no file-manager icon.** The Debian package registers the MIME
+  type and the desktop entry, but no icon for the document type itself, and
+  nothing at all is registered on Windows.
+- **A level hint marks nothing on the object.** When the X, Y or Z level lines up
+  with a shape there is no mark on the shape saying where.
+- **An object cannot be given a colour.** Setting one on a group should set it on
+  every object inside.
+
+Unverified rather than known-good:
+
+- **Wayland window decorations.** `wayland-csd-adwaita` is now on -- GNOME draws
+  no decorations for a client, and winit only draws its own with that feature --
+  and `sctk-adwaita` is in the build. Nothing here can take a screenshot of a
+  Wayland surface, so the title bar, its buttons and the resize edges have been
+  reasoned about rather than looked at.
 
 ## Worth knowing rather than fixing
 
@@ -47,6 +65,55 @@ Nothing.
   refuses the whole rebuild if it is less sound than what it replaced.
 
 ## Resolved
+
+### A face the orthographic camera could see was culled (fixed)
+
+Reported against a plate seen almost edge-on: one of its side walls was simply
+not drawn, and the background showed through the side of a solid box.
+
+`draw_shaded` culled a triangle by `normal.dot(eye - centroid)`. That is the
+right question under perspective, where every ray really does come from the eye,
+and the wrong one under **orthographic** projection, where every ray runs along
+the view direction and there is no eye to point at. The error is the angle
+between the two answers, which grows with how far the triangle sits from the
+camera's target: at 100 mm off target at a distance of 120 mm it is nearly forty
+degrees, and every wall within that of edge-on was culled although it faced the
+viewer. Under orthographic the test is now against `-forward`.
+
+Caught by `render::an_orthographic_box_away_from_the_centre_of_the_frame_keeps_all_its_faces`,
+which measures the painted silhouette against the convex hull of the box's own
+projected corners -- a dropped wall is a slice missing from the *edge* of the
+silhouette, not a hole in the middle of it, so a hole test does not see it.
+
+### A move handle had to be grabbed several times (fixed)
+
+Reported with a screen capture: dragging the X arrow moved the plate perhaps
+half the time, and the other half the click merely re-selected it.
+
+`panel_viewport::manipulate` decided what had been grabbed from where the
+pointer was **at the moment egui called the press a drag** -- which is after the
+pointer has moved past the drag threshold, most of the 9 px a handle is
+grabbable within. By then the pointer had usually left the handle it pressed,
+`hover_handle` was `None`, and the press was reported as a plain click. `App`
+now remembers what was under the pointer when the button went *down*, and starts
+the drag from the press origin rather than from wherever the pointer had slipped
+to.
+
+### Clicking a shape did nothing until something was already selected (fixed)
+
+Picking lived inside `manipulate`, which returns early when there is no primary
+node -- so with an empty selection, which is now what the application opens on,
+the first click into the viewport was thrown away and the outliner was the only
+way to select anything. It is its own step in `panel_viewport::show` now, past a
+flag saying whether the manipulator claimed the pointer.
+
+### Undo threw the view back as well as the model (fixed)
+
+An undo snapshot is the whole `Scene`, and the camera is part of a `Scene`
+because it is saved with the project. Restoring one wholesale therefore also
+restored where the user had been looking from when the edit was made. `undo::restore`
+keeps the current camera across both undo and redo: undo is over the model, and
+where you are standing is not part of it.
 
 ### Every pointer gesture was unexecuted (fixed)
 

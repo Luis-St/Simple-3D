@@ -8,6 +8,63 @@ Versions follow [semantic versioning](https://semver.org). Until 1.0 the project
 file format may still change; when it does, a file written by an older version
 will still open, and `format` in the file says which version wrote it.
 
+## [Unreleased]
+
+### Added
+
+- **A scale tool.** A factor per axis, carried by the node and applied to
+  everything under it, so a whole **group** can be made a proportion of what it
+  was -- which resize cannot do, because scaling a group truthfully would mean
+  rewriting every dimension inside it. Resize still writes dimensions and is
+  still the way to say "40 mm"; scale says "twice as big". `T` (or `Shift+S` /
+  `Shift+T` under the other presets), the fourth button on the tool rail, and a
+  Scale row in Transform with a Reset to 1 beside it.
+- **A library of saved primitives.** Keep a group, or a whole project, on the
+  palette and drop it into any other project: File › Save selection as
+  primitive, File › Save project as primitive, or the outliner's right-click
+  menu. Saved entries appear under **Saved** at the foot of the palette;
+  right-click one to take it off again. They live in `library/` under the config
+  directory, one readable JSON file each, so one can be handed to someone else by
+  sending them the file.
+- **A right-click menu on every outliner row**: rename, duplicate, copy, cut,
+  paste, group, move up and down, show/hide, save as primitive, and delete.
+  Right-clicking a row that is not selected acts on that row.
+- **A choice of where a new shape lands** -- origin, the 3D cursor, what the
+  camera is looking at, or clear of the selection -- in the palette's Add at
+  control. The hint line underneath always says where the next one will go.
+- **A switch per origin axis.** X, Y and Z each turn off on their own, from the
+  View menu, `Alt+X` / `Alt+Y` / `Alt+Z`, or the Document panel.
+- **The move and resize step is its own setting**, in Transform and in the
+  Document panel, and **defaults to 1 mm**. It used to be the ground grid's
+  spacing, which meant a fine step forced an unreadable grid.
+
+### Changed
+
+- **A new document opens empty.** It used to arrive with a plate in it that
+  nobody asked for.
+- **Hiding something hides it.** Hidden nodes are no longer drawn as translucent
+  red ghosts by default, and a hidden node that is selected no longer keeps its
+  selection outline. The ghosts remain available -- they are worth having while
+  positioning a body that is about to be subtracted -- under View › Hidden nodes
+  as ghosts.
+
+### Fixed
+
+- **A face the orthographic camera could see was culled**, so a box seen almost
+  edge-on was drawn a side wall short.
+- **A move handle had to be grabbed several times.** What is under the pointer
+  when the button goes *down* is now what gets grabbed.
+- **Clicking a shape did nothing while nothing was selected**, which made the
+  outliner the only way to select the first thing.
+- **Undo moved the camera.** It puts the model back and leaves the view alone.
+
+### Project format
+
+- A node may now carry a `scale`. It is written only when it is not `1, 1, 1`, so
+  a project without one is byte-identical to what an earlier version wrote --
+  but a project *with* one, opened in 0.0.2, loses the scale silently. Until 1.0
+  the format may still change.
+
 ## [0.0.2] — 2026-08-18
 
 ### Fixed
