@@ -613,7 +613,7 @@ impl App {
                     match self.keymap.set(command, chord.clone(), false) {
                         Ok(()) => {
                             self.recording = None;
-                            let _ = config::save_keymap(&self.keymap);
+                            self.persist_keymap();
                         }
                         // Name the command currently holding it and offer to
                         // reassign or cancel; never overwrite silently.
@@ -641,12 +641,12 @@ impl App {
                     if preset != self.keymap.preset {
                         // A preset is a starting point the user can then modify.
                         self.keymap.switch_preset(preset);
-                        let _ = config::save_keymap(&self.keymap);
+                        self.persist_keymap();
                         self.status = Status::Info(format!("Keymap preset: {}", preset.label()));
                     }
                     if ui.button("Reset everything to the preset").clicked() {
                         self.keymap.reset_all();
-                        let _ = config::save_keymap(&self.keymap);
+                        self.persist_keymap();
                     }
                 });
                 ui.horizontal(|ui| {
@@ -671,7 +671,7 @@ impl App {
                             {
                                 Ok(keymap) => {
                                     self.keymap = keymap;
-                                    let _ = config::save_keymap(&self.keymap);
+                                    self.persist_keymap();
                                 }
                                 Err(e) => self.fail("Could not read the keymap", &e),
                             }
@@ -710,7 +710,7 @@ impl App {
                     if nav != self.keymap.nav {
                         // Applies immediately, without a restart.
                         self.keymap.nav = nav;
-                        let _ = config::save_keymap(&self.keymap);
+                        self.persist_keymap();
                     }
                 });
                 if self.keymap.nav.orbit.button == self.keymap.nav.pan.button
@@ -768,7 +768,7 @@ impl App {
                                     }
                                     if ui.small_button("Reset").clicked() {
                                         self.keymap.reset(command);
-                                        let _ = config::save_keymap(&self.keymap);
+                                        self.persist_keymap();
                                     }
                                     ui.end_row();
                                 }
@@ -794,7 +794,7 @@ impl App {
                     ui.horizontal(|ui| {
                         if ui.button("Reassign").clicked() {
                             let _ = self.keymap.set(command, chord.clone(), true);
-                            let _ = config::save_keymap(&self.keymap);
+                            self.persist_keymap();
                             self.keymap_conflict = None;
                         }
                         if ui.button("Cancel").clicked() {
@@ -820,7 +820,7 @@ impl App {
                 ui.label("Everything is stored in millimetres; the display unit only changes what you read.");
                 ui.add_space(6.0);
                 ui.label(format!("Project files: .{PROJECT_EXTENSION}"));
-                ui.label(format!("Settings: {}", config::config_dir().display()));
+                ui.label(format!("Settings: {}", self.config_dir().display()));
                 if config::portable_mode() {
                     ui.label("Running in portable mode: settings live beside the executable.");
                 }

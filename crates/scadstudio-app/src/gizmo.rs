@@ -113,6 +113,7 @@ impl Mods {
 }
 
 /// The manipulator for one selected node, positioned in world space.
+#[derive(Clone, Debug)]
 pub struct Gizmo {
     pub mode: Mode,
     /// The node's origin in world space -- where move and rotate handles centre.
@@ -321,6 +322,16 @@ fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
 pub struct Drag {
     pub node: NodeId,
     pub handle: Handle,
+    /// The manipulator **as it stood when the handle was grabbed**.
+    ///
+    /// A drag must be measured against a frame that does not move, and the live
+    /// gizmo is rebuilt every frame from the very node the drag is moving. Using
+    /// it here meant the reference slid along with the result: once the node had
+    /// moved 10 mm, `gizmo.origin` had moved 10 mm too, the cursor measured 10 mm
+    /// nearer, and the next frame wrote the node back to where it started. The
+    /// position then flipped between the two on alternate frames, and where a
+    /// drag finished came down to which frame the button happened to come up on.
+    gizmo: Gizmo,
     pub start_position: Vec3,
     pub start_rotation: Vec3,
     pub start_params: Params,
@@ -350,6 +361,7 @@ impl Drag {
         let mut drag = Drag {
             node,
             handle,
+            gizmo: gizmo.clone(),
             start_position: n.position,
             start_rotation: n.rotation,
             start_params: n.params().cloned().unwrap_or_default(),
@@ -392,7 +404,6 @@ impl Drag {
     pub fn update(
         &mut self,
         scene: &mut Scene,
-        gizmo: &Gizmo,
         view: &View,
         cursor: egui::Pos2,
         mods: Mods,
@@ -400,12 +411,15 @@ impl Drag {
         rotate_snap: f64,
         unit: Unit,
     ) {
+        // Everything below is measured in the frame the drag began in, never the
+        // live one -- see the note on `Drag::gizmo`.
+        let gizmo = &self.gizmo.clone();
         match self.handle {
             Handle::MoveAxis(axis) => {
                 let Some(along) = view.ray_axis(cursor, gizmo.origin, gizmo.axes[axis]) else { return };
                 let delta = mods.snap(along - self.grab, move_snap);
                 let world_delta = gizmo.axes[axis] * delta;
-                self.write_position(scene, gizmo, world_delta);
+                self.write_position(scene, world_delta);
                 self.readout = format!("{} {}", axis_name(axis), signed_length(delta, unit));
             }
             Handle::MovePlane(axis) => {
@@ -415,7 +429,7 @@ impl Drag {
                 let du = mods.snap(raw.dot(gizmo.axes[u]), move_snap);
                 let dv = mods.snap(raw.dot(gizmo.axes[v]), move_snap);
                 let world_delta = gizmo.axes[u] * du + gizmo.axes[v] * dv;
-                self.write_position(scene, gizmo, world_delta);
+                self.write_position(scene, world_delta);
                 self.readout = format!(
                     "{} {}  {} {}",
                     axis_name(u),
@@ -447,7 +461,7 @@ impl Drag {
                 let anchor = gizmo.own.point(gizmo.face_centre(axis, positive));
                 let Some(along) = view.ray_axis(cursor, anchor, gizmo.axes[axis]) else { return };
                 let outward = mods.snap(along - self.grab, move_snap) * if positive { 1.0 } else { -1.0 };
-                let applied = self.resize_axis(scene, gizmo, axis, outward, mods.symmetric, positive);
+                let applied = self.resize_axis(scene, axis, outward, mods.symmetric, positive);
                 self.readout = match applied {
                     Some(extent) => format!("{} {}", axis_name(axis), format_length(extent, unit)),
                     None => "not resizable on this axis".to_string(),
@@ -464,7 +478,7 @@ impl Drag {
                     // fraction to the others.
                     let mut best = 0.0;
                     for axis in 0..3 {
-                        if self.drivable(gizmo, axis).is_none() {
+                        if self.drivable(axis).is_none() {
                             continue;
                         }
                         let extent = self.start_extent(axis);
@@ -480,14 +494,14 @@ impl Drag {
                 }
                 let mut parts: Vec<String> = Vec::new();
                 for axis in 0..3 {
-                    if self.drivable(gizmo, axis).is_none() {
+                    if self.drivable(axis).is_none() {
                         continue;
                     }
                     let outward = match ratio {
                         Some(r) => self.start_extent(axis) * (r - 1.0),
                         None => mods.snap(raw.dot(gizmo.axes[axis]), move_snap) * if sides[axis] { 1.0 } else { -1.0 },
                     };
-                    if let Some(extent) = self.resize_axis(scene, gizmo, axis, outward, false, sides[axis]) {
+                    if let Some(extent) = self.resize_axis(scene, axis, outward, false, sides[axis]) {
                         parts.push(format!("{} {}", axis_name(axis), format_length(extent, unit)));
                     }
                 }
@@ -496,8 +510,8 @@ impl Drag {
         }
     }
 
-    fn drivable(&self, gizmo: &Gizmo, axis: usize) -> Option<AxisDriver> {
-        gizmo.drivers[axis]
+    fn drivable(&self, axis: usize) -> Option<AxisDriver> {
+        self.gizmo.drivers[axis]
     }
 
     fn start_extent(&self, axis: usize) -> f64 {
@@ -514,13 +528,12 @@ impl Drag {
     fn resize_axis(
         &self,
         scene: &mut Scene,
-        gizmo: &Gizmo,
         axis: usize,
         outward: f64,
         symmetric: bool,
         positive: bool,
     ) -> Option<f64> {
-        let driver = self.drivable(gizmo, axis)?;
+        let driver = self.drivable(axis)?;
         if driver.factor.abs() < 1e-12 {
             return None;
         }
@@ -553,10 +566,11 @@ impl Drag {
 
     /// Write a world-space movement back to `Node::position`, which lives in the
     /// parent's frame.
-    fn write_position(&self, scene: &mut Scene, gizmo: &Gizmo, world_delta: Vec3) {
-        let target = gizmo.parent.point(self.start_position) + world_delta;
+    fn write_position(&self, scene: &mut Scene, world_delta: Vec3) {
+        let parent = self.gizmo.parent;
+        let target = parent.point(self.start_position) + world_delta;
         if let Some(node) = scene.get_mut(self.node) {
-            node.position = gizmo.parent.inverse().point(target);
+            node.position = parent.inverse().point(target);
         }
     }
 
@@ -746,6 +760,64 @@ pub fn nudge_coalesce_key(id: NodeId, mode: Mode) -> String {
     format!("nudge:{id}:{mode:?}")
 }
 
+/// The pointer facts the viewport panel reads off an `egui::Response` each frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PointerState {
+    /// Escape was pressed this frame.
+    pub escape: bool,
+    /// The drag button came up.
+    pub released: bool,
+    /// A drag started this frame.
+    pub started: bool,
+    /// The cursor is over a manipulator handle.
+    pub on_handle: bool,
+    /// There is a cursor position at all -- the pointer may be off the window.
+    pub have_cursor: bool,
+}
+
+/// What the pointer is asking the manipulator to do this frame.
+///
+/// Split out of `panel_viewport::manipulate` so the begin/continue/finish
+/// bookkeeping can be asserted. An `egui::Response` cannot be built outside a
+/// running frame, and that is what kept acceptance criterion 23's last clause --
+/// "a completed drag undoes in one step" -- untested: the single undo record
+/// happens on `Begin` and on no other phase, which is the whole mechanism.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragPhase {
+    /// Escape during a drag: put the pre-drag values back exactly.
+    Cancel,
+    /// The button came up: the drag is over.
+    Finish,
+    /// A drag is running: follow the cursor.
+    Continue,
+    /// A handle was grabbed: open one undo step and start.
+    Begin,
+    /// Nothing for the manipulator to do.
+    Idle,
+}
+
+/// Which phase a frame is in, given whether a drag is already running.
+///
+/// The ordering is the part that matters. Escape beats release, so a cancel is
+/// never mistaken for a completed drag; and `Begin` requires that no drag is
+/// running, which is what stops a second undo step opening mid-gesture.
+pub fn drag_phase(dragging: bool, pointer: PointerState) -> DragPhase {
+    if dragging {
+        if pointer.escape {
+            return DragPhase::Cancel;
+        }
+        if pointer.released {
+            return DragPhase::Finish;
+        }
+        return if pointer.have_cursor { DragPhase::Continue } else { DragPhase::Idle };
+    }
+    if pointer.started && pointer.on_handle && pointer.have_cursor {
+        DragPhase::Begin
+    } else {
+        DragPhase::Idle
+    }
+}
+
 /// One press of a nudge key, all the way through: work out the step, open or
 /// extend the undo run it belongs to, and write it into the scene.
 ///
@@ -825,7 +897,7 @@ mod tests {
         let from = f.view.project(gizmo.handle_point(handle, &f.view)).unwrap().0;
         let to = f.view.project(target).unwrap().0;
         let mut drag = Drag::begin(&f.scene, &gizmo, f.node, handle, &f.view, from).unwrap();
-        drag.update(&mut f.scene, &gizmo, &f.view, to, mods, snap, 15.0, Unit::Millimetre);
+        drag.update(&mut f.scene, &f.view, to, mods, snap, 15.0, Unit::Millimetre);
         f.reevaluate();
         drag
     }
@@ -1035,7 +1107,7 @@ mod tests {
         // A little over 30 degrees around the ring.
         let to = f.view.project(ring[7]).unwrap().0;
         let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
-        drag.update(&mut f.scene, &gizmo, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
+        drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
         let z = f.scene.node(f.node).rotation.z;
         assert!((z % 15.0).abs() < 1e-9, "not snapped to 15 degrees: {z}");
         assert!(z > 0.0, "rotated the wrong way: {z}");
@@ -1050,16 +1122,7 @@ mod tests {
         let from = f.view.project(ring[0]).unwrap().0;
         let to = f.view.project(ring[7]).unwrap().0;
         let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
-        drag.update(
-            &mut f.scene,
-            &gizmo,
-            &f.view,
-            to,
-            Mods { free: true, ..Default::default() },
-            10.0,
-            15.0,
-            Unit::Millimetre,
-        );
+        drag.update(&mut f.scene, &f.view, to, Mods { free: true, ..Default::default() }, 10.0, 15.0, Unit::Millimetre);
         let z = f.scene.node(f.node).rotation.z;
         assert!(z > 20.0 && z < 45.0, "{z}");
         assert!((z % 15.0).abs() > 1e-6, "a free drag snapped anyway: {z}");
@@ -1336,9 +1399,9 @@ mod tests {
         let from = f.view.project(gizmo.handle_point(handle, &f.view)).unwrap().0;
         let to = f.view.project(gizmo.handle_point(handle, &f.view) + Vec3::new(20.0, 0.0, 0.0)).unwrap().0;
         let mut drag = Drag::begin(&f.scene, &gizmo, f.node, handle, &f.view, from).unwrap();
-        drag.update(&mut f.scene, &gizmo, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Centimetre);
+        drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Centimetre);
         assert_eq!(drag.readout, "X +2cm", "{}", drag.readout);
-        drag.update(&mut f.scene, &gizmo, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
+        drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
         assert_eq!(drag.readout, "X +20mm");
     }
 

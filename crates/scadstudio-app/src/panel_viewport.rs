@@ -5,8 +5,8 @@
 //! manipulator, the bounding box and the drag readout are drawn on top with the
 //! toolkit's 2D painter, so they are always visible and can be hovered.
 
-use crate::app::{App, Status};
-use crate::gizmo::{self, Drag, Gizmo, Handle, Mods};
+use crate::app::App;
+use crate::gizmo::{self, Gizmo, Handle, Mods};
 use crate::pick;
 use crate::render::{self, Grid, Item, Palette, Style};
 use crate::view::View;
@@ -214,57 +214,28 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     };
     let is_group = app.scene.node(id).is_group();
     let cursor = ui.input(|i| i.pointer.hover_pos());
+    let dragging = app.drag.is_some();
 
-    // Escape during a drag cancels it and restores the pre-drag values exactly.
-    if app.drag.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-        if let Some(drag) = app.drag.take() {
-            drag.cancel(&mut app.scene);
-            app.touch();
-            app.fields.clear();
-            app.status = Status::Info("Drag cancelled".into());
-        }
-        return;
+    // The hover hit-test only matters while nothing is being dragged; during a
+    // drag the grabbed handle is the one that counts.
+    if !dragging {
+        app.hover_handle = cursor.and_then(|cursor| gizmo.hit_test(view, cursor, is_group));
     }
 
-    if let Some(drag) = &mut app.drag {
-        if response.drag_stopped() || ui.input(|i| i.pointer.any_released()) {
-            app.drag = None;
-            app.history.close();
-            app.fields.clear();
-            return;
-        }
-        if let Some(cursor) = cursor {
-            let mods = mods_from(ui);
-            let snap = app.scene.settings.grid_spacing;
-            let rotate_snap = app.settings.rotate_snap_deg;
-            let unit = app.scene.settings.unit;
-            drag.update(&mut app.scene, &gizmo, view, cursor, mods, snap, rotate_snap, unit);
-            // The property editor tracks the handle live, and the preview follows.
-            app.fields.clear();
-            app.touch();
-        }
-        return;
-    }
-
-    app.hover_handle = cursor.and_then(|cursor| gizmo.hit_test(view, cursor, is_group));
-
-    if response.drag_started_by(egui::PointerButton::Primary) {
-        if let (Some(cursor), Some(handle)) = (cursor, app.hover_handle) {
-            // One snapshot for the whole drag, so it undoes in a single step.
-            app.edit(
-                match app.mode {
-                    gizmo::Mode::Move => "Move",
-                    gizmo::Mode::Rotate => "Rotate",
-                    gizmo::Mode::Resize => "Resize",
-                },
-                None,
-            );
-            app.drag = Drag::begin(&app.scene, &gizmo, id, handle, view, cursor);
-        }
-    }
+    // Everything the pointer has to say this frame, read off the response in one
+    // place so the decision below needs nothing from egui.
+    let pointer = gizmo::PointerState {
+        escape: ui.input(|i| i.key_pressed(egui::Key::Escape)),
+        released: response.drag_stopped() || ui.input(|i| i.pointer.any_released()),
+        started: response.drag_started_by(egui::PointerButton::Primary),
+        on_handle: app.hover_handle.is_some(),
+        have_cursor: cursor.is_some(),
+    };
+    let phase = gizmo::drag_phase(dragging, pointer);
+    app.manipulate_step(&gizmo, view, id, phase, app.hover_handle, cursor, mods_from(ui));
 
     // A plain click that did not grab a handle selects whatever is under it.
-    if response.clicked_by(egui::PointerButton::Primary) && app.hover_handle.is_none() {
+    if !dragging && response.clicked_by(egui::PointerButton::Primary) && app.hover_handle.is_none() {
         select_under_cursor(app, ui, view);
     }
 }

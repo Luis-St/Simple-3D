@@ -115,6 +115,12 @@ pub struct App {
     pub recording: Option<Command>,
     pub keymap_conflict: Option<(Command, Chord, Command)>,
 
+    /// Where settings and the keymap are read from and written back to. Held
+    /// rather than looked up at each call site so a test can point an `App` at a
+    /// temp directory, and so a running application cannot start reading one
+    /// directory and writing another.
+    config_dir: PathBuf,
+
     /// True while a run of held-down nudge keys is coalescing into one undo step.
     nudging: bool,
     /// Set once a quit has been confirmed, so the event loop can close the window.
@@ -133,12 +139,20 @@ pub struct DropTarget {
 
 impl App {
     pub fn new(ctx: &egui::Context, open: Option<PathBuf>) -> App {
+        App::with_config_dir(ctx, open, config::config_dir())
+    }
+
+    /// `new`, but reading and writing settings and the keymap in `config_dir`
+    /// rather than the user's own. Tests use this so their result cannot depend
+    /// on what happens to be in the developer's config directory, and so they
+    /// cannot write to it.
+    pub fn with_config_dir(ctx: &egui::Context, open: Option<PathBuf>, config_dir: PathBuf) -> App {
         ctx.style_mut(|style| {
             style.spacing.item_spacing = egui::vec2(6.0, 5.0);
             style.spacing.button_padding = egui::vec2(7.0, 3.0);
         });
-        let settings = config::load_settings();
-        let keymap = config::load_keymap();
+        let settings = config::load_settings_from(&config_dir);
+        let keymap = config::load_keymap_from(&config_dir);
         let mut app = App {
             scene: Scene::new(),
             history: History::new(),
@@ -184,6 +198,7 @@ impl App {
             keymap_search: String::new(),
             recording: None,
             keymap_conflict: None,
+            config_dir,
             nudging: false,
             quit_now: false,
         };
@@ -666,6 +681,69 @@ impl App {
         self.fields.clear();
     }
 
+    /// Carry out one frame of a manipulator drag. `panel_viewport::manipulate`
+    /// reads the pointer off an `egui::Response`, works out the phase with
+    /// `gizmo::drag_phase`, and hands the result here; nothing about this depends
+    /// on a running frame, so a whole gesture can be driven from a test.
+    ///
+    /// The undo record happens on `Begin` and nowhere else -- that is what makes
+    /// a completed drag one undo step (spec acceptance criterion 23). The frames
+    /// in between call `touch`, which marks the scene dirty without snapshotting.
+    pub fn manipulate_step(
+        &mut self,
+        gizmo: &Gizmo,
+        view: &crate::view::View,
+        id: NodeId,
+        phase: gizmo::DragPhase,
+        handle: Option<Handle>,
+        cursor: Option<egui::Pos2>,
+        mods: gizmo::Mods,
+    ) {
+        match phase {
+            gizmo::DragPhase::Cancel => {
+                if let Some(drag) = self.drag.take() {
+                    drag.cancel(&mut self.scene);
+                    // The snapshot taken at Begin describes exactly the state the
+                    // cancel just restored, so keeping it would leave a dead undo
+                    // step behind a drag the user explicitly abandoned.
+                    self.history.discard_last();
+                    self.touch();
+                    self.fields.clear();
+                    self.status = Status::Info("Drag cancelled".into());
+                }
+            }
+            gizmo::DragPhase::Finish => {
+                self.drag = None;
+                self.history.close();
+                self.fields.clear();
+            }
+            gizmo::DragPhase::Continue => {
+                let (Some(drag), Some(cursor)) = (self.drag.as_mut(), cursor) else { return };
+                let snap = self.scene.settings.grid_spacing;
+                let rotate_snap = self.settings.rotate_snap_deg;
+                let unit = self.scene.settings.unit;
+                drag.update(&mut self.scene, view, cursor, mods, snap, rotate_snap, unit);
+                // The property editor tracks the handle live, and the preview follows.
+                self.fields.clear();
+                self.touch();
+            }
+            gizmo::DragPhase::Begin => {
+                let (Some(cursor), Some(handle)) = (cursor, handle) else { return };
+                // One snapshot for the whole drag, so it undoes in a single step.
+                self.edit(
+                    match self.mode {
+                        Mode::Move => "Move",
+                        Mode::Rotate => "Rotate",
+                        Mode::Resize => "Resize",
+                    },
+                    None,
+                );
+                self.drag = Drag::begin(&self.scene, gizmo, id, handle, view, cursor);
+            }
+            gizmo::DragPhase::Idle => {}
+        }
+    }
+
     /// The topmost selected nodes: selecting a group and one of its children acts
     /// on the group only.
     pub fn top_level_selection(&self) -> Vec<NodeId> {
@@ -813,9 +891,21 @@ impl App {
         self.quit_now = true;
     }
 
+    /// Where this application reads and writes its settings and keymap.
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
     pub fn persist(&mut self) {
-        let _ = config::save_settings(&self.settings);
-        let _ = config::save_keymap(&self.keymap);
+        let _ = config::save_settings_to(&self.config_dir, &self.settings);
+        self.persist_keymap();
+    }
+
+    /// Write the keymap out now, so a rebinding survives even a hard kill --
+    /// this is the half of acceptance criterion 28 that happens before the
+    /// restart. Called from every place the keymap editor changes something.
+    pub fn persist_keymap(&self) {
+        let _ = config::save_keymap_to(&self.config_dir, &self.keymap);
     }
 }
 
@@ -888,16 +978,73 @@ mod tests {
     /// `App::new` reads the *user's real* settings and keymap, so both are put
     /// back to their defaults here; a test must not change its answer because of
     /// what is in the developer's config directory.
+    fn temp_config_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "scadstudio-app-test-{name}-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn headless_app() -> App {
+        app_in(temp_config_dir("headless"))
+    }
+
+    fn app_in(config_dir: PathBuf) -> App {
         let ctx = egui::Context::default();
-        let mut app = App::new(&ctx, None);
-        app.settings = AppSettings::default();
-        app.keymap = Keymap::default();
+        let mut app = App::with_config_dir(&ctx, None, config_dir);
         // The gizmo needs a viewport to work out which axes face the screen, and
         // an evaluation to know where the node is.
         app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
         app.reevaluate_for_test();
         app
+    }
+
+    /// Spec acceptance criterion 28, the last link: `App` startup itself picks up
+    /// a rebinding written by a previous run.
+    ///
+    /// `config::a_rebinding_survives_a_restart_and_the_menus_follow` covers the
+    /// file round trip; this covers `App::new` actually consulting it, which is
+    /// what makes a restart show the new binding.
+    #[test]
+    fn a_restarted_app_starts_on_the_keymap_the_last_one_saved() {
+        let dir = temp_config_dir("restart");
+
+        // First run: rebind something and persist, exactly as the keymap editor does.
+        let mut first = app_in(dir.clone());
+        assert_eq!(first.keymap, Keymap::default(), "a fresh config dir did not give the default keymap");
+        first.keymap.set(Command::Group, Chord::ctrl_shift("J"), true).unwrap();
+        first.settings.rotate_snap_deg = 7.5;
+        first.persist();
+        drop(first);
+
+        // Second run: a new App over the same directory, knowing nothing else.
+        let second = app_in(dir.clone());
+        assert_eq!(second.keymap.binding(Command::Group), Some(&Chord::ctrl_shift("J")), "the rebinding was lost");
+        assert_eq!(second.keymap.command_for(&Chord::ctrl_shift("J")), Some(Command::Group));
+        assert_eq!(second.settings.rotate_snap_deg, 7.5, "settings did not persist either");
+        // What the menus render is the saved binding, not the default.
+        assert_ne!(
+            second.keymap.shortcut_text(Command::Group),
+            Keymap::default().shortcut_text(Command::Group),
+            "the menus would still show the default binding"
+        );
+
+        // And nothing was written outside the directory we handed it.
+        assert_eq!(second.config_dir(), dir.as_path());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The default `App::new` still points at the user's real config directory --
+    /// the test seam must not have changed where a shipped binary looks.
+    #[test]
+    fn the_default_config_directory_is_the_users_own() {
+        let ctx = egui::Context::default();
+        let app = App::new(&ctx, None);
+        assert_eq!(app.config_dir(), config::config_dir().as_path());
     }
 
     impl App {
@@ -927,6 +1074,187 @@ mod tests {
         assert_eq!(app.scene.depth_first().len(), 3, "root, plate and its duplicate");
         app.run(Command::Undo);
         assert_eq!(app.scene.depth_first().len(), 2);
+    }
+
+    /// Drive a whole manipulator gesture the way `panel_viewport::manipulate`
+    /// does: one `Begin`, `frames` × `Continue` along the way, then `Finish`.
+    /// Returns the cursor positions used, so a test can aim the drag.
+    fn drag_gesture(app: &mut App, id: NodeId, handle: Handle, to: Vec3, frames: usize) {
+        let view = app.current_view();
+        let start_gizmo = app.gizmo_for(id).expect("a gizmo for the dragged node");
+        let from = view.project(start_gizmo.handle_point(handle, &view)).unwrap().0;
+        let target = view.project(to).unwrap().0;
+
+        app.hover_handle = Some(handle);
+        let pointer = gizmo::PointerState { started: true, on_handle: true, have_cursor: true, ..Default::default() };
+        let phase = gizmo::drag_phase(false, pointer);
+        assert_eq!(phase, gizmo::DragPhase::Begin);
+        app.manipulate_step(&start_gizmo, &view, id, phase, Some(handle), Some(from), gizmo::Mods::default());
+
+        for frame in 1..=frames {
+            let t = frame as f32 / frames as f32;
+            let at = from + (target - from) * t;
+            let pointer = gizmo::PointerState { have_cursor: true, ..Default::default() };
+            let phase = gizmo::drag_phase(true, pointer);
+            assert_eq!(phase, gizmo::DragPhase::Continue);
+            // Rebuilt every frame, exactly as `panel_viewport::manipulate` does.
+            // A drag that measured against this rather than the frame it began
+            // in would chase its own tail; see the note on `gizmo::Drag::gizmo`.
+            let live = app.gizmo_for(id).expect("a gizmo mid-drag");
+            app.manipulate_step(&live, &view, id, phase, Some(handle), Some(at), gizmo::Mods::default());
+        }
+
+        let live = app.gizmo_for(id).expect("a gizmo at the end of the drag");
+        let pointer = gizmo::PointerState { released: true, have_cursor: true, ..Default::default() };
+        let phase = gizmo::drag_phase(true, pointer);
+        assert_eq!(phase, gizmo::DragPhase::Finish);
+        app.manipulate_step(&live, &view, id, phase, Some(handle), Some(target), gizmo::Mods::default());
+    }
+
+    /// A drag must land where the cursor left it, however many frames it took --
+    /// and land in the *same* place whether that number is odd or even.
+    ///
+    /// This is the regression test for a bug found by driving the running app:
+    /// `Drag::update` measured the cursor against the live gizmo, which is
+    /// rebuilt each frame from the node the drag is moving. Once the node had
+    /// moved, the reference had moved with it, and the next frame wrote the node
+    /// back to its starting point -- so the position flipped between the two on
+    /// alternate frames and the drag finished wherever the button happened to
+    /// come up. A single-frame drag, which is all the older tests did, cannot see
+    /// it.
+    #[test]
+    fn a_drag_lands_in_the_same_place_however_many_frames_it_took() {
+        // Where each drag aims, taken from a scene in its starting state.
+        let (target, corner) = {
+            let app = headless_app();
+            let id = app.primary().unwrap();
+            let gizmo = app.gizmo_for(id).unwrap();
+            (gizmo.origin + Vec3::new(30.0, 0.0, 0.0), gizmo.origin + Vec3::new(25.0, 15.0, 0.0))
+        };
+
+        // Every handle kind, since the frozen frame is what all of them measure
+        // against now.
+        for (handle, to) in [
+            (Handle::MoveAxis(0), target),
+            (Handle::MovePlane(2), corner),
+            (Handle::RotateRing(2), corner),
+            (Handle::ResizeFace(0, true), target),
+            (Handle::ResizeCorner([true, true, true]), corner),
+        ] {
+            let mut landed = Vec::new();
+            for frames in [1usize, 2, 3, 4, 5, 20, 21] {
+                let mut app = headless_app();
+                let id = app.primary().unwrap();
+                drag_gesture(&mut app, id, handle, to, frames);
+                app.reevaluate_for_test();
+                let node = app.scene.node(id);
+                landed.push((frames, node.position, node.rotation, node.params().cloned()));
+            }
+            let first = &landed[0];
+            for entry in &landed {
+                assert_eq!(
+                    (entry.1, entry.2, &entry.3),
+                    (first.1, first.2, &first.3),
+                    "{handle:?}: a {}-frame drag landed somewhere a {}-frame drag did not",
+                    entry.0,
+                    first.0
+                );
+            }
+        }
+    }
+
+    /// Spec acceptance criterion 23's last clause: a completed drag undoes in one
+    /// step, however many frames it took.
+    ///
+    /// This is the clause that had no test, because the bookkeeping lived inside
+    /// a function driven entirely by an `egui::Response`. The gesture below is
+    /// twenty frames long and must leave exactly one undo step behind.
+    #[test]
+    fn a_completed_drag_undoes_in_one_step_however_many_frames_it_took() {
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+        let start = app.scene.node(id).position;
+
+        // A recorded edit before the drag, so "one step" is not "the stack
+        // emptied". `Rename` only opens the editor, so it is not one.
+        app.edit("Before", None);
+        let before = app.history.revision();
+
+        let handle = Handle::MoveAxis(0);
+        let origin = app.gizmo_for(id).unwrap().origin;
+        drag_gesture(&mut app, id, handle, origin + Vec3::new(30.0, 0.0, 0.0), 20);
+        app.reevaluate_for_test();
+
+        let moved = app.scene.node(id).position;
+        assert_ne!(moved, start, "the drag did not move anything");
+        assert!(app.history.revision() > before);
+
+        app.run(Command::Undo);
+        assert_eq!(app.scene.node(id).position, start, "one undo did not take back the whole drag");
+        assert_eq!(app.history.undo_label(), Some("Before"), "the drag left more than one undo step");
+
+        app.run(Command::Redo);
+        assert_eq!(app.scene.node(id).position, moved, "redo did not put the drag back in one");
+    }
+
+    /// Escape mid-drag restores the pre-drag position *and* leaves no undo step
+    /// behind: the snapshot taken when the drag opened describes exactly the
+    /// state the cancel just restored, so an undo afterwards would do nothing
+    /// visible and the user would have to press it twice to get anywhere.
+    #[test]
+    fn a_cancelled_drag_leaves_no_undo_step_behind() {
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+
+        app.edit("Before", None);
+        let steps_before = app.history.undo_label().map(str::to_string);
+        let start = app.scene.node(id).position;
+
+        let handle = Handle::MoveAxis(0);
+        let gizmo = app.gizmo_for(id).unwrap();
+        let view = app.current_view();
+        let from = view.project(gizmo.handle_point(handle, &view)).unwrap().0;
+        let to = view.project(gizmo.origin + Vec3::new(30.0, 0.0, 0.0)).unwrap().0;
+
+        app.hover_handle = Some(handle);
+        app.manipulate_step(&gizmo, &view, id, gizmo::DragPhase::Begin, Some(handle), Some(from), Default::default());
+        app.manipulate_step(&gizmo, &view, id, gizmo::DragPhase::Continue, Some(handle), Some(to), Default::default());
+        assert_ne!(app.scene.node(id).position, start, "the drag never got going, so cancelling proves nothing");
+
+        app.manipulate_step(&gizmo, &view, id, gizmo::DragPhase::Cancel, Some(handle), Some(to), Default::default());
+        assert_eq!(app.scene.node(id).position, start, "Escape did not restore the pre-drag position exactly");
+        assert!(app.drag.is_none());
+        assert_eq!(app.history.undo_label().map(str::to_string), steps_before, "the cancelled drag left an undo step");
+
+        // So the next undo reaches the edit before the drag, not a dead step.
+        app.run(Command::Undo);
+        assert!(app.history.undo_label().is_none());
+    }
+
+    /// The phase ordering is what keeps one gesture to one undo step, so the
+    /// cases that could open a second are worth pinning down.
+    #[test]
+    fn a_second_undo_step_cannot_open_mid_gesture() {
+        use gizmo::{drag_phase, DragPhase, PointerState};
+
+        let grab = PointerState { started: true, on_handle: true, have_cursor: true, ..Default::default() };
+        assert_eq!(drag_phase(false, grab), DragPhase::Begin);
+        // The same frame's facts, once a drag is running, must never be Begin
+        // again -- that is the second snapshot that would split the gesture.
+        assert_eq!(drag_phase(true, grab), DragPhase::Continue);
+
+        // Escape beats release, so abandoning is never read as completing.
+        let both = PointerState { escape: true, released: true, have_cursor: true, ..Default::default() };
+        assert_eq!(drag_phase(true, both), DragPhase::Cancel);
+
+        // A press that did not land on a handle starts nothing.
+        assert_eq!(
+            drag_phase(false, PointerState { started: true, have_cursor: true, ..Default::default() }),
+            DragPhase::Idle
+        );
+        // The pointer leaving the window pauses the drag rather than ending it.
+        assert_eq!(drag_phase(true, PointerState::default()), DragPhase::Idle);
+        assert_eq!(drag_phase(false, PointerState::default()), DragPhase::Idle);
     }
 
     /// Spec acceptance criterion 26, from the command a keypress actually
