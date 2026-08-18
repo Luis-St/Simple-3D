@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Simple 3D
+GenericName=3D Modeller
+Comment=Parametric 3D modelling with exact metric dimensions
+# The binary is on PATH once the package is installed; %f passes a project path
+# through, which is what makes double-clicking a .simple3d file work.
+Exec=simple-3d %f
+TryExec=simple-3d
+# Matches the app id set by ViewportBuilder::with_app_id, which is how Wayland
+# associates the running window with this entry and its icon.
+Icon=net.simple3d.Simple3D
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+MimeType=application/x-simple3d-project;
+Keywords=3D;CAD;model;modelling;parametric;STL;OBJ;PLY;3MF;
+StartupNotify=true
+StartupWMClass=net.simple3d.Simple3D

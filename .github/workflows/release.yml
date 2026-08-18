@@ -1,6 +1,8 @@
 # Spec section 11: one commit produces both artefacts, with the version derived
 # from the tag. Portable single-file executables for both targets -- no
-# installer, no runtime, nothing for the user to install.
+# installer, no runtime, nothing for the user to install. The Linux job also
+# packages its executable as a .deb, for people who would rather their
+# distribution tracked the file than manage it themselves.
 #
 # The toolchain is pinned by rust-toolchain.toml, which both jobs pick up
 # automatically, so the same commit builds the same binary on either runner.
@@ -82,6 +84,27 @@ jobs:
         with:
           name: ${{ matrix.artefact }}
           path: dist/${{ matrix.artefact }}
+          if-no-files-found: error
+
+      # An addition to the portable executable above, never a replacement for
+      # it: the same binary, plus the desktop entry, icon and MIME type that
+      # put it in the applications menu and open .simple3d files by double
+      # click. Built from the version in Cargo.toml, which the tag step above
+      # has already rewritten, so the two artefacts can never disagree.
+      - name: Build the Debian package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"/\1/p}' Cargo.toml)
+          [ -n "$version" ] || { echo "no version found in Cargo.toml" >&2; exit 1; }
+          packaging/deb/build.sh "dist/${{ matrix.artefact }}" "$version" dist
+          dpkg-deb -I dist/*.deb
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: simple-3d-deb
+          path: dist/*.deb
           if-no-files-found: error
 
   release:

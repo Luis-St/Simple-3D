@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Projects are `.simple3d` files: JSON, versioned, human-readable. Declaring
+     the type here is what lets a file manager offer Simple 3D for them. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-simple3d-project">
+    <comment>Simple 3D project</comment>
+    <sub-class-of type="application/json"/>
+    <icon name="net.simple3d.Simple3D"/>
+    <glob pattern="*.simple3d"/>
+  </mime-type>
+</mime-info>
