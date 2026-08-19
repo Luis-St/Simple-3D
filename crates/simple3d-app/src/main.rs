@@ -24,6 +24,7 @@ mod render;
 mod theme;
 mod ui;
 mod view;
+mod window_chrome;
 mod worker;
 
 use std::path::PathBuf;
@@ -43,7 +44,13 @@ fn main() -> eframe::Result<()> {
         .with_title(app::APP_NAME)
         .with_app_id("net.simple3d.Simple3D")
         .with_inner_size(settings.window_size)
-        .with_min_inner_size([900.0, 560.0]);
+        .with_min_inner_size([900.0, 560.0])
+        // The application draws its own title bar (see `window_chrome`), in the
+        // shape the host desktop uses. Left to the window system it would be a
+        // GNOME-flavoured imitation on every Wayland desktop and nothing at all
+        // where the compositor declines to decorate.
+        .with_decorations(false)
+        .with_transparent(window_chrome::wants_transparency());
     if settings.window_maximized {
         viewport = viewport.with_maximized(true);
     }
