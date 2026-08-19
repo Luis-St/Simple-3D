@@ -12,7 +12,7 @@ use crate::app::{App, Status};
 use crate::theme::{self, token};
 use crate::ui::{self, Commit};
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
-use simple3d_core::scene::{Anchor, Body, GroupOp, Node, NodeId};
+use simple3d_core::scene::{Anchor, Body, Colour, GroupOp, Node, NodeId};
 use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
 use simple3d_geom::Vec3;
 
@@ -297,6 +297,37 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     });
 
     ui.horizontal(|ui| {
+        row_label(ui, "Colour").on_hover_text(
+            "What this node is painted. Painting a group paints everything in it, \
+             and the colour follows each surface through a boolean.",
+        );
+        // The swatch starts from whatever the node shows now -- its own colour,
+        // one inherited from a group above it, or the theme's colour for an
+        // unpainted solid -- so opening the picker never jumps to black.
+        let inherited = app.scene.effective_colour(id);
+        let mut rgb = inherited.map_or_else(|| unpainted_swatch(ui.visuals().dark_mode), |c| c.0);
+        let mixed = targets.iter().any(|t| app.scene.effective_colour(*t) != inherited);
+        if ui.color_edit_button_srgb(&mut rgb).changed() {
+            // One undo step for a whole drag through the picker, the way a
+            // scrubbed field is one step.
+            app.edit("Colour", Some("colour"));
+            for target in targets {
+                app.scene.paint_subtree(*target, Some(Colour(rgb)));
+            }
+        }
+        let painted = targets.iter().any(|t| app.scene.effective_colour(*t).is_some());
+        if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked() {
+            app.edit("Clear colour", None);
+            for target in targets {
+                app.scene.paint_subtree(*target, None);
+            }
+        }
+        if mixed {
+            ui.add(egui::Label::new(theme::value("mixed")).selectable(false));
+        }
+    });
+
+    ui.horizontal(|ui| {
         row_label(ui, "Anchor")
             .on_hover_text("Where this node's origin sits. Changing it moves the origin, never the shape.");
         let mixed = targets.iter().any(|t| app.scene.node(*t).anchor != anchor);
@@ -313,6 +344,12 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
             }
         }
     });
+}
+
+/// The colour an unpainted solid is drawn in, which is where the picker starts.
+fn unpainted_swatch(dark: bool) -> [u8; 3] {
+    let solid = crate::render::Palette::for_dark_mode(dark).solid;
+    [solid[0], solid[1], solid[2]]
 }
 
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {

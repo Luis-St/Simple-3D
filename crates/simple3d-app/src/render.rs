@@ -5,6 +5,7 @@
 use crate::raster::{clip_near, Frame, Rgba, Vertex};
 use crate::view::{View, NEAR};
 use simple3d_core::config::DisplayMode;
+use simple3d_core::scene::Colour;
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 
@@ -287,9 +288,21 @@ fn to_eye(view: &View, centroid: Vec3) -> Vec3 {
     }
 }
 
+/// The colour one triangle is painted: whatever body it came from, if that
+/// body was painted, and the theme's colour for solids otherwise. The tag
+/// travels with the surface through every boolean, so the far wall of a hole
+/// drilled by a painted cutter is the cutter's colour and the plate around it
+/// stays the plate's.
+fn triangle_base(item: &Renderable, index: usize, base: Rgba) -> Rgba {
+    match Colour::from_tag(item.mesh.tag(index)) {
+        Some(Colour([r, g, b])) => [r, g, b, base[3]],
+        None => base,
+    }
+}
+
 fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, alpha: u8) {
     let forward = view.forward();
-    for tri in &item.mesh.indices {
+    for (index, tri) in item.mesh.indices.iter().enumerate() {
         let world = [
             item.mesh.positions[tri[0] as usize],
             item.mesh.positions[tri[1] as usize],
@@ -306,7 +319,7 @@ fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, al
         if normal.dot(to_eye(view, centroid)) <= 0.0 {
             continue;
         }
-        let colour = shade(base, normal, forward, alpha);
+        let colour = shade(triangle_base(item, index, base), normal, forward, alpha);
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
         for piece in clip_pieces(view, in_view) {
             frame.triangle(

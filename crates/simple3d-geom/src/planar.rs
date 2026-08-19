@@ -34,20 +34,27 @@ use std::collections::BTreeMap;
 /// Rebuild the triangulation of every flat region of `mesh` from its boundary.
 /// Regions that cannot be interpreted keep their original triangles, so this
 /// never fails -- at worst it changes nothing.
+/// What makes two triangles part of the same flat region: the plane they lie
+/// in and the body they came from.
+type FlatRegion = ((i64, i64, i64, i64), u32);
+
 pub fn retriangulate_flat_regions(mesh: &Mesh) -> Mesh {
-    let mut groups: BTreeMap<(i64, i64, i64, i64), Vec<usize>> = BTreeMap::new();
-    let mut ungrouped: Vec<[u32; 3]> = Vec::new();
+    // Keyed by plane *and* tag: two bodies meeting flush in one plane are one
+    // flat region geometrically but two differently painted ones, and merging
+    // them would rebuild the boundary across a colour change.
+    let mut groups: BTreeMap<FlatRegion, Vec<usize>> = BTreeMap::new();
+    let mut ungrouped: Vec<([u32; 3], u32)> = Vec::new();
     for (i, t) in mesh.indices.iter().enumerate() {
         match plane_of(mesh, *t) {
-            Some((normal, w)) => groups.entry(plane_key(normal, w)).or_default().push(i),
+            Some((normal, w)) => groups.entry((plane_key(normal, w), mesh.tag(i))).or_default().push(i),
             // Degenerate: no usable plane. Left exactly as it was.
-            None => ungrouped.push(*t),
+            None => ungrouped.push((*t, mesh.tag(i))),
         }
     }
 
     let mut out = ungrouped;
-    for tris in groups.values() {
-        let original = || tris.iter().map(|&i| mesh.indices[i]);
+    for (&(_, tag), tris) in groups.iter() {
+        let original = || tris.iter().map(|&i| (mesh.indices[i], mesh.tag(i)));
         if tris.len() < 3 {
             // A one- or two-triangle region has nothing to gain and no interior
             // vertex to drop.
@@ -56,14 +63,15 @@ pub fn retriangulate_flat_regions(mesh: &Mesh) -> Mesh {
         }
         let normal = plane_of(mesh, mesh.indices[tris[0]]).unwrap().0;
         match boundary_loops(mesh, tris).and_then(|loops| triangulate_region(&mesh.positions, normal, loops)) {
-            Some(rebuilt) if rebuilt.len() <= tris.len() => out.extend(rebuilt),
+            Some(rebuilt) if rebuilt.len() <= tris.len() => out.extend(rebuilt.into_iter().map(|t| (t, tag))),
             // Either the region was uninterpretable, or rebuilding it produced
             // *more* triangles than it started with -- in which case there was
             // nothing to win and the original is the safer answer.
             _ => out.extend(original()),
         }
     }
-    Mesh { positions: mesh.positions.clone(), indices: out }
+    let (indices, tags) = out.into_iter().unzip();
+    Mesh { positions: mesh.positions.clone(), indices, tags }
 }
 
 fn plane_of(mesh: &Mesh, t: [u32; 3]) -> Option<(Vec3, f64)> {

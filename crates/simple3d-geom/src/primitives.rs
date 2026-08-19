@@ -143,13 +143,7 @@ pub fn cone_mesh(bottom_diameter: f64, top_diameter: f64, height: f64, segments:
 
 /// A cone swept through part of a turn: short of a full 360 the two cut faces
 /// close it, so a quarter cone is still a solid.
-pub fn cone_sector_mesh(
-    bottom_diameter: f64,
-    top_diameter: f64,
-    height: f64,
-    segments: u32,
-    sweep_deg: f64,
-) -> Mesh {
+pub fn cone_sector_mesh(bottom_diameter: f64, top_diameter: f64, height: f64, segments: u32, sweep_deg: f64) -> Mesh {
     let n = segments.max(3);
     let bottom = sector_outline(n, bottom_diameter / 2.0, bottom_diameter / 2.0, sweep_deg);
     let top = sector_outline(n, top_diameter / 2.0, top_diameter / 2.0, sweep_deg);
@@ -212,13 +206,7 @@ pub fn tube_mesh(outer_diameter: f64, inner_diameter: f64, height: f64, segments
 
 /// A tube swept through part of a turn: a curved channel or a pipe elbow,
 /// closed at both ends by the faces it was cut on.
-pub fn tube_sector_mesh(
-    outer_diameter: f64,
-    inner_diameter: f64,
-    height: f64,
-    segments: u32,
-    sweep_deg: f64,
-) -> Mesh {
+pub fn tube_sector_mesh(outer_diameter: f64, inner_diameter: f64, height: f64, segments: u32, sweep_deg: f64) -> Mesh {
     let ri = inner_diameter / 2.0;
     let ro = outer_diameter / 2.0;
     let profile = [(ri, -height / 2.0), (ro, -height / 2.0), (ro, height / 2.0), (ri, height / 2.0)];

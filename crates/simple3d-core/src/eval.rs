@@ -173,7 +173,14 @@ impl Evaluator {
         let node = scene.node(id);
         let mut errors: Vec<NodeError> = Vec::new();
         let mut local = match &node.body {
-            Body::Primitive { .. } => (*self.primitive_mesh(scene, id)).clone(),
+            Body::Primitive { .. } => {
+                // The generated mesh is cached by its shape alone and shared
+                // between identical primitives, so the colour is stamped on the
+                // copy this node keeps, never on the cached original.
+                let mut mesh = (*self.primitive_mesh(scene, id)).clone();
+                mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
+                mesh
+            }
             Body::Group { op } => {
                 let mut child_meshes: Vec<Mesh> = Vec::new();
                 for &child in &node.children {
@@ -259,7 +266,9 @@ impl Evaluator {
                 if let Some((lo, hi)) = mesh.bounds() {
                     out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
                 }
-                let world = Arc::new(apply(&shifted, &mesh));
+                let mut world = apply(&shifted, &mesh);
+                world.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
+                let world = Arc::new(world);
                 if let Some(bounds) = world.bounds() {
                     out.world_bounds.insert(id, bounds);
                 }
@@ -312,6 +321,9 @@ impl Evaluator {
             Body::Primitive { type_id, params } => {
                 type_id.hash(&mut hasher.0);
                 hash_params(hasher, params);
+                // The colour rides on the mesh as a per-triangle tag, so a
+                // repaint has to miss the cache the way a resize does.
+                crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
                 let spec = crate::primitive::lookup(type_id);
                 if spec.map_or(false, |s| s.segmented) {
                     scene.segments_for(id).hash(&mut hasher.0);
@@ -349,7 +361,15 @@ fn combine(op: GroupOp, children: &[Mesh], id: NodeId, name: &str, errors: &mut 
     if children.is_empty() {
         return Mesh::new();
     }
-    let result = evaluate_boolean(op.to_geom(), children);
+    let mut result = evaluate_boolean(op.to_geom(), children);
+    if op == GroupOp::Hull {
+        // A hull is a new surface stretched over the operands, not a selection
+        // of their faces: there is no body a given face came from. It takes the
+        // first operand's colour, which is the one the group's own colour lands
+        // on when a whole group is painted.
+        let first = children.first().map_or(0, |mesh| mesh.tag(0));
+        result.set_tag(first);
+    }
     if let Some(issue) = result.manifold_issue() {
         errors.push(NodeError {
             node: id,
@@ -390,7 +410,11 @@ fn bounds_of(points: impl Iterator<Item = Vec3>) -> Option<(Vec3, Vec3)> {
 }
 
 fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
-    Mesh { positions: mesh.positions.iter().map(|&p| xf.point(p)).collect(), indices: mesh.indices.clone() }
+    Mesh {
+        positions: mesh.positions.iter().map(|&p| xf.point(p)).collect(),
+        indices: mesh.indices.clone(),
+        tags: mesh.tags.clone(),
+    }
 }
 
 /// `DefaultHasher::new` uses fixed keys (unlike `RandomState`), so the same
@@ -456,6 +480,78 @@ mod tests {
     fn size(mesh: &Mesh) -> Vec3 {
         let (lo, hi) = mesh.bounds().unwrap();
         hi - lo
+    }
+
+    /// Every colour a mesh's faces are painted, with how many faces each has.
+    fn painted(mesh: &Mesh) -> std::collections::BTreeMap<Option<[u8; 3]>, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for i in 0..mesh.indices.len() {
+            *counts.entry(crate::scene::Colour::from_tag(mesh.tag(i)).map(|c| c.0)).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    #[test]
+    fn a_colour_follows_each_surface_through_a_difference() {
+        // What the whole per-face tag exists for: after a painted cutter drills
+        // a painted plate, the wall of the hole is the cutter's colour and the
+        // plate around it is still the plate's.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Difference, root, 0);
+        let base = plate(&mut scene, group);
+        let hole = cylinder(&mut scene, group, 6.0, 20.0);
+        scene.paint_subtree(base, Some(crate::scene::Colour([0x10, 0x20, 0x30])));
+        scene.paint_subtree(hole, Some(crate::scene::Colour([0xF0, 0xE0, 0xD0])));
+
+        let result = Evaluator::new().evaluate(&scene, &Cancel::new());
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let counts = painted(&result.mesh);
+        assert!(counts.contains_key(&Some([0x10, 0x20, 0x30])), "the plate lost its colour: {counts:?}");
+        assert!(counts.contains_key(&Some([0xF0, 0xE0, 0xD0])), "the hole wall lost the cutter's: {counts:?}");
+        assert!(!counts.contains_key(&None), "some surface came out unpainted: {counts:?}");
+    }
+
+    #[test]
+    fn painting_a_group_paints_everything_in_it_and_a_shape_can_still_differ() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        let a = plate(&mut scene, group);
+        let b = cylinder(&mut scene, group, 6.0, 4.0);
+        scene.get_mut(b).unwrap().position = Vec3::new(30.0, 0.0, 0.0);
+
+        scene.paint_subtree(group, Some(crate::scene::Colour([1, 2, 3])));
+        assert_eq!(scene.effective_colour(a).map(|c| c.0), Some([1, 2, 3]));
+        assert_eq!(scene.effective_colour(b).map(|c| c.0), Some([1, 2, 3]));
+        // Inherited, not copied: only the group carries a colour of its own.
+        assert!(scene.node(a).colour.is_none());
+
+        scene.paint_subtree(b, Some(crate::scene::Colour([9, 9, 9])));
+        let counts = painted(&Evaluator::new().evaluate(&scene, &Cancel::new()).mesh);
+        assert!(counts.contains_key(&Some([1, 2, 3])), "{counts:?}");
+        assert!(counts.contains_key(&Some([9, 9, 9])), "{counts:?}");
+
+        // And painting the group again takes the whole group back, including
+        // the shape that had been painted on its own.
+        scene.paint_subtree(group, Some(crate::scene::Colour([4, 5, 6])));
+        assert_eq!(scene.effective_colour(b).map(|c| c.0), Some([4, 5, 6]));
+    }
+
+    #[test]
+    fn repainting_re_evaluates_but_moving_a_painted_shape_does_not_recolour_it() {
+        // The colour is part of the geometry cache key, or a repaint would show
+        // the cached mesh in the old colour.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let id = plate(&mut scene, root);
+        let mut evaluator = Evaluator::new();
+        let before = painted(&evaluator.evaluate(&scene, &Cancel::new()).mesh);
+        assert_eq!(before.keys().collect::<Vec<_>>(), vec![&None]);
+
+        scene.paint_subtree(id, Some(crate::scene::Colour([7, 7, 7])));
+        let after = painted(&evaluator.evaluate(&scene, &Cancel::new()).mesh);
+        assert_eq!(after.keys().collect::<Vec<_>>(), vec![&Some([7, 7, 7])]);
     }
 
     #[test]
