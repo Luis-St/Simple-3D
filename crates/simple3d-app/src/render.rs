@@ -392,8 +392,11 @@ const SELECTION_BIAS: f32 = 8.0e-4;
 const GRID_BIAS: f32 = -8.0e-4;
 /// A plane mark sits *on* the surface it is drawn on, so it needs to win the
 /// tie against that surface -- and against the feature edges of the same
-/// solid, which is why it is biased further than they are.
-const MARK_BIAS: f32 = 4.0e-4;
+/// solid, which is why it is biased further than they are. Found by looking:
+/// below about 2e-3 the mark breaks into dashes wherever the line's own
+/// interpolated depth rounds behind the face it lies on, and an order of
+/// magnitude above this it starts showing through the far side of a solid.
+const MARK_BIAS: f32 = 3.0e-3;
 const AXIS_BIAS: f32 = -5.0e-4;
 
 fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {

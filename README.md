@@ -1,9 +1,9 @@
 # Simple 3D
 
 Parametric 3D modelling with exact metric dimensions. Assemble models out of
-primitives (boxes, prisms, spheres, cylinders, cones, pyramids, tori, regular
-polyhedra), combine them with booleans, and export to 3MF, STL, OBJ or PLY for a
-slicer.
+primitives (boxes rounded or chamfered, prisms, spheres, cylinders, cones,
+pyramids, tori, slots, regular polyhedra), combine them with booleans, and
+export to 3MF, STL, OBJ or PLY for a slicer.
 
 Nothing has to be entered as a scale factor: a 40 mm box is 40 mm because its
 width parameter says 40, and dragging its right face rewrites that parameter
@@ -51,6 +51,10 @@ those files the application's own icon.
   rewrite the shape's own dimensions and position — a completed drag is one undo
   step, and Escape during one puts everything back. The fourth tool, scale,
   writes a factor instead, and is the one that works on a group.
+- **Paint what you are working on.** An object or a whole group takes a colour,
+  and it follows each surface through a boolean: after a painted cutter drills a
+  painted plate, the wall of the hole is the cutter's colour. 3MF export carries
+  the colours; the other formats have nowhere to put them.
 - **A palette you can add to.** Save a group, or a whole project, as a primitive
   and it is on the palette of every project afterwards. New shapes land where you
   choose: the origin, the 3D cursor, what the camera is looking at, or clear of
@@ -76,7 +80,7 @@ those files the application's own icon.
 the spec's acceptance criteria are behaviourally met. What each release changed
 is on its release page; the commit log is the record between them.
 
-`cargo test --workspace` runs **354 tests**, none ignored or failing, and every
+`cargo test --workspace` runs **383 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
