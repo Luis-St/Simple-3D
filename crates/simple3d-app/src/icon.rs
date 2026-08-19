@@ -42,6 +42,7 @@ pub enum Glyph {
     // Primitive silhouettes.
     Box,
     RoundedBox,
+    ChamferedBox,
     Wedge,
     Prism,
     Sphere,
@@ -56,6 +57,7 @@ pub enum Glyph {
     Plate,
     Disc,
     Ring,
+    Slot,
 }
 
 impl Glyph {
@@ -66,6 +68,7 @@ impl Glyph {
         match type_id {
             "box" => Glyph::Box,
             "rounded_box" => Glyph::RoundedBox,
+            "chamfered_box" => Glyph::ChamferedBox,
             "wedge" => Glyph::Wedge,
             "prism" => Glyph::Prism,
             "sphere" => Glyph::Sphere,
@@ -80,6 +83,7 @@ impl Glyph {
             "plate" => Glyph::Plate,
             "disc" => Glyph::Disc,
             "ring" => Glyph::Ring,
+            "slot" => Glyph::Slot,
             _ => Glyph::Box,
         }
     }
@@ -290,6 +294,21 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.ellipse(0.86 - r, 0.86 - r, r, r, 0.0, TAU * 0.25);
             pen.ellipse(0.14 + r, 0.86 - r, r, r, TAU * 0.25, TAU * 0.5);
         }
+        Glyph::ChamferedBox => {
+            // The rounded box's square with its corners cut off straight, so
+            // the two shapes read as the same box with different edges.
+            let c = 0.20;
+            pen.closed(&[
+                (0.14 + c, 0.14),
+                (0.86 - c, 0.14),
+                (0.86, 0.14 + c),
+                (0.86, 0.86 - c),
+                (0.86 - c, 0.86),
+                (0.14 + c, 0.86),
+                (0.14, 0.86 - c),
+                (0.14, 0.14 + c),
+            ]);
+        }
         Glyph::Wedge => {
             pen.closed(&[(0.12, 0.84), (0.88, 0.84), (0.88, 0.22)]);
             pen.line(&[(0.12, 0.84), (0.30, 0.68), (0.88, 0.68)]);
@@ -357,6 +376,14 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
         Glyph::Ring => {
             pen.ellipse(0.5, 0.50, 0.40, 0.20, 0.0, TAU);
             pen.ellipse(0.5, 0.50, 0.20, 0.10, 0.0, TAU);
+        }
+        Glyph::Slot => {
+            // An obround seen face on: the shape of the hole it cuts.
+            let r = 0.18;
+            pen.line(&[(0.22, 0.50 - r), (0.78, 0.50 - r)]);
+            pen.line(&[(0.22, 0.50 + r), (0.78, 0.50 + r)]);
+            pen.ellipse(0.78, 0.50, r, r, TAU * 0.75, TAU * 1.25);
+            pen.ellipse(0.22, 0.50, r, r, TAU * 0.25, TAU * 0.75);
         }
     }
 }

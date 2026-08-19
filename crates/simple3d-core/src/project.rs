@@ -261,7 +261,8 @@ mod tests {
         // Defaults filled in: visible, centre anchor, and every declared parameter.
         assert!(scene.node(child).visible);
         assert_eq!(scene.node(child).anchor, Anchor::Centre);
-        assert_eq!(scene.node(child).params().unwrap().len(), 3);
+        let plate = crate::primitive::lookup("plate").expect("the plate is a declared type");
+        assert_eq!(scene.node(child).params().unwrap().len(), plate.params.len());
         assert_eq!(scene.settings.notes, "");
     }
 
