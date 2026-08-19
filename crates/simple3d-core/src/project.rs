@@ -267,6 +267,33 @@ mod tests {
     }
 
     #[test]
+    fn a_colour_survives_the_file_and_reads_as_hex() {
+        let mut scene = sample();
+        let child = scene.node(scene.root()).children[0];
+        scene.paint_subtree(child, Some(crate::scene::Colour([0x2E, 0x9A, 0xFF])));
+        let text = to_string(&scene);
+        assert!(text.contains("\"#2e9aff\""), "the colour should be readable in the file: {text}");
+        let back = from_str(&text).expect("it should load again");
+        let child = back.node(back.root()).children[0];
+        assert_eq!(back.node(child).colour.map(|c| c.0), Some([0x2E, 0x9A, 0xFF]));
+    }
+
+    #[test]
+    fn an_unpainted_scene_writes_no_colour_at_all() {
+        // A file written by this version has to diff cleanly against one
+        // written before colours existed.
+        assert!(!to_string(&sample()).contains("colour"));
+    }
+
+    #[test]
+    fn a_colour_that_is_not_a_colour_loads_as_unpainted() {
+        // A hand-edited or truncated value must not fail the whole file.
+        let text = to_string(&sample()).replace("\"visible\": true", "\"visible\": true, \"colour\": \"nonsense\"");
+        let scene = from_str(&text).expect("the file should still load");
+        assert!(scene.node(scene.node(scene.root()).children[0]).colour.is_none());
+    }
+
+    #[test]
     fn switching_the_display_unit_does_not_rescale_the_stored_model() {
         // Spec acceptance criterion 6, at the file level: the unit is metadata.
         let mut scene = sample();

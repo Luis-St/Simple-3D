@@ -10,7 +10,7 @@ pub mod vec3;
 
 mod tests;
 
-pub use mesh::Mesh;
+pub use mesh::{colour_tag, tag_colour, Mesh};
 pub use vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -43,13 +43,17 @@ impl Plane {
 struct Polygon {
     vertices: Vec<Vec3>,
     plane: Plane,
+    /// Which body this face came from, carried unchanged through every clip
+    /// and split so the surfaces that survive a boolean still say what they
+    /// belonged to.
+    tag: u32,
 }
 
 impl Polygon {
     fn flip(&self) -> Polygon {
         let mut v = self.vertices.clone();
         v.reverse();
-        Polygon { vertices: v, plane: self.plane.flip() }
+        Polygon { vertices: v, plane: self.plane.flip(), tag: self.tag }
     }
 }
 
@@ -115,10 +119,10 @@ fn split_polygon(
                 }
             }
             if f.len() >= 3 {
-                front.push(Polygon { vertices: f, plane: poly.plane });
+                front.push(Polygon { vertices: f, plane: poly.plane, tag: poly.tag });
             }
             if b.len() >= 3 {
-                back.push(Polygon { vertices: b, plane: poly.plane });
+                back.push(Polygon { vertices: b, plane: poly.plane, tag: poly.tag });
             }
         }
     }
@@ -253,7 +257,7 @@ fn plane_key(p: &Plane) -> (i64, i64, i64, i64) {
 /// polygons) if the group isn't a single simple loop -- e.g. it is itself
 /// the result of an earlier boolean op and legitimately has multiple
 /// boundary components (a face with a hole in it).
-fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Polygon> {
+fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane, tag: u32) -> Option<Polygon> {
     // BTreeMap, not HashMap: `start` below is picked by iteration order, and
     // `HashMap`'s is randomised per instance, which would make boolean output
     // vary between runs of identical input (spec section 5.2 requires
@@ -311,7 +315,7 @@ fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane) -> Option<Poly
         // this group's triangles in individually.
         return None;
     }
-    Some(Polygon { vertices: verts, plane })
+    Some(Polygon { vertices: verts, plane, tag })
 }
 
 /// True if the loop turns the same way at every vertex when viewed along the
@@ -344,6 +348,10 @@ pub fn debug_mesh_to_polygons(mesh: &Mesh) -> Vec<Vec<Vec3>> {
     mesh_to_polygons(mesh).into_iter().map(|p| p.vertices).collect()
 }
 
+/// What makes two triangles part of the same face: the plane they lie in and
+/// the body they came from.
+type FaceGroup = ((i64, i64, i64, i64), u32);
+
 fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
     let planes: Vec<Option<Plane>> = mesh
         .indices
@@ -356,17 +364,19 @@ fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
             )
         })
         .collect();
-    let mut groups: std::collections::BTreeMap<(i64, i64, i64, i64), Vec<usize>> = std::collections::BTreeMap::new();
+    // Grouped by plane *and* tag: coplanar faces of two different bodies are
+    // not one face, and merging them would lose which body each part came from.
+    let mut groups: std::collections::BTreeMap<FaceGroup, Vec<usize>> = std::collections::BTreeMap::new();
     for (i, p) in planes.iter().enumerate() {
         if let Some(pl) = p {
-            groups.entry(plane_key(pl)).or_default().push(i);
+            groups.entry((plane_key(pl), mesh.tag(i))).or_default().push(i);
         }
     }
     let mut polygons = Vec::new();
-    for tri_idxs in groups.values() {
+    for (&(_, tag), tri_idxs) in groups.iter() {
         let plane = planes[tri_idxs[0]].unwrap();
         if tri_idxs.len() > 1 {
-            if let Some(merged) = try_merge_group(mesh, tri_idxs, plane) {
+            if let Some(merged) = try_merge_group(mesh, tri_idxs, plane, tag) {
                 polygons.push(merged);
                 continue;
             }
@@ -375,7 +385,7 @@ fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
             let t = mesh.indices[i];
             let (a, b, c) =
                 (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
-            polygons.push(Polygon { vertices: vec![a, b, c], plane });
+            polygons.push(Polygon { vertices: vec![a, b, c], plane, tag });
         }
     }
     polygons
@@ -416,7 +426,12 @@ fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
             .or_else(|| (0..n).find(|&k| turns[k]))
             .unwrap_or(0);
         for i in 1..n - 1 {
-            mesh.push_triangle(poly.vertices[apex], poly.vertices[(apex + i) % n], poly.vertices[(apex + i + 1) % n]);
+            mesh.push_tagged_triangle(
+                poly.vertices[apex],
+                poly.vertices[(apex + i) % n],
+                poly.vertices[(apex + i + 1) % n],
+                poly.tag,
+            );
         }
     }
     mesh

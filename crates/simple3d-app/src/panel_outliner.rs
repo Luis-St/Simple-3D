@@ -10,7 +10,7 @@ use crate::app::{App, DropTarget, Status};
 use crate::icon::{self, Glyph};
 use crate::theme::{self, metric, token};
 use simple3d_core::keymap::Keymap;
-use simple3d_core::scene::{GroupOp, NodeId, Scene};
+use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
 
 /// Where a pointer at `fraction` down a row would drop: into the row's node, or
 /// between it and one of its siblings. Kept separate from the drawing so the rule
@@ -400,6 +400,12 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
 
         let mut chosen: Option<Command> = None;
         let mut save_as_primitive = false;
+        let mut paint: Option<Option<Colour>> = None;
+        let colour = app.scene.effective_colour(id);
+        let default_swatch = {
+            let solid = crate::render::Palette::for_dark_mode(ui.visuals().dark_mode).solid;
+            [solid[0], solid[1], solid[2]]
+        };
         let keymap = &app.keymap;
 
         item(ui, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
@@ -418,6 +424,21 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
             ui.close();
         }
         ui.separator();
+        // The picker lives here as well as in the properties panel: the
+        // outliner is where a group is easiest to point at, and painting a
+        // group is the reason most people open this menu.
+        ui.horizontal(|ui| {
+            ui.label("Colour");
+            let mut rgb = colour.map_or(default_swatch, |c: Colour| c.0);
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                paint = Some(Some(Colour(rgb)));
+            }
+            if ui.add_enabled(colour.is_some(), egui::Button::new("Clear")).clicked() {
+                paint = Some(None);
+                ui.close();
+            }
+        });
+        ui.separator();
         if ui
             .button("Save as primitive\u{2026}")
             .on_hover_text("Keep this, and everything under it, on the palette to use in any project")
@@ -429,6 +450,13 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         ui.separator();
         item(ui, &app.keymap, &mut chosen, Command::Delete, !is_root);
 
+        if let Some(colour) = paint {
+            app.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, colour.map(|_| "colour"));
+            let targets: Vec<NodeId> = app.selection.to_vec();
+            for target in targets {
+                app.scene.paint_subtree(target, colour);
+            }
+        }
         if save_as_primitive {
             app.save_selection_as_primitive();
         }

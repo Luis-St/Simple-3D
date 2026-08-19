@@ -35,6 +35,49 @@ impl Anchor {
     }
 }
 
+/// A node's colour: what it is painted, if anything. Stored as the three
+/// sRGB bytes a colour picker produces, and written to the project file as a
+/// `#rrggbb` string so a scene stays readable and diffable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Colour(pub [u8; 3]);
+
+impl Colour {
+    /// The tag `simple3d-geom` carries through booleans for a painted body. The
+    /// top byte separates "painted this colour" from tag 0, which every
+    /// generator produces and which means "whatever the theme paints solids".
+    pub const UNPAINTED: u32 = 0;
+
+    pub fn tag(self) -> u32 {
+        simple3d_geom::colour_tag(self.0)
+    }
+
+    /// The colour a tag stands for, or `None` for a surface nobody painted.
+    pub fn from_tag(tag: u32) -> Option<Colour> {
+        simple3d_geom::tag_colour(tag).map(Colour)
+    }
+
+    pub fn to_hex(self) -> String {
+        let [r, g, b] = self.0;
+        format!("#{r:02x}{g:02x}{b:02x}")
+    }
+
+    /// Parse `#rrggbb` or `rrggbb`. Anything else is not a colour, and the
+    /// loader treats it as an unpainted node rather than failing the file.
+    pub fn from_hex(text: &str) -> Option<Colour> {
+        let digits = text.strip_prefix('#').unwrap_or(text);
+        if digits.len() != 6 || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let byte = |i: usize| u8::from_str_radix(&digits[i..i + 2], 16).ok();
+        Some(Colour([byte(0)?, byte(2)?, byte(4)?]))
+    }
+}
+
+/// The tag for a node's effective colour, for `simple3d-geom` to carry.
+pub fn colour_tag(colour: Option<Colour>) -> u32 {
+    colour.map_or(Colour::UNPAINTED, Colour::tag)
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GroupOp {
@@ -97,6 +140,11 @@ pub struct Node {
     pub anchor: Anchor,
     /// Hidden nodes are excluded from evaluation and export entirely.
     pub visible: bool,
+    /// What this node is painted, if anything. A node without one takes its
+    /// nearest painted ancestor's colour, which is what makes painting a group
+    /// paint everything in it; nothing painted anywhere leaves the theme's own
+    /// colour for solids.
+    pub colour: Option<Colour>,
     /// Per-object override of the scene's default segment count.
     pub segments: Option<u32>,
     pub body: Body,
@@ -236,6 +284,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            colour: None,
             segments: None,
             body: Body::Group { op: GroupOp::Union },
             children: Vec::new(),
@@ -379,6 +428,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            colour: None,
             segments: None,
             body: Body::Primitive { type_id: type_id.to_string(), params: spec.default_params() },
             children: Vec::new(),
@@ -399,6 +449,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            colour: None,
             segments: None,
             body: Body::Group { op },
             children: Vec::new(),
@@ -550,6 +601,7 @@ impl Scene {
             scale: node.scale,
             anchor: node.anchor,
             visible: node.visible,
+            colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
             params,
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
@@ -575,6 +627,7 @@ impl Scene {
             scale: Node::sane_scale(data.scale),
             anchor: data.anchor,
             visible: data.visible,
+            colour: data.colour.as_deref().and_then(Colour::from_hex),
             segments: data.segments,
             body,
             children: Vec::new(),
@@ -617,6 +670,34 @@ impl Scene {
         Some(())
     }
 
+    /// What a node is painted, following the tree upward: its own colour, else
+    /// the nearest painted ancestor's, else nothing at all. This is what makes
+    /// painting a group paint every shape inside it without touching any of
+    /// them, and what a shape painted inside a painted group overrides.
+    pub fn effective_colour(&self, id: NodeId) -> Option<Colour> {
+        let mut at = Some(id);
+        while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
+            if node.colour.is_some() {
+                return node.colour;
+            }
+            at = node.parent;
+        }
+        None
+    }
+
+    /// Paint a node and everything under it. Clearing the descendants' own
+    /// colours is the point: "paint this group red" means the whole group turns
+    /// red, not that the shapes which were painted individually keep their own.
+    /// Passing `None` strips the colour from the subtree entirely.
+    pub fn paint_subtree(&mut self, id: NodeId, colour: Option<Colour>) {
+        let mut stack = vec![id];
+        while let Some(at) = stack.pop() {
+            let Some(node) = self.nodes.get_mut(&at) else { continue };
+            node.colour = if at == id { colour } else { None };
+            stack.extend(node.children.iter().copied());
+        }
+    }
+
     /// The effective segment count for a node: its own override, else the
     /// scene default.
     pub fn segments_for(&self, id: NodeId) -> u32 {
@@ -651,6 +732,11 @@ pub struct NodeData {
     pub anchor: Anchor,
     #[serde(default = "default_true")]
     pub visible: bool,
+    /// `#rrggbb`, and absent from the file for the usual unpainted node, so a
+    /// project written by this version still diffs cleanly against one written
+    /// before colours existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub segments: Option<u32>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
@@ -851,6 +937,7 @@ mod tests {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            colour: None,
             segments: None,
             params: Params::new(),
             children: vec![NodeData {
@@ -862,6 +949,7 @@ mod tests {
                 scale: Vec3::ONE,
                 anchor: Anchor::Centre,
                 visible: true,
+                colour: None,
                 segments: None,
                 params: Params::new(),
                 children: vec![],

@@ -3,10 +3,31 @@ use crate::vec3::Vec3;
 /// An indexed triangle mesh. `indices` holds flat triangle triples into `positions`.
 /// A `Mesh` returned by a primitive generator or a boolean op is expected to be
 /// watertight, manifold, correctly wound (CCW seen from outside) with outward normals.
+///
+/// `tags` runs parallel to `indices`: one number per triangle, saying which
+/// body the surface came from. Nothing in this crate interprets it -- it is
+/// carried through booleans, welding and healing so that a caller which paints
+/// bodies (see the scene's per-node colour) can still tell, on the far side of
+/// a difference, which of the operands each surviving face belonged to.
 #[derive(Clone, Debug, Default)]
 pub struct Mesh {
     pub positions: Vec<Vec3>,
     pub indices: Vec<[u32; 3]>,
+    pub tags: Vec<u32>,
+}
+
+/// The tag that stands for "this surface is painted this colour", and the
+/// reading of one. The encoding lives here, next to the field it goes in, so
+/// the scene that writes tags and the exporter that reads them cannot drift:
+/// the top byte separates a painted surface from tag 0, which every generator
+/// produces and which means "unpainted".
+pub fn colour_tag(rgb: [u8; 3]) -> u32 {
+    0x0100_0000 | (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2])
+}
+
+/// The colour a tag stands for, or `None` for a surface nobody painted.
+pub fn tag_colour(tag: u32) -> Option<[u8; 3]> {
+    (tag & 0xFF00_0000 != 0).then_some([(tag >> 16) as u8, (tag >> 8) as u8, tag as u8])
 }
 
 impl Mesh {
@@ -19,11 +40,29 @@ impl Mesh {
     }
 
     pub fn push_triangle(&mut self, a: Vec3, b: Vec3, c: Vec3) {
+        self.push_tagged_triangle(a, b, c, 0);
+    }
+
+    pub fn push_tagged_triangle(&mut self, a: Vec3, b: Vec3, c: Vec3, tag: u32) {
         let base = self.positions.len() as u32;
         self.positions.push(a);
         self.positions.push(b);
         self.positions.push(c);
         self.indices.push([base, base + 1, base + 2]);
+        self.tags.push(tag);
+    }
+
+    /// The tag of one triangle. Zero for a mesh built before tags mattered,
+    /// which is what every generator produces until a caller says otherwise.
+    pub fn tag(&self, triangle: usize) -> u32 {
+        self.tags.get(triangle).copied().unwrap_or(0)
+    }
+
+    /// Mark every triangle as belonging to one body. Called once per primitive
+    /// as evaluation collects it, before anything is combined.
+    pub fn set_tag(&mut self, tag: u32) {
+        self.tags.clear();
+        self.tags.resize(self.indices.len(), tag);
     }
 
     /// Append another mesh's geometry, offsetting its indices.
@@ -31,11 +70,12 @@ impl Mesh {
         let base = self.positions.len() as u32;
         self.positions.extend_from_slice(&other.positions);
         self.indices.extend(other.indices.iter().map(|t| [t[0] + base, t[1] + base, t[2] + base]));
+        self.tags.extend((0..other.indices.len()).map(|i| other.tag(i)));
     }
 
     pub fn transformed(&self, translate: Vec3, rotate_deg: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.rotate_xyz_deg(rotate_deg) + translate).collect();
-        Mesh { positions, indices: self.indices.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
     }
 
     /// Componentwise scale about the mesh's own origin. A factor of zero or
@@ -43,12 +83,12 @@ impl Mesh {
     /// before they get here; this does the arithmetic and nothing else.
     pub fn scaled(&self, factor: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.scaled_by(factor)).collect();
-        Mesh { positions, indices: self.indices.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
     }
 
     pub fn translated(&self, offset: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| *p + offset).collect();
-        Mesh { positions, indices: self.indices.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
     }
 
     pub fn triangle_normal(&self, tri: [u32; 3]) -> Vec3 {
@@ -111,13 +151,16 @@ impl Mesh {
             });
             remap[i] = id;
         }
-        let indices = self
-            .indices
-            .iter()
-            .map(|t| [remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize]])
-            .filter(|t| t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
-            .collect();
-        Mesh { positions, indices }
+        let mut indices = Vec::with_capacity(self.indices.len());
+        let mut tags = Vec::with_capacity(self.indices.len());
+        for (i, t) in self.indices.iter().enumerate() {
+            let t = [remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize]];
+            if t[0] != t[1] && t[1] != t[2] && t[0] != t[2] {
+                indices.push(t);
+                tags.push(self.tag(i));
+            }
+        }
+        Mesh { positions, indices, tags }
     }
 
     /// Manifoldness check on the welded mesh: every undirected edge must be

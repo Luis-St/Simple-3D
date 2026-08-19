@@ -69,13 +69,16 @@ pub fn weld_tolerant(mesh: &Mesh, tol: f64) -> Mesh {
         remap[i] = id;
     }
 
-    let indices = mesh
-        .indices
-        .iter()
-        .map(|t| [remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize]])
-        .filter(|t| t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
-        .collect();
-    Mesh { positions, indices }
+    let mut indices = Vec::with_capacity(mesh.indices.len());
+    let mut tags = Vec::with_capacity(mesh.indices.len());
+    for (i, t) in mesh.indices.iter().enumerate() {
+        let t = [remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize]];
+        if t[0] != t[1] && t[1] != t[2] && t[0] != t[2] {
+            indices.push(t);
+            tags.push(mesh.tag(i));
+        }
+    }
+    Mesh { positions, indices, tags }
 }
 
 /// Drop triangles thinner than `tol`, measured as the smallest distance from a
@@ -86,18 +89,18 @@ pub fn weld_tolerant(mesh: &Mesh, tol: f64) -> Mesh {
 /// carrying collinear T-junction vertices gets fan-triangulated.
 fn drop_slivers(mesh: Mesh, tol: f64) -> Mesh {
     let pos = &mesh.positions;
-    let indices: Vec<[u32; 3]> = mesh
-        .indices
-        .iter()
-        .copied()
-        .filter(|t| {
-            let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
-            let twice_area = (b - a).cross(c - a).length();
-            let longest = (b - a).length().max((c - b).length()).max((a - c).length());
-            longest > tol && twice_area / longest > tol
-        })
-        .collect();
-    Mesh { positions: mesh.positions, indices }
+    let mut indices: Vec<[u32; 3]> = Vec::with_capacity(mesh.indices.len());
+    let mut tags: Vec<u32> = Vec::with_capacity(mesh.indices.len());
+    for (i, t) in mesh.indices.iter().enumerate() {
+        let (a, b, c) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
+        let twice_area = (b - a).cross(c - a).length();
+        let longest = (b - a).length().max((c - b).length()).max((a - c).length());
+        if longest > tol && twice_area / longest > tol {
+            indices.push(*t);
+            tags.push(mesh.tag(i));
+        }
+    }
+    Mesh { positions: mesh.positions, indices, tags }
 }
 
 /// Drop triangle pairs that describe the same three vertices with opposite
@@ -136,8 +139,9 @@ fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
             dead[neg.pop().unwrap()] = true;
         }
     }
-    let indices = mesh.indices.iter().enumerate().filter(|(i, _)| !dead[*i]).map(|(_, t)| *t).collect();
-    Mesh { positions: mesh.positions, indices }
+    let (indices, tags) =
+        mesh.indices.iter().enumerate().filter(|(i, _)| !dead[*i]).map(|(i, t)| (*t, mesh.tag(i))).unzip();
+    Mesh { positions: mesh.positions, indices, tags }
 }
 
 fn same_winding(a: &[u32; 3], b: &[u32; 3]) -> bool {
@@ -165,30 +169,33 @@ fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
     }
 
     let pos = &mesh.positions;
-    let mut pending: Vec<[u32; 3]> = mesh.indices;
-    let mut out: Vec<[u32; 3]> = Vec::with_capacity(pending.len());
+    // Each triangle travels with its tag: a split produces two faces of the
+    // same body, so both halves inherit it.
+    let mut pending: Vec<([u32; 3], u32)> = mesh.indices.iter().enumerate().map(|(i, t)| (*t, mesh.tag(i))).collect();
+    let mut out: Vec<([u32; 3], u32)> = Vec::with_capacity(pending.len());
     // Each split strictly consumes one on-edge vertex, so this terminates; the
     // budget only guards against a pathological input turning a preview into a
     // hang, in which case we emit what we have and the manifold check reports.
     let mut budget = 4_000_000usize;
 
-    while let Some(tri) = pending.pop() {
+    while let Some((tri, tag)) = pending.pop() {
         if budget == 0 {
-            out.push(tri);
+            out.push((tri, tag));
             continue;
         }
         budget -= 1;
         match find_on_edge_vertex(pos, &grid, size, tol, &tri) {
             Some((e, v)) => {
                 let (a, b, c) = (tri[e], tri[(e + 1) % 3], tri[(e + 2) % 3]);
-                pending.push([a, v, c]);
-                pending.push([v, b, c]);
+                pending.push(([a, v, c], tag));
+                pending.push(([v, b, c], tag));
             }
-            None => out.push(tri),
+            None => out.push((tri, tag)),
         }
     }
 
-    Mesh { positions: mesh.positions, indices: out }
+    let (indices, tags) = out.into_iter().unzip();
+    Mesh { positions: mesh.positions, indices, tags }
 }
 
 /// Find a vertex lying strictly inside one of the triangle's edges. Returns
@@ -298,5 +305,5 @@ fn compact(mesh: Mesh) -> Mesh {
         }
         indices.push(out);
     }
-    Mesh { positions, indices }
+    Mesh { positions, indices, tags: mesh.tags.clone() }
 }

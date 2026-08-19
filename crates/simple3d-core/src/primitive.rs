@@ -556,13 +556,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         ],
         segmented: true,
         build: |p, seg| {
-            gen::cone_sector_mesh(
-                p.num("bottom_diameter"),
-                p.num("top_diameter"),
-                p.num("height"),
-                seg,
-                p.num("sweep"),
-            )
+            gen::cone_sector_mesh(p.num("bottom_diameter"), p.num("top_diameter"), p.num("height"), seg, p.num("sweep"))
         },
         axes: |p| {
             // Whichever end is wider sets the X/Y extent.

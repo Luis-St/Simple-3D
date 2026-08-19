@@ -14,7 +14,7 @@
 
 pub mod zip;
 
-use simple3d_geom::{Mesh, Vec3};
+use simple3d_geom::{tag_colour, Mesh, Vec3};
 use std::fmt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -284,15 +284,59 @@ fn coord(v: f64) -> String {
     s
 }
 
+/// The distinct colours the mesh's faces are painted, in the order they first
+/// appear, together with each triangle's index into that list. Index 0 is
+/// always the unpainted default, so an unpainted mesh yields a list of one and
+/// nothing downstream has to special-case it.
+fn colour_table(mesh: &Mesh) -> (Vec<[u8; 3]>, Vec<usize>) {
+    // The colour an unpainted surface is given in the file. 3MF has no "no
+    // colour" for a face inside a coloured object, so this is the neutral the
+    // viewport would have drawn.
+    const DEFAULT: [u8; 3] = [0x9A, 0xA4, 0xB2];
+    let mut colours = vec![DEFAULT];
+    let mut per_triangle = Vec::with_capacity(mesh.indices.len());
+    for i in 0..mesh.indices.len() {
+        let index = match tag_colour(mesh.tag(i)) {
+            None => 0,
+            Some(rgb) => colours.iter().position(|c| *c == rgb).unwrap_or_else(|| {
+                colours.push(rgb);
+                colours.len() - 1
+            }),
+        };
+        per_triangle.push(index);
+    }
+    (colours, per_triangle)
+}
+
 fn three_mf(mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<Vec<u8>, ExportError> {
+    let (colours, triangle_colour) = colour_table(mesh);
+    // Only a painted model carries the materials extension: an unpainted one
+    // is written exactly as it was before colours existed, so nothing that
+    // reads plain 3MF has to cope with a namespace it does not need.
+    let painted = colours.len() > 1;
     let mut model = String::with_capacity(mesh.positions.len() * 48 + mesh.indices.len() * 40);
     model.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     model.push_str(&format!(
         "<model unit=\"{}\" xml:lang=\"en-US\" \
-         xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n",
-        options.unit.as_str()
+         xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\"{}>\n",
+        options.unit.as_str(),
+        if painted { " xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\"" } else { "" }
     ));
-    model.push_str(" <resources>\n  <object id=\"1\" type=\"model\">\n   <mesh>\n    <vertices>\n");
+    model.push_str(" <resources>\n");
+    if painted {
+        // One colour group holding every colour in the model; each triangle
+        // then names its own entry. Not declared as a required extension: a
+        // reader that ignores colour still gets the whole solid.
+        model.push_str("  <m:colorgroup id=\"2\">\n");
+        for rgb in &colours {
+            model.push_str(&format!("   <m:color color=\"#{:02X}{:02X}{:02X}\"/>\n", rgb[0], rgb[1], rgb[2]));
+        }
+        model.push_str("  </m:colorgroup>\n");
+    }
+    model.push_str(&format!(
+        "  <object id=\"1\" type=\"model\"{}>\n   <mesh>\n    <vertices>\n",
+        if painted { " pid=\"2\" pindex=\"0\"" } else { "" }
+    ));
     for (i, p) in mesh.positions.iter().enumerate() {
         model.push_str(&format!("     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>\n", coord(p.x), coord(p.y), coord(p.z)));
         if i % 4096 == 0 && !progress(0.2 + 0.4 * (i as f32 / mesh.positions.len().max(1) as f32)) {
@@ -301,7 +345,14 @@ fn three_mf(mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<Ve
     }
     model.push_str("    </vertices>\n    <triangles>\n");
     for (i, t) in mesh.indices.iter().enumerate() {
-        model.push_str(&format!("     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"/>\n", t[0], t[1], t[2]));
+        let paint = if painted {
+            // One index for the whole triangle: p1 alone means a flat face,
+            // which is what a painted body has.
+            format!(" p1=\"{}\"", triangle_colour[i])
+        } else {
+            String::new()
+        };
+        model.push_str(&format!("     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"{paint}/>\n", t[0], t[1], t[2]));
         if i % 4096 == 0 && !progress(0.6 + 0.3 * (i as f32 / mesh.indices.len().max(1) as f32)) {
             return Err(ExportError::Cancelled);
         }
@@ -649,6 +700,51 @@ mod tests {
         let _ = write(&path, &open, &Options { format: Format::StlBinary, ..Default::default() }, &mut cb);
         assert_eq!(std::fs::read(&path).unwrap(), b"original contents");
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn an_unpainted_model_is_written_without_the_colour_extension() {
+        // Nothing that reads plain 3MF should have to cope with a namespace a
+        // model does not use.
+        let bytes = three_mf(&plate(), &Options::default(), &mut no_progress()).unwrap();
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        assert!(!text.contains("colorgroup"));
+        assert!(!text.contains("xmlns:m="));
+    }
+
+    #[test]
+    fn a_painted_model_carries_one_colour_group_and_a_colour_per_face() {
+        let mut mesh = plate();
+        mesh.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
+        // Two bodies, two colours, in one mesh -- what a boolean between two
+        // painted shapes produces.
+        let mut other = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(60.0, 0.0, 0.0));
+        other.set_tag(simple3d_geom::colour_tag([0xFF, 0x00, 0x00]));
+        mesh.append(&other);
+
+        let bytes = three_mf(&mesh, &Options::default(), &mut no_progress()).unwrap();
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        assert!(text.contains("xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\""));
+        assert!(text.contains("<m:color color=\"#204080\"/>"));
+        assert!(text.contains("<m:color color=\"#FF0000\"/>"));
+        assert!(text.contains("pid=\"2\" pindex=\"0\""));
+        // Index 0 is the unpainted default, so these two are 1 and 2 and every
+        // triangle names one of them.
+        assert_eq!(text.matches(" p1=\"1\"").count(), plate().indices.len());
+        assert_eq!(text.matches(" p1=\"2\"").count(), other.indices.len());
+        assert_eq!(text.matches(" p1=\"0\"").count(), 0);
+    }
+
+    #[test]
+    fn the_colour_table_lists_each_colour_once_in_the_order_it_appears() {
+        let mut mesh = plate();
+        mesh.set_tag(simple3d_geom::colour_tag([1, 2, 3]));
+        let mut second = plate().translated(Vec3::new(100.0, 0.0, 0.0));
+        second.set_tag(simple3d_geom::colour_tag([1, 2, 3]));
+        mesh.append(&second);
+        let (colours, per_triangle) = colour_table(&mesh);
+        assert_eq!(colours, vec![[0x9A, 0xA4, 0xB2], [1, 2, 3]]);
+        assert!(per_triangle.iter().all(|&i| i == 1));
     }
 
     #[test]
