@@ -737,6 +737,22 @@ impl App {
                         }
                     });
                     ui.end_row();
+
+                    ui.label("Axis style");
+                    ui.horizontal(|ui| {
+                        for option in simple3d_core::scene::AxisStyle::ALL {
+                            let showing = self.scene.settings.axis_style == option;
+                            if ui.selectable_label(showing, option.label()).clicked() {
+                                self.scene.settings.axis_style = option;
+                            }
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label("Plane marks");
+                    ui.checkbox(&mut self.scene.settings.plane_marks, "")
+                        .on_hover_text("Mark where a principal plane cuts through a shape, on the shape itself");
+                    ui.end_row();
                 });
                 ui.separator();
                 ui.label("Notes");

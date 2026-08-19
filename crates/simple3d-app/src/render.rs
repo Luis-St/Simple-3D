@@ -5,7 +5,7 @@
 use crate::raster::{clip_near, Frame, Rgba, Vertex};
 use crate::view::{View, NEAR};
 use simple3d_core::config::DisplayMode;
-use simple3d_core::scene::Colour;
+use simple3d_core::scene::{AxisStyle, Colour};
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 
@@ -181,6 +181,11 @@ pub struct Grid {
     /// Which of the three origin axes to draw, X, Y, Z. The axes are laid out on
     /// the grid's spacing, which is why they are described here with it.
     pub axes: [bool; 3],
+    pub style: AxisStyle,
+    /// Whether to mark, on a solid's own surface, where a principal plane cuts
+    /// through it. Each plane is named by the axis it is perpendicular to and
+    /// follows that axis's switch, so the ground plane's mark is the Z one.
+    pub plane_marks: bool,
 }
 
 /// One thing to draw, in world space.
@@ -243,6 +248,11 @@ pub fn render(request: &Request<'_>) -> Frame {
             }
             Style::Ghost => draw_ghost(&mut frame, &view, item.renderable, request.palette.ghost),
         }
+    }
+    if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
+        // After the solids: the mark belongs on the surface, and in wireframe
+        // there is no surface for it to sit on.
+        draw_plane_marks(&mut frame, &view, &request.items, &request.palette, &request.grid);
     }
     frame
 }
@@ -380,6 +390,10 @@ const SELECTION_BIAS: f32 = 8.0e-4;
 /// because the X and Y axes lie exactly along grid lines and would otherwise
 /// lose that tie in turn.
 const GRID_BIAS: f32 = -8.0e-4;
+/// A plane mark sits *on* the surface it is drawn on, so it needs to win the
+/// tie against that surface -- and against the feature edges of the same
+/// solid, which is why it is biased further than they are.
+const MARK_BIAS: f32 = 4.0e-4;
 const AXIS_BIAS: f32 = -5.0e-4;
 
 fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
@@ -534,33 +548,100 @@ fn faded_line(
 }
 
 fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
-    let length = effective_grid_spacing(view, grid.spacing) * 48.0;
-    for (axis, (dir, colour)) in [
-        (Vec3::new(1.0, 0.0, 0.0), palette.axis_x),
-        (Vec3::new(0.0, 1.0, 0.0), palette.axis_y),
-        (Vec3::new(0.0, 0.0, 1.0), palette.axis_z),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    let spacing = effective_grid_spacing(view, grid.spacing);
+    let length = spacing * 48.0;
+    let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
+    let directions = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+    for axis in 0..3 {
         if !grid.axes[axis] {
             continue;
         }
-        // Both halves fade outward from the origin, for the same reason the
+        // Where the axis is centred. Pinned at the origin it is the origin;
+        // along the grid, X and Y are the grid's own lines through zero, so
+        // they are centred where the grid is and travel with it. Z has no grid
+        // line to be -- the grid is the ground -- so it stays at the origin in
+        // both styles.
+        let centre = match (grid.style, axis) {
+            (AxisStyle::Grid, 0) => Vec3::new((view.camera.target.x / spacing).round() * spacing, 0.0, 0.0),
+            (AxisStyle::Grid, 1) => Vec3::new(0.0, (view.camera.target.y / spacing).round() * spacing, 0.0),
+            _ => Vec3::ZERO,
+        };
+        // Both halves fade outward from the centre, for the same reason the
         // grid does: an axis that ends abruptly reads as an object.
         for sign in [-1.0, 1.0] {
             faded_line(
                 frame,
                 view,
-                Vec3::new(0.0, 0.0, 0.0),
-                dir * (length * sign),
-                Vec3::new(0.0, 0.0, 0.0),
+                centre,
+                centre + directions[axis] * (length * sign),
+                centre,
                 length,
-                colour,
+                colours[axis],
                 AXIS_BIAS,
             );
         }
     }
+}
+
+/// Draw, on the surface of each solid, the line where a principal plane cuts
+/// through it.
+///
+/// The ground plane crossing a shape is a real dimension -- how much of the
+/// shape is below the build plate -- and until something marks it the only way
+/// to read it is to orbit until the grid is edge-on. The mark is drawn on the
+/// surface itself, where the plane meets it, in the colour of the axis the
+/// plane is perpendicular to.
+fn draw_plane_marks(frame: &mut Frame, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
+    let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
+    for item in items.iter().filter(|i| i.style == Style::Solid) {
+        for (axis, colour) in colours.into_iter().enumerate() {
+            if !grid.axes[axis] {
+                continue;
+            }
+            for tri in &item.renderable.mesh.indices {
+                let world = [
+                    item.renderable.mesh.positions[tri[0] as usize],
+                    item.renderable.mesh.positions[tri[1] as usize],
+                    item.renderable.mesh.positions[tri[2] as usize],
+                ];
+                if let Some((a, b)) = plane_crossing(world, axis) {
+                    draw_world_line(frame, view, a, b, colour, MARK_BIAS);
+                }
+            }
+        }
+    }
+}
+
+/// Where the plane through the origin perpendicular to `axis` crosses one
+/// triangle, as the segment it cuts. `None` when the triangle is wholly on one
+/// side, which is nearly all of them, so this is the cheap case.
+fn plane_crossing(world: [Vec3; 3], axis: usize) -> Option<(Vec3, Vec3)> {
+    let component = |p: Vec3| match axis {
+        0 => p.x,
+        1 => p.y,
+        _ => p.z,
+    };
+    let d = [component(world[0]), component(world[1]), component(world[2])];
+    if (d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0) {
+        return None;
+    }
+    // A triangle lying *in* the plane has no crossing line of its own -- its
+    // three edges are the mark, and its neighbours draw them.
+    if d[0] == 0.0 && d[1] == 0.0 && d[2] == 0.0 {
+        return None;
+    }
+    let mut hits: Vec<Vec3> = Vec::new();
+    for i in 0..3 {
+        let j = (i + 1) % 3;
+        if d[i] == 0.0 {
+            hits.push(world[i]);
+        }
+        if (d[i] < 0.0 && d[j] > 0.0) || (d[i] > 0.0 && d[j] < 0.0) {
+            let t = d[i] / (d[i] - d[j]);
+            hits.push(world[i] + (world[j] - world[i]) * t);
+        }
+    }
+    (hits.len() >= 2).then(|| (hits[0], hits[1]))
 }
 
 #[cfg(test)]
@@ -582,7 +663,7 @@ mod tests {
             size: [160, 120],
             mode,
             palette: Palette::dark(),
-            grid: Grid { visible: false, spacing: 10.0, axes: [true; 3] },
+            grid: Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false },
             items,
         }
     }
@@ -706,13 +787,118 @@ mod tests {
         assert_eq!(missing, 0, "{missing} pixels inside the box's own silhouette were never drawn");
     }
 
+    /// How many pixels of the frame carry the given colour, shaded or not.
+    /// A drawn line keeps its colour exactly; only shaded faces are scaled.
+    fn pixels_of(frame: &Frame, colour: Rgba) -> usize {
+        (0..frame.width * frame.height)
+            .filter(|&i| {
+                let o = i * 4;
+                frame.color[o] == colour[0] && frame.color[o + 1] == colour[1] && frame.color[o + 2] == colour[2]
+            })
+            .count()
+    }
+
+    #[test]
+    fn along_the_grid_the_axes_travel_with_the_view_and_pinned_ones_do_not() {
+        // Issue 14: pinned axes leave the view the moment the origin is panned
+        // off it, which is not how other 3D software reads. Along the grid, X
+        // and Y are the grid's own lines through zero and are always there to
+        // read -- and both styles stay available, because the pinned cross is
+        // the one that says where the origin actually is.
+        let far = Camera {
+            target: Vec3::new(4000.0, 0.0, 0.0),
+            yaw: -55.0,
+            pitch: 28.0,
+            distance: 120.0,
+            ..Camera::default()
+        };
+        let drawn = |style: AxisStyle| {
+            let mut req = request(Vec::new(), DisplayMode::Shaded);
+            req.view = View::new(far, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)));
+            req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style, plane_marks: false };
+            let frame = render(&req);
+            pixels_of(&frame, req.palette.axis_x)
+        };
+        assert_eq!(drawn(AxisStyle::Origin), 0, "a pinned X axis should be long gone at this distance");
+        assert!(drawn(AxisStyle::Grid) > 0, "the X axis should follow the grid and still be drawn");
+    }
+
+    #[test]
+    fn the_z_axis_stays_at_the_origin_in_both_styles() {
+        // There is no ground line for Z to be: the grid is the ground.
+        let drawn = |style: AxisStyle| {
+            let mut req = request(Vec::new(), DisplayMode::Shaded);
+            req.grid = Grid { visible: false, spacing: 10.0, axes: [false, false, true], style, plane_marks: false };
+            pixels_of(&render(&req), req.palette.axis_z)
+        };
+        assert!(drawn(AxisStyle::Grid) > 0);
+        assert_eq!(drawn(AxisStyle::Grid), drawn(AxisStyle::Origin));
+    }
+
+    #[test]
+    fn a_shape_the_ground_plane_cuts_is_marked_where_it_cuts_it() {
+        // Issue 16: how much of a shape is below the build plate is a real
+        // dimension, and it is invisible until something marks it.
+        let straddling = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let clear = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0).translated(Vec3::new(0.0, 0.0, 60.0)));
+        let marks = |renderable: &Renderable, on: bool| {
+            let mut req = request(vec![Item { renderable, style: Style::Solid }], DisplayMode::Shaded);
+            req.grid = Grid {
+                visible: false,
+                spacing: 10.0,
+                axes: [false, false, true],
+                style: AxisStyle::Grid,
+                plane_marks: on,
+            };
+            pixels_of(&render(&req), req.palette.axis_z)
+        };
+        // Measured as the difference the switch makes, because the Z axis
+        // itself is drawn in the same colour wherever the box does not hide it.
+        assert!(
+            marks(&straddling, true) > marks(&straddling, false),
+            "the ground plane cuts this box and nothing said where"
+        );
+        assert_eq!(marks(&clear, true), marks(&clear, false), "a box clear of the plane has nothing to mark");
+    }
+
+    #[test]
+    fn a_plane_mark_follows_the_switch_of_the_axis_that_names_it() {
+        // Each plane is named by the axis it is perpendicular to, so turning
+        // off the Z axis turns off the ground plane's mark with it.
+        let renderable = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let mut req = request(vec![Item { renderable: &renderable, style: Style::Solid }], DisplayMode::Shaded);
+        req.grid = Grid {
+            visible: false,
+            spacing: 10.0,
+            axes: [true, false, false],
+            style: AxisStyle::Grid,
+            plane_marks: true,
+        };
+        let frame = render(&req);
+        assert!(pixels_of(&frame, req.palette.axis_x) > 0, "the X plane's mark should be drawn");
+        assert_eq!(pixels_of(&frame, req.palette.axis_z), 0, "the Z plane's mark should be off with its axis");
+    }
+
+    #[test]
+    fn a_plane_cuts_a_triangle_in_at_most_one_segment() {
+        let above = [Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 2.0), Vec3::new(0.0, 1.0, 3.0)];
+        assert!(plane_crossing(above, 2).is_none());
+        let crossing = [Vec3::new(0.0, 0.0, -1.0), Vec3::new(2.0, 0.0, 1.0), Vec3::new(0.0, 2.0, 1.0)];
+        let (a, b) = plane_crossing(crossing, 2).expect("this triangle straddles z = 0");
+        assert!(a.z.abs() < 1e-9 && b.z.abs() < 1e-9, "the cut has to lie in the plane: {a:?} {b:?}");
+        // A triangle lying in the plane is left to its neighbours: its own
+        // edges are the mark, and it has no interior crossing.
+        let flat = [Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+        assert!(plane_crossing(flat, 2).is_none());
+    }
+
     #[test]
     fn each_origin_axis_can_be_turned_off_on_its_own() {
         // Three switches, not one: an axis running through the model is a
         // distraction when it is not the one being worked to.
         let colours = |axes: [bool; 3]| {
             let mut req = request(Vec::new(), DisplayMode::Shaded);
-            req.grid = Grid { visible: false, spacing: 10.0, axes };
+            req.grid = Grid { visible: false, spacing: 10.0, axes, style: AxisStyle::Origin, plane_marks: false };
             let frame = render(&req);
             let mut found: Vec<Rgba> = (0..frame.width * frame.height)
                 .filter(|&i| !is_background(&frame, i, &req.palette))
@@ -808,7 +994,7 @@ mod tests {
     fn the_grid_and_axes_draw_in_their_own_colours() {
         let empty = Renderable::empty();
         let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3] };
+        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
         let frame = render(&req);
         for (name, colour) in [
             ("grid", req.palette.grid),
@@ -825,7 +1011,8 @@ mod tests {
     fn hiding_the_grid_hides_it() {
         let empty = Renderable::empty();
         let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3] };
+        req.grid =
+            Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
         let frame = render(&req);
         assert_eq!(frame.color.chunks_exact(4).filter(|p| *p == req.palette.grid).count(), 0);
         // The axes are not part of the grid toggle.
@@ -869,7 +1056,8 @@ mod tests {
         let prepared = Renderable::prepare(&primitives::box_mesh(60.0, 40.0, 4.0));
         let build = |grid: bool| {
             let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-            req.grid = Grid { visible: grid, spacing: 10.0, axes: [true; 3] };
+            req.grid =
+                Grid { visible: grid, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
             req.view.camera.pitch = 10.0;
             // The axes fade, so an axis pixel is a blend of the axis with
             // whatever is under it -- which is the grid in one render and the
@@ -904,7 +1092,8 @@ mod tests {
         let build = || {
             let mut req =
                 request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
-            req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3] };
+            req.grid =
+                Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
             render(&req).color
         };
         assert_eq!(build(), build());

@@ -102,6 +102,8 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
                 visible: app.scene.settings.grid_visible,
                 spacing: app.scene.settings.grid_spacing,
                 axes: app.scene.settings.axes_visible,
+                style: app.scene.settings.axis_style,
+                plane_marks: app.scene.settings.plane_marks,
             },
             items,
         };
@@ -134,6 +136,8 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
     app.scene.settings.axes_visible.hash(&mut hasher);
+    app.scene.settings.axis_style.hash(&mut hasher);
+    app.scene.settings.plane_marks.hash(&mut hasher);
     let camera = app.scene.camera;
     for value in
         [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]
