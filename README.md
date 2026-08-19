@@ -36,7 +36,10 @@ keeps its settings there instead of in the user profile — otherwise they live 
 `%APPDATA%\Simple3D` or `$XDG_CONFIG_HOME/simple3d`.
 
 Projects are `.simple3d` files (JSON, versioned, human-readable). Passing one
-as an argument opens it, so file associations work on both platforms.
+as an argument opens it, so file associations work on both platforms. The
+`.deb` registers the type on Linux, icon included; on Windows, Help ▸
+Associate .simple3d files writes the association for the current user, giving
+those files the application's own icon.
 
 ## What it does
 

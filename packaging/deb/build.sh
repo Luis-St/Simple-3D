@@ -33,6 +33,13 @@ install -Dm755 "$binary" "$tree/usr/bin/$package"
 install -Dm644 "$here/$appid.desktop" "$tree/usr/share/applications/$appid.desktop"
 install -Dm644 "$here/$appid.svg" "$tree/usr/share/icons/hicolor/scalable/apps/$appid.svg"
 install -Dm644 "$here/$appid.xml" "$tree/usr/share/mime/packages/$appid.xml"
+# The same icon again, under the name the MIME type derives from its own id.
+# The `<icon name="...">` hint in the MIME definition is honoured by GIO, but
+# other file managers look only for the derived name, and a .simple3d file
+# whose icon depends on which desktop is running is not an icon. Both names,
+# one file.
+install -Dm644 "$here/$appid.svg" \
+    "$tree/usr/share/icons/hicolor/scalable/mimetypes/application-x-simple3d-project.svg"
 
 # gdk-pixbuf identifies an SVG by sniffing the first bytes of the file rather
 # than by its extension, and GNOME Shell loads menu icons through gdk-pixbuf.

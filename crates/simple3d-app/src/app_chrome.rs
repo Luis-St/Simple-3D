@@ -412,6 +412,37 @@ impl App {
                 self.modal = Modal::About;
                 ui.close();
             }
+            // Only where the application can do it itself. On Linux the .deb
+            // ships the desktop entry, the MIME type and the icon, and a
+            // portable build there has nothing to write them into.
+            if crate::file_assoc::supported() {
+                ui.separator();
+                if ui
+                    .button("Associate .simple3d files\u{2026}")
+                    .on_hover_text(
+                        "Give .simple3d files this application's icon and open them with it. \
+                         Written for the current user only; no administrator rights are needed.",
+                    )
+                    .clicked()
+                {
+                    self.status = match crate::file_assoc::register() {
+                        Ok(()) => Status::Info(
+                            ".simple3d files are now opened by Simple 3D. Explorer may need reopening to \
+                             redraw their icons."
+                                .into(),
+                        ),
+                        Err(error) => Status::Warning(error),
+                    };
+                    ui.close();
+                }
+                if ui.button("Remove the .simple3d association").clicked() {
+                    self.status = match crate::file_assoc::unregister() {
+                        Ok(()) => Status::Info(".simple3d files are no longer associated with Simple 3D.".into()),
+                        Err(error) => Status::Warning(error),
+                    };
+                    ui.close();
+                }
+            }
         });
     }
 
