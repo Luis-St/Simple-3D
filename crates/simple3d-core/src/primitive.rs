@@ -134,6 +134,19 @@ impl ParamSpec {
         ParamSpec { shown_when: Some((param, value)), ..self }
     }
 
+    /// How far round a turn a revolved shape goes. Always the same range and
+    /// the same default, so a swept cylinder and a swept tube read alike.
+    const fn sweep() -> ParamSpec {
+        ParamSpec {
+            key: "sweep",
+            label: "Sweep angle",
+            kind: ParamKind::Angle { min: 1.0, max: 360.0 },
+            default: ParamValue::Angle(360.0),
+            lock_group: 0,
+            shown_when: None,
+        }
+    }
+
     const fn count(key: &'static str, label: &'static str, default: u32, min: u32, max: u32) -> ParamSpec {
         ParamSpec {
             key,
@@ -256,6 +269,8 @@ const POLY: &str = "Regular polyhedra";
 const FLAT: &str = "Flat shapes";
 
 const MEASURE: &[&str] = &["Across corners", "Across flats"];
+const CORNER_STYLE: &[&str] = &["Rounded", "Chamfered"];
+const CHAMFER_EDGES: &[&str] = &["All edges", "Vertical edges", "Top and bottom"];
 const WALL_MODE: &[&str] = &["Wall thickness", "Inner diameter"];
 const SIZE_MODE: &[&str] = &["Circumscribed diameter", "Edge length"];
 
@@ -266,6 +281,23 @@ fn tube_inner(p: &Params) -> f64 {
     let outer = p.num("outer_diameter");
     let inner = if p.int("wall_mode") == 0 { outer - 2.0 * p.num("wall_thickness") } else { p.num("inner_diameter") };
     inner.clamp(0.0, outer)
+}
+
+/// Whether a revolved shape goes all the way round. Short of that it is a pie
+/// slice, and its width across X and Y is no longer its diameter -- which is
+/// why the resize handles on those axes withdraw.
+fn fully_swept(p: &Params) -> bool {
+    p.num("sweep") >= 360.0
+}
+
+/// The X and Y resize handles of a revolved shape, offered only while it is a
+/// full turn and its diameter really is its width.
+fn round_axes(p: &Params, x: &'static str, y: &'static str) -> [Option<AxisDriver>; 2] {
+    if fully_swept(p) {
+        [Some(AxisDriver::direct(x)), Some(AxisDriver::direct(y))]
+    } else {
+        [None, None]
+    }
 }
 
 /// Extent-to-diameter factor for a regular n-gon generated with a vertex at
@@ -305,19 +337,49 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::positive_length("width", "Width (X)", 20.0),
             ParamSpec::positive_length("depth", "Depth (Y)", 20.0),
             ParamSpec::positive_length("height", "Height (Z)", 20.0),
+            ParamSpec::choice("corner_style", "Corners", CORNER_STYLE),
             ParamSpec::length("corner_radius", "Corner radius", 3.0),
-            ParamSpec::count("corner_segments", "Corner segments", 6, 1, 64),
+            ParamSpec::count("corner_segments", "Corner segments", 6, 1, 64).when("corner_style", 0),
         ],
         segmented: false,
         build: |p, _seg| {
-            gen::rounded_box_mesh(
+            gen::corner_box_mesh(
                 p.num("width"),
                 p.num("depth"),
                 p.num("height"),
                 p.num("corner_radius"),
                 p.int("corner_segments"),
+                p.int("corner_style") == 1,
             )
         },
+        axes: |_p| {
+            [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
+        },
+    },
+    PrimitiveSpec {
+        type_id: "chamfered_box",
+        label: "Chamfered box",
+        category: BOXES,
+        params: &[
+            ParamSpec::positive_length("width", "Width (X)", 20.0),
+            ParamSpec::positive_length("depth", "Depth (Y)", 20.0),
+            ParamSpec::positive_length("height", "Height (Z)", 20.0),
+            ParamSpec::length("chamfer", "Chamfer", 2.0),
+            ParamSpec::choice("edges", "Edges cut", CHAMFER_EDGES),
+        ],
+        segmented: false,
+        build: |p, _seg| {
+            gen::chamfered_box_mesh(
+                p.num("width"),
+                p.num("depth"),
+                p.num("height"),
+                p.num("chamfer"),
+                gen::ChamferEdges::from_index(p.int("edges")),
+            )
+        },
+        // A chamfer cuts corners off the box, never past a face: the widest
+        // point of every axis is still the box's own dimension, whatever the
+        // chamfer is clamped to.
         axes: |_p| {
             [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
         },
@@ -413,15 +475,15 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::locked_length("diameter_x", "Diameter X", 20.0, 1),
             ParamSpec::locked_length("diameter_y", "Diameter Y", 20.0, 1),
             ParamSpec::positive_length("height", "Height (Z)", 20.0),
+            ParamSpec::sweep(),
         ],
         segmented: true,
-        build: |p, seg| gen::cylinder_mesh(p.num("diameter_x"), p.num("diameter_y"), p.num("height"), seg),
-        axes: |_p| {
-            [
-                Some(AxisDriver::direct("diameter_x")),
-                Some(AxisDriver::direct("diameter_y")),
-                Some(AxisDriver::direct("height")),
-            ]
+        build: |p, seg| {
+            gen::cylinder_sector_mesh(p.num("diameter_x"), p.num("diameter_y"), p.num("height"), seg, p.num("sweep"))
+        },
+        axes: |p| {
+            let [x, y] = round_axes(p, "diameter_x", "diameter_y");
+            [x, y, Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -434,15 +496,15 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::positive_length("wall_thickness", "Wall thickness", 2.0).when("wall_mode", 0),
             ParamSpec::positive_length("inner_diameter", "Inner diameter", 16.0).when("wall_mode", 1),
             ParamSpec::positive_length("height", "Height (Z)", 20.0),
+            ParamSpec::sweep(),
         ],
         segmented: true,
-        build: |p, seg| gen::tube_mesh(p.num("outer_diameter"), tube_inner(p), p.num("height"), seg),
-        axes: |_p| {
-            [
-                Some(AxisDriver::direct("outer_diameter")),
-                Some(AxisDriver::direct("outer_diameter")),
-                Some(AxisDriver::direct("height")),
-            ]
+        build: |p, seg| {
+            gen::tube_sector_mesh(p.num("outer_diameter"), tube_inner(p), p.num("height"), seg, p.num("sweep"))
+        },
+        axes: |p| {
+            let [x, y] = round_axes(p, "outer_diameter", "outer_diameter");
+            [x, y, Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -473,14 +535,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
         params: &[
             ParamSpec::positive_length("ring_diameter", "Ring diameter (centre-line)", 30.0),
             ParamSpec::positive_length("tube_diameter", "Tube diameter", 6.0),
-            ParamSpec {
-                key: "sweep",
-                label: "Sweep angle",
-                kind: ParamKind::Angle { min: 1.0, max: 360.0 },
-                default: ParamValue::Angle(360.0),
-                lock_group: 0,
-                shown_when: None,
-            },
+            ParamSpec::sweep(),
         ],
         segmented: true,
         build: |p, seg| gen::torus_mesh(p.num("ring_diameter"), p.num("tube_diameter"), p.num("sweep"), seg),
@@ -497,14 +552,24 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::positive_length("bottom_diameter", "Bottom diameter", 20.0),
             ParamSpec::length("top_diameter", "Top diameter (0 = point)", 0.0),
             ParamSpec::positive_length("height", "Height (Z)", 20.0),
+            ParamSpec::sweep(),
         ],
         segmented: true,
-        build: |p, seg| gen::cone_mesh(p.num("bottom_diameter"), p.num("top_diameter"), p.num("height"), seg),
+        build: |p, seg| {
+            gen::cone_sector_mesh(
+                p.num("bottom_diameter"),
+                p.num("top_diameter"),
+                p.num("height"),
+                seg,
+                p.num("sweep"),
+            )
+        },
         axes: |p| {
             // Whichever end is wider sets the X/Y extent.
             let wider =
                 if p.num("top_diameter") > p.num("bottom_diameter") { "top_diameter" } else { "bottom_diameter" };
-            [Some(AxisDriver::direct(wider)), Some(AxisDriver::direct(wider)), Some(AxisDriver::direct("height"))]
+            let [x, y] = round_axes(p, wider, wider);
+            [x, y, Some(AxisDriver::direct("height"))]
         },
     },
     PrimitiveSpec {
@@ -620,9 +685,19 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::positive_length("width", "Width (X)", 40.0),
             ParamSpec::positive_length("depth", "Depth (Y)", 20.0),
             ParamSpec::positive_length("thickness", "Thickness (Z)", 4.0),
+            ParamSpec::length("corner_radius", "Corner radius (0 = square)", 0.0),
+            ParamSpec::count("corner_segments", "Corner segments", 6, 1, 64),
         ],
         segmented: false,
-        build: |p, _seg| gen::plate_mesh(p.num("width"), p.num("depth"), p.num("thickness")),
+        build: |p, _seg| {
+            gen::rounded_plate_mesh(
+                p.num("width"),
+                p.num("depth"),
+                p.num("thickness"),
+                p.num("corner_radius"),
+                p.int("corner_segments"),
+            )
+        },
         axes: |_p| {
             [
                 Some(AxisDriver::direct("width")),
@@ -639,15 +714,15 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::locked_length("diameter_x", "Diameter X", 20.0, 1),
             ParamSpec::locked_length("diameter_y", "Diameter Y", 20.0, 1),
             ParamSpec::positive_length("thickness", "Thickness (Z)", 2.0),
+            ParamSpec::sweep(),
         ],
         segmented: true,
-        build: |p, seg| gen::disc_mesh(p.num("diameter_x"), p.num("diameter_y"), p.num("thickness"), seg),
-        axes: |_p| {
-            [
-                Some(AxisDriver::direct("diameter_x")),
-                Some(AxisDriver::direct("diameter_y")),
-                Some(AxisDriver::direct("thickness")),
-            ]
+        build: |p, seg| {
+            gen::disc_sector_mesh(p.num("diameter_x"), p.num("diameter_y"), p.num("thickness"), seg, p.num("sweep"))
+        },
+        axes: |p| {
+            let [x, y] = round_axes(p, "diameter_x", "diameter_y");
+            [x, y, Some(AxisDriver::direct("thickness"))]
         },
     },
     PrimitiveSpec {
@@ -660,13 +735,32 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
             ParamSpec::positive_length("wall_thickness", "Wall thickness", 2.0).when("wall_mode", 0),
             ParamSpec::positive_length("inner_diameter", "Inner diameter", 16.0).when("wall_mode", 1),
             ParamSpec::positive_length("thickness", "Thickness (Z)", 2.0),
+            ParamSpec::sweep(),
         ],
         segmented: true,
-        build: |p, seg| gen::ring_mesh(p.num("outer_diameter"), tube_inner(p), p.num("thickness"), seg),
+        build: |p, seg| {
+            gen::ring_sector_mesh(p.num("outer_diameter"), tube_inner(p), p.num("thickness"), seg, p.num("sweep"))
+        },
+        axes: |p| {
+            let [x, y] = round_axes(p, "outer_diameter", "outer_diameter");
+            [x, y, Some(AxisDriver::direct("thickness"))]
+        },
+    },
+    PrimitiveSpec {
+        type_id: "slot",
+        label: "Slot",
+        category: FLAT,
+        params: &[
+            ParamSpec::positive_length("length", "Length (X)", 30.0),
+            ParamSpec::positive_length("width", "Width (Y)", 10.0),
+            ParamSpec::positive_length("thickness", "Thickness (Z)", 4.0),
+        ],
+        segmented: true,
+        build: |p, seg| gen::slot_mesh(p.num("length"), p.num("width"), p.num("thickness"), seg),
         axes: |_p| {
             [
-                Some(AxisDriver::direct("outer_diameter")),
-                Some(AxisDriver::direct("outer_diameter")),
+                Some(AxisDriver::direct("length")),
+                Some(AxisDriver::direct("width")),
                 Some(AxisDriver::direct("thickness")),
             ]
         },
@@ -750,6 +844,88 @@ mod tests {
     }
 
     #[test]
+    fn a_partly_swept_primitive_is_still_a_solid_and_withdraws_its_width_handles() {
+        // Every type that declares a sweep has to stay manifold short of a full
+        // turn, and stop offering X/Y resize handles there: a quarter cylinder
+        // is one radius wide, so a handle writing "diameter" would not track
+        // the cursor.
+        for spec in REGISTRY {
+            if spec.param("sweep").is_none() {
+                continue;
+            }
+            for sweep in [45.0, 90.0, 200.0, 359.0] {
+                let mut params = spec.default_params();
+                params.insert("sweep".into(), ParamValue::Angle(sweep));
+                let mesh = (spec.build)(&params, 32);
+                assert!(mesh.triangle_count() > 0, "{} at {sweep} degrees: empty mesh", spec.type_id);
+                assert!(
+                    mesh.manifold_issue().is_none(),
+                    "{} at {sweep} degrees: {}",
+                    spec.type_id,
+                    mesh.manifold_issue().unwrap()
+                );
+                let axes = (spec.axes)(&params);
+                assert!(axes[0].is_none() && axes[1].is_none(), "{} kept a width handle at {sweep}", spec.type_id);
+                // The Z extent is unaffected by how far round the shape goes,
+                // so that handle stays and has to stay truthful.
+                let (lo, hi) = mesh.bounds().expect("a solid has bounds");
+                if let Some(driver) = axes[2] {
+                    let predicted = params.num(driver.param) * driver.factor;
+                    assert!(
+                        (predicted - (hi.z - lo.z)).abs() < 1e-6,
+                        "{} at {sweep} degrees: Z driver predicts {predicted}, mesh measures {}",
+                        spec.type_id,
+                        hi.z - lo.z
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_full_sweep_is_the_default_so_existing_projects_are_unchanged() {
+        // The sweep was added to types that already existed; anything that
+        // loads without one has to come back a whole turn.
+        for spec in REGISTRY {
+            let Some(sweep) = spec.param("sweep") else { continue };
+            assert_eq!(sweep.default, ParamValue::Angle(360.0), "{}", spec.type_id);
+            let migrated = spec.migrate_params(&Params::new());
+            assert_eq!(migrated.num("sweep"), 360.0, "{}", spec.type_id);
+        }
+    }
+
+    #[test]
+    fn a_chamfered_box_measures_the_dimensions_it_was_given() {
+        // Whichever edges are cut, and however large the chamfer typed in, the
+        // box is still exactly its stated size -- criterion 2 for a shape whose
+        // parameter has to be clamped.
+        let spec = lookup("chamfered_box").expect("the chamfered box is declared");
+        for edges in 0..3 {
+            for chamfer in [0.0, 1.0, 4.0, 1000.0] {
+                let mut params = spec.default_params();
+                params.insert("edges".into(), ParamValue::Choice(edges));
+                params.insert("chamfer".into(), ParamValue::Length(chamfer));
+                let mesh = (spec.build)(&params, 0);
+                assert!(
+                    mesh.manifold_issue().is_none(),
+                    "edges {edges} chamfer {chamfer}: {}",
+                    mesh.manifold_issue().unwrap()
+                );
+                let (lo, hi) = mesh.bounds().expect("a solid has bounds");
+                let size = [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z];
+                for (axis, key) in ["width", "depth", "height"].iter().enumerate() {
+                    assert!(
+                        (params.num(key) - size[axis]).abs() < 1e-9,
+                        "edges {edges} chamfer {chamfer}: {key} is {} but measures {}",
+                        params.num(key),
+                        size[axis]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn flat_shape_aliases_match_their_general_forms() {
         // Spec section 3.2: "must produce identical geometry to their equivalents".
         let plate = lookup("plate").unwrap();
@@ -762,6 +938,12 @@ mod tests {
         let b = (boxy.build)(&bp, 32);
         assert_eq!(a.indices, b.indices);
         assert_eq!(a.positions, b.positions);
+
+        // A rounded plate with no radius is still exactly the box, which is
+        // what lets the corner radius be optional on a shape that is an alias.
+        let mut sharp = plate.default_params();
+        sharp.insert("corner_radius".into(), ParamValue::Length(0.0));
+        assert_eq!((plate.build)(&sharp, 32).positions, b.positions);
 
         let disc = lookup("disc").unwrap();
         let cyl = lookup("cylinder").unwrap();

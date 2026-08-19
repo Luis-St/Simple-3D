@@ -319,6 +319,114 @@ fn boolean_evaluation_is_deterministic() {
 }
 
 #[test]
+fn a_swept_solid_is_closed_by_its_cut_faces() {
+    // A shape short of a full turn is a pie slice, and the two faces it was
+    // cut on have to close it -- an open sector would export as a shell.
+    for sweep in [30.0, 90.0, 180.0, 270.0, 359.0] {
+        let name = format!("sweep {sweep}");
+        assert_manifold(&format!("cylinder {name}"), &primitives::cylinder_sector_mesh(20.0, 20.0, 10.0, 32, sweep));
+        assert_manifold(&format!("ellipse {name}"), &primitives::cylinder_sector_mesh(20.0, 12.0, 10.0, 32, sweep));
+        assert_manifold(&format!("cone {name}"), &primitives::cone_sector_mesh(20.0, 0.0, 10.0, 32, sweep));
+        assert_manifold(&format!("frustum {name}"), &primitives::cone_sector_mesh(20.0, 8.0, 10.0, 32, sweep));
+        assert_manifold(&format!("tube {name}"), &primitives::tube_sector_mesh(20.0, 12.0, 10.0, 32, sweep));
+        assert_manifold(&format!("ring {name}"), &primitives::ring_sector_mesh(20.0, 12.0, 2.0, 32, sweep));
+    }
+}
+
+#[test]
+fn a_full_sweep_is_the_unswept_shape_exactly() {
+    // The sweep parameter defaults to a full turn, so every existing project
+    // has to keep the geometry it had: same vertices, not merely same size.
+    let full = primitives::cylinder_sector_mesh(20.0, 12.0, 10.0, 32, 360.0);
+    let plain = primitives::cylinder_mesh(20.0, 12.0, 10.0, 32);
+    assert_eq!(full.positions, plain.positions);
+    assert_eq!(full.indices, plain.indices);
+}
+
+#[test]
+fn a_quarter_cylinder_spans_one_radius_not_one_diameter() {
+    // What makes the X and Y resize handles withdraw on a partial sweep: the
+    // shape's width stops being its diameter.
+    let quarter = primitives::cylinder_sector_mesh(20.0, 20.0, 10.0, 32, 90.0);
+    assert_bounds("quarter cylinder", &quarter, Vec3::new(10.0, 10.0, 10.0), 1e-9);
+}
+
+#[test]
+fn a_chamfered_box_keeps_its_stated_dimensions() {
+    // A chamfer cuts corners off, never past a face, so the box is still
+    // exactly the size it was asked for whichever edges are cut.
+    use primitives::ChamferEdges;
+    for edges in [ChamferEdges::All, ChamferEdges::Vertical, ChamferEdges::TopAndBottom] {
+        let name = format!("chamfered box {edges:?}");
+        let mesh = primitives::chamfered_box_mesh(40.0, 20.0, 12.0, 3.0, edges);
+        assert_manifold(&name, &mesh);
+        assert_bounds(&name, &mesh, Vec3::new(40.0, 20.0, 12.0), 1e-9);
+    }
+}
+
+#[test]
+fn an_oversized_chamfer_is_clamped_rather_than_folded_through_itself() {
+    // Typing a chamfer larger than the box allows must leave a solid, not an
+    // inside-out one -- the field cannot refuse the number, so the generator
+    // has to survive it.
+    use primitives::ChamferEdges;
+    for edges in [ChamferEdges::All, ChamferEdges::Vertical, ChamferEdges::TopAndBottom] {
+        let name = format!("over-chamfered box {edges:?}");
+        let mesh = primitives::chamfered_box_mesh(20.0, 20.0, 20.0, 500.0, edges);
+        assert_manifold(&name, &mesh);
+        assert_bounds(&name, &mesh, Vec3::new(20.0, 20.0, 20.0), 1e-9);
+    }
+}
+
+#[test]
+fn a_chamfer_of_zero_is_the_plain_box() {
+    use primitives::ChamferEdges;
+    let plain = primitives::box_mesh(20.0, 14.0, 8.0);
+    for edges in [ChamferEdges::All, ChamferEdges::Vertical, ChamferEdges::TopAndBottom] {
+        let mesh = primitives::chamfered_box_mesh(20.0, 14.0, 8.0, 0.0, edges);
+        assert_eq!(mesh.weld().positions.len(), plain.weld().positions.len(), "{edges:?}");
+        assert_bounds("unchamfered box", &mesh, Vec3::new(20.0, 14.0, 8.0), 1e-9);
+    }
+}
+
+#[test]
+fn a_chamfer_removes_material_and_nothing_else() {
+    // The chamfered box has to sit inside the box it was cut from: every
+    // vertex within the plain box's bounds, and less volume than it.
+    use primitives::ChamferEdges;
+    let mesh = primitives::chamfered_box_mesh(30.0, 20.0, 10.0, 3.0, ChamferEdges::All);
+    for p in &mesh.positions {
+        assert!(p.x.abs() <= 15.0 + 1e-9 && p.y.abs() <= 10.0 + 1e-9 && p.z.abs() <= 5.0 + 1e-9, "{p:?} escapes");
+    }
+    let cut = evaluate_boolean(BooleanOp::Difference, &[primitives::box_mesh(30.0, 20.0, 10.0), mesh]);
+    assert!(cut.triangle_count() > 0, "a chamfer should leave the box with corners missing");
+}
+
+#[test]
+fn a_slot_is_a_rectangle_with_semicircular_ends() {
+    let slot = primitives::slot_mesh(30.0, 10.0, 4.0, 32);
+    assert_manifold("slot", &slot);
+    assert_bounds("slot", &slot, Vec3::new(30.0, 10.0, 4.0), 1e-9);
+    // A slot as long as it is wide is a disc: the two end radii meet.
+    let round = primitives::slot_mesh(10.0, 10.0, 4.0, 32);
+    assert_manifold("round slot", &round);
+    assert_bounds("round slot", &round, Vec3::new(10.0, 10.0, 4.0), 1e-9);
+}
+
+#[test]
+fn an_inset_outline_moves_every_edge_by_the_same_distance() {
+    // What a horizontal chamfer relies on: a parallel offset, not a scale.
+    // A scale would move the long edges of a 40x10 rectangle four times as far
+    // as the short ones and the chamfer would not be 45 degrees.
+    let rect = vec![(20.0, -5.0), (20.0, 5.0), (-20.0, 5.0), (-20.0, -5.0)];
+    let inset = crate::revolve::inset_convex_outline(&rect, 2.0);
+    let expected = [(18.0, -3.0), (18.0, 3.0), (-18.0, 3.0), (-18.0, -3.0)];
+    for (got, want) in inset.iter().zip(expected.iter()) {
+        assert!((got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9, "{got:?} vs {want:?}");
+    }
+}
+
+#[test]
 fn primitive_bounds_match_declared_dimensions() {
     // Criterion 2, over the whole primitive table. Flat axes must be exact;
     // curved axes are exact too because vertices sit on the circumscribed
