@@ -317,7 +317,11 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     let mut op = current;
-    ui.horizontal(|ui| {
+    // Wrapped, not merely laid out left to right: the four names together are
+    // wider than the dock at its default width, and a row that overflows widens
+    // the whole column behind it -- which is what used to carry the Z field of
+    // Position, Rotation and Scale off the panel with no way to reach it.
+    ui.horizontal_wrapped(|ui| {
         row_label(ui, "Operation");
         for option in GroupOp::ALL {
             if ui.selectable_label(op == option, option.label()).clicked() && op != option {
@@ -761,7 +765,10 @@ fn axis_row(
         row_label(ui, label);
         // Three fields, three chips, and the gaps between them all have to come
         // out of the row: getting this wrong pushes the Z field off the panel.
-        let available = ui.available_width();
+        // The panel's own edge decides how much there is to share out, never the
+        // widest row above -- one row wide enough to overflow would otherwise
+        // take Z with it.
+        let available = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left());
         let chips = 3.0 * (theme::AXIS_CHIP_WIDTH + ui.spacing().item_spacing.x);
         let gaps = 2.0 * ui.spacing().item_spacing.x;
         let each = ((available - chips - gaps) / 3.0).max(30.0);
