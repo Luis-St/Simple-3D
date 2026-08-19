@@ -31,6 +31,13 @@ egui = "0.32"
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30.12", default-features = false, features = ["wayland-csd-adwaita"] }
 
+# Compiles the application icon into the .exe, so Explorer has an icon to show
+# for the executable and for the .simple3d files associated with it. Windows
+# hosts only, and a build dependency: nothing of it is in the shipped binary
+# beyond the icon itself.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 # Replays pointer events against a headless egui context, so the gestures that
 # only a pointer can perform are executed by a test rather than only reasoned
