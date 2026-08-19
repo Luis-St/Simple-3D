@@ -1322,11 +1322,27 @@ impl App {
         crate::dock::show(self, ctx, Side::Right);
         panel_viewport::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
+        // Last, over everything: with no frame around the window these are the
+        // only way to resize it, and a panel edge underneath must not take the
+        // drag instead.
+        crate::window_chrome::resize_edges(ctx);
         self.modals(ctx);
     }
 }
 
 impl eframe::App for App {
+    /// Nothing behind the window's own painting: the corners are rounded away
+    /// (see `window_chrome`), and what they round away has to be the desktop
+    /// rather than a black notch.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        if crate::window_chrome::wants_transparency() {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            let c = crate::theme::token::SURFACE_0;
+            [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0]
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // A new message restarts its clock. Watching the value rather than
         // stamping it at every assignment means no `status = ...` anywhere in

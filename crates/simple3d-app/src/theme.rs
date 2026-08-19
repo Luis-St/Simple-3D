@@ -53,8 +53,6 @@ pub mod metric {
     pub const GAP: f32 = 4.0;
     /// Width of the tool rail.
     pub const RAIL: f32 = 40.0;
-    /// Height of the menu bar.
-    pub const MENU_BAR: f32 = 32.0;
     /// Height of the status bar.
     pub const STATUS_BAR: f32 = 24.0;
     /// Room kept clear at the right end of the status bar for the timing, node

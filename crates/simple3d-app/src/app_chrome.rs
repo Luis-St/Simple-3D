@@ -7,6 +7,7 @@ use crate::gizmo::Mode;
 use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
+use crate::window_chrome;
 use simple3d_core::config::{self, DisplayMode, Panel, Side};
 use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
@@ -83,45 +84,70 @@ impl App {
         }
     }
 
+    /// The menu bar, which is also the window's title bar.
+    ///
+    /// One bar rather than two: the decorations are off (see `window_chrome`),
+    /// and a separate strip holding nothing but three buttons would waste a row
+    /// of a window that is mostly viewport. Files and every browser merge them
+    /// the same way.
     pub(crate) fn menu_bar(&mut self, ctx: &egui::Context) {
-        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
-            left: 8,
-            right: 8,
-            top: 0,
-            bottom: 0,
-        });
-        egui::TopBottomPanel::top("menu").frame(frame).exact_height(theme::metric::MENU_BAR).show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                // The application's own name, once, at the left -- the window
-                // title bar is the compositor's to style, not ours.
-                ui.add(
-                    egui::Label::new(egui::RichText::new(APP_NAME).size(13.0).strong().color(theme::token::TEXT_HI))
-                        .selectable(false),
-                );
-                ui.add_space(10.0);
-                egui::MenuBar::new().ui(ui, |ui| {
-                    self.file_menu(ui);
-                    self.edit_menu(ui);
-                    self.add_menu(ui);
-                    self.view_menu(ui);
-                    self.manipulate_menu(ui);
-                    self.help_menu(ui);
-                });
-                // The document, on the right of the same row: what is open and
-                // whether it still matches what is on disk.
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let name = self
-                        .path
-                        .as_ref()
-                        .and_then(|p| p.file_name())
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "Untitled".to_string());
-                    let marker = if self.unsaved() { " \u{2022}" } else { "" };
-                    ui.add(egui::Label::new(theme::hint(format!("{name}{marker}"))).selectable(false))
-                        .on_hover_text(if self.unsaved() { "Unsaved changes" } else { "Saved" });
-                });
+        // The top two corners of the window are this bar's corners.
+        let radius = if window_chrome::is_maximized(ctx) { 0 } else { window_chrome::corner_radius() };
+        let frame = egui::Frame::NONE
+            .fill(theme::token::SURFACE_2)
+            .corner_radius(egui::CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 })
+            .inner_margin(egui::Margin {
+                left: 8,
+                right: if window_chrome::CHROME == window_chrome::Chrome::Windows { 0 } else { 6 },
+                top: 0,
+                bottom: 0,
             });
-        });
+        let maximized = window_chrome::is_maximized(ctx);
+        let panel =
+            egui::TopBottomPanel::top("menu").frame(frame).exact_height(window_chrome::bar_height()).show(ctx, |ui| {
+                // Claimed before the contents are laid out, so that every menu
+                // and button placed after it sits on top and takes its own
+                // press: what is left over is title bar, and drags the window.
+                let bar = ui.max_rect();
+                let drag = ui.interact(bar, egui::Id::new("title-bar"), egui::Sense::click_and_drag());
+                window_chrome::header_underline(ui, bar);
+                ui.horizontal_centered(|ui| {
+                    // The application's own name, once, at the left.
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(APP_NAME).size(13.0).strong().color(theme::token::TEXT_HI),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(10.0);
+                    egui::MenuBar::new().ui(ui, |ui| {
+                        self.file_menu(ui);
+                        self.edit_menu(ui);
+                        self.add_menu(ui);
+                        self.view_menu(ui);
+                        self.manipulate_menu(ui);
+                        self.help_menu(ui);
+                    });
+                    // The window buttons at the corner, then the document name
+                    // inside them: what is open and whether it still matches
+                    // what is on disk.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        window_chrome::window_buttons(ui, maximized);
+                        ui.add_space(8.0);
+                        let name = self
+                            .path
+                            .as_ref()
+                            .and_then(|p| p.file_name())
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "Untitled".to_string());
+                        let marker = if self.unsaved() { " \u{2022}" } else { "" };
+                        ui.add(egui::Label::new(theme::hint(format!("{name}{marker}"))).selectable(false))
+                            .on_hover_text(if self.unsaved() { "Unsaved changes" } else { "Saved" });
+                    });
+                });
+                drag
+            });
+        window_chrome::title_bar_drag(ctx, &panel.inner, maximized);
     }
 
     fn command_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
@@ -390,12 +416,12 @@ impl App {
     }
 
     pub(crate) fn status_bar(&mut self, ctx: &egui::Context) {
-        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
-            left: 8,
-            right: 8,
-            top: 0,
-            bottom: 0,
-        });
+        // And the bottom two are this one's.
+        let radius = if window_chrome::is_maximized(ctx) { 0 } else { window_chrome::corner_radius() };
+        let frame = egui::Frame::NONE
+            .fill(theme::token::SURFACE_2)
+            .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: radius, se: radius })
+            .inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 });
         egui::TopBottomPanel::bottom("status").frame(frame).exact_height(theme::metric::STATUS_BAR).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
