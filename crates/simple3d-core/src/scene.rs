@@ -195,6 +195,34 @@ impl Node {
     }
 }
 
+/// How the origin axes are drawn. Two readings of the same three lines, kept
+/// as a setting rather than a decision, because which one helps depends on
+/// whether the axes are being used to place something or to read the ground.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AxisStyle {
+    /// The way most 3D software draws them: X and Y *are* the coloured grid
+    /// lines through zero. They run the width of the grid and travel with it as
+    /// the view pans, so the ground always says which way is which.
+    #[default]
+    Grid,
+    /// A fixed cross pinned at the origin, fading out at its own length. It
+    /// says where the origin is rather than which way the ground runs, and it
+    /// leaves the view once the origin is panned off screen.
+    Origin,
+}
+
+impl AxisStyle {
+    pub const ALL: [AxisStyle; 2] = [AxisStyle::Grid, AxisStyle::Origin];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AxisStyle::Grid => "Along the grid",
+            AxisStyle::Origin => "Pinned at the origin",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneSettings {
     pub unit: Unit,
@@ -213,6 +241,14 @@ pub struct SceneSettings {
     /// is a distraction when it is not the one being worked to.
     #[serde(default = "all_axes")]
     pub axes_visible: [bool; 3],
+    #[serde(default)]
+    pub axis_style: AxisStyle,
+    /// Draw, on the surface of a solid, the line where a principal plane cuts
+    /// through it. Where the ground plane crosses a shape is a real dimension
+    /// -- how much of it is below the build plate -- and it is invisible until
+    /// something marks it.
+    #[serde(default = "default_true")]
+    pub plane_marks: bool,
 }
 
 fn default_snap_step() -> f64 {
@@ -235,6 +271,8 @@ impl Default for SceneSettings {
             grid_visible: true,
             snap_step: default_snap_step(),
             axes_visible: all_axes(),
+            axis_style: AxisStyle::default(),
+            plane_marks: true,
         }
     }
 }

@@ -12,7 +12,7 @@ use crate::app::{App, Status};
 use crate::theme::{self, token};
 use crate::ui::{self, Commit};
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
-use simple3d_core::scene::{Anchor, Body, Colour, GroupOp, Node, NodeId};
+use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId};
 use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
 use simple3d_geom::Vec3;
 
@@ -227,6 +227,26 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                 {
                     app.scene.settings.axes_visible[axis] = on;
                 }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            row_label(ui, "Axis style").on_hover_text(
+                "Along the grid: X and Y are the grid's own lines through zero and travel with it. \
+                 Pinned: a cross at the origin that fades out at its own length.",
+            );
+            for option in AxisStyle::ALL {
+                let showing = app.scene.settings.axis_style == option;
+                if ui.selectable_label(showing, option.label()).clicked() && !showing {
+                    app.scene.settings.axis_style = option;
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            row_label(ui, "Plane marks")
+                .on_hover_text("Mark on a shape's surface where the ground plane, or either upright plane, cuts it");
+            let mut on = app.scene.settings.plane_marks;
+            if ui.checkbox(&mut on, "").changed() {
+                app.scene.settings.plane_marks = on;
             }
         });
         ui.horizontal(|ui| {
