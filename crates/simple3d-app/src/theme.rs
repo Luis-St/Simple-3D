@@ -28,6 +28,14 @@ pub mod token {
     /// Labels, units, disabled.
     pub const TEXT_LO: Color32 = Color32::from_rgb(0x8B, 0x95, 0xA5);
 
+    /// The scrollbar handle at rest. The divider grey the scrollbar has always
+    /// been described as, rather than the widget fill it was taking, which sat
+    /// one shade off the dock behind it and left a list with more rows than fit
+    /// looking complete.
+    pub const SCROLL_HANDLE: Color32 = Color32::from_rgb(0x3E, 0x46, 0x54);
+    /// And under the pointer, on its way to [`TEXT_LO`] while it is dragged.
+    pub const SCROLL_HANDLE_HOVER: Color32 = Color32::from_rgb(0x55, 0x5F, 0x70);
+
     /// Selection, active tool, focus ring -- a machined-brass amber.
     pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0xA3, 0x3D);
     /// Dimension readouts, the measure tool, snap indicators.
@@ -70,6 +78,51 @@ pub mod font {
     pub const VALUE: f32 = 13.0;
     pub const HEADER: f32 = 12.0;
     pub const SMALL: f32 = 11.0;
+}
+
+/// The colours offered as one click in the outliner's context menu.
+///
+/// A menu cannot hold egui's colour picker -- the picker is a popup, and
+/// opening one closes the menu underneath it before anything can be chosen --
+/// so the menu offers a short palette of ordinary buttons instead and the
+/// property editor keeps the full picker. These are chosen to stay legible as
+/// shaded solids against the viewport's dark ground and its light one, and to
+/// stay apart from the accent amber a selection is drawn in.
+pub const PAINT_PRESETS: [(&str, Color32); 8] = [
+    ("Slate", Color32::from_rgb(0x8C, 0x97, 0xA8)),
+    ("Blue", Color32::from_rgb(0x2E, 0x7D, 0xD2)),
+    ("Teal", Color32::from_rgb(0x2F, 0xA8, 0xA0)),
+    ("Green", Color32::from_rgb(0x5A, 0xB0, 0x54)),
+    ("Yellow", Color32::from_rgb(0xC9, 0xB0, 0x3A)),
+    ("Orange", Color32::from_rgb(0xE0, 0x7A, 0x2B)),
+    ("Red", Color32::from_rgb(0xCC, 0x4B, 0x45)),
+    ("Violet", Color32::from_rgb(0x8E, 0x6F, 0xD0)),
+];
+
+/// A vertical scroll area for a list panel, with a bar that can be seen.
+///
+/// egui paints the scrollbar handle in the *widget* fill of the `Ui` the area
+/// was shown in, which in this palette is one shade off the dock behind it --
+/// close enough that a list holding more rows than fit looked complete, with
+/// nothing to say the tree carried on below the fold. The handle colours are
+/// raised here, on the container only: the style it returns is the one the
+/// contents must be given back, so the rows inside keep the ordinary widget
+/// colours.
+///
+/// ```ignore
+/// let (area, restore) = theme::list_scroll_area(ui);
+/// area.show(ui, |ui| {
+///     ui.set_style(restore);
+///     // rows
+/// });
+/// ```
+pub fn list_scroll_area(ui: &mut egui::Ui) -> (egui::ScrollArea, std::sync::Arc<egui::Style>) {
+    let restore = ui.style().clone();
+    let widgets = &mut ui.style_mut().visuals.widgets;
+    widgets.inactive.bg_fill = token::SCROLL_HANDLE;
+    widgets.hovered.bg_fill = token::SCROLL_HANDLE_HOVER;
+    widgets.active.bg_fill = token::TEXT_LO;
+    (egui::ScrollArea::vertical().auto_shrink([false, false]), restore)
 }
 
 /// A value: a name, a measurement, anything the user typed or the model owns.

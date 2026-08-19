@@ -131,7 +131,9 @@ fn scrub_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// drawn in either dock.
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    let (area, restore) = theme::list_scroll_area(ui);
+    area.show(ui, |ui| {
+        ui.set_style(restore);
         // Everything the panel edits, primary last -- the same order the
         // selection itself is in, so "the one being edited" is unambiguous.
         let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
@@ -335,7 +337,9 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
                 app.scene.paint_subtree(*target, Some(Colour(rgb)));
             }
         }
-        let painted = targets.iter().any(|t| app.scene.effective_colour(*t).is_some());
+        // Enabled only where clearing would do something: a node that merely
+        // inherits a group's colour has none of its own to take away.
+        let painted = targets.iter().any(|t| app.scene.subtree_is_painted(*t));
         if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked() {
             app.edit("Clear colour", None);
             for target in targets {
