@@ -90,7 +90,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     let dragging = app.outliner_drag;
     app.drop_target = None;
     let ctx = ui.ctx().clone();
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    let (area, restore) = theme::list_scroll_area(ui);
+    area.show(ui, |ui| {
+        ui.set_style(restore);
         ui.add_space(2.0);
         let ids = app.scene.depth_first();
         for id in ids {
@@ -401,11 +403,6 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         let mut chosen: Option<Command> = None;
         let mut save_as_primitive = false;
         let mut paint: Option<Option<Colour>> = None;
-        let colour = app.scene.effective_colour(id);
-        let default_swatch = {
-            let solid = crate::render::Palette::for_dark_mode(ui.visuals().dark_mode).solid;
-            [solid[0], solid[1], solid[2]]
-        };
         let keymap = &app.keymap;
 
         item(ui, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
@@ -424,20 +421,35 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
             ui.close();
         }
         ui.separator();
-        // The picker lives here as well as in the properties panel: the
-        // outliner is where a group is easiest to point at, and painting a
-        // group is the reason most people open this menu.
+        // Painting is here as well as in the property editor, because the
+        // outliner is where a group is easiest to point at and painting a group
+        // is the reason most people open this menu.
+        //
+        // A short palette of plain buttons, not a colour picker: the picker is
+        // a popup, and opening one from inside a menu closes the menu under it
+        // before a colour can be chosen. Anything not on the palette is a
+        // click away in the property editor, which the hint says.
+        ui.label(crate::theme::hint("Colour"));
         ui.horizontal(|ui| {
-            ui.label("Colour");
-            let mut rgb = colour.map_or(default_swatch, |c: Colour| c.0);
-            if ui.color_edit_button_srgb(&mut rgb).changed() {
-                paint = Some(Some(Colour(rgb)));
-            }
-            if ui.add_enabled(colour.is_some(), egui::Button::new("Clear")).clicked() {
-                paint = Some(None);
-                ui.close();
+            for (name, preset) in crate::theme::PAINT_PRESETS {
+                let swatch = egui::Button::new("")
+                    .fill(preset)
+                    .stroke(egui::Stroke::new(1.0_f32, crate::theme::token::SURFACE_3))
+                    .min_size(egui::vec2(16.0, 16.0));
+                if ui.add(swatch).on_hover_text(name).clicked() {
+                    paint = Some(Some(Colour([preset.r(), preset.g(), preset.b()])));
+                    ui.close();
+                }
             }
         });
+        if ui
+            .add_enabled(app.scene.subtree_is_painted(id), egui::Button::new("Clear the colour"))
+            .on_hover_text("Back to the theme's colour for an unpainted solid")
+            .clicked()
+        {
+            paint = Some(None);
+            ui.close();
+        }
         ui.separator();
         if ui
             .button("Save as primitive\u{2026}")

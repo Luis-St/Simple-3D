@@ -27,7 +27,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     // shapes are the only thing worth reading.
     let empty = app.scene.node(app.scene.root()).children.is_empty();
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, theme::metric::GAP);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    let (area, restore) = theme::list_scroll_area(ui);
+    area.show(ui, |ui| {
+        ui.set_style(restore);
         ui.add_space(2.0);
         for category in primitive::categories() {
             category_block(app, ui, category, empty);

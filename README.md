@@ -80,7 +80,7 @@ those files the application's own icon.
 the spec's acceptance criteria are behaviourally met. What each release changed
 is on its release page; the commit log is the record between them.
 
-`cargo test --workspace` runs **383 tests**, none ignored or failing, and every
+`cargo test --workspace` runs **385 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
