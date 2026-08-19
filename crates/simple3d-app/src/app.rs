@@ -912,7 +912,6 @@ impl App {
     pub fn add_node(&mut self, type_id: Option<&str>, op: GroupOp) {
         self.edit("Add", None);
         let (parent, index) = self.scene.insertion_point(self.primary());
-        let at = self.insertion_point_world();
         let created = match type_id {
             Some(type_id) => self.scene.add_primitive(type_id, parent, index),
             None => Some(self.scene.add_group(op, parent, index)),
@@ -920,7 +919,10 @@ impl App {
         match created {
             Some(id) => {
                 // Where a new shape lands is the user's choice; the palette's
-                // hint line says which choice is in force.
+                // hint line says which choice is in force. How big the shape is
+                // is part of the answer, so the point is asked for only now, with
+                // the node in the scene and its own size there to be measured.
+                let at = self.insertion_point_world(self.near_face_x(&[id]).unwrap_or(0.0));
                 if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
@@ -931,14 +933,41 @@ impl App {
         }
     }
 
+    /// Where the near side of what is being added sits relative to its own
+    /// origin, along X, across all of it.
+    ///
+    /// Measured from the nodes themselves rather than guessed from their
+    /// parameters, because a shape's width is not always one of them: the
+    /// regular polyhedra name an edge length, and the capsule drives no X
+    /// extent at all. `None` when there is nothing to measure, or when the
+    /// placement in force does not care -- only "beside the selection" does, so
+    /// nothing is built for the other three.
+    fn near_face_x(&self, ids: &[NodeId]) -> Option<f64> {
+        if self.settings.placement != Placement::BesideSelection {
+            return None;
+        }
+        ids.iter()
+            .filter_map(|&id| simple3d_core::eval::subtree_bounds(&self.scene, id))
+            .map(|(lo, _)| lo.x)
+            .reduce(f64::min)
+    }
+
     /// Where the next shape goes, in world millimetres, under the current
     /// placement choice.
+    ///
+    /// `near_face_x` is where the near side of the thing being added sits
+    /// relative to its own origin -- for a centred 40 mm box, -20. Only
+    /// "beside the selection" needs it, and it needs it badly: the point it
+    /// answers with is written to `Node::position`, so leaving the shape's own
+    /// width out of the sum buries it half inside what it was meant to stand
+    /// clear of. Pass 0 where nothing is being added and the answer is only
+    /// being described, as the palette's hint line does.
     ///
     /// World rather than parent-frame: adding into a rotated group would
     /// otherwise put the shape somewhere else entirely. `Node::position` is in
     /// the parent's coordinates, so the answer is carried back through the
     /// parent's frame before it is written.
-    pub fn insertion_point_world(&self) -> Vec3 {
+    pub fn insertion_point_world(&self, near_face_x: f64) -> Vec3 {
         let world = match self.settings.placement {
             Placement::Origin => Vec3::ZERO,
             Placement::Cursor => self.cursor.unwrap_or(Vec3::ZERO),
@@ -950,7 +979,9 @@ impl App {
             Placement::BesideSelection => match self.selection_bounds() {
                 // Clear of the selection along +X with one step of air, so the
                 // new shape is next to what is selected rather than inside it.
-                Some((lo, hi)) => Vec3::new(hi.x + self.move_snap(), (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5),
+                Some((lo, hi)) => {
+                    Vec3::new(hi.x + self.move_snap() - near_face_x, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
+                }
                 None => Vec3::ZERO,
             },
         };
@@ -1041,7 +1072,6 @@ impl App {
             );
         };
         self.edit("Add", None);
-        let at = self.insertion_point_world();
         let target = self.primary();
         let created = clipboard::insert(&mut self.scene, &clip, target, false);
         if created.is_empty() {
@@ -1051,6 +1081,11 @@ impl App {
         // The saved subtree keeps its own internal arrangement; what moves is
         // where the whole thing sits.
         let anchor = self.scene.node(created[0]).position;
+        // Its near side is measured across every node in it, so a saved
+        // primitive stands clear of the selection as a whole rather than
+        // leading with whichever node happens to be first.
+        let near = self.near_face_x(&created).map_or(0.0, |x| x - anchor.x);
+        let at = self.insertion_point_world(near);
         for id in &created {
             if let Some(node) = self.scene.get_mut(*id) {
                 node.position = node.position - anchor + at;
@@ -1224,7 +1259,11 @@ fn children_plural(n: usize) -> &'static str {
 /// line and in every tile's tooltip, so the two can never disagree about it.
 pub fn insertion_hint(app: &App) -> String {
     let unit = app.unit();
-    let at = app.insertion_point_world();
+    // Nothing is being added yet, so nothing has a width to clear: under
+    // "beside the selection" this is the line the next shape's near side will
+    // meet, and the wording below says so rather than passing it off as the
+    // point the shape's origin will sit at.
+    let at = app.insertion_point_world(0.0);
     let where_ = format!(
         "{}, {}, {} {}",
         simple3d_core::unit::format_length(at.x, unit),
@@ -1239,7 +1278,11 @@ pub fn insertion_hint(app: &App) -> String {
             format!("Lands at {where_}. Shift+right-click in the viewport to put the 3D cursor somewhere else.")
         }
         Placement::ViewCentre => format!("Lands at what the camera is looking at: {where_}."),
-        Placement::BesideSelection => format!("Lands beside the selection: {where_}."),
+        Placement::BesideSelection => format!(
+            "Lands clear of the selection, its near side at {} {} on X.",
+            simple3d_core::unit::format_length(at.x, unit),
+            unit.suffix()
+        ),
     }
 }
 
@@ -1698,7 +1741,7 @@ mod tests {
         app.settings.placement = Placement::ViewCentre;
         app.scene.settings.snap_step = 5.0;
         app.scene.camera.target = Vec3::new(12.0, -3.0, 0.0);
-        assert_eq!(app.insertion_point_world(), Vec3::new(10.0, -5.0, 0.0));
+        assert_eq!(app.insertion_point_world(0.0), Vec3::new(10.0, -5.0, 0.0));
         assert!(insertion_hint(&app).contains("camera"), "{}", insertion_hint(&app));
 
         // Beside the selection: clear of it, not inside it.
@@ -1708,7 +1751,43 @@ mod tests {
         app.reevaluate_for_test();
         app.settings.placement = Placement::BesideSelection;
         let (_, hi) = app.selection_bounds().expect("the plate has bounds");
-        assert_eq!(app.insertion_point_world().x, hi.x + app.move_snap());
+        assert_eq!(app.insertion_point_world(0.0).x, hi.x + app.move_snap());
+    }
+
+    /// The point of "beside the selection" is that the two do not overlap. An
+    /// assertion on the formula cannot see that -- it restates it -- so this
+    /// adds the shape and measures where it actually ended up.
+    #[test]
+    fn a_shape_added_beside_the_selection_does_not_overlap_it() {
+        for type_id in ["box", "sphere", "tetrahedron", "cylinder"] {
+            let mut app = headless_app();
+            app.settings.placement = Placement::Origin;
+            app.add_node(Some(type_id), GroupOp::Union);
+            let first = app.primary().unwrap();
+            app.reevaluate_for_test();
+            let (_, hi) = app.selection_bounds().expect("the first shape has bounds");
+
+            app.settings.placement = Placement::BesideSelection;
+            app.add_node(Some(type_id), GroupOp::Union);
+            let second = app.primary().unwrap();
+            assert_ne!(first, second);
+            app.reevaluate_for_test();
+            let (lo2, _) = app.selection_bounds().expect("the second shape has bounds");
+
+            assert!(
+                lo2.x >= hi.x,
+                "a {type_id} added beside the selection starts at {} but the selection reaches {}",
+                lo2.x,
+                hi.x
+            );
+            // One step of air between them, no more and no less.
+            assert!(
+                (lo2.x - hi.x - app.move_snap()).abs() < 1e-6,
+                "a {type_id} left {} of air, not one step of {}",
+                lo2.x - hi.x,
+                app.move_snap()
+            );
+        }
     }
 
     #[test]

@@ -333,6 +333,18 @@ impl Evaluator {
     }
 }
 
+/// The bounding box of one subtree, in its parent's frame, worked out on the
+/// spot instead of waiting for the worker.
+///
+/// Placing a shape clear of something means knowing how big the shape is, and
+/// that has to be known the moment it is added -- the background evaluation of
+/// the whole scene comes back long afterwards, and the position has to be
+/// written before then or the shape visibly jumps. Building the one subtree
+/// costs what that subtree costs, which for a single primitive is nothing much.
+pub fn subtree_bounds(scene: &Scene, id: NodeId) -> Option<(Vec3, Vec3)> {
+    Evaluator::new().subtree(scene, id, &Cancel::new()).mesh.bounds()
+}
+
 fn combine(op: GroupOp, children: &[Mesh], id: NodeId, name: &str, errors: &mut Vec<NodeError>) -> Mesh {
     if children.is_empty() {
         return Mesh::new();
