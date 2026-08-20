@@ -91,7 +91,11 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     app.drop_target = None;
     let ctx = ui.ctx().clone();
     let (area, restore) = theme::list_scroll_area(ui);
-    area.show(ui, |ui| {
+    // Named, because an automatic id is a count of the widgets drawn before it
+    // -- and the "N selected" line above appears and disappears with the
+    // selection, which would renumber every row inside on the frame a selection
+    // changed.
+    area.id_salt("outliner-tree").show(ui, |ui| {
         ui.set_style(restore);
         ui.add_space(2.0);
         let ids = app.scene.depth_first();
@@ -173,6 +177,19 @@ fn confirm_strip(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
+/// A row's own id, rather than one counted off the widgets drawn before it.
+///
+/// A right-click opens the context menu by writing the row's id into egui's
+/// memory and reading it back on the *next* frame -- and the menu's first act is
+/// to select the row it was opened on. With an automatic id, that selection
+/// renumbered the row (the header above it appears, the properties panel fills)
+/// and the menu was looked up under an id nothing had drawn, so it closed again
+/// before it was ever seen. The row is the same row whatever else is on screen,
+/// and now says so.
+pub fn row_id(id: NodeId) -> egui::Id {
+    egui::Id::new(("outliner-row", id))
+}
+
 fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
     let depth = app.scene.depth(id);
     let node = app.scene.node(id);
@@ -187,7 +204,8 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
     let type_id = node.spec().map(|s| s.type_id).unwrap_or("");
 
     let full = ui.available_width();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::click_and_drag());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::hover());
+    let response = ui.interact(rect, row_id(id), egui::Sense::click_and_drag());
 
     // Background: selection is an accent tint with a solid bar at the left edge,
     // so the primary node of a multi-selection is distinguishable from the rest

@@ -81,6 +81,11 @@ pub struct App {
     /// Bumped whenever a new evaluation lands, so cached images and renderables
     /// know to rebuild.
     pub evaluation_generation: u64,
+    /// Set when the scene on screen has no viewpoint of its own worth keeping,
+    /// so the first evaluation that gives it bounds should frame it. A project
+    /// read from a file carries its own camera and must never set this: the
+    /// stored viewpoint is the one the user saved.
+    pub(crate) frame_when_evaluated: bool,
     pub(crate) dirty: bool,
 
     pub scene_renderable: Renderable,
@@ -132,6 +137,11 @@ pub struct App {
     pub export_format: Format,
     pub export_scale: String,
     pub export_selection_only: bool,
+    /// What the export dialog last counted, and what it counted it for: the
+    /// contents choice, the selection and the evaluation it was measured
+    /// against. Counting a selection means evaluating it, which must not happen
+    /// on every frame the dialog is open.
+    pub(crate) export_preview: Option<(bool, Vec<NodeId>, u64, usize)>,
 
     pub modal: Modal,
     pub error_title: String,
@@ -205,6 +215,7 @@ impl App {
                 cancelled: false,
             },
             evaluation_generation: 0,
+            frame_when_evaluated: false,
             dirty: true,
             scene_renderable: Renderable::empty(),
             node_renderables: BTreeMap::new(),
@@ -235,6 +246,7 @@ impl App {
             export_format: Format::ThreeMf,
             export_scale: "1".to_string(),
             export_selection_only: false,
+            export_preview: None,
             modal: Modal::None,
             error_title: String::new(),
             error_detail: String::new(),
@@ -268,6 +280,7 @@ impl App {
         self.history.clear();
         self.saved_revision = self.history.revision();
         self.frame_all();
+        self.frame_when_evaluated = true;
         self.dirty = true;
     }
 
@@ -385,6 +398,9 @@ impl App {
         match project::from_str(&text) {
             Ok(scene) => {
                 self.scene = scene;
+                // The file's own camera stands, whether it was opened from the
+                // menu or handed to the binary on the command line.
+                self.frame_when_evaluated = false;
                 self.selection.clear();
                 self.history.clear();
                 self.saved_revision = self.history.revision();
@@ -1116,6 +1132,35 @@ impl App {
 
     // -- export -------------------------------------------------------------
 
+    /// The mesh an export writes: the whole scene, or just what is selected.
+    ///
+    /// A selection is re-evaluated subtree by subtree rather than merged out of
+    /// `Evaluated::node_meshes`, which holds primitives only -- merging those
+    /// wrote a selected boolean group as its raw operands, so a difference kept
+    /// its cutter and a union was refused as non-manifold.
+    pub fn export_mesh(&self) -> std::sync::Arc<simple3d_geom::Mesh> {
+        if self.export_selection_only {
+            let tops = self.top_level_selection();
+            std::sync::Arc::new(simple3d_core::eval::selection_mesh(&self.scene, &tops, &self.evaluated.node_frames))
+        } else {
+            self.evaluated.mesh.clone()
+        }
+    }
+
+    /// The triangle count the export dialog promises, for whichever contents are
+    /// chosen -- the number that is then verified as watertight.
+    pub fn export_triangle_count(&mut self) -> usize {
+        let key = (self.export_selection_only, self.selection.clone(), self.evaluation_generation);
+        if let Some((only, selection, generation, count)) = &self.export_preview {
+            if (*only, selection, *generation) == (key.0, &key.1, key.2) {
+                return *count;
+            }
+        }
+        let count = self.export_mesh().triangle_count();
+        self.export_preview = Some((key.0, key.1, key.2, count));
+        count
+    }
+
     pub fn start_export(&mut self) {
         let scale = simple3d_core::unit::parse_number(&self.export_scale).unwrap_or(1.0);
         if scale <= 0.0 {
@@ -1135,21 +1180,7 @@ impl App {
             self.fail("Export refused: the scene has unevaluated geometry", &detail);
             return;
         }
-        let mesh = if self.export_selection_only {
-            let mut merged = simple3d_geom::Mesh::new();
-            for id in self.top_level_selection() {
-                for node in std::iter::once(id).chain(self.scene.descendants(id)) {
-                    if let Some(part) = self.evaluated.node_meshes.get(&node) {
-                        if self.scene.node(node).visible {
-                            merged.append(part);
-                        }
-                    }
-                }
-            }
-            std::sync::Arc::new(merged)
-        } else {
-            self.evaluated.mesh.clone()
-        };
+        let mesh = self.export_mesh();
         if mesh.triangle_count() == 0 {
             self.fail("There is nothing to export", "The scene, or the selection, has no visible geometry.");
             return;
@@ -1352,10 +1383,9 @@ impl eframe::App for App {
             self.status_at = std::time::Instant::now();
         }
         if let Some(result) = self.worker.poll() {
-            let first = self.evaluation_generation == 0;
             self.evaluated = result;
             self.evaluation_generation += 1;
-            if first {
+            if std::mem::take(&mut self.frame_when_evaluated) {
                 // The starting scene could not be framed before it had been
                 // evaluated, since framing needs its bounds.
                 self.frame_all();
@@ -2185,5 +2215,76 @@ mod tests {
         app.run(Command::NudgeRight);
         assert_ne!(app.scene.node(pasted).position, start, "the pasted copy could not be nudged");
         assert_eq!(app.scene.node(original).position, start, "nudging the copy moved the original");
+    }
+
+    /// A project handed to the binary on the command line -- which is what a
+    /// file association and a double-click do -- keeps the camera it was saved
+    /// with. The starter scene has no camera worth keeping and is framed once
+    /// it has bounds; the flag is what tells the two apart, and it used to be
+    /// "this is the first evaluation of the session", which both are.
+    #[test]
+    fn a_project_opened_from_the_command_line_keeps_its_saved_camera() {
+        let dir = temp_config_dir("cli-camera");
+        let mut saver = app_in(dir.clone());
+        let root = saver.scene.root();
+        saver.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        saver.scene.camera.target = Vec3::new(100.0, 100.0, 50.0);
+        saver.scene.camera.distance = 250.0;
+        saver.scene.camera.yaw = 33.0;
+        saver.scene.camera.pitch = 12.0;
+        let path = dir.join("camera.simple3d");
+        saver.save_to(&path);
+        let saved = saver.scene.camera;
+        drop(saver);
+
+        let ctx = egui::Context::default();
+        let mut opened = App::with_config_dir(&ctx, Some(path.clone()), dir.clone());
+        opened.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        assert!(!opened.frame_when_evaluated, "opening a file from the command line asked for a reframe");
+        // The reframe used to happen when the first evaluation landed, so the
+        // camera has to still be the saved one *after* that.
+        opened.reevaluate_for_test();
+        assert_eq!(opened.scene.camera, saved, "the saved camera did not survive being opened from the command line");
+
+        // And the empty starter document still frames itself, which is what the
+        // flag exists for.
+        let fresh = app_in(temp_config_dir("cli-camera-fresh"));
+        assert!(fresh.frame_when_evaluated, "the starter scene will never be framed");
+    }
+
+    /// Exporting a selected boolean group writes the shape the viewport shows,
+    /// not its operands. `Evaluated::node_meshes` holds primitives only, so
+    /// merging those wrote the cutter of a difference back into the result.
+    #[test]
+    fn exporting_a_selected_difference_writes_the_cut_shape_not_its_operands() {
+        let mut app = app_in(temp_config_dir("export-selection"));
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Difference, root, 0);
+        let plate = app.scene.add_primitive("plate", group, 0).expect("the plate is in the registry");
+        let cutter = app.scene.add_primitive("box", group, 1).expect("the box is in the registry");
+        // A cutter that pokes out through the top and the bottom, so a merged
+        // export shows up as a taller box than the cut result can be.
+        if let Some(node) = app.scene.get_mut(cutter) {
+            node.position = Vec3::new(0.0, 0.0, 0.0);
+        }
+        app.reevaluate_for_test();
+        let (plate_lo, plate_hi) = app.evaluated.node_meshes[&plate].bounds().expect("the plate has bounds");
+        let (cut_lo, cut_hi) = app.evaluated.node_meshes[&cutter].bounds().expect("the cutter has bounds");
+        assert!(cut_lo.z < plate_lo.z && cut_hi.z > plate_hi.z, "this test needs a cutter taller than the plate");
+
+        app.selection = vec![group];
+        app.export_selection_only = true;
+        let mesh = app.export_mesh();
+        let (lo, hi) = mesh.bounds().expect("the selection exported nothing");
+        assert!(
+            lo.z >= plate_lo.z - 1e-6 && hi.z <= plate_hi.z + 1e-6,
+            "the export reaches {lo:?}..{hi:?}, beyond the plate it cut -- the cutter was written out too"
+        );
+        assert!(mesh.manifold_issue().is_none(), "the exported selection is not a closed solid");
+
+        // The whole scene exports as it always did.
+        app.export_selection_only = false;
+        let (whole_lo, whole_hi) = app.export_mesh().bounds().expect("the scene exported nothing");
+        assert!((whole_lo.z - lo.z).abs() < 1e-6 && (whole_hi.z - hi.z).abs() < 1e-6);
     }
 }

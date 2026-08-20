@@ -353,6 +353,39 @@ impl Evaluator {
 /// the whole scene comes back long afterwards, and the position has to be
 /// written before then or the shape visibly jumps. Building the one subtree
 /// costs what that subtree costs, which for a single primitive is nothing much.
+/// The mesh a set of nodes evaluates to, in world space, ready to export.
+///
+/// `Evaluated::node_meshes` holds *primitives* only: a group's result lives in
+/// the subtree cache instead, so merging the per-node meshes of a selected
+/// boolean group writes its operands as separate overlapping solids rather than
+/// the shape the viewport shows. Each node's own subtree is evaluated here
+/// instead -- booleans and all -- placed by the frame its parent gave it, and
+/// the results are unioned exactly as the scene root would union them.
+///
+/// `frames` is `Evaluated::node_frames`, which already carries any anchor shift
+/// an ancestor applied. A node missing from it is one the last evaluation never
+/// reached, and is skipped rather than placed wrongly at the origin.
+pub fn selection_mesh(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xform>) -> Mesh {
+    let mut evaluator = Evaluator::new();
+    let cancel = Cancel::new();
+    let mut parts: Vec<Mesh> = Vec::new();
+    for &id in ids {
+        if !scene.contains(id) || !scene.node(id).visible {
+            continue;
+        }
+        let Some(parent) = frames.get(&id) else { continue };
+        let mesh = apply(parent, &evaluator.subtree(scene, id, &cancel).mesh);
+        if mesh.triangle_count() > 0 {
+            parts.push(mesh);
+        }
+    }
+    match parts.len() {
+        0 => Mesh::new(),
+        1 => parts.pop().unwrap(),
+        _ => evaluate_boolean(GroupOp::Union.to_geom(), &parts),
+    }
+}
+
 pub fn subtree_bounds(scene: &Scene, id: NodeId) -> Option<(Vec3, Vec3)> {
     Evaluator::new().subtree(scene, id, &Cancel::new()).mesh.bounds()
 }
