@@ -14,3 +14,12 @@ KNOWN_ISSUES.md
 # Screen captures taken while working through the issue list.
 *.png
 *.webm
+
+# Verification passes: screenshots and the scenes they were taken from. They are
+# evidence for one run on one machine, they are large, and they are kept locally
+# like the rest of the working notes above -- nothing in them is published.
+verification-*/
+
+# Models exported from those scenes, one directory per pass. Build output:
+# reproducible from the scene beside it with examples/export_project.rs.
+/exports/

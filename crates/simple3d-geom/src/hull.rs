@@ -3,7 +3,7 @@
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 struct Face {
     v: [usize; 3],
@@ -98,7 +98,12 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
             continue;
         }
 
-        let mut edge_count: HashMap<(usize, usize), i32> = HashMap::new();
+        // A `BTreeMap`, not a `HashMap`: the horizon is read back by iterating
+        // this, and `HashMap`'s order is seeded randomly per process -- which
+        // made the same scene hull to the same solid with its triangles in a
+        // different order on every run, so no two exports of a hull were ever
+        // byte-identical (spec section 5.2: evaluation is deterministic).
+        let mut edge_count: BTreeMap<(usize, usize), i32> = BTreeMap::new();
         for &fi in &visible {
             let v = faces[fi].v;
             for k in 0..3 {
