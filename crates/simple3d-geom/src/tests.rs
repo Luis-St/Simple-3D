@@ -606,3 +606,24 @@ fn a_region_that_cannot_be_rebuilt_keeps_its_original_triangles() {
     let (lo, hi) = rebuilt.bounds().unwrap();
     assert_eq!((lo, hi), region.bounds().unwrap());
 }
+
+/// Evaluation is deterministic (spec section 5.2), and that has to hold across
+/// *processes*, not just within one: the subtree cache key is a content hash,
+/// two runs are meant to be comparable, and an exported file is meant to be the
+/// same file twice. The hull read its horizon edges back out of a `HashMap`,
+/// whose iteration order is seeded randomly per process, so the same two
+/// spheres hulled to the same solid with its triangles in a different order
+/// every time the application was started.
+#[test]
+fn a_hull_is_the_same_mesh_every_time_it_is_built() {
+    let a = crate::primitives::ellipsoid_mesh(30.0, 30.0, 30.0, 32);
+    let b = crate::primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 32).translated(Vec3::new(40.0, 0.0, 0.0));
+    let points: Vec<Vec3> = a.positions.iter().chain(b.positions.iter()).copied().collect();
+
+    let first = crate::hull::convex_hull(&points);
+    for _ in 0..8 {
+        let again = crate::hull::convex_hull(&points);
+        assert_eq!(again.positions, first.positions, "the hull's vertices came out in a different order");
+        assert_eq!(again.indices, first.indices, "the hull's triangles came out in a different order");
+    }
+}
