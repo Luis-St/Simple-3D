@@ -14,7 +14,7 @@ use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::{Chord, Command, Keymap};
 use simple3d_core::library;
 use simple3d_core::project;
-use simple3d_core::scene::{GroupOp, NodeId, Scene};
+use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
 use simple3d_core::undo::History;
 use simple3d_core::unit::Unit;
 use simple3d_export::Format;
@@ -587,11 +587,6 @@ impl App {
 
             FrameSelection => self.frame_selection(),
             FrameAll => self.frame_all(),
-            ToggleProjection => {
-                self.scene.camera.orthographic = !self.scene.camera.orthographic;
-                let which = if self.scene.camera.orthographic { "Orthographic" } else { "Perspective" };
-                self.status = Status::Info(which.into());
-            }
             ViewTop => self.set_view(ViewPreset::Top),
             ViewBottom => self.set_view(ViewPreset::Bottom),
             ViewFront => self.set_view(ViewPreset::Front),
@@ -607,7 +602,6 @@ impl App {
             DisplayShadedEdges => self.settings.display_mode = DisplayMode::ShadedWithEdges,
             DisplayWireframe => self.settings.display_mode = DisplayMode::Wireframe,
             ToggleBoundingBox => self.settings.show_bounding_box = !self.settings.show_bounding_box,
-            ToggleGhosts => self.settings.show_ghosts = !self.settings.show_ghosts,
             ToggleDocks => {
                 self.settings.layout.docks_hidden = !self.settings.layout.docks_hidden;
                 self.status = Status::Info(
@@ -791,6 +785,20 @@ impl App {
                 self.status = Status::Info("Grouped".into());
             }
             None => self.status = Status::Warning("That selection cannot be grouped".into()),
+        }
+    }
+
+    /// Paint every node in `targets`, and remember the colour so it can be
+    /// offered again. `None` clears the paint instead. One place, because the
+    /// property editor and the outliner's menu both do this and both have to
+    /// remember it.
+    pub(crate) fn paint(&mut self, targets: &[NodeId], colour: Option<Colour>, coalesce: Option<&str>) {
+        self.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, coalesce);
+        for target in targets {
+            self.scene.paint_subtree(*target, colour);
+        }
+        if let Some(Colour(rgb)) = colour {
+            self.settings.remember_colour(rgb);
         }
     }
 
@@ -1442,6 +1450,7 @@ impl eframe::App for App {
 mod tests {
     use super::*;
     use simple3d_core::eval::{Cancel, Evaluator};
+    use simple3d_core::scene::Visibility;
 
     /// An `App` on a headless `egui::Context`, which needs no window and no
     /// graphics -- so the command dispatch itself can be driven from a test.
@@ -2286,5 +2295,31 @@ mod tests {
         app.export_selection_only = false;
         let (whole_lo, whole_hi) = app.export_mesh().bounds().expect("the scene exported nothing");
         assert!((whole_lo.z - lo.z).abs() < 1e-6 && (whole_hi.z - hi.z).abs() < 1e-6);
+    }
+    #[test]
+    fn painting_remembers_the_colour_and_only_a_ghost_is_drawn_as_one() {
+        let mut app = headless_app();
+        let id = app.primary().expect("the plate is selected");
+        assert!(app.settings.recent_colours.is_empty());
+
+        // Issue 29: a colour used once should be offered again, wherever a
+        // colour is chosen.
+        app.paint(&[id], Some(Colour([0x2E, 0x9A, 0xFF])), None);
+        assert_eq!(app.settings.recent_colours, vec![[0x2E, 0x9A, 0xFF]]);
+        app.paint(&[id], Some(Colour([0xCC, 0x4B, 0x45])), None);
+        assert_eq!(app.settings.recent_colours[0], [0xCC, 0x4B, 0x45]);
+        // Clearing paints nothing, so it remembers nothing.
+        app.paint(&[id], None, None);
+        assert_eq!(app.settings.recent_colours.len(), 2);
+
+        // Issue 21: the three states, and which of them the viewport is asked
+        // to draw as a ghost.
+        assert!(app.ghosts().is_empty());
+        app.scene.get_mut(id).unwrap().set_visibility(Visibility::Hidden);
+        assert!(app.ghosts().is_empty(), "a hidden node is gone, not translucent");
+        app.scene.get_mut(id).unwrap().set_visibility(Visibility::Ghost);
+        assert_eq!(app.ghosts(), vec![id]);
+        app.scene.get_mut(id).unwrap().set_visibility(Visibility::Visible);
+        assert!(app.ghosts().is_empty());
     }
 }

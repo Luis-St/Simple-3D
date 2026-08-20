@@ -11,8 +11,9 @@
 use crate::app::{App, Status};
 use crate::theme::{self, token};
 use crate::ui::{self, Commit};
+use simple3d_core::config::Placement;
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
-use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId};
+use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId, Visibility};
 use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
 use simple3d_geom::Vec3;
 
@@ -65,66 +66,24 @@ fn row_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
     response
 }
 
-/// What a scrub gesture did this frame.
-struct Scrubbed {
-    /// True on the frame the drag began: the one frame that takes an undo
-    /// snapshot, so the whole drag collapses into a single step.
-    started: bool,
-    /// Change to apply, in the unit the field displays.
-    delta: f64,
-}
-
-/// A label the value can be dragged from. Returns `Some` on every frame of a
-/// drag, including the first.
-///
-/// The label is the grip rather than the field itself because the field has to
-/// stay a text field: a click in it must put a caret where it was clicked, and a
-/// drag in it must select text. The label next to it has no such job, which is
-/// what makes it free to carry the gesture.
-fn scrub_grip(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, step: f64) -> Option<Scrubbed> {
-    let id = response.id;
-    if response.hovered() || app.scrub.id == Some(id) {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-    }
-    if response.drag_started() {
-        app.scrub.id = Some(id);
-    }
-    if app.scrub.id != Some(id) {
-        return None;
-    }
-    if !response.dragged() {
-        app.scrub.id = None;
-        return None;
-    }
-    let (fine, coarse) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
-    Some(Scrubbed {
-        started: response.drag_started(),
-        delta: ui::scrub_delta(response.drag_delta().x, step, fine, coarse),
-    })
-}
-
-/// The id of a scrub grip, named after the value it scrubs rather than taken
-/// from where the grip sits in the layout. A gesture in flight is remembered by
-/// this id (`App::scrub`), so a panel that relays itself out mid-drag -- a
-/// section collapsing, a dock being resized -- must not change it. It is also
-/// what lets a test put the pointer on a named grip.
+/// The id of a value field's scrub gesture, named after the value it scrubs
+/// rather than taken from where the field sits in the layout. A gesture in
+/// flight is remembered by this id (`App::scrub`), so a panel that relays itself
+/// out mid-drag -- a section collapsing, a dock being resized -- must not change
+/// it. It is also what lets a test put the pointer on a named field.
 pub fn grip_id(name: &str) -> egui::Id {
     egui::Id::new(("scrub-grip", name))
 }
 
-/// A label that scrubs: the same row label, but sensing a drag.
-fn scrub_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, theme::metric::INPUT_ROW), egui::Sense::hover());
-    let response = ui.interact(rect, grip_id(text), egui::Sense::drag());
-    let colour = if response.hovered() || response.dragged() { token::TEXT_HI } else { token::TEXT_LO };
-    ui.painter().text(
-        egui::pos2(rect.left(), rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        text,
-        egui::FontId::proportional(theme::font::LABEL),
-        colour,
-    );
-    response
+/// One value field: a number that can be typed into or dragged, named by
+/// `name` so the gesture survives the panel relaying itself out.
+fn value_field(app: &mut App, ui: &mut egui::Ui, name: &str, field_id: egui::Id, shown: &str, step: f64) -> ui::Field {
+    // The scrub state is lifted out and put back so the field can borrow the
+    // buffers mutably without borrowing the whole application twice.
+    let mut scrub = app.scrub;
+    let outcome = app.fields.scrub_field(ui, field_id, grip_id(name), shown, step, &mut scrub);
+    app.scrub = scrub;
+    outcome
 }
 
 /// The panel's contents, without the dock around them, so the same panel can be
@@ -218,6 +177,21 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
             ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
         step_row(app, ui);
+        // Where a new shape lands. It is a document question -- the same one the
+        // grid, the step and the segment default answer -- and it used to sit
+        // under the palette, where it read as part of the shapes rather than as
+        // a setting. The palette still says which answer is in force.
+        ui.horizontal(|ui| {
+            row_label(ui, "Add at").on_hover_text("Where a shape from the palette or the Add menu lands");
+            egui::ComboBox::from_id_salt("doc-placement")
+                .selected_text(theme::value(app.settings.placement.label()))
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    for option in Placement::ALL {
+                        ui.selectable_value(&mut app.settings.placement, option, option.label());
+                    }
+                });
+        });
         ui.horizontal(|ui| {
             row_label(ui, "Axes");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -288,7 +262,8 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let node = app.scene.node(id);
     let is_root = id == app.scene.root();
     let mut name = node.name.clone();
-    let mut visible = targets.iter().all(|t| app.scene.node(*t).visible);
+    let visibility = node.visibility();
+    let mixed_visibility = targets.iter().any(|t| app.scene.node(*t).visibility() != visibility);
     let mut anchor = node.anchor;
     let many = targets.len() > 1;
 
@@ -306,16 +281,28 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
-    ui.horizontal(|ui| {
-        row_label(ui, "Visible");
-        if ui.add_enabled(!is_root, egui::Checkbox::new(&mut visible, "")).changed() {
-            app.edit("Toggle visibility", None);
-            for target in targets {
-                if let Some(node) = app.scene.get_mut(*target) {
-                    node.visible = visible;
+    // Three states rather than a checkbox: hidden means *gone*, and a body that
+    // has to be seen while it is positioned -- the one about to be subtracted --
+    // is a ghost, which is a property of that body and not of the document.
+    ui.horizontal_wrapped(|ui| {
+        row_label(ui, "Shown").on_hover_text(
+            "Visible: part of the model. Ghost: excluded from the model, drawn as a translucent shell. \
+             Hidden: excluded and not drawn at all.",
+        );
+        ui.add_enabled_ui(!is_root, |ui| {
+            for option in Visibility::ALL {
+                let showing = !mixed_visibility && visibility == option;
+                if ui.selectable_label(showing, option.label()).clicked() && (mixed_visibility || visibility != option)
+                {
+                    app.edit("Visibility", None);
+                    for target in targets {
+                        if let Some(node) = app.scene.get_mut(*target) {
+                            node.set_visibility(option);
+                        }
+                    }
                 }
             }
-        }
+        });
     });
 
     ui.horizontal(|ui| {
@@ -332,24 +319,32 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         if ui.color_edit_button_srgb(&mut rgb).changed() {
             // One undo step for a whole drag through the picker, the way a
             // scrubbed field is one step.
-            app.edit("Colour", Some("colour"));
-            for target in targets {
-                app.scene.paint_subtree(*target, Some(Colour(rgb)));
-            }
+            app.paint(targets, Some(Colour(rgb)), Some("colour"));
         }
         // Enabled only where clearing would do something: a node that merely
         // inherits a group's colour has none of its own to take away.
         let painted = targets.iter().any(|t| app.scene.subtree_is_painted(*t));
         if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked() {
-            app.edit("Clear colour", None);
-            for target in targets {
-                app.scene.paint_subtree(*target, None);
-            }
+            app.paint(targets, None, None);
         }
         if mixed {
             ui.add(egui::Label::new(theme::value("mixed")).selectable(false));
         }
     });
+
+    // The same swatches the outliner's menu offers, and the colours this
+    // document has actually been painted in: opening the picker to find a
+    // colour that is already in the project is the slow way round.
+    swatch_row(app, ui, "", &theme::PAINT_PRESETS.map(|(name, colour)| (name.to_string(), colour)), targets);
+    let recent: Vec<(String, egui::Color32)> = app
+        .settings
+        .recent_colours
+        .iter()
+        .map(|c| (format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), egui::Color32::from_rgb(c[0], c[1], c[2])))
+        .collect();
+    if !recent.is_empty() {
+        swatch_row(app, ui, "Recent", &recent, targets);
+    }
 
     ui.horizontal(|ui| {
         row_label(ui, "Anchor")
@@ -368,6 +363,31 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
             }
         }
     });
+}
+
+/// A row of colour swatches that paints the selection when one is clicked.
+///
+/// Plain buttons rather than a picker, for the same reason the outliner's menu
+/// uses them: one click, and the colour is on the shape.
+fn swatch_row(app: &mut App, ui: &mut egui::Ui, label: &str, colours: &[(String, egui::Color32)], targets: &[NodeId]) {
+    let mut chosen: Option<Colour> = None;
+    ui.horizontal_wrapped(|ui| {
+        // The label column is kept even when empty, so the swatches line up
+        // under the picker rather than under the labels.
+        row_label(ui, label);
+        for (name, colour) in colours {
+            let swatch = egui::Button::new("")
+                .fill(*colour)
+                .stroke(egui::Stroke::new(1.0_f32, token::SURFACE_3))
+                .min_size(egui::vec2(16.0, 16.0));
+            if ui.add(swatch).on_hover_text(name).clicked() {
+                chosen = Some(Colour([colour.r(), colour.g(), colour.b()]));
+            }
+        }
+    });
+    if let Some(colour) = chosen {
+        app.paint(targets, Some(colour), None);
+    }
 }
 
 /// The colour an unpainted solid is drawn in, which is where the picker starts.
@@ -512,13 +532,8 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
             }
             kind => {
                 ui.horizontal(|ui| {
-                    // The label is the scrub grip: dragging it changes the value
-                    // without going near the keyboard.
-                    let grip = scrub_label(ui, param.label);
+                    row_label(ui, param.label);
                     let step = ui::scrub_increment(kind, unit);
-                    if let Some(scrubbed) = scrub_grip(app, ui, &grip, step) {
-                        scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
-                    }
                     // A lock toggle where the type offers one: a sphere's three
                     // diameters, a cylinder's two.
                     if param.lock_group != 0 {
@@ -551,16 +566,22 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
                     let shown = ui::shared_text(
                         targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)),
                     );
-                    let committed = ui
+                    // The field is the grip: dragging it changes the value
+                    // without going near the keyboard, and clicking it opens it
+                    // for typing.
+                    let outcome = ui
                         .scope(|ui| {
                             ui.set_width(field_width);
-                            app.fields.field(ui, field_id, &shown)
+                            value_field(app, ui, param.label, field_id, &shown, step)
                         })
                         .inner;
                     if !suffix.is_empty() {
                         ui.add(egui::Label::new(theme::hint(suffix)).selectable(false));
                     }
-                    if let Some(text) = committed {
+                    if let Some(scrubbed) = outcome.scrubbed {
+                        scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
+                    }
+                    if let Some(text) = outcome.committed {
                         set_shared_param(app, targets, param, kind, unit, field_id, text);
                     }
                 });
@@ -652,16 +673,18 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let Some(&primary) = targets.last() else { return };
 
     // Three columns of numbers, each fronted by its axis colour: the row says
-    // which axis is which without spending a character on saying so. The chip
-    // is also that field's scrub grip -- it is the only label the field has.
-    axis_row(app, ui, &format!("Position ({})", unit.suffix()), |app, ui, axis, grip| {
-        if let Some(scrubbed) = scrub_grip(app, ui, grip, unit.from_mm(app.move_snap())) {
-            scrub_transform(app, targets, axis, unit.to_mm(scrubbed.delta), false, scrubbed.started);
-        }
+    // which axis is which without spending a character on saying so. The drag
+    // is on the fields themselves, here as everywhere else in the panel.
+    axis_row(app, ui, &format!("Position ({})", unit.suffix()), |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "pos", axis));
         let shown =
             ui::shared_text(targets.iter().map(|t| format_length(component(app.scene.node(*t).position, axis), unit)));
-        if let Some(text) = app.fields.field(ui, field_id, &shown) {
+        let step = unit.from_mm(app.move_snap());
+        let outcome = value_field(app, ui, name, field_id, &shown, step);
+        if let Some(scrubbed) = outcome.scrubbed {
+            scrub_transform(app, targets, axis, unit.to_mm(scrubbed.delta), false, scrubbed.started);
+        }
+        if let Some(text) = outcome.committed {
             if text.trim() == ui::MIXED {
                 app.fields.accept(field_id);
                 return;
@@ -690,13 +713,15 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
-    axis_row(app, ui, "Rotation (deg)", |app, ui, axis, grip| {
-        if let Some(scrubbed) = scrub_grip(app, ui, grip, app.settings.rotate_snap_deg.max(1.0)) {
-            scrub_transform(app, targets, axis, scrubbed.delta, true, scrubbed.started);
-        }
+    axis_row(app, ui, "Rotation (deg)", |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "rot", axis));
         let shown = ui::shared_text(targets.iter().map(|t| format_angle(component(app.scene.node(*t).rotation, axis))));
-        if let Some(text) = app.fields.field(ui, field_id, &shown) {
+        let step = app.settings.rotate_snap_deg.max(1.0);
+        let outcome = value_field(app, ui, name, field_id, &shown, step);
+        if let Some(scrubbed) = outcome.scrubbed {
+            scrub_transform(app, targets, axis, scrubbed.delta, true, scrubbed.started);
+        }
+        if let Some(text) = outcome.committed {
             if text.trim() == ui::MIXED {
                 app.fields.accept(field_id);
                 return;
@@ -728,15 +753,16 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     // Scale is a factor, not a measurement, so it has no unit and reads in the
     // same three-column row as the two above it. It is the one control that
     // resizes a *group*: a group has no dimensions of its own to type into.
-    axis_row(app, ui, "Scale (x)", |app, ui, axis, grip| {
-        if let Some(scrubbed) = scrub_grip(app, ui, grip, 0.05) {
-            scrub_scale(app, targets, axis, scrubbed.delta, scrubbed.started);
-        }
+    axis_row(app, ui, "Scale (x)", |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "scale", axis));
         let shown = ui::shared_text(
             targets.iter().map(|t| format_number(component(Node::sane_scale(app.scene.node(*t).scale), axis), 4)),
         );
-        if let Some(text) = app.fields.field(ui, field_id, &shown) {
+        let outcome = value_field(app, ui, name, field_id, &shown, 0.05);
+        if let Some(scrubbed) = outcome.scrubbed {
+            scrub_scale(app, targets, axis, scrubbed.delta, scrubbed.started);
+        }
+        if let Some(text) = outcome.committed {
             if text.trim() == ui::MIXED {
                 app.fields.accept(field_id);
                 return;
@@ -820,7 +846,7 @@ fn axis_row(
     app: &mut App,
     ui: &mut egui::Ui,
     label: &str,
-    mut field: impl FnMut(&mut App, &mut egui::Ui, usize, &egui::Response),
+    mut field: impl FnMut(&mut App, &mut egui::Ui, usize, &str),
 ) {
     ui.horizontal(|ui| {
         row_label(ui, label);
@@ -834,10 +860,13 @@ fn axis_row(
         let gaps = 2.0 * ui.spacing().item_spacing.x;
         let each = ((available - chips - gaps) / 3.0).max(30.0);
         for axis in 0..3 {
-            let grip = theme::axis_chip(ui, grip_id(&format!("{label}:{axis}")), axis);
+            // The chip is a label, not a handle: it says which axis this column
+            // is, and the field beside it carries the drag.
+            theme::axis_chip(ui, ui.id().with((label, axis)), axis);
+            let name = format!("{label}:{axis}");
             ui.scope(|ui| {
                 ui.set_width(each);
-                field(app, ui, axis, &grip);
+                field(app, ui, axis, &name);
             });
         }
     });

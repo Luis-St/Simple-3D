@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The Windows installer (WiX v4/v5 authoring, built by `wix build`).
+
+  It is an *addition* to the portable executable, never a replacement for it:
+  the release still ships simple-3d-windows-x86_64.exe, which needs no install
+  and writes nothing outside its own directory. This is for people who would
+  rather have the application in the Start menu and on the desktop than keep
+  track of a file, which is what issue 19 asked for.
+
+  Both shortcuts are their own feature, so the installer's feature tree lets
+  either one be turned off before it runs — the Start menu entry and the
+  desktop shortcut are separate decisions, and nobody should have to undo one
+  afterwards.
+
+  Built with:
+    wix build -arch x64 -d Version=1.2.3 -d ExePath=path\to\simple-3d.exe \
+              -ext WixToolset.UI.wixext packaging/windows/simple-3d.wxs -o simple-3d.msi
+  The release workflow does exactly that on the Windows runner, from the same
+  binary it uploads on its own.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package
+      Name="Simple 3D"
+      Manufacturer="Luis Staudt"
+      Version="$(var.Version)"
+      UpgradeCode="5468353E-AFE7-4D8D-8CC0-B586E2F08DE9"
+      Scope="perMachine"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <!-- One version at a time: installing a newer build replaces the older one
+         rather than leaving two entries in Apps & Features. -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Simple 3D is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- The same icon the executable carries, so the shortcuts, the Start menu
+         entry and the entry in Apps & Features all show the box. -->
+    <Icon Id="Simple3DIcon" SourceFile="net.simple3d.Simple3D.ico" />
+    <Property Id="ARPPRODUCTICON" Value="Simple3DIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/Luis-St/Simple-3D" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles6432Folder">
+      <Directory Id="INSTALLFOLDER" Name="Simple 3D" />
+    </StandardDirectory>
+
+    <Feature Id="Application" Title="Simple 3D" Description="The application itself." Level="1" AllowAbsent="no">
+      <ComponentRef Id="MainExecutable" />
+
+      <Feature Id="StartMenuShortcut" Title="Start menu entry" Description="A Simple 3D entry in the Start menu." Level="1">
+        <ComponentRef Id="StartMenuShortcut" />
+      </Feature>
+
+      <Feature Id="DesktopShortcut" Title="Desktop shortcut" Description="A Simple 3D shortcut on the desktop." Level="1">
+        <ComponentRef Id="DesktopShortcut" />
+      </Feature>
+    </Feature>
+
+    <Component Id="MainExecutable" Directory="INSTALLFOLDER" Guid="554466D7-4B08-4078-82B3-3CE3ED699916">
+      <File Id="Simple3DExe" Name="simple-3d.exe" Source="$(var.ExePath)" KeyPath="yes" />
+    </Component>
+
+    <!-- A shortcut is not a file, so its component needs something else to be
+         keyed on; a registry value under the install scope's own root is the
+         shape the installer expects. HKMU is HKLM for this per-machine
+         package. -->
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="E503949E-458D-49F0-984E-D5A1D5E7CDBA">
+      <Shortcut Id="StartMenuShortcutItem"
+                Name="Simple 3D"
+                Description="Parametric 3D modelling with exact metric dimensions"
+                Target="[INSTALLFOLDER]simple-3d.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="Simple3DIcon" />
+      <RegistryValue Root="HKMU" Key="Software\Simple3D\Shortcuts" Name="startmenu" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="4714D97C-F261-4AB0-A3F9-52447751C41B">
+      <Shortcut Id="DesktopShortcutItem"
+                Name="Simple 3D"
+                Description="Parametric 3D modelling with exact metric dimensions"
+                Target="[INSTALLFOLDER]simple-3d.exe"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="Simple3DIcon" />
+      <RegistryValue Root="HKMU" Key="Software\Simple3D\Shortcuts" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- The feature tree, because the two shortcuts are the whole point of
+         having an installer: it is the stock dialog set that lets them be
+         chosen. -->
+    <ui:WixUI Id="WixUI_FeatureTree" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+  </Package>
+</Wix>

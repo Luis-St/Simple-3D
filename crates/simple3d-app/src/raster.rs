@@ -8,10 +8,10 @@
 //! driver feature detection and no fallback to write -- it simply always works,
 //! and the window itself is the only thing that needs a graphics backend.
 //!
-//! Depth is stored as a *key* that is linear in screen space for the projection
-//! in use, and larger always means nearer: `1/z` under perspective (where `1/z`
-//! interpolates linearly) and `-z` under orthographic (where `z` does). That
-//! keeps one comparison for both projections.
+//! Depth is stored as a *key* that is linear in screen space and larger always
+//! means nearer. The projection is orthographic, so the key is simply `-z`:
+//! view-space depth interpolates linearly across a triangle on screen, and
+//! nothing has to be clipped against a near plane to keep it doing so.
 
 /// Straight-alpha RGBA.
 pub type Rgba = [u8; 4];
@@ -201,40 +201,9 @@ fn edge(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }
 
-/// Clip a view-space triangle against the near plane, so geometry the camera is
-/// inside does not wrap around and smear across the screen. Returns 0, 1 or 2
-/// triangles.
-pub fn clip_near(tri: [simple3d_geom::Vec3; 3], near: f64) -> Vec<[simple3d_geom::Vec3; 3]> {
-    let inside: Vec<bool> = tri.iter().map(|v| v.z >= near).collect();
-    let count = inside.iter().filter(|&&i| i).count();
-    match count {
-        0 => Vec::new(),
-        3 => vec![tri],
-        _ => {
-            let lerp = |a: simple3d_geom::Vec3, b: simple3d_geom::Vec3| {
-                let t = (near - a.z) / (b.z - a.z);
-                a.lerp(b, t)
-            };
-            if count == 1 {
-                let i = inside.iter().position(|&x| x).unwrap();
-                let (a, b, c) = (tri[i], tri[(i + 1) % 3], tri[(i + 2) % 3]);
-                vec![[a, lerp(a, b), lerp(a, c)]]
-            } else {
-                // Two vertices in front: the quad that remains needs two triangles.
-                let i = inside.iter().position(|&x| !x).unwrap();
-                let (out, a, b) = (tri[i], tri[(i + 1) % 3], tri[(i + 2) % 3]);
-                let na = lerp(a, out);
-                let nb = lerp(b, out);
-                vec![[a, b, nb], [a, nb, na]]
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use simple3d_geom::Vec3;
 
     const RED: Rgba = [255, 0, 0, 255];
     const BLUE: Rgba = [0, 0, 255, 255];
@@ -357,60 +326,6 @@ mod tests {
         assert_eq!(frame.pixel(0, 16), RED);
         assert_eq!(frame.pixel(31, 16), RED);
         assert_eq!(frame.pixel(16, 16), RED);
-    }
-
-    #[test]
-    fn a_triangle_entirely_in_front_of_the_near_plane_is_untouched() {
-        let tri = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(1.0, 0.0, 5.0), Vec3::new(0.0, 1.0, 6.0)];
-        let out = clip_near(tri, 0.05);
-        assert_eq!(out.len(), 1);
-        assert_eq!(out[0], tri);
-    }
-
-    #[test]
-    fn a_triangle_entirely_behind_the_near_plane_is_dropped() {
-        let tri = [Vec3::new(0.0, 0.0, -1.0), Vec3::new(1.0, 0.0, -2.0), Vec3::new(0.0, 1.0, -0.5)];
-        assert!(clip_near(tri, 0.05).is_empty());
-    }
-
-    #[test]
-    fn clipping_keeps_every_result_in_front_of_the_near_plane() {
-        let near = 0.05;
-        // One vertex in front, then two.
-        for tri in [
-            [Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, -1.0), Vec3::new(0.0, 1.0, -2.0)],
-            [Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, -2.0)],
-        ] {
-            let out = clip_near(tri, near);
-            assert!(!out.is_empty());
-            for piece in &out {
-                for v in piece {
-                    assert!(v.z >= near - 1e-9, "clipped vertex still behind: {v:?}");
-                }
-                // And each piece has real area, so it will actually rasterize.
-                let n = (piece[1] - piece[0]).cross(piece[2] - piece[0]);
-                assert!(n.length() > 1e-9, "clipping produced a degenerate triangle");
-            }
-        }
-        assert_eq!(
-            clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, -1.0), Vec3::new(0.0, 1.0, -2.0)], near).len(),
-            1
-        );
-        assert_eq!(
-            clip_near([Vec3::new(0.0, 0.0, 4.0), Vec3::new(1.0, 0.0, 3.0), Vec3::new(0.0, 1.0, -2.0)], near).len(),
-            2
-        );
-    }
-
-    #[test]
-    fn clipping_two_in_front_preserves_the_winding() {
-        let near = 0.05;
-        let tri = [Vec3::new(0.0, 0.0, 4.0), Vec3::new(2.0, 0.0, 4.0), Vec3::new(0.0, 2.0, -2.0)];
-        let original = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalized();
-        for piece in clip_near(tri, near) {
-            let n = (piece[1] - piece[0]).cross(piece[2] - piece[0]).normalized();
-            assert!(n.dot(original) > 0.9, "winding flipped: {n:?} vs {original:?}");
-        }
     }
 
     #[test]

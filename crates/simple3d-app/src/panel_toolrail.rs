@@ -119,17 +119,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             {
                 app.run(Command::ToggleGrid);
             }
-            let ortho = app.scene.camera.orthographic;
-            if icon::button(ui, Glyph::Perspective, size, !ortho, true)
-                .on_hover_text(format!(
-                    "{} projection  {}",
-                    if ortho { "Orthographic" } else { "Perspective" },
-                    app.keymap.shortcut_text(Command::ToggleProjection)
-                ))
-                .clicked()
-            {
-                app.run(Command::ToggleProjection);
-            }
             separator(ui);
             for (mode, glyph, command) in [
                 (DisplayMode::Wireframe, Glyph::Wireframe, Command::DisplayWireframe),

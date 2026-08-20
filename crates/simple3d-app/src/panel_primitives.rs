@@ -7,7 +7,6 @@
 use crate::app::App;
 use crate::icon::{self, Glyph};
 use crate::theme::{self, token};
-use simple3d_core::config::Placement;
 use simple3d_core::primitive;
 use simple3d_core::scene::GroupOp;
 
@@ -27,6 +26,14 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     // shapes are the only thing worth reading.
     let empty = app.scene.node(app.scene.root()).children.is_empty();
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, theme::metric::GAP);
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        landing_hint(app, ui);
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| shapes(app, ui, empty));
+    });
+}
+
+/// The shapes themselves, in the space the hint has left.
+fn shapes(app: &mut App, ui: &mut egui::Ui, empty: bool) {
     let (area, restore) = theme::list_scroll_area(ui);
     area.show(ui, |ui| {
         ui.set_style(restore);
@@ -36,35 +43,22 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         }
         saved_block(app, ui);
         ui.add_space(4.0);
-        placement_row(app, ui);
-        ui.horizontal_wrapped(|ui| {
-            ui.add_space(theme::metric::PANEL_PAD);
-            // The hint has to say where a shape actually lands, and the
-            // placement choice decides that.
-            ui.add(egui::Label::new(theme::hint(crate::app::insertion_hint(app))).selectable(false));
-        });
-        ui.add_space(4.0);
     });
 }
 
-/// Where a new shape lands: four named answers in one control.
+/// Where a new shape lands, said in words, pinned to the foot of the panel.
 ///
-/// It sits with the shapes rather than in a settings window, because the answer
-/// is part of adding a shape and is worth changing between one shape and the
-/// next.
-fn placement_row(app: &mut App, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
+/// It is drawn before the shapes and from the bottom up, so it keeps its place
+/// against the panel's own edge instead of floating directly under the last row
+/// of tiles -- a line that moves every time a category is folded is a line
+/// nobody reads. The choice it reports lives in the document options, beside
+/// the rest of what the document does to a new shape.
+fn landing_hint(app: &mut App, ui: &mut egui::Ui) {
+    ui.horizontal_wrapped(|ui| {
         ui.add_space(theme::metric::PANEL_PAD);
-        ui.add(egui::Label::new(theme::hint("Add at")).selectable(false));
-        egui::ComboBox::from_id_salt("palette-placement")
-            .selected_text(theme::value(app.settings.placement.label()))
-            .width(140.0)
-            .show_ui(ui, |ui| {
-                for option in Placement::ALL {
-                    ui.selectable_value(&mut app.settings.placement, option, option.label());
-                }
-            });
+        ui.add(egui::Label::new(theme::hint(crate::app::insertion_hint(app))).selectable(false));
     });
+    ui.add_space(4.0);
 }
 
 /// Groups and whole projects the user has kept for reuse. Empty until something

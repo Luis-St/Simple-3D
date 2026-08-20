@@ -45,7 +45,6 @@ pub enum Command {
 
     FrameSelection,
     FrameAll,
-    ToggleProjection,
     ViewTop,
     ViewBottom,
     ViewFront,
@@ -61,7 +60,6 @@ pub enum Command {
     DisplayShadedEdges,
     DisplayWireframe,
     ToggleBoundingBox,
-    ToggleGhosts,
     ToggleDocks,
     ResetLayout,
 
@@ -122,7 +120,6 @@ impl Command {
         Command::MoveDown,
         Command::FrameSelection,
         Command::FrameAll,
-        Command::ToggleProjection,
         Command::ViewTop,
         Command::ViewBottom,
         Command::ViewFront,
@@ -138,7 +135,6 @@ impl Command {
         Command::DisplayShadedEdges,
         Command::DisplayWireframe,
         Command::ToggleBoundingBox,
-        Command::ToggleGhosts,
         Command::ToggleDocks,
         Command::ResetLayout,
         Command::ModeMove,
@@ -177,7 +173,6 @@ impl Command {
             MoveDown => "Move down among siblings",
             FrameSelection => "Frame selection",
             FrameAll => "Frame all",
-            ToggleProjection => "Perspective / orthographic",
             ViewTop => "View: top",
             ViewBottom => "View: bottom",
             ViewFront => "View: front",
@@ -193,7 +188,6 @@ impl Command {
             DisplayShadedEdges => "Display: shaded with edges",
             DisplayWireframe => "Display: wireframe",
             ToggleBoundingBox => "Show bounding box",
-            ToggleGhosts => "Show hidden nodes as ghosts",
             ToggleDocks => "Hide / show the side docks",
             ResetLayout => "Reset panel layout",
             ModeMove => "Manipulator: move",
@@ -216,11 +210,9 @@ impl Command {
             New | Open | Save | SaveAs | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility | MoveUp
             | MoveDown => Area::Edit,
-            FrameSelection | FrameAll | ToggleProjection | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
-            | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
-            | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleGhosts | ToggleDocks | ResetLayout => {
-                Area::View
-            }
+            FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
+            | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
+            | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
             ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp
             | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
@@ -412,8 +404,34 @@ impl Preset {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Keymap {
     pub preset: Preset,
+    #[serde(deserialize_with = "bindings_from_names")]
     pub bindings: BTreeMap<Command, Chord>,
     pub nav: NavMap,
+}
+
+/// Command names earlier builds wrote and this one no longer has.
+///
+/// A keymap naming one still loads: that binding is dropped and the rest of the
+/// user's map survives, because a command being retired is our doing and must
+/// not cost them the map they carry between machines. A name that was never a
+/// command of ours stays a hard error -- that file is not one this build can
+/// honour, and quietly loading half of it is the worse answer.
+const RETIRED: [&str; 2] = ["toggle_projection", "toggle_ghosts"];
+
+fn bindings_from_names<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<Command, Chord>, D::Error> {
+    use serde::de::IntoDeserializer;
+    let named: BTreeMap<String, Chord> = BTreeMap::deserialize(deserializer)?;
+    let mut bindings = BTreeMap::new();
+    for (name, chord) in named {
+        if RETIRED.contains(&name.as_str()) {
+            continue;
+        }
+        let command: Command =
+            Command::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(name.as_str()))
+                .map_err(|_| D::Error::custom(format!("unknown command \"{name}\"")))?;
+        bindings.insert(command, chord);
+    }
+    Ok(bindings)
 }
 
 impl Default for Keymap {
@@ -452,7 +470,6 @@ impl Keymap {
 
         set(FrameSelection, Chord::key("F"));
         set(FrameAll, Chord::shift("F"));
-        set(ToggleProjection, Chord::key("P"));
         set(ViewTop, Chord::key("7"));
         set(ViewBottom, Chord::ctrl("7"));
         set(ViewFront, Chord::key("1"));
@@ -470,7 +487,6 @@ impl Keymap {
         set(DisplayShadedEdges, Chord::key("9"));
         set(DisplayWireframe, Chord::key("6"));
         set(ToggleBoundingBox, Chord::key("B"));
-        set(ToggleGhosts, Chord::shift("H"));
         // Tab clears the docks to leave the viewport alone with the model.
         set(ToggleDocks, Chord::key("Tab"));
         set(ResetLayout, Chord::ctrl_shift("L"));

@@ -44,6 +44,13 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(app::APP_NAME)
         .with_app_id("net.simple3d.Simple3D")
+        // The window's own icon: what the taskbar, the alt-tab list and the
+        // title bar show. eframe hands the window system its own egui logo for
+        // any application that does not set one, which is where the letter "e"
+        // on the Windows taskbar came from -- the icon compiled into the .exe is
+        // what Explorer shows for the file, and never what the running window
+        // wears. 256 px is the largest size Windows asks for.
+        .with_icon(icon::app_icon(256))
         .with_inner_size(settings.window_size)
         .with_min_inner_size([900.0, 560.0])
         // The application draws its own title bar (see `window_chrome`), in the

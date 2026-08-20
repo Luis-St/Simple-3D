@@ -12,8 +12,15 @@ in the exported mesh. A scale tool exists alongside that, for the question
 dimensions cannot answer — making a whole *group* a proportion of what it was —
 and it is a factor the node carries, never something a resize writes.
 
-One self-contained binary. No runtime, no installer, no network, no accelerated
-graphics required.
+The camera is orthographic, always. Parallel lines stay parallel, so the origin
+axes lie along the grid lines they belong to and two edges of the same length
+measure the same on screen wherever they sit in the frame -- which is the point
+of a viewport whose job is to show dimensions rather than a photograph.
+
+One self-contained binary. No runtime, no network, no accelerated graphics
+required, and nothing to install -- the portable executable writes nothing
+outside its own directory. Packages that *do* install it, for people who would
+rather their system tracked the file, are below.
 
 ## Download
 
@@ -25,11 +32,19 @@ from the tag by `.github/workflows/release.yml` and attached to each release:
 | Linux x86-64 | `simple-3d-linux-x86_64` (`chmod +x` and run) |
 | Linux x86-64, Debian/Ubuntu | `simple-3d_<version>_amd64.deb` (`sudo apt install ./simple-3d_<version>_amd64.deb`) |
 | Windows x64 | `simple-3d-windows-x86_64.exe` |
+| Windows x64, installer | `simple-3d-windows-x86_64.msi` |
 
 The `.deb` is the same executable, packaged: it adds only the desktop entry,
 icon and MIME type that put Simple 3D in the applications menu and let a file
 manager open `.simple3d` files with it. It is built by `packaging/deb/build.sh`
 from the binary the same job produced.
+
+The `.msi` is the Windows counterpart: the same executable, installed into
+`Program Files`, with a Start menu entry and a desktop shortcut that are each
+their own feature, so either can be turned off in the installer before it runs.
+It is built from `packaging/windows/simple-3d.wxs` by the same job that uploads
+the `.exe`. Neither package replaces the portable executable, which still
+installs nothing.
 
 Put a file named `portable` (or `portable.txt`) beside the executable and it
 keeps its settings there instead of in the user profile — otherwise they live in
@@ -66,8 +81,8 @@ those files the application's own icon.
 - **A window you can rearrange.** Panels move between the two docks by dragging
   their header and roll up by clicking it; Tab hides both docks and View ▸ Reset
   panel layout puts them back. The arrangement survives a restart. The
-  orientation cube turns the camera to a face, and its centre dot switches
-  perspective and orthographic.
+  orientation cube turns the camera to a face, and its centre dot returns to the
+  isometric view.
 - **Keys and mouse buttons are yours.** Three presets (Simple 3D default, mesh
   editor, CAD) and per-command rebinding, with conflicts named rather than
   silently taken. A rebinding applies to the next gesture, without a restart.
@@ -80,7 +95,7 @@ those files the application's own icon.
 the spec's acceptance criteria are behaviourally met. What each release changed
 is on its release page; the commit log is the record between them.
 
-`cargo test --workspace` runs **385 tests**, none ignored or failing, and every
+`cargo test --workspace` runs **395 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 

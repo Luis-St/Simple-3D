@@ -149,7 +149,7 @@ mod tests {
         scene.settings.grid_spacing = 5.0;
         scene.camera.distance = 321.5;
         scene.camera.yaw = -12.5;
-        scene.camera.orthographic = true;
+        scene.camera.pitch = 41.25;
         let root = scene.root();
         let group = scene.add_group(GroupOp::Difference, root, 0);
         scene.get_mut(group).unwrap().name = "Drilled plate".into();
