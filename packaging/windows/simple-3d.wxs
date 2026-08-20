@@ -45,6 +45,11 @@
       <Directory Id="INSTALLFOLDER" Name="Simple 3D" />
     </StandardDirectory>
 
+    <!-- Declared, not merely referenced: a component's directory has to exist
+         in the tree before the component can be put in it. -->
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
     <Feature Id="Application" Title="Simple 3D" Description="The application itself." Level="1" AllowAbsent="no">
       <ComponentRef Id="MainExecutable" />
 

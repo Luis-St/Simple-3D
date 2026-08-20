@@ -60,14 +60,22 @@ jobs:
 
       # The tag is the single source of truth for the version, so a release can
       # never disagree with what the About dialog reports.
+      # `\r?\n`, and then a check that the rewrite really happened. The Windows
+      # runner checks the repository out with CRLF line endings, so a pattern
+      # anchored on a bare `\n` matched nothing there and the step passed in
+      # silence: v0.0.4 to v0.0.6 shipped a Windows binary whose About dialog
+      # reported version 0.0.0 while the Linux one was right. A step that cannot
+      # tell the version is wrong must not be allowed to succeed.
       - name: Take the version from the tag
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
           echo "Building version $version"
-          perl -0pi -e "s/^(\[workspace\.package\]\nversion = )\"[^\"]*\"/\$1\"$version\"/m" Cargo.toml
+          perl -0pi -e "s/^(\[workspace\.package\]\r?\nversion = )\"[^\"]*\"/\$1\"$version\"/m" Cargo.toml
           grep -A1 '^\[workspace.package\]' Cargo.toml
+          written=$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version = "\(.*\)"\r*$/\1/p}' Cargo.toml)
+          [ "$written" = "$version" ] || { echo "Cargo.toml says \"$written\", not \"$version\"" >&2; exit 1; }
 
       - name: Test
         run: cargo test --workspace --release --target ${{ matrix.target }}
@@ -99,8 +107,13 @@ jobs:
           dotnet tool install --global wix --version 5.0.2
           wix extension add -g WixToolset.UI.wixext/5.0.2
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          if (-not $version) { throw "no version found in Cargo.toml" }
           Write-Host "Building the installer for version $version"
+          # -b: where the icon and the licence page's RTF are. A path inside the
+          # .wxs is resolved against the bind paths, never against the .wxs's own
+          # directory, so without this the build finds neither of them.
           wix build -arch x64 `
+            -b packaging\windows `
             -d "Version=$version" `
             -d "ExePath=$PWD\target\${{ matrix.target }}\release\simple-3d.exe" `
             -ext WixToolset.UI.wixext `
