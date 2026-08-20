@@ -434,3 +434,33 @@ fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_origin() {
 
     assert!(harness.state().cursor.is_none(), "a click on nothing did not put the cursor back at the origin");
 }
+
+// -- the outliner's context menu ----------------------------------------------
+
+#[test]
+fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_first_press() {
+    // The menu selects the row it was opened on, and that selection used to
+    // renumber the row underneath it, so the menu was looked for under an id
+    // nothing had drawn and closed again on the very next frame.
+    let mut harness = harness("outliner-context-menu");
+    let root = harness.state().scene.root();
+    let cube = harness.state_mut().scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    harness.step();
+    assert!(!harness.state().is_selected(cube), "the row this test right-clicks was already selected");
+
+    let row = rect_of(&harness, crate::panel_outliner::row_id(cube));
+    let at = egui::pos2(row.center().x, row.center().y);
+    move_to(&mut harness, at);
+    button(&mut harness, at, egui::PointerButton::Secondary, true);
+    button(&mut harness, at, egui::PointerButton::Secondary, false);
+    // Two more frames: the menu is opened out of memory on the frame after the
+    // click, and it is the frame after *that* which used to lose it.
+    harness.step();
+    harness.step();
+
+    assert!(harness.state().is_selected(cube), "the right-click did not select the row it was on");
+    assert!(
+        egui::Popup::is_id_open(&harness.ctx, crate::panel_outliner::row_id(cube).with("popup")),
+        "the first right-click on an unselected row did not leave its context menu open"
+    );
+}

@@ -671,9 +671,11 @@ impl App {
 
                 ui.separator();
                 if self.evaluated.errors.is_empty() {
+                    // The count is of what will actually be written -- the scene
+                    // or the selection -- rather than always of the whole scene.
+                    let triangles = self.export_triangle_count();
                     ui.label(format!(
-                        "{} triangles will be verified as watertight before anything is written.",
-                        self.evaluated.mesh.triangle_count()
+                        "{triangles} triangles will be verified as watertight before anything is written."
                     ));
                 } else {
                     ui.colored_label(
