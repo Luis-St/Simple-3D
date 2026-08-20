@@ -91,8 +91,8 @@ those files the application's own icon.
 
 ## Status
 
-**v0.0.2, plus unreleased work.** All four crates are implemented and all 29 of
-the spec's acceptance criteria are behaviourally met. What each release changed
+**v0.0.7.** All four crates are implemented and all 29 of the spec's
+acceptance criteria are behaviourally met. What each release changed
 is on its release page; the commit log is the record between them.
 
 `cargo test --workspace` runs **395 tests**, none ignored or failing, and every
