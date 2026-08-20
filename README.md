@@ -14,11 +14,11 @@ and it is a factor the node carries, never something a resize writes.
 
 The camera is orthographic, always. Parallel lines stay parallel, so the origin
 axes lie along the grid lines they belong to and two edges of the same length
-measure the same on screen wherever they sit in the frame -- which is the point
-of a viewport whose job is to show dimensions rather than a photograph.
+measure the same on screen wherever they sit in the frame — which is the point of
+a viewport whose job is to show dimensions rather than a photograph.
 
 One self-contained binary. No runtime, no network, no accelerated graphics
-required, and nothing to install -- the portable executable writes nothing
+required, and nothing to install — the portable executable writes nothing
 outside its own directory. Packages that *do* install it, for people who would
 rather their system tracked the file, are below.
 
@@ -61,19 +61,27 @@ those files the application's own icon.
 - **Typing is the primary interface.** Every numeric field takes an expression
   (`40/3`, `(2+3)*4`), a value in another unit (`4cm` in a millimetre document),
   or a delta (`+2`, `- 5`) that resolves against each selected shape separately.
-  Dragging a field's label scrubs its value; Shift is fine, Ctrl is coarse.
+  A field is also its own slider: drag it to scrub the value, click it to type
+  into it. Shift is fine, Ctrl is coarse.
 - **Direct manipulation writes parameters.** Move, rotate and resize handles
   rewrite the shape's own dimensions and position — a completed drag is one undo
   step, and Escape during one puts everything back. The fourth tool, scale,
   writes a factor instead, and is the one that works on a group.
-- **Paint what you are working on.** An object or a whole group takes a colour,
-  and it follows each surface through a boolean: after a painted cutter drills a
-  painted plate, the wall of the hole is the cutter's colour. 3MF export carries
-  the colours; the other formats have nowhere to put them.
+- **Paint what you are working on.** An object or a whole group takes a colour —
+  the full picker, eight presets, or one already used in this session — and it
+  follows each surface through a boolean: after a painted cutter drills a painted
+  plate, the wall of the hole is the cutter's colour. 3MF export carries the
+  colours; the other formats have nowhere to put them.
+- **Hidden, or a ghost, or neither.** A node is visible, *hidden* (out of the
+  model and not drawn), or a *ghost*: out of the model but drawn as a
+  translucent shell, which is what a body about to be subtracted needs while it
+  is being positioned. It is a property of the node, so one shape can be a ghost
+  while another is simply gone.
 - **A palette you can add to.** Save a group, or a whole project, as a primitive
   and it is on the palette of every project afterwards. New shapes land where you
-  choose: the origin, the 3D cursor, what the camera is looking at, or clear of
-  the selection.
+  choose — the origin, the 3D cursor, what the camera is looking at, or clear of
+  the selection — set by Add at in the document options, with the palette saying
+  which answer is in force.
 - **Booleans that hold up.** Union, difference, intersection and hull, nested
   arbitrarily. Results are checked for manifoldness on every evaluation; a
   boolean that cannot be evaluated names its own node in the outliner while the
@@ -91,9 +99,9 @@ those files the application's own icon.
 
 ## Status
 
-**v0.0.7.** All four crates are implemented and all 29 of the spec's
-acceptance criteria are behaviourally met. What each release changed
-is on its release page; the commit log is the record between them.
+**v0.0.7.** All four crates are implemented and all 29 of the spec's acceptance
+criteria are behaviourally met. What each release changed is on its release
+page; the commit log is the record between them.
 
 `cargo test --workspace` runs **395 tests**, none ignored or failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
@@ -111,9 +119,10 @@ test.
 A passing suite is not the same as a working application. Several of the bugs
 fixed so far — a drag that finished wherever the mouse button came up, an
 orientation cube a quarter turn out of step with the viewport, a side wall the
-orthographic camera culled although it faced the viewer — were all found by
-running the application with the full suite passing over it. Each of them is now
-covered by a test that fails without its fix.
+orthographic camera culled although it faced the viewer, a perspective
+projection that fanned the grid apart from the axes lying along it — were all
+found by running the application with the full suite passing over it. Each of
+them is now covered by a test that fails without its fix.
 
 ## Why Rust, and why no external CSG/geometry crate
 
@@ -154,6 +163,8 @@ crates/
 packaging/
   deb/               Debian package: desktop entry, icon, MIME type and the
                        script that assembles them around the built binary.
+  windows/           The application icon compiled into the .exe, and the WiX
+                       authoring for the .msi installer.
 ```
 
 Engineering highlights worth knowing about:
@@ -162,9 +173,11 @@ Engineering highlights worth knowing about:
   prism, sphere/ellipsoid, spherical cap, cylinder, tube, capsule, torus (full
   and arc), cone, pyramid, regular pyramid, and all four regular polyhedra
   (tetrahedron/octahedron/icosahedron by hand, dodecahedron built as the
-  icosahedron's dual). Plate/disc/ring are thin aliases onto box/cylinder/tube
-  per the spec's "must produce identical geometry" requirement. Measured
-  against the circumscribed convention and exact on flat axes.
+  icosahedron's dual), plus a chamfered box and a slot. Plate/disc/ring are thin
+  aliases onto box/cylinder/tube per the spec's "must produce identical geometry"
+  requirement. The round solids take a sweep angle, so a quarter cylinder or a
+  pipe elbow is one shape rather than a boolean. Measured against the
+  circumscribed convention and exact on flat axes.
 - **Booleans are watertight and manifold** for the degenerate cases that are
   the normal case in practice — coplanar faces, coincident surfaces, operands
   touching at a single edge, fully contained and fully disjoint operands.
@@ -199,7 +212,9 @@ release workflow lists the same set.
 
 Releases are cut by pushing a `v*` tag: `.github/workflows/release.yml` takes the
 version from the tag, tests and builds both targets from that one commit, and
-attaches the two executables and the Debian package to the GitHub release. The
+attaches the two portable executables, the Debian package and the Windows
+installer to the GitHub release. Each package is built from the very binary the
+same job uploads, so a release cannot carry two different builds. The Debian
 package can be built by hand from any release binary:
 
 ```bash
@@ -218,12 +233,15 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 | What a numeric field accepts | `simple3d-core/src/unit.rs` |
 | The docks, and what moves between them | `simple3d-app/src/dock.rs` |
 | A colour, a row height or a type size | `simple3d-app/src/theme.rs` — nothing else names one |
-| An icon, or a primitive's silhouette | `simple3d-app/src/icon.rs` |
+| An icon, a primitive's silhouette, or the window's own icon | `simple3d-app/src/icon.rs` |
+| The ground grid, the origin axes and how they fade | `simple3d-app/src/render.rs` (`grid_levels`, `draw_axes`) |
+| Whether a value field is a slider or a text field this frame | `simple3d-app/src/ui.rs` (`FieldBuffers::scrub_field`) |
 | Keymap presets, rebinding and conflicts | `simple3d-core/src/keymap.rs` |
 | Navigation bindings taking effect without a restart | `simple3d-app/src/panel_viewport.rs` (`nav_gesture`) |
 | Driving a pointer gesture in a test | `simple3d-app/src/gestures.rs` |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |
 | What the Debian package installs, and what it depends on | `packaging/deb/build.sh` |
+| What the Windows installer puts where | `packaging/windows/simple-3d.wxs` |
 | File format and migration | `simple3d-core/src/project.rs` |
 
 ## Licence
