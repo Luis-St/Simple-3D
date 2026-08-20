@@ -77,14 +77,28 @@ fn symbol(op: GroupOp) -> Glyph {
 /// header bar and decides which side of the window this is on.
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
-    if !app.selection.is_empty() {
-        ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            ui.add_space(theme::metric::PANEL_PAD);
-            ui.add(egui::Label::new(theme::hint(format!("{} selected", app.selection.len()))).selectable(false));
-        });
-    }
+    // The count sits at the foot of the panel: appearing and disappearing above
+    // the tree pushed every row down a line the moment anything was selected,
+    // so the row under the pointer was no longer the row that had been clicked.
+    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+        selection_line(app, ui);
+        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| tree(app, ui));
+    });
+}
 
+/// How much is selected, if anything.
+fn selection_line(app: &mut App, ui: &mut egui::Ui) {
+    if app.selection.is_empty() {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.add_space(theme::metric::PANEL_PAD);
+        ui.add(egui::Label::new(theme::hint(format!("{} selected", app.selection.len()))).selectable(false));
+    });
+    ui.add_space(2.0);
+}
+
+fn tree(app: &mut App, ui: &mut egui::Ui) {
     confirm_strip(app, ui);
 
     let dragging = app.outliner_drag;
@@ -393,7 +407,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
     /// the spot: labelling a button borrows the keymap, and running a command
     /// wants the whole application.
     fn item(ui: &mut egui::Ui, keymap: &Keymap, chosen: &mut Option<Command>, command: Command, enabled: bool) {
-        if ui.add_enabled(enabled, egui::Button::new(crate::ui::menu_label(keymap, command))).clicked() {
+        if crate::ui::menu_entry(ui, &crate::ui::menu_label(keymap, command), enabled).clicked() {
             *chosen = Some(command);
             ui.close();
         }
@@ -434,7 +448,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         item(ui, keymap, &mut chosen, Command::MoveUp, !is_root);
         item(ui, keymap, &mut chosen, Command::MoveDown, !is_root);
         ui.separator();
-        if ui.add_enabled(!is_root, egui::Button::new(show_hide)).clicked() {
+        if crate::ui::menu_entry(ui, &show_hide, !is_root).clicked() {
             chosen = Some(Command::ToggleVisibility);
             ui.close();
         }
@@ -460,6 +474,24 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
                 }
             }
         });
+        // The colours this document is already painted in, offered where the
+        // fixed palette is: the property editor keeps the same two rows.
+        let recent: Vec<[u8; 3]> = app.settings.recent_colours.clone();
+        if !recent.is_empty() {
+            ui.horizontal(|ui| {
+                for colour in recent {
+                    let swatch = egui::Button::new("")
+                        .fill(egui::Color32::from_rgb(colour[0], colour[1], colour[2]))
+                        .stroke(egui::Stroke::new(1.0_f32, crate::theme::token::SURFACE_3))
+                        .min_size(egui::vec2(16.0, 16.0));
+                    let name = format!("#{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2]);
+                    if ui.add(swatch).on_hover_text(name).clicked() {
+                        paint = Some(Some(Colour(colour)));
+                        ui.close();
+                    }
+                }
+            });
+        }
         if ui
             .add_enabled(app.scene.subtree_is_painted(id), egui::Button::new("Clear the colour"))
             .on_hover_text("Back to the theme's colour for an unpainted solid")
@@ -481,11 +513,8 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         item(ui, &app.keymap, &mut chosen, Command::Delete, !is_root);
 
         if let Some(colour) = paint {
-            app.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, colour.map(|_| "colour"));
             let targets: Vec<NodeId> = app.selection.to_vec();
-            for target in targets {
-                app.scene.paint_subtree(target, colour);
-            }
+            app.paint(&targets, colour, None);
         }
         if save_as_primitive {
             app.save_selection_as_primitive();

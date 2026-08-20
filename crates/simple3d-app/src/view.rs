@@ -14,11 +14,6 @@ pub struct View {
     pub size: egui::Vec2,
 }
 
-/// Everything nearer than this is behind the eye as far as projection is
-/// concerned; triangles are clipped against it so the preview does not explode
-/// when the camera is inside the model.
-pub const NEAR: f64 = 0.05;
-
 impl View {
     pub fn new(camera: Camera, rect: egui::Rect) -> View {
         View { camera, centre: rect.center(), size: rect.size() }
@@ -53,15 +48,12 @@ impl View {
         (right, up)
     }
 
-    /// Pixels per world unit at the target plane. Also the orthographic scale.
+    /// Pixels per world unit: the projection's whole scale, since it is
+    /// orthographic and one millimetre is the same number of pixels wherever it
+    /// sits in the frame.
     pub fn pixels_per_mm(&self) -> f64 {
         let half_height = self.camera.distance * (self.camera.fov_deg.to_radians() / 2.0).tan();
         (self.size.y as f64 / 2.0) / half_height.max(1e-9)
-    }
-
-    /// Focal length in pixels for the perspective projection.
-    fn focal(&self) -> f64 {
-        (self.size.y as f64 / 2.0) / (self.camera.fov_deg.to_radians() / 2.0).tan()
     }
 
     /// World point to view space: X right, Y up, Z forward (depth).
@@ -72,70 +64,67 @@ impl View {
     }
 
     /// View-space point to screen pixels. Returns the depth alongside, which is
-    /// view-space Z -- always positive for anything in front of the eye.
+    /// view-space Z -- positive for anything in front of the eye.
     pub fn view_to_screen(&self, v: Vec3) -> (egui::Pos2, f64) {
-        let (x, y) = if self.camera.orthographic {
-            let s = self.pixels_per_mm();
-            (v.x * s, v.y * s)
-        } else {
-            let f = self.focal();
-            let z = v.z.max(NEAR);
-            (v.x * f / z, v.y * f / z)
-        };
+        let s = self.pixels_per_mm();
+        let (x, y) = (v.x * s, v.y * s);
         (egui::pos2(self.centre.x + x as f32, self.centre.y - y as f32), v.z)
     }
 
-    /// `None` when the point is behind the near plane, so callers do not draw a
-    /// mirrored ghost of geometry behind the eye.
+    /// Where a world point lands. `Some` for every point, orthographic
+    /// projection having no near plane to fall behind; the option is kept
+    /// because callers read better for asking.
     pub fn project(&self, world: Vec3) -> Option<(egui::Pos2, f64)> {
-        let v = self.to_view(world);
-        if !self.camera.orthographic && v.z <= NEAR {
-            return None;
-        }
-        Some(self.view_to_screen(v))
+        Some(self.view_to_screen(self.to_view(world)))
     }
 
     /// Ray through a screen position: `(origin, direction)`, direction normalised.
+    /// Every ray runs along the view direction; only where it starts changes.
     pub fn ray(&self, screen: egui::Pos2) -> (Vec3, Vec3) {
         let (right, up) = self.basis();
         let dx = (screen.x - self.centre.x) as f64;
         let dy = (self.centre.y - screen.y) as f64;
-        if self.camera.orthographic {
-            let s = self.pixels_per_mm();
-            let origin = self.eye() + right * (dx / s) + up * (dy / s);
-            (origin, self.forward())
-        } else {
-            let f = self.focal();
-            let dir = (right * (dx / f) + up * (dy / f) + self.forward()).normalized();
-            (self.eye(), dir)
-        }
+        let s = self.pixels_per_mm();
+        (self.eye() + right * (dx / s) + up * (dy / s), self.forward())
     }
 
     /// How many world units one screen pixel covers at `world`. Used to keep
     /// handles a constant on-screen size regardless of zoom, and to convert a
     /// drag in pixels into a drag in millimetres.
-    pub fn mm_per_pixel_at(&self, world: Vec3) -> f64 {
-        if self.camera.orthographic {
-            1.0 / self.pixels_per_mm().max(1e-9)
-        } else {
-            let z = self.to_view(world).z.max(NEAR);
-            z / self.focal().max(1e-9)
-        }
+    pub fn mm_per_pixel_at(&self, _world: Vec3) -> f64 {
+        1.0 / self.pixels_per_mm().max(1e-9)
     }
 
     /// Where a screen ray meets a plane through `origin` with normal `normal`.
     /// `None` when the ray runs parallel to it.
+    ///
+    /// A drag uses this and must never fail on the plane it grabbed, so the hit
+    /// counts wherever it is along the ray -- including behind the camera plane,
+    /// which is where a handle ends up when the view is zoomed right into it.
     pub fn ray_plane(&self, screen: egui::Pos2, origin: Vec3, normal: Vec3) -> Option<Vec3> {
         let (ro, rd) = self.ray(screen);
         let denom = rd.dot(normal);
         if denom.abs() < 1e-9 {
             return None;
         }
-        let t = (origin - ro).dot(normal) / denom;
-        if t < 0.0 && !self.camera.orthographic {
+        Some(ro + rd * ((origin - ro).dot(normal) / denom))
+    }
+
+    /// The same hit, but only when it lies in front of the camera.
+    ///
+    /// This is what "the pointer is on the ground" means, and it is not the same
+    /// question: a parallel projection meets the ground plane for every pixel of
+    /// the frame, including the ones above the horizon, where the meeting point
+    /// is behind the viewer. Those pixels are sky, and clicking one has to mean
+    /// what it looks like it means.
+    pub fn ray_plane_ahead(&self, screen: egui::Pos2, origin: Vec3, normal: Vec3) -> Option<Vec3> {
+        let (ro, rd) = self.ray(screen);
+        let denom = rd.dot(normal);
+        if denom.abs() < 1e-9 {
             return None;
         }
-        Some(ro + rd * t)
+        let t = (origin - ro).dot(normal) / denom;
+        (t >= 0.0).then(|| ro + rd * t)
     }
 
     /// The closest point to a screen ray on the line through `origin` along
@@ -355,36 +344,36 @@ mod tests {
 
     #[test]
     fn projecting_and_unprojecting_agree() {
-        for ortho in [false, true] {
-            let mut v = view();
-            v.camera.orthographic = ortho;
-            v.camera.yaw = -55.0;
-            v.camera.pitch = 28.0;
-            for world in [Vec3::new(10.0, 5.0, 3.0), Vec3::new(-30.0, 12.0, -8.0), Vec3::new(0.0, 0.0, 0.0)] {
-                let (screen, _) = v.project(world).unwrap();
-                let (origin, dir) = v.ray(screen);
-                // The world point must lie on the ray through its own projection.
-                let along = (world - origin).dot(dir);
-                let closest = origin + dir * along;
-                // Screen coordinates are f32, so a round trip through them is
-                // good to a fraction of a micrometre, not to the last bit.
-                assert!(
-                    (closest - world).length() < 1e-3,
-                    "ortho={ortho} {world:?} -> {screen:?} -> off by {}",
-                    (closest - world).length()
-                );
-            }
+        let mut v = view();
+        v.camera.yaw = -55.0;
+        v.camera.pitch = 28.0;
+        for world in [Vec3::new(10.0, 5.0, 3.0), Vec3::new(-30.0, 12.0, -8.0), Vec3::new(0.0, 0.0, 0.0)] {
+            let (screen, _) = v.project(world).unwrap();
+            let (origin, dir) = v.ray(screen);
+            // The world point must lie on the ray through its own projection.
+            let along = (world - origin).dot(dir);
+            let closest = origin + dir * along;
+            // Screen coordinates are f32, so a round trip through them is
+            // good to a fraction of a micrometre, not to the last bit.
+            assert!(
+                (closest - world).length() < 1e-3,
+                "{world:?} -> {screen:?} -> off by {}",
+                (closest - world).length()
+            );
         }
     }
 
     #[test]
-    fn points_behind_the_eye_do_not_project_in_perspective() {
+    fn a_point_behind_the_eye_still_projects_where_it_belongs() {
+        // There is no near plane to fall behind: the projection is parallel, so
+        // a point the camera has passed lands at its true screen position and
+        // is simply behind everything else. Nothing has to be clipped, which is
+        // what stops geometry disappearing when the camera is inside the model.
         let v = view();
-        assert!(v.project(Vec3::new(0.0, -200.0, 0.0)).is_none());
-        // In orthographic there is no near-plane singularity, so it still maps.
-        let mut ortho = v;
-        ortho.camera.orthographic = true;
-        assert!(ortho.project(Vec3::new(0.0, -200.0, 0.0)).is_some());
+        let behind = Vec3::new(0.0, -200.0, 0.0);
+        let (screen, depth) = v.project(behind).unwrap();
+        assert!((screen - v.centre).length() < 1e-3, "{screen:?}");
+        assert!(depth < 0.0, "a point behind the eye should have negative depth, got {depth}");
     }
 
     #[test]
@@ -476,7 +465,6 @@ mod tests {
             let mut v = view();
             v.camera.yaw = yaw;
             v.camera.pitch = pitch;
-            v.camera.orthographic = true;
             for axis in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
                 let (screen, _) = v.project(v.camera.target + axis * 10.0).unwrap();
                 let on_screen = screen - v.centre;

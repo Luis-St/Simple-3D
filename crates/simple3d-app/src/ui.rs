@@ -151,9 +151,110 @@ pub fn show_param(value: ParamValue, unit: Unit) -> String {
 pub struct FieldBuffers {
     buffers: HashMap<egui::Id, String>,
     errors: HashSet<egui::Id>,
+    /// Fields the user has clicked into. A field that is not being typed into is
+    /// drawn as its own value and carries the scrub gesture instead, which is
+    /// what lets one control be both (see `scrub_field`).
+    editing: HashSet<egui::Id>,
+    /// Fields opened on the previous frame, which have to be given the keyboard
+    /// once the text field they turn into actually exists. Asking for focus on
+    /// the frame of the click would name a widget nothing had drawn.
+    opening: HashSet<egui::Id>,
+}
+
+/// What a scrub gesture did this frame.
+#[derive(Clone, Copy, Debug)]
+pub struct Scrubbed {
+    /// True on the frame the drag began: the one frame that takes an undo
+    /// snapshot, so the whole drag collapses into a single step.
+    pub started: bool,
+    /// Change to apply, in the unit the field displays.
+    pub delta: f64,
+}
+
+/// What one frame of a value field produced: text the user committed, and the
+/// scrub they are in the middle of. Both can be empty; they are never both set.
+#[derive(Default)]
+pub struct Field {
+    pub committed: Option<String>,
+    pub scrubbed: Option<Scrubbed>,
 }
 
 impl FieldBuffers {
+    /// A value field that is also its own slider.
+    ///
+    /// Every scrubbable value in the application used to hang its drag on
+    /// whatever sat *beside* the field -- the label for a dimension, the
+    /// coloured axis chip for a position -- because a text field has to keep
+    /// click-to-caret and drag-to-select for itself. The result was one gesture
+    /// living in two different places depending on the row, and the grip for the
+    /// only three-column rows in the panel being a four-pixel chip.
+    ///
+    /// So the field is not a text field until it is being typed into. Until
+    /// then it is a drawing of its own value, in the same box, and it carries
+    /// the drag; clicking it turns it into the text field and gives it the
+    /// keyboard. `grip` is the id that gesture is remembered by -- named after
+    /// the value rather than taken from the layout, so a panel that relays
+    /// itself out mid-drag cannot hand the drag to another field.
+    pub fn scrub_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        grip: egui::Id,
+        current: &str,
+        step: f64,
+        scrub: &mut Scrub,
+    ) -> Field {
+        let typing = self.editing.contains(&id) || ui.memory(|memory| memory.has_focus(id));
+        if typing {
+            let committed = self.field(ui, id, current);
+            if self.opening.remove(&id) {
+                // The text field exists now, so it can be given the keyboard.
+                ui.memory_mut(|memory| memory.request_focus(id));
+            } else if committed.is_some() || !ui.memory(|memory| memory.has_focus(id)) {
+                self.editing.remove(&id);
+            }
+            return Field { committed, scrubbed: None };
+        }
+
+        let rejected = self.is_rejected(id);
+        let text = self.buffers.get(&id).cloned().unwrap_or_else(|| current.to_string());
+        let response = self.value_box(ui, grip, &text, rejected);
+        if response.clicked() {
+            // Into the text field, with the keyboard, on the next frame.
+            self.editing.insert(id);
+            self.opening.insert(id);
+        }
+        Field { committed: None, scrubbed: scrub_gesture(ui, &response, scrub, step) }
+    }
+
+    /// The field as it looks when it is not being typed into: the same box, the
+    /// same right-aligned tabular figures, and the resize cursor that says it
+    /// can be dragged.
+    fn value_box(&self, ui: &mut egui::Ui, grip: egui::Id, text: &str, rejected: bool) -> egui::Response {
+        let height = crate::theme::metric::INPUT_ROW;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
+        let response = ui.interact(rect, grip, egui::Sense::click_and_drag());
+        let visuals = ui.style().interact(&response);
+        let (fill, stroke) = if rejected {
+            (crate::theme::token::DANGER.gamma_multiply(0.16), egui::Stroke::new(1.0_f32, crate::theme::token::DANGER))
+        } else {
+            (ui.visuals().extreme_bg_color, visuals.bg_stroke)
+        };
+        let painter = ui.painter();
+        painter.rect(rect, visuals.corner_radius, fill, stroke, egui::StrokeKind::Inside);
+        painter.text(
+            egui::pos2(rect.right() - 4.0, rect.center().y),
+            egui::Align2::RIGHT_CENTER,
+            text,
+            egui::FontId::monospace(crate::theme::font::VALUE),
+            visuals.text_color(),
+        );
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        response
+    }
+
     /// Draw a single-line field. Returns the committed text when the user
     /// presses Enter or leaves the field, and `None` while they are still typing.
     ///
@@ -237,6 +338,8 @@ impl FieldBuffers {
     pub fn clear(&mut self) {
         self.buffers.clear();
         self.errors.clear();
+        self.editing.clear();
+        self.opening.clear();
     }
 }
 
@@ -250,6 +353,29 @@ impl FieldBuffers {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Scrub {
     pub id: Option<egui::Id>,
+}
+
+/// One frame of a scrub on a value box: which field owns the gesture, and how
+/// far it has moved.
+///
+/// The id is held for the length of the drag so a pointer that runs off one
+/// field and over another cannot hand the gesture to a field the user never
+/// grabbed -- and any real edit does run off, six pixels to the millimetre.
+pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut Scrub, step: f64) -> Option<Scrubbed> {
+    let id = response.id;
+    if response.drag_started() {
+        scrub.id = Some(id);
+    }
+    if scrub.id != Some(id) {
+        return None;
+    }
+    if !response.dragged() {
+        scrub.id = None;
+        return None;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    let (fine, coarse) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
+    Some(Scrubbed { started: response.drag_started(), delta: scrub_delta(response.drag_delta().x, step, fine, coarse) })
 }
 
 /// This frame's pointer movement as a change in the field's own units.
@@ -268,12 +394,54 @@ pub fn scrub_increment(kind: ParamKind, unit: Unit) -> f64 {
 }
 
 /// The label to put on a menu entry: the command's name plus its *current*
-/// binding, never a hardcoded one (spec section 8.2).
+/// binding, never a hardcoded one (spec section 8.2). The two halves are kept
+/// apart by a tab, and `menu_entry` is what draws them.
 pub fn menu_label(keymap: &Keymap, command: Command) -> String {
     match keymap.binding(command) {
         Some(chord) => format!("{}\t{}", command.label(), chord),
         None => command.label().to_string(),
     }
+}
+
+/// Split a menu label into the action and its key binding.
+pub fn split_menu_label(label: &str) -> (&str, &str) {
+    match label.split_once('\t') {
+        Some((action, shortcut)) => (action, shortcut.trim()),
+        None => (label, ""),
+    }
+}
+
+/// One menu entry: the action on the left, its key binding boxed at the right
+/// edge of the menu.
+///
+/// A tab between the two put them one word apart, wherever that happened to
+/// land, so a column of entries had its bindings scattered down the middle and
+/// nothing said which text was a key and which was the name of the command.
+/// The binding is now pushed to the right by a growing spacer -- so every
+/// entry's binding lines up with every other's -- and drawn inside a keycap
+/// outline, so it reads as a key rather than as more of the sentence.
+pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    let (action, shortcut) = split_menu_label(label);
+    let font = egui::FontId::monospace(crate::theme::font::SMALL);
+    let mut button = egui::Button::new(action);
+    if !shortcut.is_empty() {
+        button = button.shortcut_text(egui::RichText::new(shortcut).font(font.clone()));
+    }
+    let response = ui.add_enabled(enabled, button);
+    if !shortcut.is_empty() {
+        // The outline is painted after the button, so it can only ever be a
+        // stroke: a filled box here would cover the text already drawn under it.
+        let width = ui.fonts(|fonts| fonts.layout_no_wrap(shortcut.to_string(), font, egui::Color32::WHITE).size().x);
+        let right = response.rect.right() - ui.spacing().button_padding.x;
+        let box_rect = egui::Rect::from_center_size(
+            egui::pos2(right - width / 2.0, response.rect.center().y),
+            egui::vec2(width, crate::theme::font::SMALL + 2.0),
+        )
+        .expand2(egui::vec2(4.0, 2.0));
+        let colour = if enabled { crate::theme::token::SURFACE_3 } else { crate::theme::token::SURFACE_2 };
+        ui.painter().rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0_f32, colour), egui::StrokeKind::Inside);
+    }
+    response
 }
 
 /// Translate an egui key press into the chord form the keymap stores. Uses

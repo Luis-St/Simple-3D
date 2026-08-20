@@ -2,8 +2,8 @@
 //! shaded / shaded-with-edges / wireframe display, the ground grid and origin
 //! axes, the selection highlight and translucent ghosts for hidden nodes.
 
-use crate::raster::{clip_near, Frame, Rgba, Vertex};
-use crate::view::{View, NEAR};
+use crate::raster::{Frame, Rgba, Vertex};
+use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::{AxisStyle, Colour};
 use simple3d_geom::{Mesh, Vec3};
@@ -258,12 +258,11 @@ pub fn render(request: &Request<'_>) -> Frame {
 }
 
 /// Project a world point to a rasterizer vertex, with the depth key the
-/// framebuffer expects: larger is nearer, and linear in screen space for the
-/// projection in use.
+/// framebuffer expects: larger is nearer, and linear in screen space. Under a
+/// parallel projection the view-space depth itself is that, negated.
 fn to_vertex(view: &View, view_space: Vec3) -> Vertex {
     let (pos, z) = view.view_to_screen(view_space);
-    let key = if view.camera.orthographic { -z as f32 } else { (1.0 / z.max(NEAR)) as f32 };
-    Vertex { pos, key }
+    Vertex { pos, key: -z as f32 }
 }
 
 /// Shade one triangle: a headlight from the camera plus a constant fill, so a
@@ -281,21 +280,15 @@ fn shade(base: Rgba, normal: Vec3, view_dir: Vec3, alpha: u8) -> Rgba {
 
 /// The direction from a triangle towards the eye, for back-face culling.
 ///
-/// Under perspective that is the eye minus the triangle, and it has to be
-/// measured per triangle: a face at the edge of the frame is seen from a
-/// noticeably different direction than one at its centre. Under **orthographic**
-/// projection there is no eye to point at -- every ray runs along the view
-/// direction -- and using `eye - centroid` there is simply wrong. It answers
-/// correctly only near the middle of the frame, and the further a face sits from
-/// it the more the answer tilts, until a face within a few degrees of edge-on is
-/// culled although it is facing the viewer. That is what dropped the side wall
-/// off a plate seen almost from the side.
-fn to_eye(view: &View, centroid: Vec3) -> Vec3 {
-    if view.camera.orthographic {
-        -view.forward()
-    } else {
-        view.eye() - centroid
-    }
+/// The projection is parallel, so there is no eye to point at: every ray runs
+/// along the view direction and that direction is the answer for every triangle
+/// in the frame. Pointing at `eye - centroid` instead is right only near the
+/// middle of the frame, and the further a face sits from it the more the answer
+/// tilts, until a face within a few degrees of edge-on is culled although it is
+/// facing the viewer -- which is what once dropped the side wall off a plate
+/// seen almost from the side.
+fn to_eye(view: &View, _centroid: Vec3) -> Vec3 {
+    -view.forward()
 }
 
 /// The colour one triangle is painted: whatever body it came from, if that
@@ -331,13 +324,11 @@ fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, al
         }
         let colour = shade(triangle_base(item, index, base), normal, forward, alpha);
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
-        for piece in clip_pieces(view, in_view) {
-            frame.triangle(
-                [to_vertex(view, piece[0]), to_vertex(view, piece[1]), to_vertex(view, piece[2])],
-                colour,
-                true,
-            );
-        }
+        frame.triangle(
+            [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
+            colour,
+            true,
+        );
     }
 }
 
@@ -357,29 +348,19 @@ fn draw_ghost(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba) {
         }
         let colour = shade(base, normal.normalized(), forward, base[3]);
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
-        for piece in clip_pieces(view, in_view) {
-            frame.triangle(
-                [to_vertex(view, piece[0]), to_vertex(view, piece[1]), to_vertex(view, piece[2])],
-                colour,
-                false,
-            );
-        }
+        frame.triangle(
+            [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
+            colour,
+            false,
+        );
     }
 }
 
-fn clip_pieces(view: &View, in_view: [Vec3; 3]) -> Vec<[Vec3; 3]> {
-    if view.camera.orthographic {
-        vec![in_view]
-    } else {
-        clip_near(in_view, NEAR)
-    }
-}
-
-/// Depth bias for a line, as a fraction of its own depth key. Absolute biases
-/// do not work here: the key is `1/z` under perspective, so a fixed nudge that
-/// is invisible up close is larger than the whole scene's depth range when the
-/// camera is far away -- which is what made the origin axes draw straight through
-/// solid geometry.
+/// Depth bias for a line, as a fraction of its own depth key rather than an
+/// absolute amount, so one set of numbers holds at every zoom: the key is the
+/// distance from the eye, which grows with the camera's own distance, and a
+/// fixed nudge that is invisible up close would be larger than the whole
+/// scene's depth range when the camera is far away.
 const EDGE_BIAS: f32 = 2.0e-4;
 const SELECTION_BIAS: f32 = 8.0e-4;
 /// The grid and the axes are biased *away* from the eye, so a face that happens
@@ -441,20 +422,10 @@ fn draw_world_line_with_depth(
     bias: f32,
     write_depth: bool,
 ) {
-    let (mut va, mut vb) = (view.to_view(a), view.to_view(b));
-    if !view.camera.orthographic {
-        if va.z < NEAR && vb.z < NEAR {
-            return;
-        }
-        if va.z < NEAR {
-            let t = (NEAR - va.z) / (vb.z - va.z);
-            va = va.lerp(vb, t);
-        } else if vb.z < NEAR {
-            let t = (NEAR - vb.z) / (va.z - vb.z);
-            vb = vb.lerp(va, t);
-        }
-    }
-    let (va, vb) = (to_vertex(view, va), to_vertex(view, vb));
+    // Nothing is clipped: a parallel projection maps a point behind the eye to
+    // its true screen position, and the depth key puts it behind everything
+    // else on its own.
+    let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
     let scale = (va.key.abs() + vb.key.abs()) * 0.5;
     if write_depth {
         frame.line(va, vb, colour, bias * scale);
@@ -463,39 +434,119 @@ fn draw_world_line_with_depth(
     }
 }
 
-/// Grid spacing that is actually legible: step up in powers of ten until one
-/// cell is at least a few pixels across, so a 1mm grid does not turn a zoomed-out
-/// view into a solid block of lines.
-pub fn effective_grid_spacing(view: &View, spacing: f64) -> f64 {
-    let mut spacing = spacing.max(1e-6);
-    let pixels_per_mm = view.pixels_per_mm();
-    while spacing * pixels_per_mm < 6.0 {
-        spacing *= 10.0;
-    }
-    spacing
+/// The world radius the ground grid and the axes cover.
+///
+/// It is derived from the frame rather than from the grid's spacing: half the
+/// viewport's diagonal, converted to millimetres at the current zoom, with a
+/// margin so the fade finishes just outside the corners. That makes it
+/// continuous in the zoom -- the extent of the ground grows smoothly as the
+/// camera pulls back, instead of jumping tenfold whenever the spacing steps up
+/// a decade, which is what made zooming out lurch.
+pub fn grid_radius(view: &View) -> f64 {
+    let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
+    half_diagonal / view.pixels_per_mm().max(1e-9) * 1.35
 }
 
+/// The narrowest a grid cell may be drawn, in pixels, and the width at which it
+/// is drawn at full strength. Between the two it is faded, which is what makes a
+/// decade of the grid arrive and leave without a step.
+const CELL_FADE_OUT: f64 = 6.0;
+const CELL_FULL: f64 = 26.0;
+
+/// The two decades of grid to draw at this zoom: the coarse one, always at full
+/// strength, the fine one below it, and how strongly that fine one shows.
+///
+/// The coarse spacing is the first decade of the document's own spacing whose
+/// cell is at least `CELL_FULL` across, so it is never a solid block of lines.
+/// The fine spacing is the decade under it, faded out as its cells shrink from
+/// `CELL_FULL` to `CELL_FADE_OUT`. At the moment the coarse level steps up, the
+/// level it replaces is exactly `CELL_FULL` across and fully drawn, so the
+/// picture does not change: the tenfold jump the old single-level grid made is
+/// spread across the whole decade of zoom instead.
+pub fn grid_levels(view: &View, spacing: f64) -> (f64, f64, f64) {
+    let spacing = spacing.max(1e-6);
+    let pixels_per_mm = view.pixels_per_mm();
+    let mut coarse = spacing;
+    // Bounded: an absurd zoom cannot ask for an unbounded number of decades.
+    for _ in 0..40 {
+        if coarse * pixels_per_mm >= CELL_FULL {
+            break;
+        }
+        coarse *= 10.0;
+    }
+    if coarse <= spacing * 1.000_001 {
+        // The document's own spacing is already wide enough, so there is no
+        // finer decade to fade in under it.
+        return (spacing, spacing, 0.0);
+    }
+    let fine = coarse / 10.0;
+    let cell = fine * pixels_per_mm;
+    let t = ((cell - CELL_FADE_OUT) / (CELL_FULL - CELL_FADE_OUT)).clamp(0.0, 1.0);
+    // Smoothstep, so the fine grid arrives and leaves without an edge.
+    (fine, coarse, t * t * (3.0 - 2.0 * t))
+}
+
+/// Grid spacing that is legible at this zoom: the coarse decade of
+/// `grid_levels`. The axes are laid out on it, and the tool rail reads it to
+/// say what one grid square means.
+pub fn effective_grid_spacing(view: &View, spacing: f64) -> f64 {
+    grid_levels(view, spacing).1
+}
+
+/// How many lines one level of the grid may draw either side of its centre.
+/// The fine level at its densest would otherwise be several hundred, which is
+/// pixels of work for lines that are all but invisible by then.
+const MAX_LINES: i64 = 140;
+
 fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
-    let spacing = effective_grid_spacing(view, grid.spacing);
-    // Enough lines to fill the view, capped so an extreme zoom cannot cost
-    // seconds.
-    let lines = 48i64;
+    let (fine, coarse, strength) = grid_levels(view, grid.spacing);
+    let radius = grid_radius(view);
+    // The fine level is drawn over a shorter reach than the coarse one: far
+    // from the centre its lines are a wash rather than a measure, and drawing
+    // them there costs the most.
+    if strength > 0.03 {
+        draw_grid_level(frame, view, fine, radius * 0.55, strength, false, palette);
+    }
+    draw_grid_level(frame, view, coarse, radius, 1.0, true, palette);
+}
+
+/// One decade of the ground grid, centred on the camera target so panning never
+/// runs off the end of it. The centre is snapped to the level's own spacing, so
+/// every line sits at a whole multiple of it -- which is what keeps the line
+/// through zero *on* zero, and the X and Y axes lying along the grid rather
+/// than across it.
+fn draw_grid_level(
+    frame: &mut Frame,
+    view: &View,
+    spacing: f64,
+    radius: f64,
+    strength: f64,
+    majors: bool,
+    palette: &Palette,
+) {
+    let lines = ((radius / spacing).ceil() as i64).clamp(1, MAX_LINES);
     let half = spacing * lines as f64;
-    // Snap the grid to the camera target so panning does not run off the end.
     let cx = (view.camera.target.x / spacing).round() * spacing;
     let cy = (view.camera.target.y / spacing).round() * spacing;
+    let centre = Vec3::new(cx, cy, 0.0);
+    // A major line every ten, counted in whole multiples of the spacing from
+    // the world origin rather than from the centre, so which lines are major
+    // stays put while the camera pans over them.
+    let shade = |world: f64| {
+        let index = (world / spacing).round() as i64;
+        let colour = if majors && index.rem_euclid(10) == 0 { palette.grid_major } else { palette.grid };
+        [colour[0], colour[1], colour[2], (colour[3] as f64 * strength).round() as u8]
+    };
     for i in -lines..=lines {
         let offset = i as f64 * spacing;
-        let major = i % 10 == 0;
-        let colour = if major { palette.grid_major } else { palette.grid };
         faded_line(
             frame,
             view,
             Vec3::new(cx + offset, cy - half, 0.0),
             Vec3::new(cx + offset, cy + half, 0.0),
-            Vec3::new(cx, cy, 0.0),
-            half,
-            colour,
+            centre,
+            radius,
+            shade(cx + offset),
             GRID_BIAS,
         );
         faded_line(
@@ -503,9 +554,9 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
             view,
             Vec3::new(cx - half, cy + offset, 0.0),
             Vec3::new(cx + half, cy + offset, 0.0),
-            Vec3::new(cx, cy, 0.0),
-            half,
-            colour,
+            centre,
+            radius,
+            shade(cy + offset),
             GRID_BIAS,
         );
     }
@@ -552,22 +603,42 @@ fn faded_line(
 
 fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
     let spacing = effective_grid_spacing(view, grid.spacing);
-    let length = spacing * 48.0;
+    let radius = grid_radius(view);
     let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
     let directions = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
     for axis in 0..3 {
         if !grid.axes[axis] {
             continue;
         }
-        // Where the axis is centred. Pinned at the origin it is the origin;
-        // along the grid, X and Y are the grid's own lines through zero, so
-        // they are centred where the grid is and travel with it. Z has no grid
-        // line to be -- the grid is the ground -- so it stays at the origin in
-        // both styles.
-        let centre = match (grid.style, axis) {
-            (AxisStyle::Grid, 0) => Vec3::new((view.camera.target.x / spacing).round() * spacing, 0.0, 0.0),
-            (AxisStyle::Grid, 1) => Vec3::new(0.0, (view.camera.target.y / spacing).round() * spacing, 0.0),
-            _ => Vec3::ZERO,
+        // The two styles are two different things, and each is drawn as what it
+        // is. Along the grid, an axis *is* a grid line: it runs the width of the
+        // ground, travels with it, and fades out with it at the edge -- so X and
+        // Y are the coloured lines through zero, the way every other 3D
+        // application draws them. Pinned at the origin, it is a cross: a
+        // bounded mark of a dozen grid squares that stays at zero while the
+        // camera pans away from it, drawn at full strength so it reads as an
+        // object rather than as ground.
+        let (centre, length, reach) = match grid.style {
+            AxisStyle::Grid => {
+                let centre = match axis {
+                    // Snapped to the grid's own spacing, so the axis lies along
+                    // a grid line rather than between two of them.
+                    0 => Vec3::new((view.camera.target.x / spacing).round() * spacing, 0.0, 0.0),
+                    1 => Vec3::new(0.0, (view.camera.target.y / spacing).round() * spacing, 0.0),
+                    // Z has no grid line to be: the grid is the ground.
+                    _ => Vec3::ZERO,
+                };
+                (centre, radius, radius)
+            }
+            // `reach` past the length, so the fade only softens the last part of
+            // each arm instead of consuming the whole of it.
+            AxisStyle::Origin => {
+                // Bounded, and always well inside the ground's own reach, so it
+                // reads as a cross at the origin rather than as another pair of
+                // grid lines however far the camera is pulled back.
+                let length = (spacing * 12.0).min(radius * 0.45);
+                (Vec3::ZERO, length, length * 2.0)
+            }
         };
         // Both halves fade outward from the centre, for the same reason the
         // grid does: an axis that ends abruptly reads as an object.
@@ -578,7 +649,7 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
                 centre,
                 centre + directions[axis] * (length * sign),
                 centre,
-                length,
+                reach,
                 colours[axis],
                 AXIS_BIAS,
             );
@@ -756,8 +827,8 @@ mod tests {
     }
 
     #[test]
-    fn an_orthographic_box_away_from_the_centre_of_the_frame_keeps_all_its_faces() {
-        // Under orthographic projection every ray runs along the view direction,
+    fn a_box_away_from_the_centre_of_the_frame_keeps_all_its_faces() {
+        // Every ray runs along the view direction,
         // so which faces are turned towards the viewer cannot depend on where in
         // the frame they land. Culling against `eye - centroid` made it depend on
         // exactly that: it dropped a near-edge-on side wall out of the image, and
@@ -772,7 +843,7 @@ mod tests {
         // degrees between the two answers, and every wall inside that is lost.
         let mesh = primitives::box_mesh(40.0, 20.0, 4.0).translated(Vec3::new(100.0, 0.0, 0.0));
         let prepared = Renderable::prepare(&mesh);
-        let camera = Camera { yaw: 2.0, pitch: -15.0, distance: 120.0, orthographic: true, ..Camera::default() };
+        let camera = Camera { yaw: 2.0, pitch: -15.0, distance: 120.0, ..Camera::default() };
         let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)));
 
         let mut empty = request(Vec::new(), DisplayMode::Shaded);
@@ -828,14 +899,116 @@ mod tests {
 
     #[test]
     fn the_z_axis_stays_at_the_origin_in_both_styles() {
-        // There is no ground line for Z to be: the grid is the ground.
+        // There is no ground line for Z to be: the grid is the ground, so
+        // neither style moves it off zero.
         let drawn = |style: AxisStyle| {
             let mut req = request(Vec::new(), DisplayMode::Shaded);
             req.grid = Grid { visible: false, spacing: 10.0, axes: [false, false, true], style, plane_marks: false };
-            pixels_of(&render(&req), req.palette.axis_z)
+            let frame = render(&req);
+            let mut columns: Vec<usize> = Vec::new();
+            for i in 0..frame.width * frame.height {
+                let o = i * 4;
+                if frame.color[o..o + 3] == req.palette.axis_z[..3] {
+                    columns.push(i % frame.width);
+                }
+            }
+            columns
         };
-        assert!(drawn(AxisStyle::Grid) > 0);
-        assert_eq!(drawn(AxisStyle::Grid), drawn(AxisStyle::Origin));
+        for style in AxisStyle::ALL {
+            let columns = drawn(style);
+            assert!(!columns.is_empty(), "{style:?}: the Z axis did not draw");
+            // The camera looks at the origin, so the axis through it runs down
+            // the middle of the frame whichever style drew it.
+            let (lo, hi) = (*columns.iter().min().unwrap(), *columns.iter().max().unwrap());
+            assert!(lo >= 78 && hi <= 82, "{style:?}: the Z axis is not at the origin: columns {lo}..{hi}");
+        }
+    }
+
+    #[test]
+    fn the_two_axis_styles_are_two_different_pictures() {
+        // Issue 23: the setting had no visible effect. Both styles put the same
+        // three lines through the same origin, and at the origin the pinned one
+        // was centred exactly where the travelling one was -- so the only way to
+        // tell them apart was to pan a long way off. A pinned axis is now a
+        // bounded cross, drawn short, while one along the grid runs the width of
+        // the ground.
+        // How far the axis reaches from the centre of the frame, counting any
+        // pixel that is not the background: an axis fades out along its length,
+        // and a faded pixel is still a drawn one.
+        let reach = |style: AxisStyle| {
+            let mut req = request(Vec::new(), DisplayMode::Shaded);
+            req.grid = Grid { visible: false, spacing: 10.0, axes: [true, false, false], style, plane_marks: false };
+            let frame = render(&req);
+            let centre = ((frame.width / 2) as f64, (frame.height / 2) as f64);
+            (0..frame.width * frame.height)
+                .filter(|&i| !is_background(&frame, i, &req.palette))
+                .map(|i| ((i % frame.width) as f64 - centre.0).hypot((i / frame.width) as f64 - centre.1))
+                .fold(0.0_f64, f64::max)
+        };
+        let pinned = reach(AxisStyle::Origin);
+        let along = reach(AxisStyle::Grid);
+        assert!(pinned > 0.0 && along > 0.0, "both styles should draw the X axis: {pinned} pinned, {along} along");
+        assert!(along > pinned * 1.5, "the two styles look the same: {pinned} pinned against {along} along the grid");
+    }
+
+    #[test]
+    fn the_axes_lie_along_the_grid_lines_rather_than_across_them() {
+        // Issue 20: with the grid snapped to the camera target and the axes
+        // snapped to their own rounding, the X axis could run between two grid
+        // lines instead of along one. Every line of either is a whole multiple
+        // of the spacing, so the line through zero is a grid line -- checked
+        // from a target that is deliberately not on one.
+        let camera = Camera { target: Vec3::new(37.3, -12.8, 0.0), distance: 300.0, ..Camera::default() };
+        let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)));
+        let spacing = effective_grid_spacing(&view, 10.0);
+        for target in [camera.target.x, camera.target.y] {
+            let centre = (target / spacing).round() * spacing;
+            let remainder = (centre / spacing) - (centre / spacing).round();
+            assert!(remainder.abs() < 1e-9, "the grid centre is not a whole multiple of the spacing");
+            // Zero is one of the lines this grid draws, which is the axis.
+            assert!((centre / spacing).abs().fract() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn zooming_out_brings_the_next_grid_decade_in_without_a_step() {
+        // Issue 25: the grid stepped up a whole decade at one particular zoom,
+        // and the picture lurched -- every cell tenfold wider from one wheel
+        // notch to the next, and the ground's extent with it. Sweeping the zoom
+        // continuously, neither the coarse spacing nor the extent may ever jump.
+        let mut previous: Option<(f64, f64)> = None;
+        let mut distance = 20.0_f64;
+        while distance < 200_000.0 {
+            let camera = Camera { distance, ..Camera::default() };
+            let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0)));
+            let (fine, coarse, strength) = grid_levels(&view, 1.0);
+            let radius = grid_radius(&view);
+            if let Some((previous_coarse, previous_radius)) = previous {
+                // The extent follows the zoom itself, so one step of it moves
+                // the extent by one step.
+                assert!(
+                    radius / previous_radius < 1.05,
+                    "the ground's extent jumped at distance {distance}: {previous_radius} to {radius}"
+                );
+                // Nothing to check where the level that stepped up was the
+                // document's own spacing: there was no finer decade under it to
+                // be faded, and it was being drawn in full.
+                if coarse != previous_coarse {
+                    // A decade may only arrive by taking over from the one below
+                    // it, and that one has to still be drawn at full strength as
+                    // it hands over -- so the frame after the step looks like the
+                    // frame before it.
+                    assert!((coarse - previous_coarse * 10.0).abs() < 1e-9, "the grid skipped a decade");
+                    assert!((fine - previous_coarse).abs() < 1e-9, "the level that stepped up is not the old coarse");
+                    assert!(
+                        strength > 0.98,
+                        "the grid stepped up while the decade below it was already faded to {strength}"
+                    );
+                }
+            }
+            previous = Some((coarse, radius));
+            distance *= 1.01;
+        }
     }
 
     #[test]
@@ -997,17 +1170,27 @@ mod tests {
     fn the_grid_and_axes_draw_in_their_own_colours() {
         let empty = Renderable::empty();
         let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
+        // Close enough in that a 10 mm grid is drawn at full strength, so there
+        // are grid lines either side of the axes to find.
+        req.view.camera.distance = 30.0;
         req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
         let frame = render(&req);
-        for (name, colour) in [
-            ("grid", req.palette.grid),
-            ("X axis", req.palette.axis_x),
-            ("Y axis", req.palette.axis_y),
-            ("Z axis", req.palette.axis_z),
-        ] {
+        for (name, colour) in
+            [("X axis", req.palette.axis_x), ("Y axis", req.palette.axis_y), ("Z axis", req.palette.axis_z)]
+        {
             let count = frame.color.chunks_exact(4).filter(|p| *p == colour).count();
             assert!(count > 0, "{name} did not draw");
         }
+        // The grid fades outwards from the camera target and the axes cover its
+        // two lines through zero, so it is counted as what it adds to the frame
+        // rather than by an exact colour match.
+        let mut bare = req;
+        bare.grid.visible = false;
+        let bare = render(&bare);
+        assert!(
+            count_non_background(&frame, &Palette::dark()) > count_non_background(&bare, &Palette::dark()),
+            "the grid did not draw"
+        );
     }
 
     #[test]
@@ -1108,16 +1291,18 @@ mod tests {
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
         req.view.camera.distance = 1.0;
         let frame = render(&req);
-        // The near plane clipping means we get a partial fill, not a panic and
-        // not a screen of garbage from vertices behind the eye.
+        // A parallel projection has no near-plane singularity to fall into: the
+        // walls the camera has passed simply land behind the ones it has not, so
+        // this is a partial fill rather than a panic or a screen of garbage.
         assert_eq!(frame.color.len(), 160 * 120 * 4);
     }
 
     #[test]
-    fn an_orthographic_view_renders_too() {
+    fn a_view_from_far_away_renders_too() {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-        req.view.camera.orthographic = true;
+        req.view.camera.distance = 4000.0;
+        req.view.camera.fov_deg = 2.0;
         let frame = render(&req);
         assert!(count_non_background(&frame, &req.palette) > 1000);
     }

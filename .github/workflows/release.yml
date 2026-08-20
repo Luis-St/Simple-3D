@@ -1,8 +1,9 @@
 # Spec section 11: one commit produces both artefacts, with the version derived
-# from the tag. Portable single-file executables for both targets -- no
-# installer, no runtime, nothing for the user to install. The Linux job also
-# packages its executable as a .deb, for people who would rather their
-# distribution tracked the file than manage it themselves.
+# from the tag. Portable single-file executables for both targets -- no runtime
+# and nothing for the user to install. Each job then packages its own executable
+# a second time, for people who would rather their system tracked the file than
+# manage it themselves: a .deb on Linux, an .msi on Windows. Neither replaces
+# the portable executable.
 #
 # The toolchain is pinned by rust-toolchain.toml, which both jobs pick up
 # automatically, so the same commit builds the same binary on either runner.
@@ -84,6 +85,33 @@ jobs:
         with:
           name: ${{ matrix.artefact }}
           path: dist/${{ matrix.artefact }}
+          if-no-files-found: error
+
+      # The Windows counterpart of the .deb below: the same executable, in an
+      # installer that puts it in Program Files and offers a Start menu entry
+      # and a desktop shortcut, either of which can be turned off in the
+      # installer's feature tree. The portable .exe above is still the first
+      # artefact; this is for people who would rather not keep track of a file.
+      - name: Build the Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"' | Select-Object -First 1).Matches.Groups[1].Value
+          Write-Host "Building the installer for version $version"
+          wix build -arch x64 `
+            -d "Version=$version" `
+            -d "ExePath=$PWD\target\${{ matrix.target }}\release\simple-3d.exe" `
+            -ext WixToolset.UI.wixext `
+            packaging/windows/simple-3d.wxs `
+            -o dist/simple-3d-windows-x86_64.msi
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: simple-3d-msi
+          path: dist/*.msi
           if-no-files-found: error
 
       # An addition to the portable executable above, never a replacement for

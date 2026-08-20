@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 const SETTINGS_FILE: &str = "settings.json";
 const KEYMAP_FILE: &str = "keymap.json";
 const MAX_RECENT: usize = 10;
+/// A row of swatches, no more: past that it is a list to search rather than a
+/// set to glance at.
+const MAX_RECENT_COLOURS: usize = 8;
 
 /// How the viewport draws geometry.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -268,12 +271,6 @@ pub struct AppSettings {
     pub display_mode: DisplayMode,
     pub show_grid: bool,
     pub show_bounding_box: bool,
-    /// Draw hidden nodes as translucent ghosts rather than not at all. Off by
-    /// default: hiding something means it goes away, and a red shape still
-    /// sitting in the viewport is not that. It is worth having for positioning a
-    /// tool body that is about to be subtracted, which is why it is a setting
-    /// and not a removal.
-    pub show_ghosts: bool,
     pub handle_frame: HandleFrame,
     /// Where a new shape lands.
     #[serde(default)]
@@ -281,6 +278,12 @@ pub struct AppSettings {
     /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
     /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
+    /// The colours most recently applied, most recent first. Offered beside the
+    /// fixed palette wherever a colour can be chosen: the colour a project is
+    /// actually painted in is nearly always one already used somewhere else in
+    /// it, and finding it again in a picker is a worse job than it looks.
+    #[serde(default)]
+    pub recent_colours: Vec<[u8; 3]>,
     pub last_export_dir: Option<PathBuf>,
     pub last_export_format: String,
     pub last_export_scale: f64,
@@ -299,10 +302,10 @@ impl Default for AppSettings {
             display_mode: DisplayMode::ShadedWithEdges,
             show_grid: true,
             show_bounding_box: false,
-            show_ghosts: false,
             handle_frame: HandleFrame::Object,
             placement: Placement::Origin,
             rotate_snap_deg: 15.0,
+            recent_colours: Vec::new(),
             last_export_dir: None,
             // 3MF by default, because it records units.
             last_export_format: "3mf".to_string(),
@@ -318,6 +321,14 @@ impl AppSettings {
         self.recent_files.retain(|p| p != &path);
         self.recent_files.insert(0, path);
         self.recent_files.truncate(MAX_RECENT);
+    }
+
+    /// Remember a colour that was just applied, most recent first and without
+    /// duplicates, so the row of recent swatches stays short enough to scan.
+    pub fn remember_colour(&mut self, colour: [u8; 3]) {
+        self.recent_colours.retain(|c| *c != colour);
+        self.recent_colours.insert(0, colour);
+        self.recent_colours.truncate(MAX_RECENT_COLOURS);
     }
 
     pub fn forget_recent(&mut self, path: &Path) {
@@ -545,5 +556,20 @@ mod tests {
     fn the_handle_frame_toggles_both_ways() {
         assert_eq!(HandleFrame::Object.toggled(), HandleFrame::World);
         assert_eq!(HandleFrame::World.toggled(), HandleFrame::Object);
+    }
+    #[test]
+    fn recent_colours_are_most_recent_first_deduplicated_and_bounded() {
+        let mut settings = AppSettings::default();
+        for i in 0..MAX_RECENT_COLOURS + 4 {
+            settings.remember_colour([i as u8, 0, 0]);
+        }
+        assert_eq!(settings.recent_colours.len(), MAX_RECENT_COLOURS);
+        assert_eq!(settings.recent_colours[0], [(MAX_RECENT_COLOURS + 3) as u8, 0, 0]);
+
+        // Using one again moves it to the front rather than repeating it.
+        let again = settings.recent_colours[3];
+        settings.remember_colour(again);
+        assert_eq!(settings.recent_colours[0], again);
+        assert_eq!(settings.recent_colours.iter().filter(|c| **c == again).count(), 1);
     }
 }

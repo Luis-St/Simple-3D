@@ -186,10 +186,10 @@ fn clicking_a_panel_header_rolls_it_up_without_moving_it() {
     assert!(!harness.state().settings.layout.is_collapsed(Panel::Outliner), "the second click did not unroll it");
 }
 
-// -- the field label scrub ----------------------------------------------------
+// -- the scrub, which is on the field itself ----------------------------------
 
 #[test]
-fn dragging_a_field_label_scrubs_its_value_in_one_undo_step() {
+fn dragging_a_value_field_scrubs_it_in_one_undo_step() {
     let mut harness = harness("scrub");
     let plate = harness.state().primary().expect("the starting scene has a plate selected");
     let width = |harness: &Harness<'_, App>| harness.state().scene.node(plate).params().unwrap().num("width");
@@ -200,7 +200,7 @@ fn dragging_a_field_label_scrubs_its_value_in_one_undo_step() {
     let grip = rect_of(&harness, crate::panel_properties::grip_id("Width (X)"));
     drag(&mut harness, grip.center(), grip.center() + egui::vec2(60.0, 0.0), 6);
 
-    assert!((width(&harness) - 50.0).abs() < 1e-9, "the label scrub gave {} rather than 50 mm", width(&harness));
+    assert!((width(&harness) - 50.0).abs() < 1e-9, "the scrub gave {} rather than 50 mm", width(&harness));
     assert_eq!(
         harness.state().history.undo_len(),
         steps + 1,
@@ -213,10 +213,10 @@ fn dragging_a_field_label_scrubs_its_value_in_one_undo_step() {
 }
 
 #[test]
-fn a_scrub_that_runs_off_its_label_keeps_scrubbing_that_field_and_no_other() {
-    // The pointer leaves the label almost immediately -- six pixels a
+fn a_scrub_that_runs_off_its_field_keeps_scrubbing_that_field_and_no_other() {
+    // The pointer leaves the field almost immediately -- six pixels a
     // millimetre means any real edit crosses it -- and it passes over the other
-    // two dimension labels on its way. Neither may take the gesture over.
+    // two dimension fields on its way. Neither may take the gesture over.
     let mut harness = harness("scrub-away");
     let plate = harness.state().primary().unwrap();
     let params = |harness: &Harness<'_, App>| {
@@ -235,7 +235,31 @@ fn a_scrub_that_runs_off_its_label_keeps_scrubbing_that_field_and_no_other() {
 
     let (w, d, t) = params(&harness);
     assert!((w - 45.0).abs() < 1e-9, "the field the drag began on scrubbed to {w} rather than 45 mm");
-    assert_eq!((d, t), (20.0, 4.0), "a label the pointer merely crossed was scrubbed too");
+    assert_eq!((d, t), (20.0, 4.0), "a field the pointer merely crossed was scrubbed too");
+}
+
+#[test]
+fn every_scrubbable_value_is_dragged_from_its_own_field() {
+    // Issue 27: the drag used to be on whatever sat beside the field -- the
+    // label for a dimension, the four-pixel axis chip for a position -- so the
+    // same gesture had a different grip depending on the row. Every one of them
+    // is now the field, and this drags all three kinds to prove it.
+    let mut harness = harness("scrub-everywhere");
+    let plate = harness.state().primary().expect("the starting scene has a plate selected");
+    let node = |harness: &Harness<'_, App>| harness.state().scene.node(plate).clone();
+    let before = node(&harness);
+
+    for (name, moved) in [("Position (mm):0", 10.0), ("Rotation (deg):2", 150.0), ("Scale (x):1", 0.5)] {
+        let field = rect_of(&harness, crate::panel_properties::grip_id(name));
+        drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 6);
+        let after = node(&harness);
+        let change = match name {
+            "Position (mm):0" => after.position.x - before.position.x,
+            "Rotation (deg):2" => after.rotation.z - before.rotation.z,
+            _ => after.scale.y - before.scale.y,
+        };
+        assert!((change - moved).abs() < 1e-9, "dragging {name} moved it by {change} rather than {moved}");
+    }
 }
 
 // -- picking and grabbing in the viewport -------------------------------------
@@ -423,7 +447,7 @@ fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_origin() {
         .map(|i| egui::pos2(viewport.center().x, viewport.top() + i as f32))
         .find(|p| {
             let (origin, dir) = view.ray(*p);
-            view.ray_plane(*p, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)).is_none()
+            view.ray_plane_ahead(*p, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)).is_none()
                 && crate::pick::ray_mesh(&mesh, origin, dir).is_none()
         })
         .expect("the whole viewport meets the ground plane; this test has nowhere empty to click");
@@ -498,10 +522,9 @@ fn escape_abandons_a_half_typed_value_and_enter_takes_it() {
     let plate = harness.state().primary().expect("the starter shape is selected");
     let before = harness.state().scene.node(plate).position.x;
 
-    // The field has no name of its own; its axis chip does, and the field is the
-    // rest of that row.
-    let grip = rect_of(&harness, crate::panel_properties::grip_id("Position (mm):0"));
-    let at = egui::pos2(grip.right() + 40.0, grip.center().y);
+    // The field carries the name, because the field is also the grip.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Position (mm):0"));
+    let at = field.center();
 
     replace_field(&mut harness, at, "40");
     key(&mut harness, egui::Key::Escape);

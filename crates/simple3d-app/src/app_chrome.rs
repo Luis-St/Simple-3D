@@ -11,19 +11,37 @@ use crate::window_chrome;
 use simple3d_core::config::{self, DisplayMode, Panel, Side};
 use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
-use simple3d_core::scene::{GroupOp, NodeId};
+use simple3d_core::scene::{GroupOp, NodeId, Visibility};
 use simple3d_core::unit::{format_number, Unit};
 use simple3d_export::Format;
 use std::hash::{Hash, Hasher};
 
 impl App {
+    /// The nodes drawn as ghosts: hidden, and asked to be seen anyway. A group
+    /// set to ghost carries its children with it, the way hiding it does.
+    pub(crate) fn ghosts(&self) -> Vec<NodeId> {
+        self.scene
+            .depth_first()
+            .into_iter()
+            .filter(|id| self.scene.node(*id).visibility() == Visibility::Ghost)
+            .collect()
+    }
+
+    /// A cheap summary of which nodes are ghosts, for the cache key: the
+    /// renderables have to be rebuilt when one is turned on or off.
+    fn ghost_generation(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.ghosts().hash(&mut hasher);
+        hasher.finish()
+    }
+
     /// Rebuild the per-node meshes the viewport needs -- the selection outline and
     /// the ghosts -- when either the evaluation or what is selected has changed.
     pub(crate) fn refresh_node_renderables(&mut self) {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.evaluation_generation.hash(&mut hasher);
         self.selection.hash(&mut hasher);
-        self.settings.show_ghosts.hash(&mut hasher);
+        self.ghost_generation().hash(&mut hasher);
         let key = hasher.finish();
         if key == self.renderable_key {
             return;
@@ -34,14 +52,10 @@ impl App {
         for id in self.top_level_selection() {
             wanted.extend(std::iter::once(id).chain(self.scene.descendants(id)));
         }
-        if self.settings.show_ghosts {
-            // Hidden nodes, so a subtracted tool body can be seen while it is
-            // being positioned (spec section 6.1).
-            for id in self.scene.depth_first() {
-                if !self.scene.node(id).visible {
-                    wanted.extend(std::iter::once(id).chain(self.scene.descendants(id)));
-                }
-            }
+        // Every node the user asked to keep as a ghost, so a subtracted tool
+        // body can be seen while it is being positioned (spec section 6.1).
+        for id in self.ghosts() {
+            wanted.extend(std::iter::once(id).chain(self.scene.descendants(id)));
         }
         wanted.sort_unstable();
         wanted.dedup();
@@ -152,7 +166,7 @@ impl App {
 
     fn command_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
         let label = ui::menu_label(&self.keymap, command);
-        if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+        if ui::menu_entry(ui, &label, enabled).clicked() {
             self.run(command);
             ui.close();
         }
@@ -225,11 +239,11 @@ impl App {
                 format!("{}\t{}", undo.unwrap_or_else(|| "Undo".into()), self.keymap.shortcut_text(Command::Undo));
             let redo_text =
                 format!("{}\t{}", redo.unwrap_or_else(|| "Redo".into()), self.keymap.shortcut_text(Command::Redo));
-            if ui.add_enabled(can_undo, egui::Button::new(undo_text)).clicked() {
+            if ui::menu_entry(ui, &undo_text, can_undo).clicked() {
                 self.run(Command::Undo);
                 ui.close();
             }
-            if ui.add_enabled(can_redo, egui::Button::new(redo_text)).clicked() {
+            if ui::menu_entry(ui, &redo_text, can_redo).clicked() {
                 self.run(Command::Redo);
                 ui.close();
             }
@@ -295,17 +309,6 @@ impl App {
                 self.command_item(ui, command, true);
             }
             ui.separator();
-            let ortho = self.scene.camera.orthographic;
-            let label = format!(
-                "{}\t{}",
-                if ortho { "Switch to perspective" } else { "Switch to orthographic" },
-                self.keymap.shortcut_text(Command::ToggleProjection)
-            );
-            if ui.button(label).clicked() {
-                self.run(Command::ToggleProjection);
-                ui.close();
-            }
-            ui.separator();
             for (mode, command) in [
                 (DisplayMode::Shaded, Command::DisplayShaded),
                 (DisplayMode::ShadedWithEdges, Command::DisplayShadedEdges),
@@ -318,7 +321,7 @@ impl App {
                     mode.label(),
                     self.keymap.shortcut_text(command)
                 );
-                if ui.button(label).clicked() {
+                if ui::menu_entry(ui, &label, true).clicked() {
                     self.run(command);
                     ui.close();
                 }
@@ -330,11 +333,10 @@ impl App {
                 (self.scene.settings.axes_visible[1], Command::ToggleAxisY, "Y axis"),
                 (self.scene.settings.axes_visible[2], Command::ToggleAxisZ, "Z axis"),
                 (self.settings.show_bounding_box, Command::ToggleBoundingBox, "Bounding box"),
-                (self.settings.show_ghosts, Command::ToggleGhosts, "Hidden nodes as ghosts"),
                 (!self.settings.layout.docks_hidden, Command::ToggleDocks, "Side docks"),
             ] {
                 let text = format!("{} {label}\t{}", if on { "*" } else { " " }, self.keymap.shortcut_text(command));
-                if ui.button(text).clicked() {
+                if ui::menu_entry(ui, &text, true).clicked() {
                     self.run(command);
                     ui.close();
                 }
@@ -385,7 +387,7 @@ impl App {
                     mode.label(),
                     self.keymap.shortcut_text(command)
                 );
-                if ui.button(text).clicked() {
+                if ui::menu_entry(ui, &text, true).clicked() {
                     self.run(command);
                     ui.close();
                 }
@@ -396,7 +398,7 @@ impl App {
                 self.settings.handle_frame.label(),
                 self.keymap.shortcut_text(Command::ToggleHandleFrame)
             );
-            if ui.button(text).clicked() {
+            if ui::menu_entry(ui, &text, true).clicked() {
                 self.run(Command::ToggleHandleFrame);
                 ui.close();
             }

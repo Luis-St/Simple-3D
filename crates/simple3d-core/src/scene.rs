@@ -140,6 +140,15 @@ pub struct Node {
     pub anchor: Anchor,
     /// Hidden nodes are excluded from evaluation and export entirely.
     pub visible: bool,
+    /// What a hidden node looks like: nothing at all, or a translucent ghost.
+    ///
+    /// Meaningless while `visible` is true, and the pair is read through
+    /// `Node::visibility` rather than field by field. It is per node because
+    /// the two reasons to hide something are different reasons: a tool body
+    /// about to be subtracted has to be seen while it is positioned, and
+    /// everything else that is hidden has to be *gone*. One switch over the
+    /// whole document could only ever answer one of them.
+    pub ghost: bool,
     /// What this node is painted, if anything. A node without one takes its
     /// nearest painted ancestor's colour, which is what makes painting a group
     /// paint everything in it; nothing painted anywhere leaves the theme's own
@@ -152,10 +161,49 @@ pub struct Node {
     pub parent: Option<NodeId>,
 }
 
+/// What a node shows in the viewport: the three states the interface offers.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Visibility {
+    #[default]
+    Visible,
+    /// Excluded from the model, drawn as a translucent shell -- for a body that
+    /// is about to be subtracted and has to be positioned first.
+    Ghost,
+    /// Excluded from the model and not drawn at all.
+    Hidden,
+}
+
+impl Visibility {
+    pub const ALL: [Visibility; 3] = [Visibility::Visible, Visibility::Ghost, Visibility::Hidden];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Visibility::Visible => "Visible",
+            Visibility::Ghost => "Ghost",
+            Visibility::Hidden => "Hidden",
+        }
+    }
+}
+
 impl Node {
     /// The smallest a scale factor may get. Zero collapses a solid into a plane
     /// and negative turns it inside out, and neither is a thing to export.
     pub const MIN_SCALE: f64 = 1e-4;
+
+    /// The node's own visibility, as the one three-state answer the interface
+    /// asks for rather than as the two flags that store it.
+    pub fn visibility(&self) -> Visibility {
+        match (self.visible, self.ghost) {
+            (true, _) => Visibility::Visible,
+            (false, true) => Visibility::Ghost,
+            (false, false) => Visibility::Hidden,
+        }
+    }
+
+    pub fn set_visibility(&mut self, visibility: Visibility) {
+        self.visible = visibility == Visibility::Visible;
+        self.ghost = visibility == Visibility::Ghost;
+    }
 
     /// A scale with every axis clamped into the range that produces a solid.
     pub fn sane_scale(scale: Vec3) -> Vec3 {
@@ -279,6 +327,15 @@ impl Default for SceneSettings {
 
 /// Saved with the project (spec section 6.1: "The camera position is part of
 /// the saved project").
+///
+/// The projection is always orthographic. A perspective view converges every
+/// parallel line, which in a modelling tool means the grid lines, the origin
+/// axes and the edges of a box all fan out from one another instead of running
+/// together -- a box on the origin was drawn with the axes crossing its top
+/// face at a visibly different angle from the grid they lie on. Nothing here is
+/// judged by eye; every measurement is typed and read back, so the projection
+/// that keeps parallels parallel is the only one worth having. Older files
+/// carrying an `orthographic` flag still load: the field is simply ignored.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub target: Vec3,
@@ -287,13 +344,17 @@ pub struct Camera {
     pub yaw: f64,
     /// Degrees above the XY plane.
     pub pitch: f64,
-    pub orthographic: bool,
+    /// How much of the scene the frame covers, expressed as the field of view a
+    /// perspective camera at `distance` would need to cover the same height.
+    /// Under orthographic projection it is one half of the zoom: `distance`
+    /// times the tangent of half of this is the half-height of the frame in
+    /// millimetres.
     pub fov_deg: f64,
 }
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { target: Vec3::ZERO, distance: 160.0, yaw: -55.0, pitch: 28.0, orthographic: false, fov_deg: 45.0 }
+        Camera { target: Vec3::ZERO, distance: 160.0, yaw: -55.0, pitch: 28.0, fov_deg: 45.0 }
     }
 }
 
@@ -322,6 +383,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            ghost: false,
             colour: None,
             segments: None,
             body: Body::Group { op: GroupOp::Union },
@@ -466,6 +528,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            ghost: false,
             colour: None,
             segments: None,
             body: Body::Primitive { type_id: type_id.to_string(), params: spec.default_params() },
@@ -487,6 +550,7 @@ impl Scene {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            ghost: false,
             colour: None,
             segments: None,
             body: Body::Group { op },
@@ -639,6 +703,7 @@ impl Scene {
             scale: node.scale,
             anchor: node.anchor,
             visible: node.visible,
+            ghost: node.ghost,
             colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
             params,
@@ -665,6 +730,7 @@ impl Scene {
             scale: Node::sane_scale(data.scale),
             anchor: data.anchor,
             visible: data.visible,
+            ghost: data.ghost,
             colour: data.colour.as_deref().and_then(Colour::from_hex),
             segments: data.segments,
             body,
@@ -763,6 +829,10 @@ fn default_true() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// The readable, diffable form of a node used by both the project file and the
 /// clipboard, so a selection can be pasted into a text editor and back again
 /// (spec sections 8.1, 10).
@@ -786,6 +856,10 @@ pub struct NodeData {
     pub anchor: Anchor,
     #[serde(default = "default_true")]
     pub visible: bool,
+    /// Absent from the file for every node that is not a ghost, which is nearly
+    /// all of them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub ghost: bool,
     /// `#rrggbb`, and absent from the file for the usual unpainted node, so a
     /// project written by this version still diffs cleanly against one written
     /// before colours existed.
@@ -1027,6 +1101,7 @@ mod tests {
             scale: Vec3::ONE,
             anchor: Anchor::Centre,
             visible: true,
+            ghost: false,
             colour: None,
             segments: None,
             params: Params::new(),
@@ -1039,6 +1114,7 @@ mod tests {
                 scale: Vec3::ONE,
                 anchor: Anchor::Centre,
                 visible: true,
+                ghost: false,
                 colour: None,
                 segments: None,
                 params: Params::new(),
@@ -1058,5 +1134,30 @@ mod tests {
         scene.remove(a);
         let b = box_at(&mut scene, root, 0.0);
         assert_ne!(a, b);
+    }
+    #[test]
+    fn a_node_has_three_visibility_states_and_they_survive_the_file() {
+        // Issue 21: hidden used to mean "invisible, unless the document-wide
+        // ghost switch is on, in which case it means translucent" -- so the only
+        // states the interface could reach were visible and ghost, and there was
+        // no way to say "this one is gone" while another was being positioned.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let a = scene.add_primitive("plate", root, 0).unwrap();
+        assert_eq!(scene.node(a).visibility(), Visibility::Visible);
+
+        for state in Visibility::ALL {
+            scene.get_mut(a).unwrap().set_visibility(state);
+            assert_eq!(scene.node(a).visibility(), state);
+            // Anything but visible is out of the model, ghost included: a ghost
+            // is drawn, never built.
+            assert_eq!(scene.node(a).visible, state == Visibility::Visible);
+
+            let data = scene.export_subtree(a).unwrap();
+            let mut other = Scene::new();
+            let other_root = other.root();
+            let copy = other.import_subtree(&data, other_root, 0).unwrap();
+            assert_eq!(other.node(copy).visibility(), state, "{state:?} did not survive the round trip");
+        }
     }
 }

@@ -80,11 +80,12 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
 
         let mut items: Vec<Item> = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
         // Ghosts before the selection outline, so the outline stays readable.
-        if app.settings.show_ghosts {
-            for (id, renderable) in &app.node_renderables {
-                if !app.scene.is_shown(*id) {
-                    items.push(Item { renderable, style: Style::Ghost });
-                }
+        let ghosts = app.ghosts();
+        for (id, renderable) in &app.node_renderables {
+            // A ghost group shows its own children as ghosts, so a whole
+            // assembly can be positioned before it is subtracted.
+            if ghosts.iter().any(|&g| g == *id || app.scene.is_ancestor_of(g, *id)) {
+                items.push(Item { renderable, style: Style::Ghost });
             }
         }
         for id in &selected {
@@ -144,7 +145,6 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     {
         value.to_bits().hash(&mut hasher);
     }
-    camera.orthographic.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -345,9 +345,8 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     draw_cursor(app, &painter, view);
 
     let hud = format!(
-        "{} \u{00B7} {} \u{00B7} {} frame",
+        "{} \u{00B7} orthographic \u{00B7} {} frame",
         app.mode.label(),
-        if app.scene.camera.orthographic { "orthographic" } else { "perspective" },
         app.settings.handle_frame.label().to_lowercase()
     );
     let galley = painter.layout_no_wrap(hud, egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
@@ -410,7 +409,7 @@ fn place_cursor(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, vie
     // another shape is the reason to move the cursor at all.
     let (origin, dir) = view.ray(pointer);
     let hit = pick::ray_mesh(&app.evaluated.mesh, origin, dir).map(|t| origin + dir * t);
-    let at = hit.or_else(|| view.ray_plane(pointer, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
+    let at = hit.or_else(|| view.ray_plane_ahead(pointer, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
     match at {
         Some(at) => {
             let snapped = snap_point(at, app.move_snap());
@@ -443,9 +442,9 @@ pub fn cube_id() -> egui::Id {
 /// The orientation cube in the bottom-right corner.
 ///
 /// It answers which way the model faces, and it is also the fastest way to
-/// change that: a face turns the camera to look at it straight on, the dot at
-/// its centre switches between perspective and orthographic. Returns true when
-/// it took the pointer, so a click on it does not also orbit.
+/// change that: a face turns the camera to look at it straight on, and the dot
+/// at its centre returns to the isometric view the cube is drawn from. Returns
+/// true when it took the pointer, so a click on it does not also orbit.
 fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) -> bool {
     let side = theme::metric::VIEW_CUBE;
     let box_rect =
@@ -522,20 +521,17 @@ fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) ->
         painter.text(text_at, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(9.0), text_colour);
     }
 
-    // The centre dot: projection. It sits where no face label does, so it never
-    // covers one.
+    // The centre dot: an isometric view, back to where the cube itself is
+    // drawn from. It sits where no face label does, so it never covers one.
     let dot = if over_centre { token::ACCENT } else { token::TEXT_LO };
     painter.circle_filled(centre, centre_radius * 0.45, dot);
-    if !app.scene.camera.orthographic {
-        painter.circle_stroke(centre, centre_radius * 0.8, egui::Stroke::new(1.0_f32, dot.gamma_multiply(0.6)));
-    }
 
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     if response.clicked() {
         if over_centre {
-            app.run(simple3d_core::keymap::Command::ToggleProjection);
+            app.set_view(crate::view::ViewPreset::Isometric);
         } else if let Some(index) = hovered_face {
             app.set_view(crate::view::CUBE_FACES[index].1);
         }
