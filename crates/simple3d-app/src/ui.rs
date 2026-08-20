@@ -188,6 +188,16 @@ impl FieldBuffers {
             })
             .inner;
         let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        // Escape is the way out of everything else in this application, and it
+        // is the way out of a half-typed value too: the buffer is dropped and
+        // the model keeps what it had. egui surrenders focus on Escape, so
+        // without this the abandoned text would be committed on the way out.
+        let abandoned = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if abandoned {
+            self.buffers.remove(&id);
+            self.errors.remove(&id);
+            return None;
+        }
         if response.has_focus() && !entered {
             self.buffers.insert(id, text);
             return None;

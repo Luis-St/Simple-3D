@@ -464,3 +464,57 @@ fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_first_press()
         "the first right-click on an unselected row did not leave its context menu open"
     );
 }
+
+// -- a value field: Enter takes it, Escape leaves it ---------------------------
+
+fn text(harness: &mut Harness<'_, App>, what: &str) {
+    event(harness, egui::Event::Text(what.to_string()));
+}
+
+/// Click into a field, select what is in it, and type over it -- which is what
+/// entering a value actually is.
+fn replace_field(harness: &mut Harness<'_, App>, at: egui::Pos2, what: &str) {
+    press(harness, at);
+    release(harness, at);
+    modifiers(harness, egui::Modifiers::COMMAND);
+    key(harness, egui::Key::A);
+    modifiers(harness, egui::Modifiers::NONE);
+    text(harness, what);
+}
+
+fn key(harness: &mut Harness<'_, App>, key: egui::Key) {
+    let modifiers = harness.input().modifiers;
+    event(harness, egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+    event(harness, egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers });
+}
+
+#[test]
+fn escape_abandons_a_half_typed_value_and_enter_takes_it() {
+    // Escape is the way out of everything else in this application. It used to
+    // be the one place it was not: egui surrenders focus on Escape, the field
+    // committed on any loss of focus, and the abandoned text was written to the
+    // model on the way out.
+    let mut harness = harness("field-escape");
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let before = harness.state().scene.node(plate).position.x;
+
+    // The field has no name of its own; its axis chip does, and the field is the
+    // rest of that row.
+    let grip = rect_of(&harness, crate::panel_properties::grip_id("Position (mm):0"));
+    let at = egui::pos2(grip.right() + 40.0, grip.center().y);
+
+    replace_field(&mut harness, at, "40");
+    key(&mut harness, egui::Key::Escape);
+    harness.step();
+    assert_eq!(
+        harness.state().scene.node(plate).position.x,
+        before,
+        "Escape committed the value that was being abandoned"
+    );
+
+    // The same typing, ended with Enter, does reach the model.
+    replace_field(&mut harness, at, "40");
+    key(&mut harness, egui::Key::Enter);
+    harness.step();
+    assert_eq!(harness.state().scene.node(plate).position.x, 40.0, "Enter did not take the typed value");
+}
