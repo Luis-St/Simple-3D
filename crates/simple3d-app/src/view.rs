@@ -243,6 +243,110 @@ pub const CUBE_FACES: [([i32; 3], ViewPreset, &str); 6] = [
     ([0, 0, -1], ViewPreset::Bottom, "BTM"),
 ];
 
+/// Every place the orientation cube can be pointed at: its six face centres,
+/// its twelve edge midpoints and its eight corners, as the cube-space vectors
+/// that reach them. A component of 0 means "in the middle of that axis", so the
+/// number of non-zero components says which of the three a zone is.
+///
+/// Faces alone were not enough: from the top there is no way to ask for the
+/// front without going through the View menu, and a corner is how every other
+/// 3D application offers the three-quarter views (issue 34).
+pub const fn cube_zones() -> [[i32; 3]; 26] {
+    let mut out = [[0i32; 3]; 26];
+    let mut count = 0;
+    let mut x = -1;
+    while x <= 1 {
+        let mut y = -1;
+        while y <= 1 {
+            let mut z = -1;
+            while z <= 1 {
+                if !(x == 0 && y == 0 && z == 0) {
+                    out[count] = [x, y, z];
+                    count += 1;
+                }
+                z += 1;
+            }
+            y += 1;
+        }
+        x += 1;
+    }
+    out
+}
+
+/// How many of a zone's components are non-zero: 1 for a face, 2 for an edge,
+/// 3 for a corner.
+pub fn zone_order(zone: [i32; 3]) -> usize {
+    zone.iter().filter(|c| **c != 0).count()
+}
+
+/// Which zone of the orientation cube a point `offset` from its centre falls
+/// on: the nearest of the ones turned towards the eye. `None` when the point is
+/// not on the cube at all.
+///
+/// Nearest-point rather than a hit test against the drawn quads, because the
+/// cube is drawn from six flat faces and the zones are the nine regions of
+/// each: the point on the cube closest to the pointer is the region the pointer
+/// is in, and it says the same thing with a tenth of the geometry.
+pub fn cube_zone_at(yaw_deg: f64, pitch_deg: f64, offset: egui::Vec2, reach: f32) -> Option<[i32; 3]> {
+    let mut best: Option<([i32; 3], f32)> = None;
+    for zone in cube_zones() {
+        let v = Vec3::new(zone[0] as f64, zone[1] as f64, zone[2] as f64);
+        let (at, depth) = cube_project(yaw_deg, pitch_deg, v, reach);
+        // Facing away, so it is on the side of the cube that cannot be seen.
+        if depth >= 0.0 {
+            continue;
+        }
+        let distance = (offset - at).length();
+        if distance > reach * 0.85 {
+            continue;
+        }
+        if best.is_none_or(|(_, d)| distance < d) {
+            best = Some((zone, distance));
+        }
+    }
+    best.map(|(zone, _)| zone)
+}
+
+/// The view a zone asks for: the preset for one of the six faces, and the yaw
+/// and pitch that put the eye on the zone's own direction otherwise.
+///
+/// `current_yaw` is used for the two poles, where every yaw looks the same and
+/// turning to an arbitrary one would spin the model for no reason.
+pub fn cube_zone_angles(zone: [i32; 3], current_yaw: f64) -> (f64, f64) {
+    if let Some(preset) = cube_zone_preset(zone) {
+        let (yaw, pitch) = preset.angles();
+        return match preset {
+            // Straight up or straight down: the yaw is not visible, so keep
+            // the one the camera already has.
+            ViewPreset::Top | ViewPreset::Bottom => (current_yaw, pitch),
+            _ => (yaw, pitch),
+        };
+    }
+    let v = Vec3::new(zone[0] as f64, zone[1] as f64, zone[2] as f64);
+    let length = v.length().max(1e-9);
+    let pitch = (v.z / length).asin().to_degrees().clamp(-89.9, 89.9);
+    let yaw = v.y.atan2(v.x).to_degrees();
+    (yaw, pitch)
+}
+
+/// The named view a zone is, when it is one of the six faces.
+pub fn cube_zone_preset(zone: [i32; 3]) -> Option<ViewPreset> {
+    CUBE_FACES.iter().find(|(normal, _, _)| *normal == zone).map(|(_, preset, _)| *preset)
+}
+
+/// What a zone is called, for the status line: the preset's name for a face,
+/// and the sides it lies between otherwise.
+pub fn cube_zone_label(zone: [i32; 3]) -> String {
+    if let Some(preset) = cube_zone_preset(zone) {
+        return preset.label().to_string();
+    }
+    let names = [(0, 1, "right"), (0, -1, "left"), (1, 1, "back"), (1, -1, "front"), (2, 1, "top"), (2, -1, "bottom")];
+    let parts: Vec<&str> =
+        names.iter().filter(|(axis, sign, _)| zone[*axis] == *sign).map(|(_, _, name)| *name).collect();
+    let what = if zone_order(zone) == 3 { "corner" } else { "edge" };
+    format!("{} {what}", parts.join("-"))
+}
+
 /// Project a unit-cube direction onto the orientation cube's face, given the
 /// camera's yaw and pitch. Returns the offset from the cube's centre in points,
 /// scaled by `reach`, and a depth that is negative towards the eye.
@@ -263,31 +367,6 @@ pub fn cube_project(yaw_deg: f64, pitch_deg: f64, v: Vec3, reach: f32) -> (egui:
     // Screen y grows downward, so up is negated. Depth is negative towards the
     // eye, which is what makes a face visible.
     (egui::vec2(v.dot(right) as f32, -v.dot(up) as f32) * reach, v.dot(forward))
-}
-
-/// Which face of the orientation cube a point `offset` from its centre falls
-/// on: the nearest face centre among the faces that are turned towards the eye.
-/// `None` when the point is outside the cube altogether.
-///
-/// Faces pointing away are excluded rather than being the nearest match, so a
-/// click never turns the camera to the side of the cube you cannot see.
-pub fn cube_face_at(yaw_deg: f64, pitch_deg: f64, offset: egui::Vec2, reach: f32) -> Option<usize> {
-    let mut best: Option<(usize, f32)> = None;
-    for (index, (normal, _, _)) in CUBE_FACES.iter().enumerate() {
-        let n = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
-        let (at, depth) = cube_project(yaw_deg, pitch_deg, n, reach);
-        if depth >= 0.0 {
-            continue;
-        }
-        let distance = (offset - at).length();
-        if distance > reach * 0.9 {
-            continue;
-        }
-        if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((index, distance));
-        }
-    }
-    best.map(|(index, _)| index)
 }
 
 /// Move and zoom the camera so `bounds` fills the viewport with a little margin
@@ -507,7 +586,8 @@ mod tests {
                     // would answer for a face nobody can see.
                     continue;
                 }
-                assert_eq!(cube_face_at(yaw, pitch, at, reach), Some(index), "{label} at yaw {yaw} pitch {pitch}");
+                assert_eq!(cube_zone_at(yaw, pitch, at, reach), Some(*normal), "{label} at yaw {yaw} pitch {pitch}");
+                let _ = index;
             }
         }
     }
@@ -518,12 +598,60 @@ mod tests {
         // and a click in the middle must be the front.
         let (yaw, pitch) = ViewPreset::Front.angles();
         let reach = 20.0_f32;
-        let index = cube_face_at(yaw, pitch, egui::vec2(0.0, 0.0), reach).unwrap();
-        let (normal, preset, _) = CUBE_FACES[index];
-        assert_eq!(normal, [0, -1, 0], "the click landed on a face pointing away from the eye");
-        assert_eq!(preset, ViewPreset::Front);
-        // And a point outside the cube is not a face at all.
-        assert_eq!(cube_face_at(yaw, pitch, egui::vec2(200.0, 0.0), reach), None);
+        let zone = cube_zone_at(yaw, pitch, egui::vec2(0.0, 0.0), reach).unwrap();
+        assert_eq!(zone, [0, -1, 0], "the click landed on a face pointing away from the eye");
+        assert_eq!(cube_zone_preset(zone), Some(ViewPreset::Front));
+        // And a point outside the cube is not part of it at all.
+        assert_eq!(cube_zone_at(yaw, pitch, egui::vec2(200.0, 0.0), reach), None);
+    }
+
+    #[test]
+    fn the_corners_and_edges_of_the_cube_can_be_pointed_at_too() {
+        // Issue 34: a corner is how the three-quarter views are asked for, and
+        // an edge is how the two beside it are.
+        let reach = 20.0_f32;
+        let (yaw, pitch) = ViewPreset::Isometric.angles();
+        for zone in cube_zones() {
+            let v = Vec3::new(zone[0] as f64, zone[1] as f64, zone[2] as f64);
+            let (at, depth) = cube_project(yaw, pitch, v, reach);
+            if depth >= 0.0 {
+                continue;
+            }
+            assert_eq!(cube_zone_at(yaw, pitch, at, reach), Some(zone), "{zone:?} could not be pointed at");
+        }
+    }
+
+    #[test]
+    fn a_corner_of_the_cube_asks_for_the_view_from_that_corner() {
+        // The near corner of the isometric view is +X +Y up ... looking from
+        // it means an eye 35 degrees above the ground, halfway between two
+        // sides.
+        let (yaw, pitch) = cube_zone_angles([1, 1, 1], 0.0);
+        assert!((yaw - 45.0).abs() < 1e-6, "yaw was {yaw}");
+        assert!((pitch - 35.264).abs() < 1e-3, "pitch was {pitch}");
+
+        // An edge between two sides is halfway between them, and level.
+        let (yaw, pitch) = cube_zone_angles([1, -1, 0], 0.0);
+        assert!((yaw + 45.0).abs() < 1e-6, "yaw was {yaw}");
+        assert_eq!(pitch, 0.0);
+
+        // A face is still exactly the preset it always was, and the two poles
+        // keep whatever yaw the camera already had -- turning the model round
+        // on the way to looking straight down at it is motion for nothing.
+        assert_eq!(cube_zone_angles([0, -1, 0], 17.0), ViewPreset::Front.angles());
+        assert_eq!(cube_zone_angles([0, 0, 1], 17.0), (17.0, ViewPreset::Top.angles().1));
+    }
+
+    #[test]
+    fn every_zone_of_the_cube_is_named_after_the_sides_it_lies_between() {
+        assert_eq!(cube_zone_label([0, -1, 0]), "Front");
+        assert_eq!(cube_zone_label([1, -1, 0]), "right-front edge");
+        assert_eq!(cube_zone_label([1, -1, 1]), "right-front-top corner");
+        // Twenty-six of them, and no repeats.
+        let mut labels: Vec<String> = cube_zones().iter().map(|zone| cube_zone_label(*zone)).collect();
+        labels.sort();
+        labels.dedup();
+        assert_eq!(labels.len(), 26);
     }
 
     #[test]

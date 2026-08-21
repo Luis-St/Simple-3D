@@ -449,14 +449,35 @@ fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) ->
     let side = theme::metric::VIEW_CUBE;
     let box_rect =
         egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(side + 12.0, side + 12.0), egui::Vec2::splat(side));
-    let response = ui.interact(box_rect, cube_id(), egui::Sense::click());
+    // Click *and drag*: the drag turns the cube alone, which is the only way to
+    // reach the three sides the camera cannot currently see (issue 34).
+    let response = ui.interact(box_rect, cube_id(), egui::Sense::click_and_drag());
     let painter = ui.painter_at(box_rect.expand(2.0));
     painter.rect_filled(box_rect, 3.0, token::SURFACE_1.gamma_multiply(0.80));
     painter.rect_stroke(box_rect, 3.0, egui::Stroke::new(1.0_f32, token::SURFACE_3), egui::StrokeKind::Inside);
 
     let centre = box_rect.center();
     let reach = side * 0.30;
-    let (yaw, pitch) = (app.scene.camera.yaw, app.scene.camera.pitch);
+
+    // The cube follows the camera unless it has been turned by hand, and a
+    // camera that moves takes the cube back with it: a spin is remembered
+    // along with the camera it was started from, and is dropped the moment the
+    // scene turns underneath it.
+    let camera = (app.scene.camera.yaw, app.scene.camera.pitch);
+    if app.cube_spin.is_some_and(|spin| spin.camera != camera) {
+        app.cube_spin = None;
+    }
+    if response.dragged() {
+        let delta = response.drag_delta();
+        let (from_yaw, from_pitch) = app.cube_spin.map_or(camera, |spin| (spin.yaw, spin.pitch));
+        app.cube_spin = Some(crate::app::CubeSpin {
+            yaw: from_yaw - delta.x as f64 * 0.5,
+            pitch: (from_pitch + delta.y as f64 * 0.5).clamp(-89.9, 89.9),
+            camera,
+        });
+    }
+    let (yaw, pitch) = app.cube_spin.map_or(camera, |spin| (spin.yaw, spin.pitch));
+
     let project = |v: Vec3| crate::view::cube_project(yaw, pitch, v, reach);
     let corner = |i: usize| {
         Vec3::new(
@@ -465,16 +486,22 @@ fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) ->
             if i & 4 == 0 { -1.0 } else { 1.0 },
         )
     };
+    let at_zone = |zone: [i32; 3]| centre + project(Vec3::new(zone[0] as f64, zone[1] as f64, zone[2] as f64)).0;
 
     let hover = response.hover_pos();
     let centre_radius = side * 0.11;
     let over_centre = hover.is_some_and(|p| (p - centre).length() < centre_radius);
-    // Which face the pointer is over: the nearest one that is turned towards
-    // the eye, so a click never asks for the side of the cube you cannot see.
-    let hovered_face = match (over_centre, hover) {
-        (false, Some(p)) => crate::view::cube_face_at(yaw, pitch, p - centre, reach),
+    // Which part of the cube the pointer is over -- a face, an edge or a corner
+    // -- among the ones turned towards the eye, so a click never asks for the
+    // side of the cube that cannot be seen. A drag in progress is turning the
+    // cube, not choosing a view, so nothing is highlighted during one.
+    let hovered_zone = match (over_centre, response.dragged(), hover) {
+        (false, false, Some(p)) => crate::view::cube_zone_at(yaw, pitch, p - centre, reach),
         _ => None,
     };
+    let hovered_face = hovered_zone
+        .filter(|zone| crate::view::zone_order(*zone) == 1)
+        .and_then(|zone| crate::view::CUBE_FACES.iter().position(|(normal, _, _)| *normal == zone));
     let faces: Vec<(usize, egui::Pos2, f64)> = crate::view::CUBE_FACES
         .iter()
         .enumerate()
@@ -521,23 +548,61 @@ fn view_cube(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) ->
         painter.text(text_at, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(9.0), text_colour);
     }
 
+    // An edge or a corner has no quad of its own, so the highlight is drawn
+    // over the faces: the edge as a bar along itself, the corner as a dot on
+    // it. Both in the selection colour, which is what "this is what a click
+    // would take" means everywhere else in the application.
+    if let Some(zone) = hovered_zone {
+        match crate::view::zone_order(zone) {
+            2 => {
+                let axis = zone.iter().position(|c| *c == 0).unwrap_or(0);
+                let mut a = zone;
+                let mut b = zone;
+                a[axis] = -1;
+                b[axis] = 1;
+                painter.line_segment([at_zone(a), at_zone(b)], egui::Stroke::new(3.5_f32, token::ACCENT));
+            }
+            3 => {
+                painter.circle_filled(at_zone(zone), 4.5, token::ACCENT);
+            }
+            _ => {}
+        }
+    }
+
     // The centre dot: an isometric view, back to where the cube itself is
     // drawn from. It sits where no face label does, so it never covers one.
     let dot = if over_centre { token::ACCENT } else { token::TEXT_LO };
     painter.circle_filled(centre, centre_radius * 0.45, dot);
 
-    if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(if response.dragged() {
+            egui::CursorIcon::Grabbing
+        } else {
+            egui::CursorIcon::PointingHand
+        });
+    }
+    let hint = match (over_centre, hovered_zone) {
+        (true, _) => Some("Isometric".to_string()),
+        (false, Some(zone)) => Some(crate::view::cube_zone_label(zone)),
+        _ => None,
+    };
+    if let Some(hint) = hint {
+        response.clone().on_hover_text(format!("{hint}\nDrag the cube to turn it without moving the model"));
     }
     if response.clicked() {
+        // Whatever was chosen, the cube goes back to matching the camera: the
+        // spin is a way of *reaching* a view, not a second orientation to keep.
+        app.cube_spin = None;
         if over_centre {
             app.set_view(crate::view::ViewPreset::Isometric);
-        } else if let Some(index) = hovered_face {
-            app.set_view(crate::view::CUBE_FACES[index].1);
+        } else if let Some(zone) = hovered_zone {
+            let (to_yaw, to_pitch) = crate::view::cube_zone_angles(zone, app.scene.camera.yaw);
+            app.turn_camera_to(to_yaw, to_pitch);
+            app.status = Status::Info(format!("View: {}", crate::view::cube_zone_label(zone)));
         }
     }
     let _ = view;
-    response.hovered() || response.clicked()
+    response.hovered() || response.clicked() || response.dragged()
 }
 
 /// Put the corners of a face in ring order around its centre, so the quad drawn

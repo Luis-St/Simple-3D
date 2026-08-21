@@ -114,6 +114,10 @@ pub struct App {
     /// in widget state so the gesture survives the panel being relaid out.
     pub scrub: crate::ui::Scrub,
     pub rename: Option<(NodeId, String)>,
+    /// The groups whose children the outliner is not showing. Held here rather
+    /// than in widget state so it survives a relayout, and so selecting a node
+    /// from the viewport can open the groups above it.
+    pub collapsed: std::collections::HashSet<NodeId>,
     pub outliner_drag: Option<NodeId>,
     pub drop_target: Option<DropTarget>,
 
@@ -126,6 +130,10 @@ pub struct App {
     /// A view change in flight. The camera is the scene's, so the move writes
     /// into it every frame rather than holding a second copy of the truth.
     pub camera_move: Option<CameraMove>,
+    /// The orientation cube, turned by hand away from the camera it belongs to.
+    /// `None` -- the usual state -- means it shows exactly what the camera
+    /// shows.
+    pub cube_spin: Option<CubeSpin>,
     /// Which panel header is being dragged between docks, and where to.
     pub dock_drag: crate::dock::DockDrag,
     /// Header centres and the outer rectangle of each dock, collected while the
@@ -172,6 +180,16 @@ pub struct App {
     nudging: bool,
     /// Set once a quit has been confirmed, so the event loop can close the window.
     quit_now: bool,
+}
+
+/// The orientation cube turned on its own, so a side the camera cannot see can
+/// still be picked. `camera` is the camera it was turned away from: the moment
+/// the scene moves, the spin is stale and the cube goes back to following it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CubeSpin {
+    pub yaw: f64,
+    pub pitch: f64,
+    pub camera: (f64, f64),
 }
 
 /// Where an outliner drag would drop.
@@ -234,11 +252,13 @@ impl App {
             fields: FieldBuffers::default(),
             scrub: crate::ui::Scrub::default(),
             rename: None,
+            collapsed: std::collections::HashSet::new(),
             outliner_drag: None,
             drop_target: None,
             cursor: None,
             pending_delete: None,
             camera_move: None,
+            cube_spin: None,
             dock_drag: crate::dock::DockDrag::default(),
             dock_headers: Vec::new(),
             dock_rects: Vec::new(),
@@ -318,6 +338,30 @@ impl App {
         self.fields.clear();
         self.history.close();
         self.rename = None;
+        // Whatever is selected has to be findable: a node picked in the
+        // viewport, or one left selected by an undo, opens the collapsed
+        // groups above it rather than being selected out of sight.
+        for id in self.selection.clone() {
+            self.reveal(id);
+        }
+    }
+
+    /// Open every group above `id`, so its row is one of the ones drawn.
+    pub fn reveal(&mut self, id: NodeId) {
+        let mut walk = self.scene.get(id).and_then(|node| node.parent);
+        while let Some(parent) = walk {
+            self.collapsed.remove(&parent);
+            walk = self.scene.get(parent).and_then(|node| node.parent);
+        }
+    }
+
+    /// Shut or open one group in the outliner.
+    pub fn set_collapsed(&mut self, id: NodeId, collapsed: bool) {
+        if collapsed {
+            self.collapsed.insert(id);
+        } else {
+            self.collapsed.remove(&id);
+        }
     }
 
     // -- edits --------------------------------------------------------------
@@ -798,8 +842,21 @@ impl App {
             self.scene.paint_subtree(*target, colour);
         }
         if let Some(Colour(rgb)) = colour {
-            self.settings.remember_colour(rgb);
+            // Only a colour the user picked out for themselves. The eight
+            // presets are already on the palette above this row; repeating one
+            // of them here spends the recent list on colours that were never
+            // hard to find (issue 35).
+            if !is_preset(rgb) {
+                self.settings.remember_colour(rgb);
+            }
         }
+    }
+
+    /// The recent colours worth offering: the ones that are not already a
+    /// preset. Filtered on the way out as well as on the way in, so a list
+    /// saved by an earlier version stops showing them too.
+    pub(crate) fn custom_recent_colours(&self) -> Vec<[u8; 3]> {
+        self.settings.recent_colours.iter().copied().filter(|rgb| !is_preset(*rgb)).collect()
     }
 
     fn toggle_visibility(&mut self) {
@@ -818,12 +875,110 @@ impl App {
         }
     }
 
-    fn reorder(&mut self, delta: isize) {
-        let Some(id) = self.primary() else { return };
-        self.edit("Reorder", None);
-        if !self.scene.reorder(id, delta) {
-            self.status = Status::Info("Already at the end".into());
+    /// Whether a move by `delta` would do anything: at least one of the nodes
+    /// it acts on has somewhere to go. What the menus grey their entries out
+    /// on, rather than letting a click answer with a status line nobody sees.
+    pub fn can_reorder(&self, delta: isize) -> bool {
+        !self.reorder_plan(delta).is_empty()
+    }
+
+    /// What a reorder acts on: the topmost selected nodes, in tree order,
+    /// minus the root. The whole selection rather than the primary alone --
+    /// moving one of three selected siblings and leaving the other two behind
+    /// looks exactly like the command not working (issue 41).
+    fn reorder_targets(&self) -> Vec<NodeId> {
+        self.top_level_selection().into_iter().filter(|id| *id != self.scene.root()).collect()
+    }
+
+    /// Which of those nodes would actually move, in the order they have to be
+    /// moved in.
+    ///
+    /// Selected siblings move as a block: the one nearest the end goes first,
+    /// into the space it has, and a node whose neighbour is a selected node
+    /// that could not move cannot move either -- otherwise a run of three
+    /// pushed against the end of the list would come apart, one node
+    /// overtaking another that had nowhere to go.
+    fn reorder_plan(&self, delta: isize) -> Vec<NodeId> {
+        let mut targets = self.reorder_targets();
+        if delta > 0 {
+            targets.reverse();
         }
+        let mut stuck: Vec<NodeId> = Vec::new();
+        let mut moving: Vec<NodeId> = Vec::new();
+        for id in targets {
+            let Some(parent) = self.scene.get(id).and_then(|node| node.parent) else {
+                stuck.push(id);
+                continue;
+            };
+            let children = &self.scene.node(parent).children;
+            let Some(at) = children.iter().position(|&c| c == id) else {
+                stuck.push(id);
+                continue;
+            };
+            let to = at as isize + delta;
+            if to < 0 || to >= children.len() as isize {
+                stuck.push(id);
+                continue;
+            }
+            if stuck.contains(&children[to as usize]) {
+                stuck.push(id);
+                continue;
+            }
+            moving.push(id);
+        }
+        moving
+    }
+
+    fn reorder(&mut self, delta: isize) {
+        if self.reorder_targets().is_empty() {
+            self.status = Status::Info("Select something to move".into());
+            return;
+        }
+        let plan = self.reorder_plan(delta);
+        if plan.is_empty() {
+            self.status = Status::Info(
+                if delta < 0 { "Already first among its siblings" } else { "Already last among its siblings" }.into(),
+            );
+            return;
+        }
+        self.edit("Reorder", None);
+        for id in plan {
+            self.scene.reorder(id, delta);
+        }
+    }
+
+    /// Set a group's boolean operator, from wherever a group can be pointed at.
+    pub fn set_group_op(&mut self, id: NodeId, op: GroupOp) {
+        if self.scene.node(id).group_op() == Some(op) {
+            return;
+        }
+        self.edit("Operation", None);
+        if let Some(node) = self.scene.get_mut(id) {
+            node.body = simple3d_core::scene::Body::Group { op };
+        }
+        self.status = Status::Info(format!("{} group", op.label()));
+    }
+
+    /// A new, empty union group: inside `at` when that is a group, beside it
+    /// otherwise. What the outliner's menu offers, so somewhere to put things
+    /// can be made where the tree is.
+    pub fn add_group_at(&mut self, at: NodeId) {
+        self.edit("Add group", None);
+        let (parent, index) = match self.scene.get(at) {
+            Some(node) if node.is_group() => (at, self.scene.node(at).children.len()),
+            Some(node) => match node.parent {
+                Some(parent) => {
+                    let after = self.scene.node(parent).children.iter().position(|&c| c == at).map_or(0, |i| i + 1);
+                    (parent, after)
+                }
+                None => (self.scene.root(), self.scene.node(self.scene.root()).children.len()),
+            },
+            None => (self.scene.root(), self.scene.node(self.scene.root()).children.len()),
+        };
+        let id = self.scene.add_group(GroupOp::Union, parent, index);
+        self.collapsed.remove(&parent);
+        self.select_only(id);
+        self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
     }
 
     /// Nudge the selection along the two axes most closely aligned with the
@@ -1276,6 +1431,12 @@ impl App {
     pub fn persist_keymap(&self) {
         let _ = config::save_keymap_to(&self.config_dir, &self.keymap);
     }
+}
+
+/// Whether a colour is one of the fixed swatches the palette rows already
+/// offer.
+fn is_preset(rgb: [u8; 3]) -> bool {
+    crate::theme::PAINT_PRESETS.iter().any(|(_, colour)| [colour.r(), colour.g(), colour.b()] == rgb)
 }
 
 fn plural(n: usize) -> &'static str {
@@ -2297,6 +2458,73 @@ mod tests {
         assert!((whole_lo.z - lo.z).abs() < 1e-6 && (whole_hi.z - hi.z).abs() < 1e-6);
     }
     #[test]
+    fn moving_among_siblings_moves_everything_that_is_selected() {
+        // Issue 41: with more than one node selected, only the primary used to
+        // move -- which reads as the command doing nothing to the rest.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let first = app.scene.add_primitive("box", root, 0).unwrap();
+        let second = app.scene.add_primitive("box", root, 1).unwrap();
+        let third = app.scene.add_primitive("box", root, 2).unwrap();
+        let plate = app.scene.node(root).children[3];
+
+        app.selection = vec![second, third];
+        assert!(app.can_reorder(1), "there is a sibling below to move past");
+        app.run(Command::MoveDown);
+        assert_eq!(app.scene.node(root).children, vec![first, plate, second, third]);
+
+        // And the two of them together stop at the end rather than one of them
+        // running past the other.
+        assert!(!app.can_reorder(1));
+        app.run(Command::MoveDown);
+        assert_eq!(app.scene.node(root).children, vec![first, plate, second, third]);
+
+        app.selection = vec![first];
+        assert!(!app.can_reorder(-1), "already first among its siblings");
+        assert!(app.can_reorder(1));
+    }
+
+    #[test]
+    fn a_group_can_be_made_empty_and_have_its_operator_set_where_the_tree_is() {
+        // Issues 37 and 40.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.add_group_at(plate);
+        let group = app.primary().unwrap();
+        assert!(app.scene.node(group).is_group());
+        assert!(app.scene.node(group).children.is_empty(), "the new group is empty");
+        assert_eq!(app.scene.node(group).parent, Some(app.scene.root()), "beside the node it was made from");
+
+        // Made *inside* a group, since a group is somewhere things can go.
+        app.add_group_at(group);
+        let inner = app.primary().unwrap();
+        assert_eq!(app.scene.node(inner).parent, Some(group));
+
+        app.set_group_op(group, GroupOp::Difference);
+        assert_eq!(app.scene.node(group).group_op(), Some(GroupOp::Difference));
+    }
+
+    #[test]
+    fn a_collapsed_group_hides_its_children_and_a_selection_opens_it_again() {
+        // Issue 33.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.run(Command::Group);
+        let group = app.primary().unwrap();
+        assert!(crate::panel_outliner::visible_rows(&app).contains(&plate));
+
+        app.set_collapsed(group, true);
+        let rows = crate::panel_outliner::visible_rows(&app);
+        assert!(rows.contains(&group), "the group itself is still a row");
+        assert!(!rows.contains(&plate), "a collapsed group still drew its children");
+
+        // Selecting something inside it -- from the viewport, say -- has to
+        // bring it back into view.
+        app.select_only(plate);
+        assert!(crate::panel_outliner::visible_rows(&app).contains(&plate));
+    }
+
+    #[test]
     fn painting_remembers_the_colour_and_only_a_ghost_is_drawn_as_one() {
         let mut app = headless_app();
         let id = app.primary().expect("the plate is selected");
@@ -2306,11 +2534,18 @@ mod tests {
         // colour is chosen.
         app.paint(&[id], Some(Colour([0x2E, 0x9A, 0xFF])), None);
         assert_eq!(app.settings.recent_colours, vec![[0x2E, 0x9A, 0xFF]]);
-        app.paint(&[id], Some(Colour([0xCC, 0x4B, 0x45])), None);
-        assert_eq!(app.settings.recent_colours[0], [0xCC, 0x4B, 0x45]);
+        app.paint(&[id], Some(Colour([0x77, 0x11, 0x22])), None);
+        assert_eq!(app.settings.recent_colours[0], [0x77, 0x11, 0x22]);
         // Clearing paints nothing, so it remembers nothing.
         app.paint(&[id], None, None);
         assert_eq!(app.settings.recent_colours.len(), 2);
+
+        // Issue 35: one of the eight presets is already a click away on the
+        // row above, so using it is not what "recent" is for.
+        let preset = crate::theme::PAINT_PRESETS[6].1;
+        app.paint(&[id], Some(Colour([preset.r(), preset.g(), preset.b()])), None);
+        assert_eq!(app.settings.recent_colours.len(), 2, "a preset was remembered as a recent colour");
+        assert_eq!(app.custom_recent_colours(), vec![[0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]]);
 
         // Issue 21: the three states, and which of them the viewport is asked
         // to draw as a ghost.

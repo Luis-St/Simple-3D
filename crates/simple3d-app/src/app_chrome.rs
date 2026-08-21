@@ -258,8 +258,8 @@ impl App {
             self.command_item(ui, Command::Group, has_selection);
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
-            self.command_item(ui, Command::MoveUp, has_selection);
-            self.command_item(ui, Command::MoveDown, has_selection);
+            self.command_item(ui, Command::MoveUp, self.can_reorder(-1));
+            self.command_item(ui, Command::MoveDown, self.can_reorder(1));
             ui.separator();
             if ui.button("Keyboard and mouse...").clicked() {
                 self.modal = Modal::Keymap;
@@ -551,16 +551,22 @@ impl App {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // The scene itself is not a node the document holds: it is
+                    // the tree's root, it is always there, and counting it made
+                    // an empty document report one node.
+                    let nodes = self.scene.len().saturating_sub(1);
                     ui.add(
                         egui::Label::new(theme::numeric(ui::describe_counts(
-                            self.scene.len(),
+                            nodes,
                             self.evaluated.mesh.triangle_count(),
                         )))
                         .selectable(false),
-                    );
+                    )
+                    .on_hover_text("Shapes and groups in the document, and the triangles the model came out as");
                     if let Some(elapsed) = self.worker.last_elapsed {
                         dot(ui);
-                        ui.add(egui::Label::new(theme::numeric(ui::describe_elapsed(elapsed))).selectable(false));
+                        ui.add(egui::Label::new(theme::numeric(ui::describe_elapsed(elapsed))).selectable(false))
+                            .on_hover_text("How long the last rebuild of the model took");
                     }
                     if !self.evaluated.errors.is_empty() {
                         dot(ui);
