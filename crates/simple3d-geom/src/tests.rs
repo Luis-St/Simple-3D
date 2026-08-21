@@ -627,3 +627,75 @@ fn a_hull_is_the_same_mesh_every_time_it_is_built() {
         assert_eq!(again.indices, first.indices, "the hull's triangles came out in a different order");
     }
 }
+
+#[test]
+fn a_round_primitive_unions_without_running_out_of_stack() {
+    // The regression this file exists for: raising the segment count of a
+    // sphere or a spherical cap that touches another body killed the whole
+    // application. A convex body defeats the BSP's auto-partition -- every one
+    // of its faces has all the others behind it -- so the tree is a chain one
+    // node per face, and the walks over it used to be recursive.
+    //
+    // A quarter of a megabyte of stack is far less than a chain of two thousand
+    // faces needs to recurse down, and enough for anything that does not.
+    let worker = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(|| {
+            let cap = primitives::spherical_cap_mesh(20.0, 10.0, 64);
+            let plate = primitives::box_mesh(40.0, 40.0, 4.0);
+            let result = evaluate_boolean(BooleanOp::Union, &[plate, cap]);
+            result.triangle_count()
+        })
+        .unwrap();
+    let triangles = worker.join().expect("the union overflowed the stack");
+    assert!(triangles > 0);
+}
+
+/// The volume the mesh encloses, by the divergence theorem. Any boolean that
+/// leaves an operand's interior faces in the result, or loses part of the
+/// surface, gets this badly wrong -- which a triangle count alone will not show.
+fn volume(mesh: &Mesh) -> f64 {
+    let mut total = 0.0;
+    for t in &mesh.indices {
+        let (a, b, c) = (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
+        total += a.dot(b.cross(c)) / 6.0;
+    }
+    total
+}
+
+#[test]
+fn a_convex_body_is_recognised_as_splitting_nothing() {
+    // What the one-pass build rests on: no face of a convex solid divides any
+    // other, and a solid with a dent in it has faces that do.
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 64)));
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::spherical_cap_mesh(20.0, 10.0, 64)));
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::cylinder_mesh(20.0, 20.0, 20.0, 64.0 as u32)));
+    assert!(!crate::csg_bsp::debug_splits_nothing(&primitives::torus_mesh(30.0, 8.0, 360.0, 64)));
+}
+
+#[test]
+fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_solid() {
+    // Both halves of the segment-count regression, on the shape it was reported
+    // on. A spherical cap sunk into a plate at 176 segments used to come back as
+    // 2.7 million triangles -- the T-junction pass cascading into its own budget
+    // -- and non-manifold with it. The same union at 64 segments describes the
+    // same solid, so the two must agree on volume however finely either is cut.
+    let plate = || primitives::box_mesh(40.0, 40.0, 4.0);
+    let coarse = evaluate_boolean(BooleanOp::Union, &[plate(), primitives::spherical_cap_mesh(20.0, 10.0, 64)]);
+    let fine = evaluate_boolean(BooleanOp::Union, &[plate(), primitives::spherical_cap_mesh(20.0, 10.0, 176)]);
+    assert_manifold("union at 64 segments", &coarse);
+    assert_manifold("union at 176 segments", &fine);
+
+    let (v0, v1) = (volume(&coarse), volume(&fine));
+    assert!((v1 - v0).abs() / v0 < 0.01, "volume moved from {v0} to {v1} between tessellations");
+
+    // Eight faces of the cap for every one at 64 segments, so a result that
+    // stays in proportion is at most about ten times the size. The cascade
+    // produced eight hundred times.
+    assert!(
+        fine.triangle_count() < coarse.triangle_count() * 10,
+        "{} triangles at 176 segments against {} at 64",
+        fine.triangle_count(),
+        coarse.triangle_count()
+    );
+}
