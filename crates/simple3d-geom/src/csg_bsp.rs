@@ -128,86 +128,422 @@ fn split_polygon(
     }
 }
 
+/// A bounding-volume hierarchy over the polygons of one body, answering two
+/// questions the BSP tree itself answers badly.
+///
+/// *Does anything come near this box?* -- so a boolean can tell that a polygon
+/// is nowhere near the other body's surface without walking that body's BSP,
+/// which for a round primitive is a chain thousands of nodes long whose own
+/// bounding box is the whole body and so proves nothing.
+///
+/// *Is every polygon behind this plane?* -- which is what says a plane splits
+/// nothing, and lets `build` chain a convex body's faces in one pass instead of
+/// re-classifying every remaining face at every one of its own planes.
+struct BoxTree {
+    nodes: Vec<BoxNode>,
+    /// Polygon indices, permuted so that each leaf owns a contiguous run.
+    order: Vec<u32>,
+    boxes: Vec<(Vec3, Vec3)>,
+}
+
+struct BoxNode {
+    lo: Vec3,
+    hi: Vec3,
+    /// A split's two children, or a leaf's run of `order`.
+    kind: BoxKind,
+}
+
+enum BoxKind {
+    Split(u32, u32),
+    Leaf(u32, u32),
+}
+
+/// Below this many polygons a node stops dividing. Testing a handful directly
+/// costs less than the branches to avoid them.
+const BOX_LEAF: usize = 4;
+
+impl BoxTree {
+    fn new(polygons: &[Polygon]) -> Option<BoxTree> {
+        let boxes: Vec<(Vec3, Vec3)> =
+            polygons.iter().filter_map(|p| polygon_bounds(std::slice::from_ref(p))).collect();
+        if boxes.len() != polygons.len() || boxes.is_empty() {
+            return None;
+        }
+        let order: Vec<u32> = (0..boxes.len() as u32).collect();
+        let mut tree = BoxTree { nodes: Vec::new(), order, boxes };
+        tree.split();
+        Some(tree)
+    }
+
+    /// Divide at the median of the widest axis until each leaf is small.
+    /// Iterative, like every other walk in this file: the input can be a
+    /// hundred thousand faces.
+    fn split(&mut self) {
+        let root = self.push_placeholder();
+        let mut stack: Vec<(usize, usize, u32)> = vec![(0, self.order.len(), root)];
+        while let Some((from, to, slot)) = stack.pop() {
+            let (lo, hi) = self.enclosing(from, to);
+            if to - from <= BOX_LEAF {
+                self.nodes[slot as usize] = BoxNode { lo, hi, kind: BoxKind::Leaf(from as u32, to as u32) };
+                continue;
+            }
+            let size = hi - lo;
+            let axis = if size.x >= size.y && size.x >= size.z {
+                0
+            } else if size.y >= size.z {
+                1
+            } else {
+                2
+            };
+            let boxes = &self.boxes;
+            let key = |i: u32| {
+                let b = boxes[i as usize];
+                let c = (b.0 + b.1) / 2.0;
+                match axis {
+                    0 => c.x,
+                    1 => c.y,
+                    _ => c.z,
+                }
+            };
+            let mid = from + (to - from) / 2;
+            self.order[from..to].select_nth_unstable_by(mid - from, |&a, &b| key(a).total_cmp(&key(b)));
+            let (left, right) = (self.push_placeholder(), self.push_placeholder());
+            self.nodes[slot as usize] = BoxNode { lo, hi, kind: BoxKind::Split(left, right) };
+            stack.push((from, mid, left));
+            stack.push((mid, to, right));
+        }
+    }
+
+    fn enclosing(&self, from: usize, to: usize) -> (Vec3, Vec3) {
+        let (mut lo, mut hi) = self.boxes[self.order[from] as usize];
+        for &i in &self.order[from + 1..to] {
+            let (blo, bhi) = self.boxes[i as usize];
+            lo = lo.min(blo);
+            hi = hi.max(bhi);
+        }
+        (lo, hi)
+    }
+
+    fn push_placeholder(&mut self) -> u32 {
+        self.nodes.push(BoxNode { lo: Vec3::ZERO, hi: Vec3::ZERO, kind: BoxKind::Leaf(0, 0) });
+        (self.nodes.len() - 1) as u32
+    }
+
+    /// Does any polygon's box come within `EPSILON` of `query`?
+    fn meets(&self, query: (Vec3, Vec3)) -> bool {
+        let mut stack = vec![0u32];
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i as usize];
+            if !boxes_meet((node.lo, node.hi), query) {
+                continue;
+            }
+            match node.kind {
+                BoxKind::Split(left, right) => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                BoxKind::Leaf(from, to) => {
+                    for &p in &self.order[from as usize..to as usize] {
+                        if boxes_meet(self.boxes[p as usize], query) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Is every polygon in `polygons` on or behind `plane`?
+    ///
+    /// A box whose every corner is behind the plane settles a whole subtree at
+    /// once, which is what keeps this cheap: for a sphere and one of its own
+    /// tangent planes, all but the faces around the point of tangency are
+    /// pruned in a handful of steps. Only the leaves that survive are tested
+    /// vertex by vertex, and those are exact -- a box corner can poke through a
+    /// tilted plane that no vertex reaches.
+    fn all_behind(&self, plane: &Plane, polygons: &[Polygon]) -> bool {
+        let mut stack = vec![0u32];
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i as usize];
+            if furthest_corner(plane, node.lo, node.hi) <= EPSILON {
+                continue;
+            }
+            match node.kind {
+                BoxKind::Split(left, right) => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                BoxKind::Leaf(from, to) => {
+                    for &p in &self.order[from as usize..to as usize] {
+                        for v in &polygons[p as usize].vertices {
+                            if plane.normal.dot(*v) - plane.w > EPSILON {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+}
+
+/// How far in front of `plane` the furthest corner of the box lies.
+fn furthest_corner(plane: &Plane, lo: Vec3, hi: Vec3) -> f64 {
+    let n = plane.normal;
+    let pick = |a: f64, l: f64, h: f64| if a >= 0.0 { h } else { l };
+    let far = Vec3::new(pick(n.x, lo.x, hi.x), pick(n.y, lo.y, hi.y), pick(n.z, lo.z, hi.z));
+    n.dot(far) - plane.w
+}
+
+/// A plane's identity, sign-independent: two faces of a solid that lie in the
+/// same plane belong at the same BSP node whichever way they face.
+fn unoriented_plane_key(p: &Plane) -> (i64, i64, i64, i64) {
+    let flip = if p.normal.x.abs() > 1e-9 {
+        p.normal.x < 0.0
+    } else if p.normal.y.abs() > 1e-9 {
+        p.normal.y < 0.0
+    } else {
+        p.normal.z < 0.0
+    };
+    let p = if flip { p.flip() } else { *p };
+    plane_key(&p)
+}
+
 struct BspNode {
     plane: Option<Plane>,
     front: Option<Box<BspNode>>,
     back: Option<Box<BspNode>>,
     polygons: Vec<Polygon>,
+    /// A hierarchy over the boxes of the polygons this tree was built from,
+    /// held by the root and used by `clip_polygons` to prove that a polygon
+    /// meets no face of this body at all. `None` disables that shortcut, which
+    /// only ever costs time.
+    surface: Option<BoxTree>,
 }
 
+fn polygon_bounds(polygons: &[Polygon]) -> Option<(Vec3, Vec3)> {
+    let mut bounds: Option<(Vec3, Vec3)> = None;
+    for p in polygons {
+        for v in &p.vertices {
+            bounds = Some(match bounds {
+                None => (*v, *v),
+                Some((lo, hi)) => (lo.min(*v), hi.max(*v)),
+            });
+        }
+    }
+    bounds
+}
+
+/// Do the two boxes come within `EPSILON` of each other? Deliberately generous:
+/// the point of the test is to prove that a polygon *cannot* meet a surface, and
+/// a box that only just misses proves nothing.
+fn boxes_meet(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
+    let (alo, ahi) = a;
+    let (blo, bhi) = b;
+    alo.x <= bhi.x + EPSILON
+        && blo.x <= ahi.x + EPSILON
+        && alo.y <= bhi.y + EPSILON
+        && blo.y <= ahi.y + EPSILON
+        && alo.z <= bhi.z + EPSILON
+        && blo.z <= ahi.z + EPSILON
+}
+
+/// Every walk over the tree below is written with an explicit stack rather
+/// than by recursion, and the tree drops itself the same way.
+///
+/// This is not a matter of taste. The splitting plane is the first polygon's
+/// own plane -- the classic auto-partition -- and a *convex* body defeats it
+/// completely: every face of a sphere has the whole sphere behind it, so no
+/// face ever divides the rest and the "tree" comes out as a chain one node per
+/// polygon deep. A sphere or a spherical cap at 128 segments is some eight
+/// thousand faces, and eight thousand nested calls of `build` (or of `clip_to`,
+/// or of the compiler's own drop glue for the chain of boxes) is past the end of
+/// the thread's stack: the process died on the spot, taking the user's unsaved
+/// document with it, the moment the segment count of a round primitive touching
+/// another body was raised. Depth now costs heap, which the machine has.
+///
+/// The chain is still a chain: that is what a convex body's own face planes
+/// make, and clipping down one is cheap because a polygon leaves it at the
+/// first plane it is in front of. Building one is what used to be expensive,
+/// and `non_splitting_order` is how that stopped being so.
 impl BspNode {
     fn new(polygons: Vec<Polygon>) -> BspNode {
-        let mut node = BspNode { plane: None, front: None, back: None, polygons: Vec::new() };
+        let mut node = BspNode { plane: None, front: None, back: None, polygons: Vec::new(), surface: None };
         if !polygons.is_empty() {
+            let surface = BoxTree::new(&polygons);
             node.build(polygons);
+            node.surface = surface;
         }
         node
     }
 
     fn invert(&mut self) {
-        for p in self.polygons.iter_mut() {
-            *p = p.flip();
+        let mut stack: Vec<&mut BspNode> = vec![self];
+        while let Some(node) = stack.pop() {
+            for p in node.polygons.iter_mut() {
+                *p = p.flip();
+            }
+            if let Some(plane) = &mut node.plane {
+                *plane = plane.flip();
+            }
+            std::mem::swap(&mut node.front, &mut node.back);
+            stack.extend(node.front.as_deref_mut());
+            stack.extend(node.back.as_deref_mut());
         }
-        if let Some(plane) = &mut self.plane {
-            *plane = plane.flip();
+    }
+
+    /// Is `point` on the solid side of this subtree?
+    ///
+    /// The same walk `clip_polygons` makes, for a single point and without
+    /// splitting anything: front at a leaf is outside the body, back at a leaf
+    /// is inside it. Only meaningful for a point the surface does not pass
+    /// near, which is exactly where it is used.
+    fn keeps_point(&self, point: Vec3) -> bool {
+        let mut node = self;
+        loop {
+            let Some(plane) = node.plane else { return true };
+            let child = if plane.normal.dot(point) - plane.w > 0.0 { &node.front } else { &node.back };
+            match child {
+                Some(next) => node = next,
+                // In front of a leaf plane is outside the body, behind it is in.
+                None => return plane.normal.dot(point) - plane.w > 0.0,
+            }
         }
-        if let Some(f) = &mut self.front {
-            f.invert();
-        }
-        if let Some(b) = &mut self.back {
-            b.invert();
-        }
-        std::mem::swap(&mut self.front, &mut self.back);
     }
 
     fn clip_polygons(&self, polygons: &[Polygon]) -> Vec<Polygon> {
-        let Some(plane) = self.plane else {
-            return polygons.to_vec();
-        };
-        let mut cf = Vec::new();
-        let mut cb = Vec::new();
-        let mut front = Vec::new();
-        let mut back = Vec::new();
-        for p in polygons {
-            split_polygon(&plane, p, &mut cf, &mut cb, &mut front, &mut back);
+        let mut kept = Vec::new();
+        // Pushed back-subtree first so the front one is popped first: the
+        // surviving polygons come out in the same order the recursive walk
+        // produced them, and so therefore does the mesh built from them.
+        let mut stack: Vec<(&BspNode, Vec<Polygon>)> = vec![(self, polygons.to_vec())];
+        while let Some((node, polygons)) = stack.pop() {
+            let Some(plane) = node.plane else {
+                kept.extend(polygons);
+                continue;
+            };
+            let mut cf = Vec::new();
+            let mut cb = Vec::new();
+            let mut front = Vec::new();
+            let mut back = Vec::new();
+            for p in &polygons {
+                // A polygon that comes near no face of this body at all cannot
+                // be crossed by its surface, so it is wholly inside or wholly
+                // outside, and one point settles which. The classic algorithm
+                // splits it against the planes regardless, which is how a
+                // 40 mm plate comes back from a union with a 20 mm sphere cut
+                // to pieces along the sphere's *infinite* tangent planes -- out
+                // at the plate's rim, a centimetre from the nearest part of the
+                // sphere. The hierarchy is asked about the whole body rather
+                // than this subtree on purpose: for a convex body the subtree is
+                // a chain whose own box is the whole body, which proves nothing
+                // about anything.
+                let clear = match (&self.surface, polygon_bounds(std::slice::from_ref(p))) {
+                    (Some(surface), Some(poly)) => !surface.meets(poly),
+                    _ => false,
+                };
+                if clear {
+                    if node.keeps_point(p.vertices[0]) {
+                        kept.push(p.clone());
+                    }
+                    continue;
+                }
+                split_polygon(&plane, p, &mut cf, &mut cb, &mut front, &mut back);
+            }
+            front.extend(cf);
+            back.extend(cb);
+            // Behind a leaf plane is solid, so what is left there is inside the
+            // other body and does not survive the clip.
+            if let Some(b) = &node.back {
+                if !back.is_empty() {
+                    stack.push((b, back));
+                }
+            }
+            match &node.front {
+                Some(f) if !front.is_empty() => stack.push((f, front)),
+                Some(_) => {}
+                None => kept.extend(front),
+            }
         }
-        front.extend(cf);
-        back.extend(cb);
-        let mut front = if let Some(f) = &self.front { f.clip_polygons(&front) } else { front };
-        let back = if let Some(b) = &self.back { b.clip_polygons(&back) } else { Vec::new() };
-        front.extend(back);
-        front
+        kept
     }
 
     fn clip_to(&mut self, other: &BspNode) {
-        self.polygons = other.clip_polygons(&self.polygons);
-        if let Some(f) = &mut self.front {
-            f.clip_to(other);
-        }
-        if let Some(b) = &mut self.back {
-            b.clip_to(other);
+        let mut stack: Vec<&mut BspNode> = vec![self];
+        while let Some(node) = stack.pop() {
+            node.polygons = other.clip_polygons(&node.polygons);
+            stack.extend(node.front.as_deref_mut());
+            stack.extend(node.back.as_deref_mut());
         }
     }
 
     fn all_polygons(&self) -> Vec<Polygon> {
-        let mut result = self.polygons.clone();
-        if let Some(f) = &self.front {
-            result.extend(f.all_polygons());
-        }
-        if let Some(b) = &self.back {
-            result.extend(b.all_polygons());
+        let mut result = Vec::new();
+        let mut stack: Vec<&BspNode> = vec![self];
+        while let Some(node) = stack.pop() {
+            result.extend(node.polygons.iter().cloned());
+            // Back first, so the front subtree is popped -- and appended --
+            // first, as in the recursive walk this replaces.
+            stack.extend(node.back.as_deref());
+            stack.extend(node.front.as_deref());
         }
         result
     }
 
     fn build(&mut self, polygons: Vec<Polygon>) {
-        if polygons.is_empty() {
-            return;
+        // The hierarchy describes the polygons the tree already had; polygons
+        // arriving now are not in it, so the shortcut it serves is withdrawn.
+        // Nothing in `op` clips a tree after building into it.
+        self.surface = None;
+        let mut stack: Vec<(&mut BspNode, Vec<Polygon>)> = vec![(self, polygons)];
+        while let Some((node, polygons)) = stack.pop() {
+            if polygons.is_empty() {
+                continue;
+            }
+            if node.plane.is_none() {
+                if let Some(groups) = non_splitting_order(&polygons) {
+                    node.chain(polygons, groups);
+                    continue;
+                }
+            }
+            node.build_one_level(polygons, &mut stack);
         }
-        if self.plane.is_none() {
-            self.plane = Some(polygons[0].plane);
+    }
+
+    /// Build a set that no plane of its own divides, as the chain of nodes the
+    /// general path would have arrived at -- without the work of arriving.
+    ///
+    /// `groups` lists the polygons of each plane, in the order the planes are
+    /// to be chained. Each node keeps the polygons lying in its own plane, just
+    /// as `build_one_level` puts coplanar polygons at the node; everything
+    /// further down is behind it.
+    fn chain(&mut self, polygons: Vec<Polygon>, groups: Vec<Vec<usize>>) {
+        let mut polygons: Vec<Option<Polygon>> = polygons.into_iter().map(Some).collect();
+        let mut node = self;
+        let last = groups.len() - 1;
+        for (i, group) in groups.into_iter().enumerate() {
+            node.plane = Some(polygons[group[0]].as_ref().expect("each polygon is in one group").plane);
+            node.polygons = group.iter().map(|&i| polygons[i].take().expect("groups do not overlap")).collect();
+            // No node past the last plane. A node with no plane of its own
+            // *keeps* everything that reaches it, so a trailing empty one would
+            // hand back the far side of the body as though it were outside --
+            // the deepest back child being absent is what says "solid here".
+            if i < last {
+                node = node.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
+            }
         }
-        let plane = self.plane.unwrap();
+    }
+
+    /// Partition `polygons` by this node's plane, keeping what is coplanar with
+    /// it and handing the two sides to the children.
+    fn build_one_level<'a>(&'a mut self, polygons: Vec<Polygon>, stack: &mut Vec<(&'a mut BspNode, Vec<Polygon>)>) {
+        let node = self;
+        if node.plane.is_none() {
+            node.plane = Some(polygons[0].plane);
+        }
+        let plane = node.plane.unwrap();
         let mut front = Vec::new();
         let mut back = Vec::new();
         for p in polygons {
@@ -216,16 +552,34 @@ impl BspNode {
             let mut fr = Vec::new();
             let mut bk = Vec::new();
             split_polygon(&plane, &p, &mut cf, &mut cb, &mut fr, &mut bk);
-            self.polygons.extend(cf);
-            self.polygons.extend(cb);
+            node.polygons.extend(cf);
+            node.polygons.extend(cb);
             front.extend(fr);
             back.extend(bk);
         }
         if !front.is_empty() {
-            self.front.get_or_insert_with(|| Box::new(BspNode::new(Vec::new()))).build(front);
+            let child = node.front.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
+            stack.push((child, front));
         }
         if !back.is_empty() {
-            self.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new()))).build(back);
+            let child = node.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
+            stack.push((child, back));
+        }
+    }
+}
+
+impl Drop for BspNode {
+    fn drop(&mut self) {
+        // The compiler's own drop glue is recursive, so a deep tree overflows
+        // the stack on the way out just as surely as on the way in. Unlink the
+        // children into a list first; each box then drops with no children of
+        // its own left to recurse into.
+        let mut stack: Vec<Box<BspNode>> = Vec::new();
+        stack.extend(self.front.take());
+        stack.extend(self.back.take());
+        while let Some(mut node) = stack.pop() {
+            stack.extend(node.front.take());
+            stack.extend(node.back.take());
         }
     }
 }
@@ -395,6 +749,14 @@ pub fn debug_roundtrip(mesh: &Mesh) -> Mesh {
     polygons_to_mesh(&mesh_to_polygons(mesh))
 }
 
+/// Whether `build` can chain this mesh's faces instead of classifying every one
+/// of them against every plane -- true exactly when no face's plane divides
+/// another, which is what a convex solid is. Exposed for the test that holds
+/// the shortcut to that meaning.
+pub fn debug_splits_nothing(mesh: &Mesh) -> bool {
+    non_splitting_order(&mesh_to_polygons(mesh)).is_some()
+}
+
 fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
     let mut mesh = Mesh::new();
     for poly in polys {
@@ -435,6 +797,46 @@ fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
         }
     }
     mesh
+}
+
+/// If no plane of `polygons` divides any of them, the planes grouped by the
+/// order they should be chained in; `None` if any plane splits something and
+/// the general build must do the work.
+///
+/// This is the convex case, and it is not an exotic one: a sphere, a cylinder,
+/// a box, a cap, a prism -- every round primitive the application offers is
+/// convex, and a convex body is the worst case for the classic BSP build. No
+/// face of a sphere divides the others (they are all behind it), so the tree is
+/// a chain, and the general build re-classifies every remaining face at every
+/// level to discover that: quadratic in the face count, and the reason a
+/// spherical cap at 128 segments spent a second of its second inside
+/// `BspNode::build` alone. Proving the same thing through the bounding-volume
+/// hierarchy costs one query per distinct plane.
+fn non_splitting_order(polygons: &[Polygon]) -> Option<Vec<Vec<usize>>> {
+    /// Not worth the hierarchy: the general build is already linear here.
+    const MIN: usize = 64;
+    if polygons.len() < MIN {
+        return None;
+    }
+    let tree = BoxTree::new(polygons)?;
+
+    // Grouped by plane, in first-appearance order, so the chain takes the
+    // planes in the order the general build would have taken them.
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    let mut index: std::collections::BTreeMap<(i64, i64, i64, i64), usize> = std::collections::BTreeMap::new();
+    for (i, p) in polygons.iter().enumerate() {
+        let slot = *index.entry(unoriented_plane_key(&p.plane)).or_insert_with(|| {
+            groups.push(Vec::new());
+            groups.len() - 1
+        });
+        groups[slot].push(i);
+    }
+    for group in &groups {
+        if !tree.all_behind(&polygons[group[0]].plane, polygons) {
+            return None;
+        }
+    }
+    Some(groups)
 }
 
 fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {

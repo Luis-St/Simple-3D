@@ -10,9 +10,11 @@
 //! it is why `subtract`/`intersect` used to fail the manifold tests.
 //!
 //! `heal` fixes it after the fact, which is both simpler and more robust than
-//! trying to make the BSP produce matched splits: weld coincident vertices
-//! with a real tolerance, then repeatedly split any triangle edge that has a
-//! foreign vertex lying on its interior until no such vertex remains.
+//! trying to make the BSP produce matched splits: weld coincident vertices with
+//! a real tolerance, then give every triangle the vertices that lie on its own
+//! edges, in one pass over the mesh the weld produced. One pass, not a loop
+//! until nothing is left to split -- see `split_t_junctions` for what the loop
+//! did to a finely tessellated boolean.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
@@ -155,6 +157,24 @@ fn same_winding(a: &[u32; 3], b: &[u32; 3]) -> bool {
 
 /// Split every triangle edge that has another vertex of the mesh lying on its
 /// interior, so each undirected edge ends up shared by exactly two triangles.
+///
+/// Every triangle is dealt with **once**, from the vertices the mesh had when
+/// the pass started. The obvious implementation instead splits a triangle in
+/// two and pushes both halves back into the queue, and that is what shipped
+/// first; it is unbounded. A split introduces an *internal* edge from the split
+/// point to the opposite corner, that new edge is examined in its turn, and any
+/// vertex within a micron of it -- a vertex that was never on the surface's
+/// boundary and needs no split at all -- sets off another. On a spherical cap
+/// unioned with a plate the cascade turned 50,854 triangles into 2,679,216 and
+/// ran out of its own budget, leaving the mesh non-manifold: a boolean at 176
+/// segments produced a quarter of a gigabyte of garbage where 25,000 triangles
+/// describe the solid.
+///
+/// Collecting each edge's on-edge vertices up front and triangulating the
+/// resulting polygon in one go cannot cascade: the internal edges it creates
+/// are never looked at. They need not be. A T-junction is a vertex on the
+/// *boundary* between two faces, and the boundary is exactly what the up-front
+/// collection sees.
 fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
     if mesh.indices.is_empty() {
         return mesh;
@@ -168,90 +188,139 @@ fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
         grid.entry(cell_of(p, size)).or_default().push(i as u32);
     }
 
+    let mut positions = mesh.positions.clone();
     let pos = &mesh.positions;
-    // Each triangle travels with its tag: a split produces two faces of the
-    // same body, so both halves inherit it.
-    let mut pending: Vec<([u32; 3], u32)> = mesh.indices.iter().enumerate().map(|(i, t)| (*t, mesh.tag(i))).collect();
-    let mut out: Vec<([u32; 3], u32)> = Vec::with_capacity(pending.len());
-    // Each split strictly consumes one on-edge vertex, so this terminates; the
-    // budget only guards against a pathological input turning a preview into a
-    // hang, in which case we emit what we have and the manifold check reports.
-    let mut budget = 4_000_000usize;
+    let mut indices: Vec<[u32; 3]> = Vec::with_capacity(mesh.indices.len());
+    let mut tags: Vec<u32> = Vec::with_capacity(mesh.indices.len());
+    // The triangle's boundary with the on-edge vertices spliced into it, reused
+    // across triangles rather than reallocated for each.
+    let mut loop_: Vec<u32> = Vec::new();
+    let mut on_edge: Vec<(f64, u32)> = Vec::new();
 
-    while let Some((tri, tag)) = pending.pop() {
-        if budget == 0 {
-            out.push((tri, tag));
+    for (i, tri) in mesh.indices.iter().enumerate() {
+        let tag = mesh.tag(i);
+        loop_.clear();
+        for e in 0..3 {
+            loop_.push(tri[e]);
+            on_edge_vertices(pos, &grid, size, tol, tri, e, &mut on_edge);
+            loop_.extend(on_edge.iter().map(|&(_, v)| v));
+        }
+        // A vertex near a corner can be within the tolerance of *both* edges
+        // meeting there, and would then be spliced into the loop twice. Once is
+        // enough to make it a corner of the fan -- twice makes two triangles
+        // that lie on top of each other, and an edge used twice in the same
+        // direction is exactly as non-manifold as an edge used once.
+        let mut seen = loop_.clone();
+        seen.sort_unstable();
+        if seen.windows(2).any(|w| w[0] == w[1]) {
+            let mut kept: Vec<u32> = Vec::with_capacity(loop_.len());
+            for &v in &loop_ {
+                if !kept.contains(&v) {
+                    kept.push(v);
+                }
+            }
+            loop_ = kept;
+        }
+        if loop_.len() == 3 {
+            indices.push(*tri);
+            tags.push(tag);
             continue;
         }
-        budget -= 1;
-        match find_on_edge_vertex(pos, &grid, size, tol, &tri) {
-            Some((e, v)) => {
-                let (a, b, c) = (tri[e], tri[(e + 1) % 3], tri[(e + 2) % 3]);
-                pending.push(([a, v, c], tag));
-                pending.push(([v, b, c], tag));
-            }
-            None => out.push((tri, tag)),
-        }
+        fan_from_centre(pos, tri, &loop_, tag, &mut positions, &mut indices, &mut tags);
     }
 
-    let (indices, tags) = out.into_iter().unzip();
-    Mesh { positions: mesh.positions, indices, tags }
+    Mesh { positions, indices, tags }
 }
 
-/// Find a vertex lying strictly inside one of the triangle's edges. Returns
-/// the edge's index within the triangle and the offending vertex, choosing the
-/// vertex nearest the edge's start so repeated splitting walks along the edge.
-fn find_on_edge_vertex(
+/// Every vertex of the mesh lying strictly inside edge `e` of `tri`, in order
+/// along the edge. Written into `out` rather than returned so the walk over a
+/// large mesh allocates nothing per triangle.
+fn on_edge_vertices(
     pos: &[Vec3],
     grid: &HashMap<Cell, Vec<u32>>,
     size: f64,
     tol: f64,
     tri: &[u32; 3],
-) -> Option<(usize, u32)> {
-    for e in 0..3 {
-        let (ia, ib) = (tri[e], tri[(e + 1) % 3]);
-        let (pa, pb) = (pos[ia as usize], pos[ib as usize]);
-        let ab = pb - pa;
-        let len2 = ab.dot(ab);
-        if len2 <= tol * tol {
-            continue;
-        }
-        let len = len2.sqrt();
-        let margin = tol / len;
+    e: usize,
+    out: &mut Vec<(f64, u32)>,
+) {
+    out.clear();
+    let (ia, ib) = (tri[e], tri[(e + 1) % 3]);
+    let (pa, pb) = (pos[ia as usize], pos[ib as usize]);
+    let ab = pb - pa;
+    let len2 = ab.dot(ab);
+    if len2 <= tol * tol {
+        return;
+    }
+    let margin = tol / len2.sqrt();
 
-        let lo = pa.min(pb) - Vec3::splat(tol);
-        let hi = pa.max(pb) + Vec3::splat(tol);
-        let (c0, c1) = (cell_of(lo, size), cell_of(hi, size));
-
-        let mut best: Option<(f64, u32)> = None;
-        for cx in c0.0..=c1.0 {
-            for cy in c0.1..=c1.1 {
-                for cz in c0.2..=c1.2 {
-                    let Some(list) = grid.get(&(cx, cy, cz)) else { continue };
-                    for &v in list {
-                        if v == tri[0] || v == tri[1] || v == tri[2] {
-                            continue;
-                        }
-                        let d = pos[v as usize] - pa;
-                        let s = d.dot(ab) / len2;
-                        if s <= margin || s >= 1.0 - margin {
-                            continue;
-                        }
-                        if (d - ab * s).length() > tol {
-                            continue;
-                        }
-                        if best.map_or(true, |(bs, _)| s < bs) {
-                            best = Some((s, v));
-                        }
+    let lo = pa.min(pb) - Vec3::splat(tol);
+    let hi = pa.max(pb) + Vec3::splat(tol);
+    let (c0, c1) = (cell_of(lo, size), cell_of(hi, size));
+    for cx in c0.0..=c1.0 {
+        for cy in c0.1..=c1.1 {
+            for cz in c0.2..=c1.2 {
+                let Some(list) = grid.get(&(cx, cy, cz)) else { continue };
+                for &v in list {
+                    if v == tri[0] || v == tri[1] || v == tri[2] {
+                        continue;
                     }
+                    let d = pos[v as usize] - pa;
+                    let s = d.dot(ab) / len2;
+                    if s <= margin || s >= 1.0 - margin {
+                        continue;
+                    }
+                    if (d - ab * s).length() > tol {
+                        continue;
+                    }
+                    out.push((s, v));
                 }
             }
         }
-        if let Some((_, v)) = best {
-            return Some((e, v));
-        }
     }
-    None
+    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // The same physical point can be present twice over -- the grid is searched
+    // by cell, and a vertex sitting exactly on a cell boundary is listed in
+    // both. Two boundary vertices at the same place would make a zero-length
+    // edge, and the ear clipper below would have to cope with it.
+    out.dedup_by(|a, b| (a.0 - b.0).abs() <= f64::EPSILON || a.1 == b.1);
+}
+
+/// Triangulate a triangle's boundary once its edges have been subdivided, by
+/// fanning it from a new vertex at the triangle's centre.
+///
+/// The obvious triangulations both fail here. A fan from one of the corners
+/// leaves every split point on the two edges meeting at that corner sitting in
+/// the interior of an emitted edge -- the T-junction is not removed, only
+/// moved. An ear clipper stalls: a boundary that is a triangle's own sides is
+/// convex but full of collinear triples, and on a boolean's sliver triangles
+/// *every* triple comes out collinear to within the tolerance, so it gives up
+/// and drops the face, which tears a hole in the surface. Both were measured
+/// doing exactly that before this was written.
+///
+/// The centre point is inside the triangle by construction, a third of the
+/// height away from each side, so every triangle of the fan has real area and
+/// every split point is a corner of two of them. It costs one vertex per
+/// subdivided face, and `retriangulate_flat_regions` -- which runs immediately
+/// after and rebuilds each flat region from its boundary alone -- drops them
+/// again.
+fn fan_from_centre(
+    pos: &[Vec3],
+    tri: &[u32; 3],
+    boundary: &[u32],
+    tag: u32,
+    positions: &mut Vec<Vec3>,
+    indices: &mut Vec<[u32; 3]>,
+    tags: &mut Vec<u32>,
+) {
+    let centre = (pos[tri[0] as usize] + pos[tri[1] as usize] + pos[tri[2] as usize]) / 3.0;
+    positions.push(centre);
+    let c = (positions.len() - 1) as u32;
+    for i in 0..boundary.len() {
+        let (a, b) = (boundary[i], boundary[(i + 1) % boundary.len()]);
+        indices.push([c, a, b]);
+        tags.push(tag);
+    }
 }
 
 /// Weld, cancel coincident opposite faces, eliminate T-junctions, and rebuild
