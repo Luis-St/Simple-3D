@@ -112,8 +112,14 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     area.id_salt("outliner-tree").show(ui, |ui| {
         ui.set_style(restore);
         ui.add_space(2.0);
-        let ids = app.scene.depth_first();
+        let ids = visible_rows(app);
         for id in ids {
+            // What is being dragged is drawn on the pointer, not in the tree:
+            // a row that stays where it was, while a copy of it follows the
+            // mouse, reads as two of the same node (issue 39).
+            if dragging.is_some_and(|source| id == source || app.scene.is_ancestor_of(source, id)) {
+                continue;
+            }
             row(app, ui, id, dragging);
         }
         // Dropping in the empty space below the tree means "at the end of the
@@ -129,10 +135,85 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
         }
     });
 
+    if let Some(source) = dragging {
+        drag_ghost(app, &ctx, source);
+    }
+
     // Finish the drag on release, wherever the pointer ended up.
     if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
         finish_drag(app);
     }
+}
+
+/// The rows the tree shows: depth-first, minus everything under a group that
+/// has been collapsed.
+///
+/// A collapsed group's children are not merely hidden here -- they are not
+/// drawn at all -- so nothing below one can be clicked, dropped on or moved by
+/// accident while it is shut.
+pub fn visible_rows(app: &App) -> Vec<NodeId> {
+    let mut out = Vec::new();
+    push_visible(app, app.scene.root(), &mut out);
+    out
+}
+
+fn push_visible(app: &App, id: NodeId, out: &mut Vec<NodeId>) {
+    out.push(id);
+    if app.collapsed.contains(&id) {
+        return;
+    }
+    for &child in &app.scene.node(id).children {
+        push_visible(app, child, out);
+    }
+}
+
+/// What is being dragged, drawn under the pointer: the node's own glyph and
+/// name on a translucent slab.
+///
+/// The tree has already left the row out, so this is the only place the dragged
+/// node appears -- which is what makes it obvious that it is *held* rather than
+/// merely highlighted, and what makes the drop line the answer to "where would
+/// it land".
+fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId) {
+    let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) else { return };
+    if !app.scene.contains(source) {
+        return;
+    }
+    let node = app.scene.node(source);
+    let name = node.name.clone();
+    let glyph = if node.is_group() {
+        Glyph::Bracket
+    } else {
+        Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
+    };
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("outliner-drag-ghost")));
+    let galley = painter.layout_no_wrap(
+        name,
+        egui::FontId::proportional(theme::font::VALUE),
+        token::TEXT_HI.gamma_multiply(0.9),
+    );
+    // Held a little below and to the right of the pointer, so the drop
+    // indicator under the pointer is never covered by what is being dropped.
+    let at = pointer + egui::vec2(14.0, 6.0);
+    let slab = egui::Rect::from_min_size(at, egui::vec2(galley.size().x + 26.0, metric::ROW)).expand(1.0);
+    painter.rect_filled(slab, 3.0, token::SURFACE_2.gamma_multiply(0.72));
+    painter.rect_stroke(
+        slab,
+        3.0,
+        egui::Stroke::new(1.0_f32, token::ACCENT.gamma_multiply(0.55)),
+        egui::StrokeKind::Inside,
+    );
+    icon::draw(
+        &painter,
+        egui::Rect::from_min_size(at + egui::vec2(4.0, 4.0), egui::Vec2::splat(14.0)),
+        glyph,
+        token::ACCENT.gamma_multiply(0.75),
+    );
+    painter.galley(
+        egui::pos2(at.x + 22.0, slab.center().y - galley.size().y / 2.0),
+        galley,
+        token::TEXT_HI.gamma_multiply(0.9),
+    );
 }
 
 /// The inline confirmation for deleting a group.
@@ -260,6 +341,29 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
 
     let mut x = rect.left() + 6.0 + depth as f32 * 12.0;
 
+    // The twisty, for anything that holds children. Its column is reserved on
+    // every row, childless ones included, so the glyphs and names below a
+    // group still line up under the ones above it.
+    let twisty_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::Vec2::splat(14.0));
+    let has_children = !app.scene.node(id).children.is_empty();
+    let mut collapsed = app.collapsed.contains(&id);
+    let mut twisty_hovered = false;
+    if has_children {
+        let twisty = ui.interact(twisty_rect, ui.id().with((id, "twisty")), egui::Sense::click());
+        twisty_hovered = twisty.hovered();
+        theme::twisty(
+            &painter,
+            twisty_rect.center(),
+            !collapsed,
+            if twisty.hovered() { token::TEXT_HI } else { token::TEXT_LO },
+        );
+        if twisty.clicked() {
+            collapsed = !collapsed;
+            app.set_collapsed(id, collapsed);
+        }
+    }
+    x += 14.0;
+
     // Type glyph: a bracket for a group, a solid mark for a shape.
     let glyph_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::Vec2::splat(14.0));
     let glyph = if is_group { Glyph::Bracket } else { Glyph::for_primitive(type_id) };
@@ -341,8 +445,9 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
         app.scene.difference_base(id),
     ));
 
-    // The eye owns its own clicks: pressing it must not also select the row.
-    if !eye.hovered() {
+    // The eye and the twisty own their own clicks: pressing either must not
+    // also select the row.
+    if !eye.hovered() && !twisty_hovered {
         if response.clicked() {
             if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
                 app.toggle_selected(id);
@@ -401,6 +506,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
 /// it is the same commands where the tree is, so the shortcut is learned by
 /// reading the row you are already looking at.
 fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: bool) {
+    let is_group = app.scene.node(id).is_group();
     use simple3d_core::keymap::Command;
 
     /// One command in the menu. What was picked is collected rather than run on
@@ -433,6 +539,8 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         );
 
         let mut chosen: Option<Command> = None;
+        let mut operation: Option<GroupOp> = None;
+        let mut new_group = false;
         let mut save_as_primitive = false;
         let mut paint: Option<Option<Colour>> = None;
         let keymap = &app.keymap;
@@ -445,8 +553,41 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         item(ui, keymap, &mut chosen, Command::Paste, have_clipboard);
         ui.separator();
         item(ui, keymap, &mut chosen, Command::Group, !is_root);
-        item(ui, keymap, &mut chosen, Command::MoveUp, !is_root);
-        item(ui, keymap, &mut chosen, Command::MoveDown, !is_root);
+        // Disabled where the move has nowhere to go, rather than enabled and
+        // silent: a node that is already first among its siblings used to
+        // answer a click with a status line that had faded by the time anyone
+        // looked for it (issue 41).
+        item(ui, keymap, &mut chosen, Command::MoveUp, app.can_reorder(-1));
+        item(ui, keymap, &mut chosen, Command::MoveDown, app.can_reorder(1));
+        ui.separator();
+        // A group's operator, where the group is: the property editor has the
+        // same four, but pointing at the group in the tree and saying what it
+        // does is one gesture rather than three (issue 37).
+        if is_group {
+            let current = app.scene.node(id).group_op();
+            ui.menu_button("Operation", |ui| {
+                for option in GroupOp::ALL {
+                    if crate::ui::menu_entry(ui, option.label(), current != Some(option)).clicked() {
+                        operation = Some(option);
+                        ui.close();
+                    }
+                }
+            });
+        }
+        // Somewhere to put things: a group with nothing in it yet, made where
+        // the tree is rather than from the Add menu (issue 40).
+        if ui
+            .button("New empty group")
+            .on_hover_text(if is_group {
+                "A new, empty union group inside this one"
+            } else {
+                "A new, empty union group beside this node"
+            })
+            .clicked()
+        {
+            new_group = true;
+            ui.close();
+        }
         ui.separator();
         if crate::ui::menu_entry(ui, &show_hide, !is_root).clicked() {
             chosen = Some(Command::ToggleVisibility);
@@ -474,9 +615,10 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
                 }
             }
         });
-        // The colours this document is already painted in, offered where the
-        // fixed palette is: the property editor keeps the same two rows.
-        let recent: Vec<[u8; 3]> = app.settings.recent_colours.clone();
+        // The colours the user has mixed for themselves, offered where the
+        // fixed palette is: the property editor keeps the same two rows. A
+        // preset never appears here -- it is already one row up.
+        let recent: Vec<[u8; 3]> = app.custom_recent_colours();
         if !recent.is_empty() {
             ui.horizontal(|ui| {
                 for colour in recent {
@@ -512,6 +654,12 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         ui.separator();
         item(ui, &app.keymap, &mut chosen, Command::Delete, !is_root);
 
+        if let Some(op) = operation {
+            app.set_group_op(id, op);
+        }
+        if new_group {
+            app.add_group_at(id);
+        }
         if let Some(colour) = paint {
             let targets: Vec<NodeId> = app.selection.to_vec();
             app.paint(&targets, colour, None);

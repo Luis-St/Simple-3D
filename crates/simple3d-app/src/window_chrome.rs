@@ -187,9 +187,28 @@ fn glyph(painter: &egui::Painter, rect: egui::Rect, button: Button, maximized: b
 pub(crate) fn title_bar_drag(ctx: &egui::Context, response: &egui::Response, maximized: bool) {
     if response.double_clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
-    } else if response.dragged() {
+    } else if response.drag_started() {
+        // `drag_started`, not `dragged`: the move belongs to the window system
+        // from the moment it is asked for, and asking again on every later
+        // frame of the same drag is what left the window stuck to the pointer
+        // long after the button came up.
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+        hand_over_pointer(ctx);
     }
+}
+
+/// Give up the pointer, having just handed the gesture to the window system.
+///
+/// A compositor that takes over a move or a resize grabs the pointer for
+/// itself, and the release that ends the gesture is delivered to it and never
+/// to us. Without this, egui is left believing a button is still held and a
+/// widget still dragged for as long as the window lives: the title bar's
+/// buttons stop taking clicks, the resize edges stop reporting a hover, and the
+/// next press is read as the continuation of a drag that ended minutes ago --
+/// which is exactly the window "sticking to the mouse" after one resize.
+fn hand_over_pointer(ctx: &egui::Context) {
+    ctx.stop_dragging();
+    ctx.input_mut(|input| input.pointer = egui::PointerState::default());
 }
 
 /// The eight resize grips around the window.
@@ -279,6 +298,7 @@ pub(crate) fn resize_edges(ctx: &egui::Context) {
                 }
                 if response.drag_started() {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
+                    hand_over_pointer(ui.ctx());
                 }
             }
         });

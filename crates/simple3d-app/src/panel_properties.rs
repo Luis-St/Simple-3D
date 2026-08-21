@@ -192,6 +192,10 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
         });
+        // The 3D cursor, as three numbers. Shift+right-click in the viewport
+        // puts it roughly where it is wanted; this is where it is given the
+        // exact place (issue 42).
+        cursor_rows(app, ui);
         ui.horizontal(|ui| {
             row_label(ui, "Axes");
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -254,6 +258,49 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         ui.add(
             egui::Label::new(theme::hint("Select a shape to edit it, or pick one from the palette.")).selectable(false),
         );
+    });
+}
+
+/// Where the 3D cursor is, to the millimetre.
+///
+/// The cursor is `None` when it has never been moved, which means the origin,
+/// so the fields read zero and typing into one places it: the same two states
+/// the viewport draws, without a third way of saying "nowhere".
+fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
+    let unit = app.unit();
+    let at = app.cursor.unwrap_or(Vec3::ZERO);
+    let mut components = [at.x, at.y, at.z];
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        row_label(ui, "3D cursor").on_hover_text(
+            "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
+             Shift+right-click in the viewport puts it under the pointer.",
+        );
+        for (axis, value) in components.iter_mut().enumerate() {
+            let mut shown = unit.from_mm(*value);
+            let field = egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
+            let response = ui.add_sized(egui::vec2(56.0, theme::metric::INPUT_ROW), field);
+            if response.changed() {
+                *value = unit.to_mm(shown);
+                changed = true;
+            }
+            let _ = axis;
+        }
+        ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
+    });
+    if changed {
+        app.cursor = Some(Vec3::new(components[0], components[1], components[2]));
+    }
+    ui.horizontal(|ui| {
+        row_label(ui, "");
+        if ui
+            .add_enabled(app.cursor.is_some(), egui::Button::new("Back to the origin"))
+            .on_hover_text("The cursor goes back to 0, 0, 0")
+            .clicked()
+        {
+            app.cursor = None;
+            app.status = Status::Info("3D cursor back at the origin".into());
+        }
     });
 }
 
@@ -337,8 +384,7 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     // colour that is already in the project is the slow way round.
     swatch_row(app, ui, "", &theme::PAINT_PRESETS.map(|(name, colour)| (name.to_string(), colour)), targets);
     let recent: Vec<(String, egui::Color32)> = app
-        .settings
-        .recent_colours
+        .custom_recent_colours()
         .iter()
         .map(|c| (format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]), egui::Color32::from_rgb(c[0], c[1], c[2])))
         .collect();

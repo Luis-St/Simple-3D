@@ -480,7 +480,9 @@ pub fn describe_point(p: simple3d_geom::Vec3, unit: Unit) -> String {
     )
 }
 
-/// The status bar's triangle and node counts.
+/// The status bar's triangle and node counts. `nodes` is what the document
+/// holds -- the scene itself is not one of them, and counting it made an empty
+/// document report one node with nothing in it.
 pub fn describe_counts(nodes: usize, triangles: usize) -> String {
     format!("{nodes} node{}  {triangles} triangle{}", plural(nodes), plural(triangles))
 }
@@ -497,7 +499,16 @@ fn plural(n: usize) -> &'static str {
 /// than is meaningful.
 pub fn describe_elapsed(elapsed: std::time::Duration) -> String {
     let millis = elapsed.as_secs_f64() * 1000.0;
-    if millis < 1000.0 {
+    // Rounded to whole milliseconds, an evaluation that takes a fifth of one --
+    // which most of them do -- reads as "0 ms", and a readout that says zero
+    // reads as a readout that is not working. Two decimals under 10 ms, one
+    // under 100, none above: always three significant figures of something
+    // that actually happened.
+    if millis < 10.0 {
+        format!("{} ms", format_number(millis, 2))
+    } else if millis < 100.0 {
+        format!("{} ms", format_number(millis, 1))
+    } else if millis < 1000.0 {
         format!("{} ms", format_number(millis, 0))
     } else {
         format!("{} s", format_number(millis / 1000.0, 2))
@@ -655,6 +666,9 @@ mod tests {
         assert_eq!(describe_counts(1, 1), "1 node  1 triangle");
         assert_eq!(describe_counts(3, 240), "3 nodes  240 triangles");
         assert_eq!(describe_elapsed(std::time::Duration::from_millis(12)), "12 ms");
+        // Issue 38: the readout used to say "0 ms" for every evaluation that
+        // took less than half a millisecond, which is most of them.
+        assert_eq!(describe_elapsed(std::time::Duration::from_micros(240)), "0.24 ms");
         assert_eq!(describe_elapsed(std::time::Duration::from_millis(2500)), "2.5 s");
     }
 }
