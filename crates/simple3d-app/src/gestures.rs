@@ -541,3 +541,46 @@ fn escape_abandons_a_half_typed_value_and_enter_takes_it() {
     harness.step();
     assert_eq!(harness.state().scene.node(plate).position.x, 40.0, "Enter did not take the typed value");
 }
+
+#[test]
+fn a_drag_over_the_outliner_marks_the_row_it_would_land_in_while_it_is_still_held() {
+    // Issue 43. The indicator asked `hovered()`, which egui reserves for a
+    // frame where nothing is being dragged -- so it was true on exactly one
+    // frame of a drag, the release, and the mark nobody could see was the
+    // whole complaint. Held here across several frames, which is where a
+    // pointer actually is while it is looking for somewhere to drop.
+    let mut harness = harness("outliner-drop-indicator");
+    let root = harness.state().scene.root();
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let group = harness.state_mut().scene.add_group(simple3d_core::scene::GroupOp::Union, root, 1);
+    let cube = harness.state_mut().scene.add_primitive("box", root, 2).expect("the box is in the registry");
+    harness.state_mut().select_only(plate);
+    harness.state_mut().toggle_selected(cube);
+    harness.step();
+    harness.step();
+
+    let from = rect_of(&harness, crate::panel_outliner::row_id(cube)).center();
+    press(&mut harness, from);
+    // A short move first, to make the press a drag: the rows being carried
+    // leave the tree on the frame after that, which is when the row to aim at
+    // is where it will be for the rest of the gesture.
+    move_to(&mut harness, from + egui::vec2(0.0, 4.0));
+    harness.step();
+    // Aim at where the group row is *now*: the rows the drag carries have left
+    // the tree, so everything below them has moved up. Settled over several
+    // frames, because a response reports the frame it was drawn in.
+    for _ in 0..3 {
+        let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
+        move_to(&mut harness, onto);
+        harness.step();
+    }
+    let target = harness.state().drop_target.expect("nothing was marked as the drop target mid-drag");
+    assert_eq!(target.into, Some(group), "the group under the pointer was not marked as what would take the drop");
+
+    let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
+    release(&mut harness, onto);
+    harness.step();
+    let app = harness.state();
+    assert_eq!(app.scene.node(group).children, vec![plate, cube], "the whole selection did not land in the group");
+    assert!(app.drop_target.is_none(), "the drop target outlived the drag");
+}

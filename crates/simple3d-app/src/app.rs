@@ -978,11 +978,12 @@ impl App {
         self.status = Status::Info(format!("{} group", op.label()));
     }
 
-    /// A new, empty union group: inside `at` when that is a group, beside it
-    /// otherwise. What the outliner's menu offers, so somewhere to put things
-    /// can be made where the tree is.
-    pub fn add_group_at(&mut self, at: NodeId) {
-        self.edit("Add group", None);
+    /// Add a group or a primitive *where the tree is pointing*: inside `at` when
+    /// it is a group, beside it otherwise. What the outliner's own Add menu
+    /// uses, so a shape made from a row lands on that row rather than at the
+    /// document's insertion point (issue 44).
+    pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
+        self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
         let (parent, index) = match self.scene.get(at) {
             Some(node) if node.is_group() => (at, self.scene.node(at).children.len()),
             Some(node) => match node.parent {
@@ -994,7 +995,15 @@ impl App {
             },
             None => (self.scene.root(), self.scene.node(self.scene.root()).children.len()),
         };
-        let id = self.scene.add_group(GroupOp::Union, parent, index);
+        let created = match type_id {
+            Some(type_id) => self.scene.add_primitive(type_id, parent, index),
+            None => Some(self.scene.add_group(op, parent, index)),
+        };
+        let Some(id) = created else {
+            self.history.discard_last();
+            self.status = Status::Warning("That shape is not in the palette".into());
+            return;
+        };
         self.collapsed.remove(&parent);
         self.select_only(id);
         self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
@@ -1105,6 +1114,23 @@ impl App {
         tops.sort_by_key(|id| order.iter().position(|o| o == id).unwrap_or(usize::MAX));
         tops.dedup();
         tops
+    }
+
+    /// What an outliner drag started on `source` actually carries: the whole
+    /// selection when the row that was grabbed is part of it, and that row
+    /// alone otherwise -- dragging something unselected is a statement about
+    /// that node, not about whatever was selected before (issue 43).
+    ///
+    /// Topmost nodes only, in document order, which is both the order they land
+    /// in and the set `Scene::reparent_many` expects.
+    pub fn dragged_nodes(&self, source: NodeId) -> Vec<NodeId> {
+        if self.is_selected(source) && self.selection.len() > 1 {
+            let tops = self.top_level_selection();
+            if !tops.is_empty() {
+                return tops;
+            }
+        }
+        vec![source]
     }
 
     pub fn add_node(&mut self, type_id: Option<&str>, op: GroupOp) {
@@ -2508,19 +2534,105 @@ mod tests {
         // Issues 37 and 40.
         let mut app = headless_app();
         let plate = app.primary().unwrap();
-        app.add_group_at(plate);
+        app.add_node_at(plate, None, GroupOp::Union);
         let group = app.primary().unwrap();
         assert!(app.scene.node(group).is_group());
         assert!(app.scene.node(group).children.is_empty(), "the new group is empty");
         assert_eq!(app.scene.node(group).parent, Some(app.scene.root()), "beside the node it was made from");
 
         // Made *inside* a group, since a group is somewhere things can go.
-        app.add_group_at(group);
+        app.add_node_at(group, None, GroupOp::Union);
         let inner = app.primary().unwrap();
         assert_eq!(app.scene.node(inner).parent, Some(group));
 
         app.set_group_op(group, GroupOp::Difference);
         assert_eq!(app.scene.node(group).group_op(), Some(GroupOp::Difference));
+    }
+
+    #[test]
+    fn dragging_one_row_of_a_multi_selection_moves_the_whole_selection() {
+        // Issue 43: a drag that started on a selected row carries everything
+        // selected, in document order, and leaves it selected where it lands.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let plate = app.primary().unwrap();
+        let second = app.scene.add_primitive("box", root, 1).unwrap();
+        let third = app.scene.add_primitive("cylinder", root, 2).unwrap();
+        let group = app.scene.add_group(GroupOp::Union, root, 3);
+
+        app.selection = vec![third, plate];
+        // Grabbed on a row that is part of the selection: all of it travels,
+        // in the order the tree has it rather than the order it was clicked.
+        assert_eq!(app.dragged_nodes(third), vec![plate, third]);
+        // Grabbed on a row that is not: that row alone, and the selection is
+        // not what the gesture was about.
+        assert_eq!(app.dragged_nodes(second), vec![second]);
+
+        app.outliner_drag = Some(third);
+        app.drop_target = Some(DropTarget { parent: group, index: 0, into: Some(group) });
+        crate::panel_outliner::finish_drag(&mut app);
+        assert_eq!(app.scene.node(group).children, vec![plate, third]);
+        assert_eq!(app.scene.node(root).children, vec![second, group]);
+        assert!(app.is_selected(plate) && app.is_selected(third), "the load was dropped out of the selection");
+        assert_eq!(app.selection.len(), 2);
+
+        // One undo step for the whole drag, and it puts all of it back.
+        app.run(Command::Undo);
+        assert_eq!(app.scene.node(root).children, vec![plate, second, third, group]);
+    }
+
+    #[test]
+    fn a_selection_that_holds_a_group_and_its_child_drags_as_the_group_alone() {
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let plate = app.primary().unwrap();
+        let group = app.scene.add_group(GroupOp::Union, root, 1);
+        let inner = app.scene.add_primitive("box", group, 0).unwrap();
+        let target = app.scene.add_group(GroupOp::Union, root, 2);
+
+        app.selection = vec![group, inner];
+        assert_eq!(app.dragged_nodes(inner), vec![group], "the child was torn out of the group carrying it");
+
+        app.outliner_drag = Some(group);
+        app.drop_target = Some(DropTarget { parent: target, index: 0, into: Some(target) });
+        crate::panel_outliner::finish_drag(&mut app);
+        assert_eq!(app.scene.node(target).children, vec![group]);
+        assert_eq!(app.scene.node(group).children, vec![inner], "the child did not travel with its group");
+        assert_eq!(app.scene.node(root).children, vec![plate, target]);
+    }
+
+    #[test]
+    fn the_outliner_can_add_a_group_or_any_primitive_where_the_row_is() {
+        // Issue 44: the row's own Add menu, which puts a new node inside the
+        // group it was opened on and beside anything else.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+
+        app.add_node_at(plate, Some("cylinder"), GroupOp::Union);
+        let cylinder = app.primary().unwrap();
+        assert_eq!(app.scene.node(cylinder).parent, Some(app.scene.root()), "beside the node it was added from");
+        assert_eq!(app.scene.node(cylinder).spec().map(|s| s.type_id), Some("cylinder"));
+
+        app.add_node_at(cylinder, None, GroupOp::Difference);
+        let group = app.primary().unwrap();
+        assert_eq!(app.scene.node(group).group_op(), Some(GroupOp::Difference));
+
+        // Into the group, because a group is somewhere things can go.
+        app.add_node_at(group, Some("box"), GroupOp::Union);
+        let boxed = app.primary().unwrap();
+        assert_eq!(app.scene.node(boxed).parent, Some(group));
+
+        // Every shape the palette offers is reachable from the same menu.
+        for spec in simple3d_core::primitive::REGISTRY.iter() {
+            app.add_node_at(group, Some(spec.type_id), GroupOp::Union);
+            let added = app.primary().unwrap();
+            assert_eq!(
+                app.scene.node(added).spec().map(|s| s.type_id),
+                Some(spec.type_id),
+                "{} could not be added from the outliner",
+                spec.type_id
+            );
+        }
     }
 
     #[test]

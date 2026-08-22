@@ -605,28 +605,57 @@ impl Scene {
     /// Move `id` under `new_parent` at `index`. Refuses to create a cycle and
     /// refuses to move the root (spec section 7.2).
     pub fn reparent(&mut self, id: NodeId, new_parent: NodeId, index: usize) -> Result<(), &'static str> {
-        if id == self.root {
-            return Err("the scene root cannot be moved");
-        }
-        if !self.nodes.contains_key(&id) || !self.nodes.contains_key(&new_parent) {
+        self.reparent_many(&[id], new_parent, index)
+    }
+
+    /// Move several nodes under `new_parent`, starting at `index` and keeping
+    /// the order they are given in.
+    ///
+    /// Not a loop over `reparent` at the call site, because each single move
+    /// would shift the index the next one was measured against -- and because
+    /// the whole drag has to be refused as one when any part of it is illegal,
+    /// rather than half-applied and then rejected. A node whose own ancestor is
+    /// also being moved is left out: it travels inside it, and moving it as
+    /// well would tear it out of the parent that carries it.
+    pub fn reparent_many(&mut self, ids: &[NodeId], new_parent: NodeId, index: usize) -> Result<(), &'static str> {
+        if !self.nodes.contains_key(&new_parent) {
             return Err("no such node");
         }
         if !self.nodes[&new_parent].is_group() {
             return Err("only groups can hold children");
         }
-        if new_parent == id || self.is_ancestor_of(id, new_parent) {
-            return Err("a node cannot be moved inside itself");
+        for &id in ids {
+            if id == self.root {
+                return Err("the scene root cannot be moved");
+            }
+            if !self.nodes.contains_key(&id) {
+                return Err("no such node");
+            }
+            if new_parent == id || self.is_ancestor_of(id, new_parent) {
+                return Err("a node cannot be moved inside itself");
+            }
+        }
+        let mut moving: Vec<NodeId> = Vec::new();
+        for &id in ids {
+            let carried = ids.iter().any(|&other| other != id && self.is_ancestor_of(other, id));
+            if !carried && !moving.contains(&id) {
+                moving.push(id);
+            }
         }
         // Index is interpreted against the target's child list *before* the
         // move, so dragging within one parent lands where the indicator showed.
-        let same_parent = self.nodes[&id].parent == Some(new_parent);
-        let old_index = self.nodes[&new_parent].children.iter().position(|&c| c == id);
-        self.unlink(id);
-        let index = match (same_parent, old_index) {
-            (true, Some(old)) if old < index => index - 1,
-            _ => index,
-        };
-        self.link(id, new_parent, index);
+        let mut index = index;
+        for &id in &moving {
+            if self.nodes[&new_parent].children.iter().position(|&c| c == id).is_some_and(|old| old < index) {
+                index -= 1;
+            }
+        }
+        for &id in &moving {
+            self.unlink(id);
+        }
+        for (offset, &id) in moving.iter().enumerate() {
+            self.link(id, new_parent, index + offset);
+        }
         Ok(())
     }
 
@@ -997,6 +1026,54 @@ mod tests {
         // Drop `a` between `b` and `c`: index 2 in the pre-move list.
         scene.reparent(a, root, 2).unwrap();
         assert_eq!(scene.node(root).children, vec![b, a, c]);
+    }
+
+    #[test]
+    fn reparenting_several_nodes_keeps_their_order_and_lands_where_one_would() {
+        // Issue 43: a multi-node drag is one move, not a loop of single moves --
+        // each of those would shift the index the next was measured against.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let a = box_at(&mut scene, root, 0.0);
+        let b = box_at(&mut scene, root, 1.0);
+        let c = box_at(&mut scene, root, 2.0);
+        let d = box_at(&mut scene, root, 3.0);
+        let group = scene.add_group(GroupOp::Union, root, 4);
+
+        scene.reparent_many(&[a, c], group, 0).unwrap();
+        assert_eq!(scene.node(group).children, vec![a, c], "the two lost their order on the way in");
+        assert_eq!(scene.node(root).children, vec![b, d, group]);
+
+        // Back out, between `b` and `d`: the index is read against the list as
+        // it stands before the move, exactly as for a single node.
+        scene.reparent_many(&[a, c], root, 1).unwrap();
+        assert_eq!(scene.node(root).children, vec![b, a, c, d, group]);
+
+        // A run that moves within one parent counts what leaves from in front
+        // of the target, so it lands where the indicator was drawn.
+        scene.reparent_many(&[b, a], root, 3).unwrap();
+        assert_eq!(scene.node(root).children, vec![c, b, a, d, group]);
+    }
+
+    #[test]
+    fn a_multi_node_reparent_is_refused_whole_and_never_moves_a_carried_child() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let outer = scene.add_group(GroupOp::Union, root, 0);
+        let inner = scene.add_group(GroupOp::Union, outer, 0);
+        let leaf = box_at(&mut scene, inner, 0.0);
+        let other = box_at(&mut scene, root, 1.0);
+
+        // One illegal member fails the whole drag, and nothing has moved.
+        assert!(scene.reparent_many(&[other, outer], inner, 0).is_err());
+        assert_eq!(scene.node(root).children, vec![outer, other]);
+        assert_eq!(scene.node(outer).children, vec![inner]);
+
+        // A node inside another node being moved travels inside it; moving it
+        // as well would tear it out of the group that carries it.
+        scene.reparent_many(&[outer, leaf], root, 0).unwrap();
+        assert_eq!(scene.node(inner).children, vec![leaf]);
+        assert_eq!(scene.node(root).children, vec![outer, other]);
     }
 
     #[test]
