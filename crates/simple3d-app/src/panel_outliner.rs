@@ -34,6 +34,22 @@ pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId) -
     Some(DropTarget { parent, index: if after { index + 1 } else { index }, into: None })
 }
 
+/// Where the line marking a drop *between* two rows is drawn: the middle of the
+/// gap between them, whichever of the two the pointer happens to be over.
+///
+/// One gap is one landing place, so it gets one line. Drawn on the row's own
+/// edge instead, the same drop showed as two lines a spacing apart -- one under
+/// the row above, one over the row below -- and reads as two positions to choose
+/// between (issue 48).
+pub fn gap_line_y(rect: egui::Rect, spacing: f32, after: bool) -> f32 {
+    let half = spacing / 2.0;
+    if after {
+        rect.bottom() + half
+    } else {
+        rect.top() - half
+    }
+}
+
 /// The operator mark a node carries in the tree: its own, for a group, or the
 /// one it is subject to, for a child of a difference or intersection. Reading
 /// the boolean tree at a glance is the whole reason these are inline rather
@@ -508,9 +524,15 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     // Drop indicator: which group would take the load, or which gap it would
     // land in. Both are drawn on the row under the pointer, because that is
     // where the pointer is looking (issue 43).
-    if !carried.is_empty() && !shadowed && response.contains_pointer() {
-        let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(rect.center());
-        let fraction = ((pointer.y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
+    // The band a row answers for is its rect grown by half the spacing above and
+    // below, so the strip between two rows belongs to one of them rather than to
+    // neither: read off the row alone, the indicator blinked out every time the
+    // pointer crossed a gap (issue 48).
+    let half_gap = ui.spacing().item_spacing.y / 2.0;
+    let band = rect.expand2(egui::vec2(0.0, half_gap));
+    if !carried.is_empty() && !shadowed && ui.rect_contains_pointer(band) {
+        let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(band.center());
+        let fraction = ((pointer.y - band.top()) / band.height().max(1.0)).clamp(0.0, 1.0);
         let root = app.scene.root();
         if let Some(target) = drop_position(&app.scene, id, fraction, root) {
             if drop_is_legal(&app.scene, carried, &target) {
@@ -536,7 +558,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
                         // going above.
                         let own = app.scene.node(target.parent).children.iter().position(|&c| c == id);
                         let after = own.is_some_and(|index| target.index > index);
-                        let y = if after { rect.bottom() } else { rect.top() };
+                        let y = gap_line_y(rect, half_gap * 2.0, after);
                         // A child of `target.parent` sits one level in from it,
                         // which is the level the line has to sit at.
                         let left = rect.left() + 6.0 + (app.scene.depth(target.parent) + 1) as f32 * 12.0;
@@ -851,6 +873,21 @@ mod tests {
         assert_eq!(beside_group.parent, root);
         assert_eq!(beside_group.index, 0);
         assert_eq!(beside_group.into, None);
+    }
+
+    #[test]
+    fn one_gap_between_two_rows_draws_one_line() {
+        // Issue 48: the same landing place -- under the upper row, over the
+        // lower one -- was drawn at two heights a spacing apart, so slowly
+        // crossing a gap showed two orange lines and read as two positions to
+        // aim at. Both now land in the middle of the gap, which is one line.
+        let spacing = 4.0;
+        let upper = egui::Rect::from_min_size(egui::pos2(0.0, 10.0), egui::vec2(100.0, 22.0));
+        let lower = egui::Rect::from_min_size(egui::pos2(0.0, upper.bottom() + spacing), egui::vec2(100.0, 22.0));
+        assert_eq!(gap_line_y(upper, spacing, true), gap_line_y(lower, spacing, false));
+        // And it is the gap it names, not the inside of either row.
+        let y = gap_line_y(upper, spacing, true);
+        assert!(y > upper.bottom() && y < lower.top(), "the line at {y} is not in the gap");
     }
 
     #[test]

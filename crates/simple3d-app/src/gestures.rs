@@ -621,3 +621,59 @@ fn the_rows_a_drag_carries_stay_where_they_are_while_it_is_held() {
     assert!(harness.state().outliner_drag.is_none(), "the drag outlived the release");
     assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(last)), below);
 }
+
+#[test]
+fn the_gap_between_two_rows_is_one_drop_position_all_the_way_across() {
+    // Issue 48. The rows are laid out with a gap between them, and a pointer in
+    // that gap is claimed by the rows either side of it -- so both drew the
+    // mark, one under the upper row and one over the lower one, two orange
+    // lines a spacing apart for a single landing place. Checked here both ways:
+    // every step across the gap names the same drop, and the height the two
+    // rows would draw their line at is the same height.
+    let mut harness = harness("outliner-drop-gap");
+    let root = harness.state().scene.root();
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let cube = harness.state_mut().scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    let sphere = harness.state_mut().scene.add_primitive("sphere", root, 2).expect("the sphere is in the registry");
+    harness.state_mut().select_only(sphere);
+    harness.step();
+    harness.step();
+
+    let upper = rect_of(&harness, crate::panel_outliner::row_id(plate));
+    let lower = rect_of(&harness, crate::panel_outliner::row_id(cube));
+    let gap = lower.top() - upper.bottom();
+    assert!(gap > 0.0, "the rows are drawn edge to edge, so this test proves nothing");
+
+    let from = rect_of(&harness, crate::panel_outliner::row_id(sphere)).center();
+    press(&mut harness, from);
+    move_to(&mut harness, from + egui::vec2(0.0, 4.0));
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert!(harness.state().outliner_drag.is_some(), "the drag never started");
+
+    // Up across the gap in small steps, the way a pointer looking for a place
+    // to land actually crosses it.
+    let x = upper.center().x;
+    let mut y = lower.top() + 2.0;
+    while y >= upper.bottom() - 2.0 {
+        move_to(&mut harness, egui::pos2(x, y));
+        harness.step();
+        let target = harness.state().drop_target.unwrap_or_else(|| panic!("no drop target at y {y}"));
+        assert_eq!(target.into, None, "the gap at y {y} was read as a drop into a node");
+        assert_eq!(target.parent, root, "the gap at y {y} named another parent");
+        assert_eq!(target.index, 1, "the gap at y {y} named another landing place");
+        y -= gap / 4.0;
+    }
+
+    // Whichever of the two rows draws it, the line lands in the middle of the
+    // gap rather than on that row's own edge, so there is only ever one of it.
+    let from_above = crate::panel_outliner::gap_line_y(upper, gap, true);
+    let from_below = crate::panel_outliner::gap_line_y(lower, gap, false);
+    assert_eq!(from_above, from_below, "the two rows either side of the gap drew the drop line at two heights");
+    assert!(from_above > upper.bottom() && from_above < lower.top(), "the line is not in the gap");
+
+    release(&mut harness, egui::pos2(x, lower.top()));
+    harness.step();
+    assert_eq!(harness.state().scene.node(root).children, vec![plate, sphere, cube], "the drop landed elsewhere");
+}
