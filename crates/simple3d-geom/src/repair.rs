@@ -83,6 +83,56 @@ pub fn weld_tolerant(mesh: &Mesh, tol: f64) -> Mesh {
     Mesh { positions, indices, tags }
 }
 
+/// Merge the ends of every edge shorter than `limit`, and drop the triangles
+/// that collapse to a line as a result.
+///
+/// The weld above merges points that are within a tolerance of *each other*;
+/// this deals with the pair that ends up just outside it. A chain of booleans
+/// puts two copies of the same physical point a few microns apart -- far enough
+/// to survive the weld, close enough that the triangle between them is a
+/// slither with no surface -- and there is no tolerance that separates that
+/// case from a real feature by distance alone, because the two are the same
+/// distance apart.
+///
+/// Collapsing, rather than deleting. A deleted sliver leaves its neighbours'
+/// edges with nothing on the other side, which is a hole where there was a
+/// seam; collapsing one end onto the other retargets those neighbours instead,
+/// and the surface stays closed. Nothing moves further than `limit`.
+fn collapse_short_edges(mesh: Mesh, limit: f64) -> Mesh {
+    let mut union: Vec<u32> = (0..mesh.positions.len() as u32).collect();
+    fn root(union: &mut [u32], mut i: u32) -> u32 {
+        while union[i as usize] != i {
+            union[i as usize] = union[union[i as usize] as usize];
+            i = union[i as usize];
+        }
+        i
+    }
+    for t in &mesh.indices {
+        for e in 0..3 {
+            let (a, b) = (root(&mut union, t[e]), root(&mut union, t[(e + 1) % 3]));
+            if a == b {
+                continue;
+            }
+            if (mesh.positions[a as usize] - mesh.positions[b as usize]).length() < limit {
+                // The lower index survives, so the result does not depend on
+                // the order the triangles happen to be in.
+                let (keep, gone) = if a < b { (a, b) } else { (b, a) };
+                union[gone as usize] = keep;
+            }
+        }
+    }
+    let mut indices = Vec::with_capacity(mesh.indices.len());
+    let mut tags = Vec::with_capacity(mesh.indices.len());
+    for (i, t) in mesh.indices.iter().enumerate() {
+        let t = [root(&mut union, t[0]), root(&mut union, t[1]), root(&mut union, t[2])];
+        if t[0] != t[1] && t[1] != t[2] && t[0] != t[2] {
+            indices.push(t);
+            tags.push(mesh.tag(i));
+        }
+    }
+    Mesh { positions: mesh.positions, indices, tags }
+}
+
 /// Drop triangles thinner than `tol`, measured as the smallest distance from a
 /// vertex to the opposite edge. Welding has already merged everything closer
 /// together than `tol`, so such a triangle is geometrically indistinguishable
@@ -326,35 +376,74 @@ fn fan_from_centre(
 /// Weld, cancel coincident opposite faces, eliminate T-junctions, and rebuild
 /// each flat region's interior triangulation. Applied to every boolean result so
 /// nested booleans always get clean, and reasonably sized, input.
+///
+/// A second and a third attempt at a coarser tolerance, when the first leaves
+/// the mesh broken. `WELD_TOL` is sized for the ~1e-12mm disagreement between
+/// two evaluations of the same physical point, and that is the right size for
+/// one boolean; nine of them chained -- each one's output the next one's input
+/// -- push two copies of a point as far as 3e-6mm apart, and a weld that leaves
+/// those as two points leaves a seam no amount of splitting can close. Which
+/// side of the tolerance such a pair lands on comes down to the last bits of a
+/// sine, so the same commit was clean on Linux and not on Windows.
+///
+/// The coarser attempts run from the original mesh rather than patching the
+/// first attempt's output: a tolerance is a decision made at the weld, and
+/// every step after it inherits that decision. They cost nothing in the
+/// ordinary case, which stops at the first attempt, and a tenth of a micron is
+/// still two orders of magnitude below anything a printer resolves.
 pub fn heal(mesh: &Mesh) -> Mesh {
-    let m = weld_tolerant(mesh, WELD_TOL);
-    let m = drop_slivers(m, WELD_TOL);
-    let m = cancel_opposite_faces(m);
-    let healed = split_t_junctions(m, WELD_TOL);
+    let best = heal_at(mesh, WELD_TOL);
+    if best.manifold_issue().is_none() {
+        return best;
+    }
+    for factor in [10.0, 100.0, 1000.0] {
+        let again = heal_at(mesh, WELD_TOL * factor);
+        if again.manifold_issue().is_none() {
+            return again;
+        }
+    }
+    best
+}
 
-    // Rebuilding each flat region deliberately straightens its boundary, dropping
-    // the collinear vertices the pass above inserted -- an ear clipper stalls on
-    // those. The neighbouring faces still have their own corners there, so a
-    // second T-junction pass puts exactly the same splits back, this time into
-    // far fewer and larger triangles.
+/// One attempt at healing, at one tolerance.
+fn heal_at(mesh: &Mesh, tol: f64) -> Mesh {
+    let m = weld_tolerant(mesh, tol);
+    let m = collapse_short_edges(m, tol * 4.0);
+    let m = drop_slivers(m, tol);
+    let m = cancel_opposite_faces(m);
+    let healed = split_t_junctions(m, tol);
+
+    // Rebuilding each flat region deliberately straightens its boundary,
+    // dropping the collinear vertices the pass above inserted -- an ear clipper
+    // stalls on those. The neighbouring faces still have their own corners
+    // there, so a second T-junction pass puts exactly the same splits back,
+    // this time into far fewer and larger triangles.
     //
-    // Retriangulation is the most intricate step here and the one most exposed to
-    // geometry nobody anticipated, so its output only stands if it is at least as
-    // sound as the input it replaced. A valid but bulky mesh always beats a slim
-    // broken one.
-    // Compacted before the second T-junction pass, and not just at the end:
+    // Compacted before that second pass, and not just at the end:
     // retriangulating orphans every vertex that was interior to a flat region,
     // and those orphans sit *on* the large new triangles that replaced them.
     // Left in `positions` they would all be found as on-edge vertices and split
     // straight back out again.
-    let simplified = compact(crate::planar::retriangulate_flat_regions(&healed));
-    let simplified = split_t_junctions(simplified, WELD_TOL);
-    if simplified.triangle_count() < healed.triangle_count()
-        && (simplified.manifold_issue().is_none() || healed.manifold_issue().is_some())
-    {
-        return compact(simplified);
+    let simplified = split_t_junctions(compact(crate::planar::retriangulate_flat_regions(&healed)), tol);
+    compact(sounder_of(healed, simplified))
+}
+
+/// Whichever of the two is fit to be returned: a manifold mesh in preference to
+/// a broken one, and the smaller of the two when there is nothing to choose
+/// between them on that count.
+///
+/// Never the broken one while a whole mesh is on the table. The rule this
+/// replaces kept the *first* candidate unless the second was strictly smaller,
+/// which quietly let a broken result through whenever both were broken -- and
+/// that is exactly the position a boolean that has gone marginally differently
+/// on another platform puts this in.
+fn sounder_of(healed: Mesh, simplified: Mesh) -> Mesh {
+    match (healed.manifold_issue().is_none(), simplified.manifold_issue().is_none()) {
+        (false, true) => simplified,
+        (true, false) => healed,
+        _ if simplified.triangle_count() < healed.triangle_count() => simplified,
+        _ => healed,
     }
-    compact(healed)
 }
 
 /// Drop positions no triangle references (cancelling faces can orphan some).
