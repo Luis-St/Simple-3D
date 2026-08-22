@@ -16,18 +16,76 @@ pub struct Renderable {
     /// Edges worth drawing: a real crease in the surface, not an artefact of how
     /// a flat face happens to be triangulated.
     pub edges: Vec<[u32; 2]>,
+    /// Which separate body each vertex belongs to: two vertices share a number
+    /// when the surface joins them. The viewport hands the renderer the whole
+    /// evaluated scene as *one* mesh, so this is the only thing that says where
+    /// one solid ends and the next begins -- and an origin axis has to know,
+    /// because the solid it runs into may not hide it while every other one
+    /// must (issue 47).
+    pub bodies: Vec<u16>,
+    /// How many bodies that is: what the next item's tags start after, so two
+    /// items' bodies are never the same body as far as the frame is concerned.
+    pub body_count: u16,
 }
 
 impl Renderable {
     pub fn prepare(mesh: &Mesh) -> Renderable {
         let welded = mesh.weld();
         let edges = feature_edges(&welded, 20.0);
-        Renderable { mesh: welded, edges }
+        let bodies = bodies_of(&welded);
+        let body_count = bodies.iter().max().map_or(0, |last| last + 1);
+        Renderable { mesh: welded, edges, bodies, body_count }
     }
 
     pub fn empty() -> Renderable {
-        Renderable { mesh: Mesh::new(), edges: Vec::new() }
+        Renderable { mesh: Mesh::new(), edges: Vec::new(), bodies: Vec::new(), body_count: 0 }
     }
+
+    /// The body a triangle belongs to, as a tag for the depth buffer. `base` is
+    /// where this item's bodies start, so two items never share a tag, and 0
+    /// means "no body", so the numbering starts at 1.
+    fn tag(&self, triangle: usize, base: u16) -> u16 {
+        self.mesh.indices.get(triangle).map_or(0, |tri| self.body_tag(tri[0] as usize, base))
+    }
+
+    fn body_tag(&self, vertex: usize, base: u16) -> u16 {
+        self.bodies.get(vertex).map_or(0, |body| base.saturating_add(*body).saturating_add(1))
+    }
+}
+
+/// Group the vertices of a welded mesh into connected bodies: union-find over
+/// the triangles, which is what "one solid" means once the scene has been
+/// evaluated into a single mesh.
+///
+/// More than `u16::MAX` bodies would be a scene of sixty-five thousand separate
+/// solids; past that they share the last number, which costs nothing but the
+/// distinction between two axes' worth of far-off shapes.
+fn bodies_of(mesh: &Mesh) -> Vec<u16> {
+    let mut parent: Vec<u32> = (0..mesh.positions.len() as u32).collect();
+    fn find(parent: &mut [u32], mut of: u32) -> u32 {
+        while parent[of as usize] != of {
+            parent[of as usize] = parent[parent[of as usize] as usize];
+            of = parent[of as usize];
+        }
+        of
+    }
+    for tri in &mesh.indices {
+        let root = find(&mut parent, tri[0]);
+        for &vertex in &tri[1..] {
+            let other = find(&mut parent, vertex);
+            if other != root {
+                parent[other as usize] = root;
+            }
+        }
+    }
+    let mut numbers: std::collections::HashMap<u32, u16> = std::collections::HashMap::new();
+    (0..mesh.positions.len() as u32)
+        .map(|vertex| {
+            let root = find(&mut parent, vertex);
+            let next = numbers.len().min(u16::MAX as usize - 1) as u16;
+            *numbers.entry(root).or_insert(next)
+        })
+        .collect()
 }
 
 /// Edges where the surface actually creases, plus any edge with only one
@@ -227,20 +285,20 @@ pub fn render(request: &Request<'_>) -> Frame {
     if request.grid.visible {
         draw_grid(&mut frame, &view, &request.grid, &request.palette);
     }
-    // What each axis runs through: the stretches inside material, which are cut
-    // out of the line, and which solid each one goes into, which is the solid
-    // that may not hide it. Every item is drawn under its own tag so the axes
-    // can ask that question of the depth buffer a pixel at a time.
+    // Where each axis runs through material: the stretches cut out of the line,
+    // and the stretches on either side of them that run up to a surface and so
+    // must not be swallowed by the shape they are arriving at.
     let material = axis_material(&request.items, &request.grid);
-    for (index, item) in request.items.iter().enumerate() {
-        frame.set_tag(index as u16 + 1);
+    for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         match item.style {
             Style::Solid => match request.mode {
                 DisplayMode::Wireframe => draw_wireframe(&mut frame, &view, item.renderable, request.palette.wire),
-                DisplayMode::Shaded => draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255),
+                DisplayMode::Shaded => {
+                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255, tag_base)
+                }
                 DisplayMode::ShadedWithEdges => {
-                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255);
-                    draw_edges(&mut frame, &view, item.renderable, request.palette.edge);
+                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255, tag_base);
+                    draw_edges(&mut frame, &view, item.renderable, request.palette.edge, tag_base);
                 }
             },
             Style::Selected => {
@@ -248,7 +306,7 @@ pub fn render(request: &Request<'_>) -> Frame {
                 // be visible, and an outline reads clearly over a shaded body.
                 // A larger bias than the solid's own edges, or the two would tie
                 // at equal depth and the outline would lose.
-                draw_selection(&mut frame, &view, item.renderable, request.palette.selected);
+                draw_selection(&mut frame, &view, item.renderable, request.palette.selected, tag_base);
             }
             Style::Ghost => draw_ghost(&mut frame, &view, item.renderable, request.palette.ghost),
         }
@@ -259,14 +317,14 @@ pub fn render(request: &Request<'_>) -> Frame {
         // there is no surface for it to sit on.
         draw_plane_marks(&mut frame, &view, &request.items, &request.palette, &request.grid);
     }
-    // Last: an axis is hidden by two things and no others -- the material it
-    // runs through, cut out of the line itself, and any solid in front of it
-    // that it does not run through. The solid it *does* run through cannot hide
-    // it: the arm leaving that solid is outside it from the surface onwards,
-    // but its projection stays over the shape most of the way to the
-    // silhouette, and the depth test alone ate exactly the stretch that says
-    // where the line goes in (issue 47). The grid is untouched, drawn first and
-    // covered by everything.
+    // Last: an axis is hidden by the material it runs through, which is cut out
+    // of the line, and by anything in front of it -- except on the approach to a
+    // surface it is about to go into, which is drawn over the shape it is
+    // arriving at. Depth alone eats that approach, because the line is behind
+    // the shape's own front faces for the whole stretch between the silhouette
+    // and the point it enters, and losing it is what made the origin read as
+    // being somewhere behind the model (issue 47). The grid is untouched, drawn
+    // first and covered by everything.
     draw_axes(&mut frame, &view, &request.palette, &request.grid, &material);
     frame
 }
@@ -317,7 +375,7 @@ fn triangle_base(item: &Renderable, index: usize, base: Rgba) -> Rgba {
     }
 }
 
-fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, alpha: u8) {
+fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, colour_base: Rgba, alpha: u8, tag_base: u16) {
     let forward = view.forward();
     for (index, tri) in item.mesh.indices.iter().enumerate() {
         let world = [
@@ -336,7 +394,8 @@ fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba, al
         if normal.dot(to_eye(view, centroid)) <= 0.0 {
             continue;
         }
-        let colour = shade(triangle_base(item, index, base), normal, forward, alpha);
+        let colour = shade(triangle_base(item, index, colour_base), normal, forward, alpha);
+        frame.set_tag(item.tag(index, tag_base));
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
         frame.triangle(
             [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
@@ -394,18 +453,23 @@ const AXIS_BIAS: f32 = -5.0e-4;
 /// magnitude above this it starts showing through the far side of a solid.
 const MARK_BIAS: f32 = 3.0e-3;
 
-fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
+fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
+        // Tagged like the faces it creases, so an edge of the solid an axis
+        // goes into does not hide that axis where the faces either side of it
+        // do not.
+        frame.set_tag(item.body_tag(edge[0] as usize, tag_base));
         draw_world_line(frame, view, a, b, colour, EDGE_BIAS);
     }
 }
 
-fn draw_selection(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
+fn draw_selection(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
+        frame.set_tag(item.body_tag(edge[0] as usize, tag_base));
         draw_world_line(frame, view, a, b, colour, SELECTION_BIAS);
     }
 }
@@ -425,13 +489,6 @@ fn draw_wireframe(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgb
 /// the line's own depth key, not an absolute amount.
 fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32) {
     draw_world_line_with_depth(frame, view, a, b, colour, bias, true)
-}
-
-/// A stretch of an axis: hidden by whatever is in front of it except the solids
-/// in `through`, and never leaving depth of its own.
-fn draw_axis_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba, through: &[bool]) {
-    let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
-    frame.line_through(va, vb, colour, AXIS_BIAS, through);
 }
 
 /// As `draw_world_line`, with the depth *write* optional: the grid is
@@ -629,21 +686,38 @@ fn faded_line(
 struct AxisMaterial {
     /// Per axis, the stretches inside a solid, as coordinates along that axis.
     inside: [Vec<(f64, f64)>; 3],
-    /// Per axis, per item, whether that axis runs through that solid. A solid
-    /// pierced by Y is still an ordinary occluder for X and Z, so this cannot be
-    /// collapsed to one flag per item.
-    pierced: [Vec<bool>; 3],
+    /// Per axis, the bodies it runs through, indexed by their tag: the solids
+    /// that may not hide that axis. Per body and per axis both -- a box the Y
+    /// axis runs through is still an ordinary occluder for X and Z, and a box
+    /// the axes never touch is an ordinary occluder for all three, however many
+    /// other shapes it was merged into one mesh with (img2).
+    through: [Vec<bool>; 3],
     /// The distance from the origin to the model's furthest vertex. What an
     /// origin axis's arms have to be longer than, or a shape standing on the
     /// origin holds the whole arm and the axis is never seen at all.
     reach: f64,
 }
 
+/// Where each item's body tags start, so no two items share one.
+fn tag_bases(items: &[Item<'_>]) -> Vec<u16> {
+    let mut base = 0_u16;
+    items
+        .iter()
+        .map(|item| {
+            let start = base;
+            base = base.saturating_add(item.renderable.body_count);
+            start
+        })
+        .collect()
+}
+
 fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
-    let none = || vec![false; items.len()];
-    let mut material =
-        AxisMaterial { inside: [Vec::new(), Vec::new(), Vec::new()], pierced: [none(), none(), none()], reach: 0.0 };
-    for (index, item) in items.iter().enumerate() {
+    let mut material = AxisMaterial {
+        inside: [Vec::new(), Vec::new(), Vec::new()],
+        through: [Vec::new(), Vec::new(), Vec::new()],
+        reach: 0.0,
+    };
+    for (item, tag_base) in items.iter().zip(tag_bases(items)) {
         let positions = item.renderable.mesh.positions.iter();
         material.reach = positions.map(|p| p.length()).fold(material.reach, f64::max);
         // A ghost is see-through, so the axis inside it is too -- and it never
@@ -655,9 +729,14 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
             if !grid.axes[axis] {
                 continue;
             }
-            let spans = axis_inside_spans(item, axis);
-            material.pierced[axis][index] = !spans.is_empty();
-            material.inside[axis].extend(spans);
+            for (span, tag) in axis_inside_spans(item, axis, tag_base) {
+                material.inside[axis].push(span);
+                let through = &mut material.through[axis];
+                if through.len() <= tag as usize {
+                    through.resize(tag as usize + 1, false);
+                }
+                through[tag as usize] = true;
+            }
         }
     }
     material
@@ -700,49 +779,60 @@ fn faded_axis_line(
             continue;
         }
         let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
-        for (from, to) in outside_spans(component(a, axis), component(b, axis), inside) {
-            draw_axis_line(frame, view, along(axis, from), along(axis, to), faded, through);
+        for (from, to, material) in clip_spans(component(a, axis), component(b, axis), inside) {
+            if material {
+                continue;
+            }
+            let (start, end) = (along(axis, from), along(axis, to));
+            let (va, vb) = (to_vertex(view, view.to_view(start)), to_vertex(view, view.to_view(end)));
+            frame.line_through(va, vb, faded, AXIS_BIAS, through);
         }
     }
 }
 
-/// The parts of `[a, b]` -- a stretch of an axis, given as the coordinate along
-/// it -- that are not inside any of `inside`. Either end may be the larger; the
-/// pieces come back in the order they were asked for, so a line keeps its
-/// direction and its fade.
-fn outside_spans(a: f64, b: f64, inside: &[(f64, f64)]) -> Vec<(f64, f64)> {
+/// `[a, b]` -- a stretch of an axis, given as the coordinate along it -- cut at
+/// every boundary of `spans`, each piece saying whether it lies inside one.
+///
+/// Either end may be the larger; the pieces come back in the order they were
+/// asked for, so a line keeps its direction and the fade along it.
+fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64, bool)> {
     let (lo, hi) = (a.min(b), a.max(b));
-    let mut pieces = vec![(lo, hi)];
-    for &(start, end) in inside {
-        let mut next = Vec::with_capacity(pieces.len() + 1);
-        for (from, to) in pieces {
-            if end <= from || start >= to {
-                next.push((from, to));
-                continue;
-            }
-            if start > from {
-                next.push((from, start));
-            }
-            if end < to {
-                next.push((end, to));
+    let mut cuts = vec![lo, hi];
+    for &(start, end) in spans {
+        for edge in [start, end] {
+            if edge > lo && edge < hi {
+                cuts.push(edge);
             }
         }
-        pieces = next;
+    }
+    cuts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mut pieces: Vec<(f64, f64, bool)> = Vec::with_capacity(cuts.len());
+    for pair in cuts.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        if to - from < 1e-9 {
+            continue;
+        }
+        let middle = (from + to) / 2.0;
+        pieces.push((from, to, spans.iter().any(|&(start, end)| middle > start && middle < end)));
     }
     if a > b {
         pieces.reverse();
-        pieces = pieces.into_iter().map(|(from, to)| (to, from)).collect();
+        pieces = pieces.into_iter().map(|(from, to, flag)| (to, from, flag)).collect();
     }
     pieces
 }
 
-/// Where along `axis` one solid is, as spans of the coordinate along it.
+/// Where along `axis` one item's solids are, as spans of the coordinate along
+/// it, each with the body it runs through.
 ///
 /// A closed surface is crossed an even number of times, so the crossings sorted
-/// and taken in pairs are the stretches inside it. An odd count means the line
-/// grazed an edge or the mesh is not closed; the odd one out is dropped rather
-/// than turned into a span that runs to infinity.
-fn axis_inside_spans(item: &Item<'_>, axis: usize) -> Vec<(f64, f64)> {
+/// and taken in pairs are the stretches inside it. They are paired *per body*,
+/// because the mesh handed to the renderer is the whole scene at once and two
+/// shapes on the same axis would otherwise pair across the gap between them --
+/// which would call the empty space between two boxes "material". An odd count
+/// means the line grazed an edge or the mesh is not closed; the odd one out is
+/// dropped rather than turned into a span that runs to infinity.
+fn axis_inside_spans(item: &Item<'_>, axis: usize, tag_base: u16) -> Vec<((f64, f64), u16)> {
     // The axis passes through the origin, so a solid that does not straddle zero
     // on the other two coordinates cannot be on it -- which is most of them, and
     // this is the whole mesh not looked at.
@@ -750,21 +840,25 @@ fn axis_inside_spans(item: &Item<'_>, axis: usize) -> Vec<(f64, f64)> {
     if (0..3).any(|other| other != axis && (component(lo, other) > 0.0 || component(hi, other) < 0.0)) {
         return Vec::new();
     }
-    let mut crossings: Vec<f64> = Vec::new();
-    for tri in &item.renderable.mesh.indices {
+    let mut crossings: std::collections::BTreeMap<u16, Vec<f64>> = std::collections::BTreeMap::new();
+    for (index, tri) in item.renderable.mesh.indices.iter().enumerate() {
         let world = [
             item.renderable.mesh.positions[tri[0] as usize],
             item.renderable.mesh.positions[tri[1] as usize],
             item.renderable.mesh.positions[tri[2] as usize],
         ];
         if let Some(at) = axis_crossing(world, axis) {
-            crossings.push(at);
+            crossings.entry(item.renderable.tag(index, tag_base)).or_default().push(at);
         }
     }
-    crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    // A crossing on a shared edge is found twice, once for each triangle.
-    crossings.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-    crossings.chunks_exact(2).map(|pair| (pair[0], pair[1])).collect()
+    let mut spans = Vec::new();
+    for (tag, mut at) in crossings {
+        at.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // A crossing on a shared edge is found twice, once for each triangle.
+        at.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        spans.extend(at.chunks_exact(2).map(|pair| ((pair[0], pair[1]), tag)));
+    }
+    spans
 }
 
 /// The point on the axis at `value` along it. Every axis line passes through the
@@ -823,12 +917,8 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
         }
         // Where this axis runs through material, and so is not drawn at all...
         let inside = &material.inside[axis];
-        // ...and the solids it runs through, which do not hide the rest of it.
-        // Tags are item indices plus one, 0 being a pixel no item claimed.
-        let mut through = vec![false; material.pierced[axis].len() + 1];
-        for (index, pierced) in material.pierced[axis].iter().enumerate() {
-            through[index + 1] = *pierced;
-        }
+        // ...and the bodies it runs through, which do not hide the rest of it.
+        let through = &material.through[axis];
         // The two styles are two different things, and each is drawn as what it
         // is. Along the grid, an axis *is* a grid line: it runs the width of the
         // ground, travels with it, and fades out with it at the edge -- so X and
@@ -879,7 +969,7 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
                 colours[axis],
                 axis,
                 inside,
-                &through,
+                through,
             );
         }
     }
@@ -1494,7 +1584,7 @@ mod tests {
         let prepared = Renderable::prepare(&between);
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
         assert!(
-            axis_material(&items, &req.grid).pierced.iter().all(|pierced| pierced == &vec![false]),
+            axis_material(&items, &req.grid).inside.iter().all(|spans| spans.is_empty()),
             "the solid was placed on an axis, so this proves nothing"
         );
 
@@ -1548,6 +1638,114 @@ mod tests {
     }
 
     #[test]
+    fn one_mesh_of_two_shapes_is_still_two_solids_to_an_axis() {
+        // The viewport hands the renderer the *whole scene* as one mesh, so
+        // "the solid an axis runs into" cannot be an item: a box on the origin
+        // and a box nowhere near it arrive welded into a single `Renderable`,
+        // and taking that as one solid drew all three axes across everything
+        // (img2). The bodies are found in the mesh instead.
+        let mut req = request(Vec::new(), DisplayMode::Shaded);
+        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+        // One on the origin, and one off to the side but nearer the eye, so it
+        // covers a stretch of the axes without touching any of them.
+        let (right, up) = req.view.basis();
+        let elsewhere =
+            primitives::box_mesh(24.0, 24.0, 24.0).translated(req.view.offset_dir() * 40.0 + right * 26.0 + up * 8.0);
+        let apart = Renderable::prepare(&elsewhere);
+        let scene = simple3d_geom::csg_bsp::union(&primitives::box_mesh(20.0, 20.0, 20.0), &elsewhere);
+        let prepared = Renderable::prepare(&scene);
+        assert_eq!(prepared.body_count, 2, "the two shapes welded into one body, so this proves nothing");
+
+        let items = vec![Item { renderable: &prepared, style: Style::Solid }];
+        let material = axis_material(&items, &req.grid);
+        for axis in 0..3 {
+            let seen = material.through[axis].iter().filter(|&&through| through).count();
+            assert_eq!(seen, 1, "axis {axis} is seen through {seen} of the two bodies");
+        }
+
+        let frame = |axes: [bool; 3], items: Vec<Item<'_>>| {
+            let mut this = Request { grid: Grid { axes, ..req.grid }, ..request(Vec::new(), req.mode) };
+            this.view = req.view;
+            this.items = items;
+            render(&this)
+        };
+        fn solid<'a>(renderable: &'a Renderable) -> Vec<Item<'a>> {
+            vec![Item { renderable, style: Style::Solid }]
+        }
+        // Where each box drew on its own, so a sample can be put behind the far
+        // one on purpose -- and away from the near one, which is seen through.
+        let apart_only = frame([false; 3], solid(&apart));
+        let on_origin = Renderable::prepare(&primitives::box_mesh(20.0, 20.0, 20.0));
+        let near_only = frame([false; 3], solid(&on_origin));
+        let all = frame([true; 3], solid(&prepared));
+        let bare = frame([true; 3], Vec::new());
+
+        let mut behind_the_far_box = 0;
+        for axis in 0..3 {
+            let mut axes = [true; 3];
+            axes[axis] = false;
+            let (without, bare_without) = (frame(axes, solid(&prepared)), frame(axes, Vec::new()));
+            let at = |frame: &Frame, reference: &Frame, at: f64| {
+                let (pos, _) = req.view.project(along(axis, at)).expect("the sample is in front of the camera");
+                let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
+                let drawn = (y.saturating_sub(1)..=y + 1).any(|y| {
+                    (x.saturating_sub(1)..=x + 1).any(|x| {
+                        x < frame.width && y < frame.height && {
+                            let o = (y * frame.width + x) * 4;
+                            frame.color[o..o + 4] != reference.color[o..o + 4]
+                        }
+                    })
+                });
+                // Off-frame samples report the last pixel, which is background
+                // in every one of these renders, so they simply do not qualify.
+                let pixel = if x < frame.width && y < frame.height { x + y * frame.width } else { 0 };
+                (drawn, pixel)
+            };
+
+            // Just outside the box on the origin, where the line runs up to the
+            // surface it goes into: drawn, over that box's own silhouette.
+            let mut arriving = 0;
+            for sample in [-13.0, -12.0, -11.5, 11.5, 12.0, 13.0] {
+                let (drawn, pixel) = at(&all, &without, sample);
+                // Only where the far box is not the one in the way: that stretch
+                // is its own case, tested below.
+                if !is_background(&apart_only, pixel, &req.palette) {
+                    continue;
+                }
+                arriving += 1;
+                assert!(drawn, "axis {axis} stopped short of the solid it enters, at {sample}");
+            }
+            assert!(arriving > 0, "axis {axis}: every sample beside the near box was covered by the far one");
+
+            // ...and behind the box it never enters: not drawn. The samples are
+            // found rather than guessed -- a point on this axis that the far box
+            // covers, and that the axis does draw at with nothing in the way.
+            for step in 0..80 {
+                let sample = 15.0 + step as f64;
+                for sample in [sample, -sample] {
+                    let (drawn_bare, pixel) = at(&bare, &bare_without, sample);
+                    let behind_far = !is_background(&apart_only, pixel, &req.palette);
+                    let over_near = !is_background(&near_only, pixel, &req.palette);
+                    // Behind the far box and clear of the near one, so the far
+                    // box is what is actually in the way.
+                    if !drawn_bare || !behind_far || over_near {
+                        continue;
+                    }
+                    behind_the_far_box += 1;
+                    assert!(
+                        !at(&all, &without, sample).0,
+                        "axis {axis} drew through the solid it only passes behind, at {sample}"
+                    );
+                }
+            }
+        }
+        assert!(
+            behind_the_far_box >= 2,
+            "only {behind_the_far_box} samples landed behind the far box, so nothing was really tested"
+        );
+    }
+
+    #[test]
     fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
         // Pairs of crossings, per solid: in at one face, out at the other.
         let centred = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
@@ -1564,11 +1762,11 @@ mod tests {
         assert!(spans.iter().any(|&(a, b)| near(a, 35.0) && near(b, 45.0)), "{spans:?}");
         // The second box is off the Y axis entirely, so only the first is on it.
         assert_eq!(material.inside[1].len(), 1);
-        // Both are run through by X, so neither may hide it...
-        assert_eq!(material.pierced[0], vec![true, true]);
-        // ...while the box off the Y axis is an ordinary occluder for that one,
-        // which is why this cannot be one flag per solid.
-        assert_eq!(material.pierced[1], vec![true, false]);
+        // Both boxes are run through by X, so neither may hide it...
+        assert_eq!(material.through[0].iter().filter(|&&through| through).count(), 2, "{:?}", material.through[0]);
+        // ...while for Y only the one it goes into is seen through, which is
+        // the whole of img2: the other box hides Y like anything else.
+        assert_eq!(material.through[1].iter().filter(|&&through| through).count(), 1, "{:?}", material.through[1]);
         // The furthest corner of the further box, which the arms have to clear.
         assert!(material.reach > 45.0, "reach was {}", material.reach);
 
@@ -1576,13 +1774,16 @@ mod tests {
         let away = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(40.0, 40.0, 0.0)));
         let items = vec![Item { renderable: &away, style: Style::Solid }];
         let material = axis_material(&items, &grid);
-        assert!(material.pierced.iter().all(|axis| axis == &vec![false]), "a solid off the axes was taken as pierced");
         assert!(material.inside.iter().all(|spans| spans.is_empty()), "a solid off the axes cut one of them");
+        assert!(
+            material.through.iter().all(|bodies| !bodies.contains(&true)),
+            "a solid the axes never enter was marked see-through, so it would not hide them"
+        );
 
         // A ghost hides nothing: it is see-through, and so is the axis in it.
         let ghosted = vec![Item { renderable: &centred, style: Style::Ghost }];
         let material = axis_material(&ghosted, &grid);
-        assert!(material.pierced.iter().all(|axis| axis == &vec![false]), "a ghost was taken as pierced");
+        assert!(material.through.iter().all(|bodies| !bodies.contains(&true)), "a ghost was marked see-through");
         assert!(material.inside[0].is_empty(), "a ghost cut the axis");
 
         // An axis that is switched off is not looked for at all.
@@ -1592,17 +1793,17 @@ mod tests {
     }
 
     #[test]
-    fn a_stretch_of_axis_is_clipped_against_what_hides_it() {
-        let hidden = [(-15.0, 15.0), (35.0, 45.0)];
-        // Wholly clear, wholly hidden, and straddling an edge.
-        assert_eq!(outside_spans(20.0, 30.0, &hidden), vec![(20.0, 30.0)]);
-        assert!(outside_spans(-10.0, 10.0, &hidden).is_empty());
-        assert_eq!(outside_spans(10.0, 20.0, &hidden), vec![(15.0, 20.0)]);
-        // Across a whole span: two pieces, in the order they were asked for.
-        assert_eq!(outside_spans(30.0, 50.0, &hidden), vec![(30.0, 35.0), (45.0, 50.0)]);
+    fn a_stretch_of_axis_is_cut_at_every_boundary_it_crosses() {
+        let spans = [(-15.0, 15.0), (35.0, 45.0)];
+        // Wholly clear, wholly inside, and straddling one edge.
+        assert_eq!(clip_spans(20.0, 30.0, &spans), vec![(20.0, 30.0, false)]);
+        assert_eq!(clip_spans(-10.0, 10.0, &spans), vec![(-10.0, 10.0, true)]);
+        assert_eq!(clip_spans(10.0, 20.0, &spans), vec![(10.0, 15.0, true), (15.0, 20.0, false)]);
+        // Across a whole span: three pieces, in the order they were asked for.
+        assert_eq!(clip_spans(30.0, 50.0, &spans), vec![(30.0, 35.0, false), (35.0, 45.0, true), (45.0, 50.0, false)]);
         // Backwards, for the arm that runs the other way: the pieces come back
         // in that direction too, so the fade along the arm stays put.
-        assert_eq!(outside_spans(50.0, 30.0, &hidden), vec![(50.0, 45.0), (35.0, 30.0)]);
+        assert_eq!(clip_spans(50.0, 30.0, &spans), vec![(50.0, 45.0, false), (45.0, 35.0, true), (35.0, 30.0, false)]);
     }
 
     #[test]
