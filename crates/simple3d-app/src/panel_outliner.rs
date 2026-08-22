@@ -102,6 +102,10 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     confirm_strip(app, ui);
 
     let dragging = app.outliner_drag;
+    // The whole load, worked out once a frame: every row it holds leaves the
+    // tree, the legality of a drop is judged against all of it, and the ghost
+    // says how much is on the pointer (issue 43).
+    let carried: Vec<NodeId> = dragging.map(|source| app.dragged_nodes(source)).unwrap_or_default();
     app.drop_target = None;
     let ctx = ui.ctx().clone();
     let (area, restore) = theme::list_scroll_area(ui);
@@ -117,10 +121,10 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
             // What is being dragged is drawn on the pointer, not in the tree:
             // a row that stays where it was, while a copy of it follows the
             // mouse, reads as two of the same node (issue 39).
-            if dragging.is_some_and(|source| id == source || app.scene.is_ancestor_of(source, id)) {
+            if carried.iter().any(|&source| id == source || app.scene.is_ancestor_of(source, id)) {
                 continue;
             }
-            row(app, ui, id, dragging);
+            row(app, ui, id, &carried);
         }
         // Dropping in the empty space below the tree means "at the end of the
         // root", which is otherwise awkward to reach.
@@ -128,7 +132,12 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
             egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
             egui::Sense::hover(),
         );
-        if dragging.is_some() && response.hovered() {
+        // `contains_pointer`, not `hovered`: egui reserves hovering for a frame
+        // where nothing is being dragged, which is every frame of a drag but the
+        // one it ends on. Asking the wrong question is why the drop indicator
+        // only ever appeared for the single frame of the release, if at all
+        // (issue 43).
+        if dragging.is_some() && response.contains_pointer() {
             let root = app.scene.root();
             app.drop_target = Some(DropTarget { parent: root, index: app.scene.node(root).children.len(), into: None });
             ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
@@ -136,7 +145,7 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     });
 
     if let Some(source) = dragging {
-        drag_ghost(app, &ctx, source);
+        drag_ghost(app, &ctx, source, carried.len());
     }
 
     // Finish the drag on release, wherever the pointer ended up.
@@ -174,13 +183,16 @@ fn push_visible(app: &App, id: NodeId, out: &mut Vec<NodeId>) {
 /// node appears -- which is what makes it obvious that it is *held* rather than
 /// merely highlighted, and what makes the drop line the answer to "where would
 /// it land".
-fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId) {
+fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId, carried: usize) {
     let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) else { return };
     if !app.scene.contains(source) {
         return;
     }
     let node = app.scene.node(source);
-    let name = node.name.clone();
+    // A whole selection travels under one slab, named for how much of it there
+    // is: eight slabs stacked on the pointer would cover the drop indicator
+    // they exist to point at.
+    let name = if carried > 1 { format!("{carried} nodes") } else { node.name.clone() };
     let glyph = if node.is_group() {
         Glyph::Bracket
     } else {
@@ -285,7 +297,7 @@ pub fn row_id(id: NodeId) -> egui::Id {
     egui::Id::new(("outliner-row", id))
 }
 
-fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
+fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
     let depth = app.scene.depth(id);
     let node = app.scene.node(id);
     let name = node.name.clone();
@@ -465,38 +477,60 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, dragging: Option<NodeId>) {
 
     context_menu(app, &response, id, is_root);
 
-    // Drop indicator.
-    if let Some(source) = dragging {
-        if response.hovered() {
-            let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(rect.center());
-            let fraction = ((pointer.y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
-            let root = app.scene.root();
-            if let Some(target) = drop_position(&app.scene, id, fraction, root) {
-                let legal = target.parent != source
-                    && !app.scene.is_ancestor_of(source, target.parent)
-                    && app.scene.node(target.parent).is_group();
-                if legal {
-                    app.drop_target = Some(target);
-                    let stroke = egui::Stroke::new(2.0_f32, token::ACCENT);
-                    match target.into {
-                        // Into a group: outline the whole row.
-                        Some(_) => {
-                            painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-                        }
-                        // Between siblings: a line where it will land.
-                        None => {
-                            let y = if fraction > 0.5 { rect.bottom() } else { rect.top() };
-                            painter.hline(rect.x_range(), y, stroke);
-                        }
+    // Drop indicator: which group would take the load, or which gap it would
+    // land in. Both are drawn on the row under the pointer, because that is
+    // where the pointer is looking (issue 43).
+    if !carried.is_empty() && response.contains_pointer() {
+        let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(rect.center());
+        let fraction = ((pointer.y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
+        let root = app.scene.root();
+        if let Some(target) = drop_position(&app.scene, id, fraction, root) {
+            if drop_is_legal(&app.scene, carried, &target) {
+                app.drop_target = Some(target);
+                let stroke = egui::Stroke::new(2.0_f32, token::ACCENT);
+                match target.into {
+                    // Into a group: the whole row is lit, not merely outlined,
+                    // so "inside this one" and "next to it" cannot be confused
+                    // at a glance.
+                    Some(_) => {
+                        painter.rect_filled(rect, 2.0, token::ACCENT.gamma_multiply(0.22));
+                        painter.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
                     }
-                } else {
-                    // Cycles are prevented, and the indicator says so rather than
-                    // letting the user find out on release.
-                    painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0_f32, token::DANGER), egui::StrokeKind::Inside);
+                    // Between siblings: a line in the gap it would land in,
+                    // indented to the depth it would land at and tipped with a
+                    // marker, so the line belongs to a level and not merely to
+                    // a pair of rows.
+                    None => {
+                        // Which side of this row the line goes on is read back
+                        // out of the target, not guessed from the pointer again:
+                        // the two used different thresholds, and the band
+                        // between them drew the line under a row the drop was
+                        // going above.
+                        let own = app.scene.node(target.parent).children.iter().position(|&c| c == id);
+                        let after = own.is_some_and(|index| target.index > index);
+                        let y = if after { rect.bottom() } else { rect.top() };
+                        // A child of `target.parent` sits one level in from it,
+                        // which is the level the line has to sit at.
+                        let left = rect.left() + 6.0 + (app.scene.depth(target.parent) + 1) as f32 * 12.0;
+                        painter.hline(left..=rect.right(), y, stroke);
+                        painter.circle_filled(egui::pos2(left + 1.0, y), 3.0, token::ACCENT);
+                    }
                 }
+            } else {
+                // Cycles are prevented, and the indicator says so rather than
+                // letting the user find out on release.
+                painter.rect_stroke(rect, 2.0, egui::Stroke::new(1.0_f32, token::DANGER), egui::StrokeKind::Inside);
             }
         }
     }
+}
+
+/// Whether everything being dragged may land on `target`: nothing can be
+/// dropped into itself or into anything it holds, and only a group can hold
+/// children at all.
+pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> bool {
+    scene.node(target.parent).is_group()
+        && carried.iter().all(|&source| target.parent != source && !scene.is_ancestor_of(source, target.parent))
 }
 
 /// The right-click menu on an outliner row.
@@ -540,11 +574,38 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
 
         let mut chosen: Option<Command> = None;
         let mut operation: Option<GroupOp> = None;
-        let mut new_group = false;
+        let mut add: Option<(Option<&'static str>, GroupOp)> = None;
         let mut save_as_primitive = false;
         let mut paint: Option<Option<Colour>> = None;
         let keymap = &app.keymap;
 
+        // First, because adding is what the tree is most often opened to do,
+        // and because a shape added from a row belongs on that row: inside the
+        // group that was clicked, or beside anything else (issue 44). The Add
+        // menu in the menu bar has the same contents and puts them at the
+        // document's insertion point instead.
+        ui.menu_button("Add", |ui| {
+            for op in GroupOp::ALL {
+                if ui.button(format!("{} group", op.label())).clicked() {
+                    add = Some((None, op));
+                    ui.close();
+                }
+            }
+            ui.separator();
+            for category in simple3d_core::primitive::categories() {
+                ui.menu_button(category, |ui| {
+                    for spec in simple3d_core::primitive::REGISTRY.iter().filter(|s| s.category == category) {
+                        if ui.button(spec.label).clicked() {
+                            add = Some((Some(spec.type_id), GroupOp::Union));
+                            ui.close();
+                        }
+                    }
+                });
+            }
+        })
+        .response
+        .on_hover_text(if is_group { "Into this group" } else { "Beside this node" });
+        ui.separator();
         item(ui, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
         item(ui, keymap, &mut chosen, Command::Duplicate, !is_root);
         ui.separator();
@@ -573,20 +634,6 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
                     }
                 }
             });
-        }
-        // Somewhere to put things: a group with nothing in it yet, made where
-        // the tree is rather than from the Add menu (issue 40).
-        if ui
-            .button("New empty group")
-            .on_hover_text(if is_group {
-                "A new, empty union group inside this one"
-            } else {
-                "A new, empty union group beside this node"
-            })
-            .clicked()
-        {
-            new_group = true;
-            ui.close();
         }
         ui.separator();
         if crate::ui::menu_entry(ui, &show_hide, !is_root).clicked() {
@@ -657,8 +704,8 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         if let Some(op) = operation {
             app.set_group_op(id, op);
         }
-        if new_group {
-            app.add_group_at(id);
+        if let Some((type_id, op)) = add {
+            app.add_node_at(id, type_id, op);
         }
         if let Some(colour) = paint {
             let targets: Vec<NodeId> = app.selection.to_vec();
@@ -707,19 +754,34 @@ fn hover_text(
     lines.join("\n")
 }
 
-fn finish_drag(app: &mut App) {
+pub(crate) fn finish_drag(app: &mut App) {
     let Some(source) = app.outliner_drag.take() else { return };
     let Some(target) = app.drop_target.take() else { return };
-    if !app.scene.contains(source) {
+    let carried: Vec<NodeId> = app.dragged_nodes(source).into_iter().filter(|id| app.scene.contains(*id)).collect();
+    if carried.is_empty() {
         return;
     }
     app.edit("Reparent", None);
-    match app.scene.reparent(source, target.parent, target.index) {
+    match app.scene.reparent_many(&carried, target.parent, target.index) {
         Ok(()) => {
-            app.select_only(source);
-            app.status = Status::Info(format!("Moved into {}", app.scene.node(target.parent).name));
+            // The load stays selected, in the order it landed in: a drag that
+            // dropped the rest of the selection on arrival would make moving
+            // several nodes twice in a row impossible.
+            app.select_only(carried[0]);
+            for &id in &carried[1..] {
+                app.toggle_selected(id);
+            }
+            let into = app.scene.node(target.parent).name.clone();
+            app.status = Status::Info(if carried.len() > 1 {
+                format!("Moved {} nodes into {into}", carried.len())
+            } else {
+                format!("Moved into {into}")
+            });
         }
-        Err(why) => app.status = Status::Warning(why.to_string()),
+        Err(why) => {
+            app.history.discard_last();
+            app.status = Status::Warning(why.to_string());
+        }
     }
 }
 
@@ -789,6 +851,26 @@ mod tests {
         let target = drop_position(&scene, sibling, 0.95, root).unwrap();
         scene.reparent(inner, target.parent, target.index).unwrap();
         assert_eq!(scene.node(root).children, vec![group, sibling, inner]);
+    }
+
+    #[test]
+    fn a_drop_is_refused_when_any_one_of_the_dragged_nodes_would_swallow_itself() {
+        // Issue 43: the whole load is judged, not just the row that was grabbed.
+        let (scene, root, group, inner, sibling) = tree();
+        let into_group = DropTarget { parent: group, index: 0, into: Some(group) };
+        assert!(drop_is_legal(&scene, &[sibling], &into_group));
+        // `group` is being dragged too, so nothing may land inside it.
+        assert!(!drop_is_legal(&scene, &[sibling, group], &into_group));
+        // Nor may a node land inside itself, however it was reached.
+        assert!(!drop_is_legal(&scene, &[group], &into_group));
+        // Its own child is a fine place for a sibling, and not for the group.
+        let beside_inner = DropTarget { parent: group, index: 1, into: None };
+        assert!(drop_is_legal(&scene, &[sibling], &beside_inner));
+        assert!(!drop_is_legal(&scene, &[inner, group], &beside_inner));
+        // Only a group can hold children.
+        let into_leaf = DropTarget { parent: sibling, index: 0, into: Some(sibling) };
+        assert!(!drop_is_legal(&scene, &[inner], &into_leaf));
+        let _ = root;
     }
 
     #[test]
