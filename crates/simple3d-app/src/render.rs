@@ -227,15 +227,6 @@ pub fn render(request: &Request<'_>) -> Frame {
     if request.grid.visible {
         draw_grid(&mut frame, &view, &request.grid, &request.palette);
     }
-    // Before the model and depth-tested against it: an axis is a mark on the
-    // ground, and a solid standing on the origin covers the part of it that
-    // runs inside the solid, the way the solid covers anything else behind it
-    // (issues 36 and 47). Drawn last and over the model instead, the arms
-    // either side of a shape are joined by a coloured line lying across its
-    // front, which is the picture 47 rejects: only the stretches standing
-    // clear of the solid belong on screen.
-    draw_axes(&mut frame, &view, &request.palette, &request.grid);
-
     for item in &request.items {
         match item.style {
             Style::Solid => match request.mode {
@@ -261,10 +252,15 @@ pub fn render(request: &Request<'_>) -> Frame {
         // there is no surface for it to sit on.
         draw_plane_marks(&mut frame, &view, &request.items, &request.palette, &request.grid);
     }
-    if request.mode != DisplayMode::Wireframe {
-        // Where each axis goes into a solid, on the surface it goes in through.
-        draw_axis_entries(&mut frame, &view, &request.items, &request.palette, &request.grid);
-    }
+    // After the model, because the axes are not tested against it: an axis is
+    // hidden by the material it runs *through*, worked out against the meshes
+    // themselves, and by nothing else. Tested against the depth buffer instead
+    // it also vanished wherever a shape merely stood in front of it, which left
+    // the line arriving at a shape missing (issue 47); drawn with no regard for
+    // the model at all it ran straight across the solid it goes into, which is
+    // the picture issue 47 rejects. The grid is untouched: it is ground, drawn
+    // first and covered by everything.
+    draw_axes(&mut frame, &view, &request.palette, &request.grid, &request.items);
     frame
 }
 
@@ -374,13 +370,12 @@ fn draw_ghost(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba) {
 /// scene's depth range when the camera is far away.
 const EDGE_BIAS: f32 = 2.0e-4;
 const SELECTION_BIAS: f32 = 8.0e-4;
-/// The grid and the axes are biased *away* from the eye, so a face that happens
-/// to be coplanar with one of them hides it. Without this a plate 4mm thick and
-/// centred on the origin has the ground grid drawn straight across its side
-/// walls, because the wall and the grid line tie at exactly equal depth and the
-/// grid got there first. The axes are biased slightly less than the grid,
-/// because the X and Y axes lie exactly along grid lines and would otherwise
-/// lose that tie in turn.
+/// The grid is biased *away* from the eye, so a face that happens to be
+/// coplanar with it hides it. Without this a plate 4mm thick and centred on the
+/// origin has the ground grid drawn straight across its side walls, because the
+/// wall and the grid line tie at exactly equal depth and the grid got there
+/// first. The axes need no bias of their own: they are not tested against the
+/// model at all, only against the material they run through.
 const GRID_BIAS: f32 = -8.0e-4;
 /// A plane mark sits *on* the surface it is drawn on, so it needs to win the
 /// tie against that surface -- and against the feature edges of the same
@@ -389,7 +384,6 @@ const GRID_BIAS: f32 = -8.0e-4;
 /// interpolated depth rounds behind the face it lies on, and an order of
 /// magnitude above this it starts showing through the far side of a solid.
 const MARK_BIAS: f32 = 3.0e-3;
-const AXIS_BIAS: f32 = -5.0e-4;
 
 fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
     for edge in &item.edges {
@@ -424,8 +418,16 @@ fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgb
     draw_world_line_with_depth(frame, view, a, b, colour, bias, true)
 }
 
-/// As `draw_world_line`, with the depth *write* optional: the grid and the axes
-/// are depth-tested against the model but leave no depth of their own.
+/// A world-space line drawn over everything already in the frame, depth neither
+/// tested nor written: an axis, which is hidden by the material it runs through
+/// rather than by whatever happens to be in front of it on screen.
+fn draw_world_line_overlay(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba) {
+    let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
+    frame.line_overlay(va, vb, colour);
+}
+
+/// As `draw_world_line`, with the depth *write* optional: the grid is
+/// depth-tested against the model but leaves no depth of its own.
 fn draw_world_line_with_depth(
     frame: &mut Frame,
     view: &View,
@@ -614,15 +616,178 @@ fn faded_line(
     }
 }
 
-fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
+/// How far from the origin the model reaches: the distance to its furthest
+/// vertex. What an origin axis's arms have to be longer than, or the shape
+/// standing on the origin holds the whole arm and the axis is never seen.
+fn origin_clearance(items: &[Item<'_>]) -> f64 {
+    items.iter().flat_map(|item| item.renderable.mesh.positions.iter()).map(|p| p.length()).fold(0.0_f64, f64::max)
+}
+
+/// One arm of an axis: faded along its length like the grid, and drawn over the
+/// frame rather than tested against it -- except where it runs inside material,
+/// which is not drawn at all.
+///
+/// The depth test is the wrong question for an axis. Asked of the depth buffer,
+/// an axis disappears wherever the shape merely *stands in front of it*, which
+/// is most of the screen once the camera is close: the arm leaving a box at the
+/// origin is outside the box from the surface onwards, but its projection stays
+/// over the box for a long way, so the line arriving at the shape was missing
+/// and only a mark on the face was left (issue 47). Asked of the model instead
+/// -- is this stretch of the line inside anything? -- the answer is the one the
+/// picture wants: the line runs unbroken up to the surface it goes into, stops
+/// there, and picks up again where it comes out. The stretch behind the shape is
+/// the same line, so it is drawn like the rest of it (issues 20, 36, 47).
+#[allow(clippy::too_many_arguments)]
+fn faded_axis_line(
+    frame: &mut Frame,
+    view: &View,
+    centre: Vec3,
+    to: Vec3,
+    reach: f64,
+    colour: Rgba,
+    axis: usize,
+    inside: &[(f64, f64)],
+) {
+    for step in 0..FADE_STEPS {
+        let t0 = step as f64 / FADE_STEPS as f64;
+        let t1 = (step + 1) as f64 / FADE_STEPS as f64;
+        let a = centre + (to - centre) * t0;
+        let b = centre + (to - centre) * t1;
+        let mid = (a + b) * 0.5;
+        let fade = 1.0 - ((mid - centre).length() / (reach * 0.8)).min(1.0).powi(2);
+        if fade <= 0.03 {
+            continue;
+        }
+        let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
+        for (from, to) in outside_spans(component(a, axis), component(b, axis), inside) {
+            draw_world_line_overlay(frame, view, along(axis, from), along(axis, to), faded);
+        }
+    }
+}
+
+/// The parts of `[a, b]` -- a stretch of an axis, given as the coordinate along
+/// it -- that are not inside any of `inside`. Either end may be the larger; the
+/// pieces come back in the order they were asked for, so a line keeps its
+/// direction and its fade.
+fn outside_spans(a: f64, b: f64, inside: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let (lo, hi) = (a.min(b), a.max(b));
+    let mut pieces = vec![(lo, hi)];
+    for &(start, end) in inside {
+        let mut next = Vec::with_capacity(pieces.len() + 1);
+        for (from, to) in pieces {
+            if end <= from || start >= to {
+                next.push((from, to));
+                continue;
+            }
+            if start > from {
+                next.push((from, start));
+            }
+            if end < to {
+                next.push((end, to));
+            }
+        }
+        pieces = next;
+    }
+    if a > b {
+        pieces.reverse();
+        pieces = pieces.into_iter().map(|(from, to)| (to, from)).collect();
+    }
+    pieces
+}
+
+/// Where along `axis` the solids are, as spans of the coordinate along it.
+///
+/// A closed surface is crossed an even number of times, so the crossings sorted
+/// and taken in pairs are the stretches inside it. An odd count means the line
+/// grazed an edge or a mesh is not closed; the odd one out is dropped rather
+/// than turned into a span that runs to infinity.
+fn axis_inside_spans(items: &[Item<'_>], axis: usize) -> Vec<(f64, f64)> {
+    let mut spans = Vec::new();
+    for item in items.iter().filter(|i| i.style == Style::Solid) {
+        // The axis passes through the origin, so a solid that does not straddle
+        // zero on the other two coordinates cannot be on it -- which is most of
+        // them, and this is the whole mesh not looked at.
+        let Some((lo, hi)) = item.renderable.mesh.bounds() else { continue };
+        if (0..3).any(|other| other != axis && (component(lo, other) > 0.0 || component(hi, other) < 0.0)) {
+            continue;
+        }
+        let mut crossings: Vec<f64> = Vec::new();
+        for tri in &item.renderable.mesh.indices {
+            let world = [
+                item.renderable.mesh.positions[tri[0] as usize],
+                item.renderable.mesh.positions[tri[1] as usize],
+                item.renderable.mesh.positions[tri[2] as usize],
+            ];
+            if let Some(at) = axis_crossing(world, axis) {
+                crossings.push(at);
+            }
+        }
+        crossings.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // A crossing on a shared edge is found twice, once for each triangle.
+        crossings.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        for pair in crossings.chunks_exact(2) {
+            spans.push((pair[0], pair[1]));
+        }
+    }
+    spans
+}
+
+/// The point on the axis at `value` along it. Every axis line passes through the
+/// origin, in both styles, so the other two coordinates are zero.
+fn along(axis: usize, value: f64) -> Vec3 {
+    match axis {
+        0 => Vec3::new(value, 0.0, 0.0),
+        1 => Vec3::new(0.0, value, 0.0),
+        _ => Vec3::new(0.0, 0.0, value),
+    }
+}
+
+fn component(v: Vec3, axis: usize) -> f64 {
+    match axis {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    }
+}
+
+/// Where the axis through the origin along `axis` pierces one triangle, as the
+/// coordinate along that axis. Moller-Trumbore against the line rather than a
+/// ray, so a crossing behind the origin is found as readily as one in front.
+fn axis_crossing(world: [Vec3; 3], axis: usize) -> Option<f64> {
+    let direction = along(axis, 1.0);
+    let (edge1, edge2) = (world[1] - world[0], world[2] - world[0]);
+    let pvec = direction.cross(edge2);
+    let det = edge1.dot(pvec);
+    // Edge-on to the axis: no crossing, and the maths is degenerate.
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let tvec = -world[0];
+    let u = tvec.dot(pvec) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let qvec = tvec.cross(edge1);
+    let v = direction.dot(qvec) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    Some(edge2.dot(qvec) * inv)
+}
+
+fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, items: &[Item<'_>]) {
     let spacing = effective_grid_spacing(view, grid.spacing);
     let radius = grid_radius(view);
+    let clearance = origin_clearance(items);
     let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
     let directions = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
     for axis in 0..3 {
         if !grid.axes[axis] {
             continue;
         }
+        // Where this axis runs through material, and so is not drawn at all.
+        let inside = axis_inside_spans(items, axis);
         // The two styles are two different things, and each is drawn as what it
         // is. Along the grid, an axis *is* a grid line: it runs the width of the
         // ground, travels with it, and fades out with it at the edge -- so X and
@@ -650,21 +815,29 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
                 // reads as a cross at the origin rather than as another pair of
                 // grid lines however far the camera is pulled back.
                 let length = (spacing * 12.0).min(radius * 0.45);
+                // ...but never so short that the model swallows the whole arm.
+                // The arms are measured from the origin, which is inside a shape
+                // standing on it, so an arm that ends inside that shape is an
+                // axis with nothing left to draw -- which is what zooming in on
+                // a box at the origin gave: a mark on the face and no line
+                // arriving at it.
+                let clear = (clearance * 1.6 + 30.0 / view.pixels_per_mm().max(1e-9)).min(radius * 1.5);
+                let length = length.max(clear);
                 (Vec3::ZERO, length, length * 2.0)
             }
         };
         // Both halves fade outward from the centre, for the same reason the
         // grid does: an axis that ends abruptly reads as an object.
         for sign in [-1.0, 1.0] {
-            faded_line(
+            faded_axis_line(
                 frame,
                 view,
                 centre,
                 centre + directions[axis] * (length * sign),
-                centre,
                 reach,
                 colours[axis],
-                AXIS_BIAS,
+                axis,
+                &inside,
             );
         }
     }
@@ -697,107 +870,6 @@ fn draw_plane_marks(frame: &mut Frame, view: &View, items: &[Item<'_>], palette:
             }
         }
     }
-}
-
-/// How long the mark where an axis enters a solid is, in pixels. Long enough to
-/// carry its colour and its direction, short enough that it is a mark on the
-/// surface and not a line drawn across it.
-const ENTRY_MARK_PIXELS: f64 = 24.0;
-
-/// Draw, on the surface of each solid, a short stub of each axis where it goes
-/// into it.
-///
-/// The axes themselves stop at the silhouette, because a solid standing on the
-/// origin covers what runs inside it (issue 36). On its own that is also what a
-/// line passing *behind* the shape looks like -- stopping at an edge means
-/// "behind" everywhere else in the frame -- so the origin ended up reading as
-/// somewhere back there rather than inside the shape. The stub says which it is:
-/// the line arrives, and it goes in *here*. It is deliberately short. Carried
-/// across the whole shape, at any strength, it becomes a line lying over the
-/// front of the model, which is the picture issue 47 rejects (issues 20, 36, 47).
-fn draw_axis_entries(frame: &mut Frame, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
-    let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
-    let directions = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
-    // A world length from a screen length: the mark is the same size on screen
-    // however far the camera is pulled back, the way a mark on a drawing is.
-    let half = ENTRY_MARK_PIXELS / view.pixels_per_mm().max(1e-9) / 2.0;
-    for item in items.iter().filter(|i| i.style == Style::Solid) {
-        for (axis, colour) in colours.into_iter().enumerate() {
-            if !grid.axes[axis] {
-                continue;
-            }
-            for tri in &item.renderable.mesh.indices {
-                let world = [
-                    item.renderable.mesh.positions[tri[0] as usize],
-                    item.renderable.mesh.positions[tri[1] as usize],
-                    item.renderable.mesh.positions[tri[2] as usize],
-                ];
-                let Some(hit) = axis_crossing(world, axis) else { continue };
-                // Depth-tested like the plane marks, with the same bias: a
-                // crossing on the far side of the solid is behind the near face
-                // and must stay behind it.
-                draw_entry_mark(frame, view, hit, directions[axis] * half, colour);
-            }
-        }
-    }
-}
-
-/// One entry mark: a short segment of the axis on the surface it goes in
-/// through, drawn wide enough to be seen against a lit face.
-///
-/// Widened in screen space rather than in the world, so it is the same mark at
-/// any zoom, and so the width does not lean with the axis's angle to the camera.
-fn draw_entry_mark(frame: &mut Frame, view: &View, hit: Vec3, arm: Vec3, colour: Rgba) {
-    let a = to_vertex(view, view.to_view(hit - arm));
-    let b = to_vertex(view, view.to_view(hit + arm));
-    let along = b.pos - a.pos;
-    let length = along.length();
-    if length < 1e-3 {
-        return;
-    }
-    // Perpendicular to the mark on screen, so the three passes lie side by side
-    // rather than end to end.
-    let across = egui::vec2(-along.y, along.x) / length;
-    for offset in [-1.0_f32, 0.0, 1.0] {
-        let shift = across * offset;
-        frame.line_with_depth(
-            Vertex { pos: a.pos + shift, key: a.key },
-            Vertex { pos: b.pos + shift, key: b.key },
-            colour,
-            MARK_BIAS,
-            false,
-        );
-    }
-}
-
-/// Where the axis through the origin along `axis` pierces one triangle, if it
-/// does. Moller-Trumbore, against the line rather than a ray: both ends of a
-/// solid the axis passes through are crossings, and both get a mark.
-fn axis_crossing(world: [Vec3; 3], axis: usize) -> Option<Vec3> {
-    let direction = match axis {
-        0 => Vec3::new(1.0, 0.0, 0.0),
-        1 => Vec3::new(0.0, 1.0, 0.0),
-        _ => Vec3::new(0.0, 0.0, 1.0),
-    };
-    let (edge1, edge2) = (world[1] - world[0], world[2] - world[0]);
-    let pvec = direction.cross(edge2);
-    let det = edge1.dot(pvec);
-    // Edge-on to the axis: no crossing worth marking, and the maths is degenerate.
-    if det.abs() < 1e-12 {
-        return None;
-    }
-    let inv = 1.0 / det;
-    let tvec = -world[0];
-    let u = tvec.dot(pvec) * inv;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let qvec = tvec.cross(edge1);
-    let v = direction.dot(qvec) * inv;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    Some(direction * (edge2.dot(qvec) * inv))
 }
 
 /// Where the plane through the origin perpendicular to `axis` crosses one
@@ -1272,7 +1344,11 @@ mod tests {
     #[test]
     fn a_ghost_is_translucent_over_the_background() {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
-        let req = request(vec![Item { renderable: &prepared, style: Style::Ghost }], DisplayMode::Shaded);
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Ghost }], DisplayMode::Shaded);
+        // No axes: a ghost hides nothing, so all three are drawn across it at
+        // full strength, and `AXIS_X` is the same red as `DANGER` -- they would
+        // answer the question this test is asking.
+        req.grid.axes = [false; 3];
         let frame = render(&req);
         let painted = count_non_background(&frame, &req.palette);
         assert!(painted > 500, "the ghost did not draw");
@@ -1308,108 +1384,92 @@ mod tests {
     }
 
     #[test]
-    fn a_solid_on_the_origin_hides_the_axes_that_run_inside_it() {
-        // Issues 36 and 47: the axes are ground, not an overlay. A box standing
-        // on the origin covers the stretch of them that runs inside it, exactly
-        // as it covers anything else behind it. What shows over the solid is
-        // the entry mark and nothing else -- a short stub where each axis goes
-        // in, not the line carried across the shape.
+    fn an_axis_stops_at_the_material_it_runs_into_and_starts_again_where_it_comes_out() {
+        // Issue 47, and the rule the three earlier passes all missed. What
+        // hides an axis is the material it runs *through*, not the depth
+        // buffer: a shape merely standing in front of the line is no reason to
+        // drop it, or the stretch arriving at that shape goes missing and only
+        // the point where the line meets the surface is left.
+        //
+        // Sampled at points on the line itself, in the world, and measured as
+        // the difference switching that one axis off makes -- a line is faded
+        // and alpha-blended, so the pixel is never the axis colour exactly, and
+        // counting coloured pixels is what let every earlier version of this
+        // pass while being wrong.
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
         req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-        let with_axes = render(&req);
+        let frame = render(&req);
 
-        // The same frame with nothing on the ground, to find where the box drew.
-        let mut bare = Request {
-            grid: Grid { visible: false, axes: [false; 3], ..req.grid },
-            ..request(Vec::new(), DisplayMode::Shaded)
-        };
-        bare.items = vec![Item { renderable: &prepared, style: Style::Solid }];
-        let box_only = render(&bare);
+        for axis in 0..3 {
+            let mut without = Request { grid: Grid { axes: [true; 3], ..req.grid }, ..request(Vec::new(), req.mode) };
+            without.grid.axes[axis] = false;
+            without.items = vec![Item { renderable: &prepared, style: Style::Solid }];
+            let without = render(&without);
 
-        let colours = [req.palette.axis_x, req.palette.axis_y, req.palette.axis_z];
-        let (mut covered, mut changed) = (0_usize, 0_usize);
-        for i in 0..with_axes.width * with_axes.height {
-            if is_background(&box_only, i, &req.palette) {
-                continue;
+            // Whether this axis put anything on the frame at a point on it.
+            let drawn_at = |at: f64| {
+                let (pos, _) = req.view.project(along(axis, at)).expect("the sample is in front of the camera");
+                let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
+                // A line is a pixel wide and the projection rounds, so the
+                // neighbourhood is what is asked, not the single pixel.
+                (y.saturating_sub(1)..=y + 1).any(|y| {
+                    (x.saturating_sub(1)..=x + 1).any(|x| {
+                        if x >= frame.width || y >= frame.height {
+                            return false;
+                        }
+                        let o = (y * frame.width + x) * 4;
+                        frame.color[o..o + 4] != without.color[o..o + 4]
+                    })
+                })
+            };
+
+            // Inside the box, which spans -15..15: nothing of the line.
+            for at in [-12.0, -6.0, 0.0, 6.0, 12.0] {
+                assert!(!drawn_at(at), "axis {axis} drew inside the solid, at {at}");
             }
-            covered += 1;
-            let o = i * 4;
-            if with_axes.color[o..o + 4] == box_only.color[o..o + 4] {
-                continue;
+            // Outside it: the line is there, unbroken, right up to the surface
+            // it goes into -- including where it is still over the box's own
+            // silhouette, which is the stretch the depth test used to eat.
+            for at in [-24.0, -18.0, -16.0, 16.0, 18.0, 24.0] {
+                assert!(drawn_at(at), "axis {axis} left a gap outside the solid, at {at}");
             }
-            changed += 1;
-            let pixel: Rgba =
-                [with_axes.color[o], with_axes.color[o + 1], with_axes.color[o + 2], with_axes.color[o + 3]];
-            assert!(colours.contains(&pixel), "something other than an entry mark drew over the solid at pixel {i}");
         }
-        assert!(covered > 1000, "the box did not draw, so nothing was covered");
-        // Marks, not lines: three stubs cover a sliver of a face, while the
-        // three axes carried across the shape would cover far more of it.
-        assert!(changed > 0, "the axes left no mark at all where they enter the solid");
-        assert!(changed * 20 < covered, "{changed} of {covered} covered pixels changed: that is a line, not a mark");
-
-        // ...and the part of the Z axis standing clear above the box still is.
-        let mut without_z = Request {
-            grid: Grid { axes: [true, true, false], ..req.grid },
-            ..request(Vec::new(), DisplayMode::Shaded)
-        };
-        without_z.items = vec![Item { renderable: &prepared, style: Style::Solid }];
-        let without_z = render(&without_z);
-        assert!(
-            count_non_background(&with_axes, &req.palette) > count_non_background(&without_z, &req.palette),
-            "the Z axis vanished entirely instead of only where the box covers it"
-        );
     }
 
     #[test]
-    fn each_axis_marks_the_face_it_goes_into_and_only_near_where_it_goes_in() {
-        // Issue 47. The axes stopping at the silhouette is also what a line
-        // passing behind the shape looks like, so the origin read as somewhere
-        // back there. The stub on the surface says the line goes in *here* --
-        // and it has to stay a stub: carried across the shape it becomes the
-        // overlay this issue rejects.
-        let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
-        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid =
-            Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-        let frame = render(&req);
+    fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
+        // Pairs of crossings, per solid: in at one face, out at the other.
+        let centred = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
+        let beside = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(40.0, 0.0, 0.0)));
+        let items =
+            vec![Item { renderable: &centred, style: Style::Solid }, Item { renderable: &beside, style: Style::Solid }];
+        let spans = axis_inside_spans(&items, 0);
+        assert_eq!(spans.len(), 2, "one span per solid the X axis passes through, got {spans:?}");
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        assert!(spans.iter().any(|&(a, b)| near(a, -15.0) && near(b, 15.0)), "{spans:?}");
+        assert!(spans.iter().any(|&(a, b)| near(a, 35.0) && near(b, 45.0)), "{spans:?}");
 
-        // Where the box drew, so a mark can be told from the axis outside it.
-        let mut bare =
-            Request { grid: Grid { axes: [false; 3], ..req.grid }, ..request(Vec::new(), DisplayMode::Shaded) };
-        bare.items = vec![Item { renderable: &prepared, style: Style::Solid }];
-        let box_only = render(&bare);
-        let silhouette: Vec<usize> =
-            (0..frame.width * frame.height).filter(|&i| !is_background(&box_only, i, &req.palette)).collect();
-        let extent = |pixels: &[usize]| {
-            let xs = pixels.iter().map(|i| i % frame.width);
-            let ys = pixels.iter().map(|i| i / frame.width);
-            let (x0, x1) = (xs.clone().min().unwrap(), xs.max().unwrap());
-            let (y0, y1) = (ys.clone().min().unwrap(), ys.max().unwrap());
-            (x1 - x0, y1 - y0)
-        };
-        let (box_w, box_h) = extent(&silhouette);
+        // The second box is off the Y axis entirely, so only the first is on it.
+        assert_eq!(axis_inside_spans(&items, 1).len(), 1);
 
-        let colours = [req.palette.axis_x, req.palette.axis_y, req.palette.axis_z];
-        for (axis, colour) in colours.iter().enumerate() {
-            let marked: Vec<usize> =
-                silhouette.iter().copied().filter(|&i| frame.color[i * 4..i * 4 + 4] == *colour).collect();
-            assert!(!marked.is_empty(), "axis {axis} left no mark on the face it goes into");
-            let (w, h) = extent(&marked);
-            assert!(
-                w * 2 < box_w && h * 2 < box_h,
-                "axis {axis} drew {w}x{h} across a {box_w}x{box_h} silhouette: that is a line over the model"
-            );
-        }
+        // A ghost hides nothing: it is see-through, and so is the axis in it.
+        let ghosted = vec![Item { renderable: &centred, style: Style::Ghost }];
+        assert!(axis_inside_spans(&ghosted, 0).is_empty(), "a ghost cut the axis");
+    }
 
-        // An axis that is switched off marks nothing either.
-        req.grid.axes = [false, true, true];
-        let frame = render(&req);
-        assert!(
-            silhouette.iter().all(|&i| frame.color[i * 4..i * 4 + 4] != req.palette.axis_x),
-            "the X axis marked the solid after being switched off"
-        );
+    #[test]
+    fn a_stretch_of_axis_is_clipped_against_what_hides_it() {
+        let hidden = [(-15.0, 15.0), (35.0, 45.0)];
+        // Wholly clear, wholly hidden, and straddling an edge.
+        assert_eq!(outside_spans(20.0, 30.0, &hidden), vec![(20.0, 30.0)]);
+        assert!(outside_spans(-10.0, 10.0, &hidden).is_empty());
+        assert_eq!(outside_spans(10.0, 20.0, &hidden), vec![(15.0, 20.0)]);
+        // Across a whole span: two pieces, in the order they were asked for.
+        assert_eq!(outside_spans(30.0, 50.0, &hidden), vec![(30.0, 35.0), (45.0, 50.0)]);
+        // Backwards, for the arm that runs the other way: the pieces come back
+        // in that direction too, so the fade along the arm stays put.
+        assert_eq!(outside_spans(50.0, 30.0, &hidden), vec![(50.0, 45.0), (35.0, 30.0)]);
     }
 
     #[test]
