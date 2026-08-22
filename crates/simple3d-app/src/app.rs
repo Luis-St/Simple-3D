@@ -105,6 +105,11 @@ pub struct App {
     pub path: Option<PathBuf>,
     saved_revision: u64,
 
+    /// The recent colours as they stood when the current painting run began, so
+    /// a drag through the colour picker leaves one entry behind and not one per
+    /// frame. `None` outside a coalescing run.
+    paint_run_colours: Option<Vec<[u8; 3]>>,
+
     pub status: Status,
     /// When the current message was set, so a message that has been read can
     /// fade out instead of sitting there looking current.
@@ -219,6 +224,7 @@ impl App {
             scene: Scene::new(),
             history: History::new(),
             settings,
+            paint_run_colours: None,
             keymap,
             selection: Vec::new(),
             clipboard: None,
@@ -368,9 +374,10 @@ impl App {
 
     /// Take an undo snapshot and mark the scene for re-evaluation. Every
     /// model-mutating path in the application goes through here.
-    pub fn edit(&mut self, label: &str, coalesce: Option<&str>) {
-        self.history.record(&self.scene, label, coalesce);
+    pub fn edit(&mut self, label: &str, coalesce: Option<&str>) -> bool {
+        let coalescing = self.history.record(&self.scene, label, coalesce);
         self.dirty = true;
+        coalescing
     }
 
     /// Mark the scene for re-evaluation without taking a snapshot, for the
@@ -837,7 +844,7 @@ impl App {
     /// property editor and the outliner's menu both do this and both have to
     /// remember it.
     pub(crate) fn paint(&mut self, targets: &[NodeId], colour: Option<Colour>, coalesce: Option<&str>) {
-        self.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, coalesce);
+        let coalescing = self.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, coalesce);
         for target in targets {
             self.scene.paint_subtree(*target, colour);
         }
@@ -847,6 +854,18 @@ impl App {
             // of them here spends the recent list on colours that were never
             // hard to find (issue 35).
             if !is_preset(rgb) {
+                // A drag through the picker paints on every frame it moves, and
+                // remembering each frame would fill the whole row with eight
+                // shades of the one colour. The run is one choice: put the list
+                // back the way it was when the drag began, then remember the
+                // colour the drag has reached (issue 35).
+                match (coalescing, &self.paint_run_colours) {
+                    (true, Some(before)) => self.settings.recent_colours = before.clone(),
+                    (true, None) => {}
+                    (false, _) => {
+                        self.paint_run_colours = coalesce.map(|_| self.settings.recent_colours.clone());
+                    }
+                }
                 self.settings.remember_colour(rgb);
             }
         }
@@ -2546,6 +2565,23 @@ mod tests {
         app.paint(&[id], Some(Colour([preset.r(), preset.g(), preset.b()])), None);
         assert_eq!(app.settings.recent_colours.len(), 2, "a preset was remembered as a recent colour");
         assert_eq!(app.custom_recent_colours(), vec![[0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]]);
+
+        // Issue 35 again: a drag through the picker paints on every frame it
+        // moves, and each of those frames used to take a slot -- which is how
+        // the row ended up holding eight shades of the same colour. The whole
+        // run is one choice, so only where it stopped is remembered.
+        for step in 0..6_u8 {
+            app.paint(&[id], Some(Colour([0x10 + step, 0x40, 0x90])), Some("colour"));
+        }
+        assert_eq!(
+            app.custom_recent_colours(),
+            vec![[0x15, 0x40, 0x90], [0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]],
+            "a single drag through the picker filled the recent row"
+        );
+        // A drag that ends and a new one that begins are two choices.
+        app.history.close();
+        app.paint(&[id], Some(Colour([0x01, 0x02, 0x03])), Some("colour"));
+        assert_eq!(app.custom_recent_colours()[..2], [[0x01, 0x02, 0x03], [0x15, 0x40, 0x90]]);
 
         // Issue 21: the three states, and which of them the viewport is asked
         // to draw as a ghost.

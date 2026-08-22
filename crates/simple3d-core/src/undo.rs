@@ -88,7 +88,10 @@ impl History {
     /// Call **before** mutating `scene`. `coalesce` groups consecutive edits of
     /// the same thing into one step; pass `None` for an edit that always gets
     /// its own step.
-    pub fn record(&mut self, scene: &Scene, label: &str, coalesce: Option<&str>) {
+    ///
+    /// Returns whether this edit joined the run that was already open, which is
+    /// what a caller needs to tell one continuous gesture from a fresh choice.
+    pub fn record(&mut self, scene: &Scene, label: &str, coalesce: Option<&str>) -> bool {
         self.revision += 1;
         let coalescing = match (coalesce, &self.open_key, self.open_at) {
             (Some(key), Some(open), Some(at)) => key == open && at.elapsed() < COALESCE_WINDOW,
@@ -99,13 +102,14 @@ impl History {
         self.open_key = coalesce.map(|k| k.to_string());
         self.open_at = Some(Instant::now());
         if coalescing {
-            return;
+            return true;
         }
         self.future.clear();
         self.past.push(Snapshot { label: label.to_string(), scene: scene.clone() });
         if self.past.len() > self.depth {
             self.past.remove(0);
         }
+        false
     }
 
     /// Drop the most recent snapshot without restoring it, for an edit that was
