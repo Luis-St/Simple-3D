@@ -561,14 +561,11 @@ fn a_drag_over_the_outliner_marks_the_row_it_would_land_in_while_it_is_still_hel
 
     let from = rect_of(&harness, crate::panel_outliner::row_id(cube)).center();
     press(&mut harness, from);
-    // A short move first, to make the press a drag: the rows being carried
-    // leave the tree on the frame after that, which is when the row to aim at
-    // is where it will be for the rest of the gesture.
+    // A short move first, to make the press a drag.
     move_to(&mut harness, from + egui::vec2(0.0, 4.0));
     harness.step();
-    // Aim at where the group row is *now*: the rows the drag carries have left
-    // the tree, so everything below them has moved up. Settled over several
-    // frames, because a response reports the frame it was drawn in.
+    // Settled over several frames, because a response reports the frame it was
+    // drawn in.
     for _ in 0..3 {
         let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
         move_to(&mut harness, onto);
@@ -583,4 +580,44 @@ fn a_drag_over_the_outliner_marks_the_row_it_would_land_in_while_it_is_still_hel
     let app = harness.state();
     assert_eq!(app.scene.node(group).children, vec![plate, cube], "the whole selection did not land in the group");
     assert!(app.drop_target.is_none(), "the drop target outlived the drag");
+}
+
+#[test]
+fn the_rows_a_drag_carries_stay_where_they_are_while_it_is_held() {
+    // Issue 46. Taking the carried rows out of the tree re-flowed everything
+    // below them the instant the drag began, so the gap the drop line pointed
+    // at slid out from under the pointer that was aiming at it. They stay,
+    // drawn faintly, and the tree does not move.
+    let mut harness = harness("outliner-drag-shadow");
+    let root = harness.state().scene.root();
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let cube = harness.state_mut().scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    let last = harness.state_mut().scene.add_primitive("sphere", root, 2).expect("the sphere is in the registry");
+    harness.state_mut().select_only(plate);
+    harness.state_mut().toggle_selected(cube);
+    harness.step();
+    harness.step();
+
+    let carried = rect_of(&harness, crate::panel_outliner::row_id(cube));
+    let below = rect_of(&harness, crate::panel_outliner::row_id(last));
+
+    press(&mut harness, carried.center());
+    move_to(&mut harness, carried.center() + egui::vec2(0.0, 4.0));
+    // Settled over several frames: a response reports the frame it was drawn
+    // in, so the press only becomes a drag a frame or two after the move.
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert!(harness.state().outliner_drag.is_some(), "the drag never started");
+    // Both carried rows are still drawn, in the same places, and so is the row
+    // under them.
+    assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(cube)), carried, "the dragged row left the tree");
+    assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(plate)).height(), carried.height());
+    assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(last)), below, "the tree re-flowed under the pointer");
+
+    // Let go over nothing: the drag is off and every row is back to normal.
+    release(&mut harness, carried.center() + egui::vec2(0.0, 4.0));
+    harness.step();
+    assert!(harness.state().outliner_drag.is_none(), "the drag outlived the release");
+    assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(last)), below);
 }

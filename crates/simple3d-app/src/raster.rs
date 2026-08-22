@@ -52,12 +52,16 @@ impl Frame {
     /// Depth-tested, optionally alpha-blended write. `write_depth` is false for
     /// translucent passes, so ghosts do not hide each other.
     fn put(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool) {
-        self.put_with(x, y, key, rgba, write_depth);
+        self.put_with(x, y, key, rgba, write_depth, true);
     }
 
-    fn put_with(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool) {
+    /// As `put`, with the depth *test* itself optional. An overlay -- something
+    /// that has to be seen through the model rather than hidden by it, which is
+    /// what the origin axes are -- is written with `depth_test` false, and never
+    /// writes depth of its own.
+    fn put_with(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool, depth_test: bool) {
         let i = y * self.width + x;
-        if key <= self.key[i] {
+        if depth_test && key <= self.key[i] {
             return;
         }
         let o = i * 4;
@@ -129,10 +133,17 @@ impl Frame {
     }
 
     pub fn line_with_depth(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool) {
-        self.line_inner(a, b, rgba, bias, write_depth);
+        self.line_inner(a, b, rgba, bias, write_depth, true);
     }
 
-    fn line_inner(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool) {
+    /// A line drawn over whatever is already in the frame, depth neither tested
+    /// nor written: the origin axes, which run across a solid standing on the
+    /// origin rather than stopping at it.
+    pub fn line_overlay(&mut self, a: Vertex, b: Vertex, rgba: Rgba) {
+        self.line_inner(a, b, rgba, 0.0, false, false);
+    }
+
+    fn line_inner(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool, depth_test: bool) {
         let Some((a, b)) = self.clip_to_frame(a, b) else { return };
         let steps = ((b.pos.x - a.pos.x).abs().max((b.pos.y - a.pos.y).abs()).ceil() as usize).max(1);
         for step in 0..=steps {
@@ -147,7 +158,7 @@ impl Frame {
                 continue;
             }
             let key = a.key + (b.key - a.key) * t;
-            self.put_with(x, y, key + bias, rgba, write_depth);
+            self.put_with(x, y, key + bias, rgba, write_depth, depth_test);
         }
     }
 

@@ -118,13 +118,14 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(2.0);
         let ids = visible_rows(app);
         for id in ids {
-            // What is being dragged is drawn on the pointer, not in the tree:
-            // a row that stays where it was, while a copy of it follows the
-            // mouse, reads as two of the same node (issue 39).
-            if carried.iter().any(|&source| id == source || app.scene.is_ancestor_of(source, id)) {
-                continue;
-            }
-            row(app, ui, id, &carried);
+            // What is being dragged stays in the tree, drawn as a shadow of
+            // itself: taking the rows out re-flowed everything below them the
+            // moment a drag started, so the gaps the drop line points at moved
+            // out from under the pointer as it was being aimed. Left in place
+            // and faded, the tree holds still, the shadow says where the load
+            // came from and the slab on the pointer says it is held (issue 46).
+            let shadowed = carried.iter().any(|&source| id == source || app.scene.is_ancestor_of(source, id));
+            row(app, ui, id, &carried, shadowed);
         }
         // Dropping in the empty space below the tree means "at the end of the
         // root", which is otherwise awkward to reach.
@@ -179,10 +180,10 @@ fn push_visible(app: &App, id: NodeId, out: &mut Vec<NodeId>) {
 /// What is being dragged, drawn under the pointer: the node's own glyph and
 /// name on a translucent slab.
 ///
-/// The tree has already left the row out, so this is the only place the dragged
-/// node appears -- which is what makes it obvious that it is *held* rather than
-/// merely highlighted, and what makes the drop line the answer to "where would
-/// it land".
+/// The row itself stays in the tree as a shadow of what it was (issue 46), so
+/// the two together say the whole thing: the shadow is where the load came
+/// from, the slab is what is held and how much of it, and the drop line is
+/// where it would land.
 fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId, carried: usize) {
     let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) else { return };
     if !app.scene.contains(source) {
@@ -297,7 +298,12 @@ pub fn row_id(id: NodeId) -> egui::Id {
     egui::Id::new(("outliner-row", id))
 }
 
-fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
+/// How much of itself a row keeps while it is being dragged. Faint enough to
+/// read as held rather than as sitting there, solid enough to still name what
+/// is on the pointer.
+const DRAG_SHADOW: f32 = 0.38;
+
+fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowed: bool) {
     let depth = app.scene.depth(id);
     let node = app.scene.node(id);
     let name = node.name.clone();
@@ -305,27 +311,35 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
     let is_group = node.is_group();
     let is_root = id == app.scene.root();
     let selected = app.is_selected(id);
-    let primary = app.primary() == Some(id);
     let failed = app.evaluated.error_for(id).is_some();
     let badge = operator_badge(&app.scene, id);
     let type_id = node.spec().map(|s| s.type_id).unwrap_or("");
 
     let full = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::hover());
-    let response = ui.interact(rect, row_id(id), egui::Sense::click_and_drag());
+    // A shadowed row is a picture of where the load came from and nothing else:
+    // it cannot be clicked, hovered, renamed, dropped on or dragged again while
+    // it is in the air.
+    let response =
+        ui.interact(rect, row_id(id), if shadowed { egui::Sense::hover() } else { egui::Sense::click_and_drag() });
 
-    // Background: selection is an accent tint with a solid bar at the left edge,
-    // so the primary node of a multi-selection is distinguishable from the rest
-    // without a second colour.
-    let painter = ui.painter().clone();
+    // Background: selection is an accent tint with a bar at the left edge, and
+    // every selected row is drawn the same. Lighting the most recent one
+    // brighter than the rest made a multi-selection look like one row selected
+    // and the others merely marked, when they are all equally selected and
+    // everything acts on all of them (issue 45).
+    let mut painter = ui.painter().clone();
+    if shadowed {
+        painter.multiply_opacity(DRAG_SHADOW);
+    }
     if selected {
-        painter.rect_filled(rect, 0.0, token::ACCENT.gamma_multiply(if primary { 0.22 } else { 0.13 }));
+        painter.rect_filled(rect, 0.0, token::ACCENT.gamma_multiply(0.13));
         painter.rect_filled(
             egui::Rect::from_min_size(rect.left_top(), egui::vec2(2.0, rect.height())),
             0.0,
-            if primary { token::ACCENT } else { token::ACCENT.gamma_multiply(0.5) },
+            token::ACCENT.gamma_multiply(0.5),
         );
-    } else if response.hovered() {
+    } else if response.hovered() && !shadowed {
         painter.rect_filled(rect, 0.0, token::SURFACE_3);
     }
 
@@ -333,9 +347,13 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
     // hidden when the node is not visible.
     let eye_rect =
         egui::Rect::from_min_size(egui::pos2(rect.right() - 22.0, rect.top() + 3.0), egui::Vec2::splat(16.0));
-    let eye = ui.interact(eye_rect, ui.id().with((id, "eye")), egui::Sense::click());
+    let eye = ui.interact(
+        eye_rect,
+        ui.id().with((id, "eye")),
+        if shadowed { egui::Sense::hover() } else { egui::Sense::click() },
+    );
     if !is_root {
-        let colour = if eye.hovered() {
+        let colour = if eye.hovered() && !shadowed {
             token::TEXT_HI
         } else if visible {
             token::TEXT_LO
@@ -343,7 +361,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
             token::TEXT_LO.gamma_multiply(0.45)
         };
         icon::draw(&painter, eye_rect.shrink(1.0), if visible { Glyph::Eye } else { Glyph::EyeOff }, colour);
-        if eye.clicked() {
+        if eye.clicked() && !shadowed {
             app.edit("Toggle visibility", None);
             if let Some(node) = app.scene.get_mut(id) {
                 node.visible = !visible;
@@ -361,15 +379,19 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
     let mut collapsed = app.collapsed.contains(&id);
     let mut twisty_hovered = false;
     if has_children {
-        let twisty = ui.interact(twisty_rect, ui.id().with((id, "twisty")), egui::Sense::click());
-        twisty_hovered = twisty.hovered();
+        let twisty = ui.interact(
+            twisty_rect,
+            ui.id().with((id, "twisty")),
+            if shadowed { egui::Sense::hover() } else { egui::Sense::click() },
+        );
+        twisty_hovered = twisty.hovered() && !shadowed;
         theme::twisty(
             &painter,
             twisty_rect.center(),
             !collapsed,
             if twisty.hovered() { token::TEXT_HI } else { token::TEXT_LO },
         );
-        if twisty.clicked() {
+        if twisty.clicked() && !shadowed {
             collapsed = !collapsed;
             app.set_collapsed(id, collapsed);
         }
@@ -449,17 +471,21 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
     );
     painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, text_colour);
 
-    let response = response.on_hover_text(hover_text(
-        app,
-        id,
-        is_group,
-        app.scene.node(id).group_op(),
-        app.scene.difference_base(id),
-    ));
+    let response = if shadowed {
+        response
+    } else {
+        response.on_hover_text(hover_text(
+            app,
+            id,
+            is_group,
+            app.scene.node(id).group_op(),
+            app.scene.difference_base(id),
+        ))
+    };
 
     // The eye and the twisty own their own clicks: pressing either must not
     // also select the row.
-    if !eye.hovered() && !twisty_hovered {
+    if !shadowed && !eye.hovered() && !twisty_hovered {
         if response.clicked() {
             if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
                 app.toggle_selected(id);
@@ -475,12 +501,14 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId]) {
         }
     }
 
-    context_menu(app, &response, id, is_root);
+    if !shadowed {
+        context_menu(app, &response, id, is_root);
+    }
 
     // Drop indicator: which group would take the load, or which gap it would
     // land in. Both are drawn on the row under the pointer, because that is
     // where the pointer is looking (issue 43).
-    if !carried.is_empty() && response.contains_pointer() {
+    if !carried.is_empty() && !shadowed && response.contains_pointer() {
         let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(rect.center());
         let fraction = ((pointer.y - rect.top()) / rect.height().max(1.0)).clamp(0.0, 1.0);
         let root = app.scene.root();
