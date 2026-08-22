@@ -99,11 +99,11 @@ those files the application's own icon.
 
 ## Status
 
-**v0.0.10.** All four crates are implemented and all 29 of the spec's acceptance
+**v0.0.11.** All four crates are implemented and all 29 of the spec's acceptance
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **413 tests**, none failing, and every
+`cargo test --workspace` runs **415 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
