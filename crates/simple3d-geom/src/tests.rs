@@ -664,16 +664,6 @@ fn volume(mesh: &Mesh) -> f64 {
 }
 
 #[test]
-fn a_convex_body_is_recognised_as_splitting_nothing() {
-    // What the one-pass build rests on: no face of a convex solid divides any
-    // other, and a solid with a dent in it has faces that do.
-    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 64)));
-    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::spherical_cap_mesh(20.0, 10.0, 64)));
-    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::cylinder_mesh(20.0, 20.0, 20.0, 64.0 as u32)));
-    assert!(!crate::csg_bsp::debug_splits_nothing(&primitives::torus_mesh(30.0, 8.0, 360.0, 64)));
-}
-
-#[test]
 fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_solid() {
     // Both halves of the segment-count regression, on the shape it was reported
     // on. A spherical cap sunk into a plate at 176 segments used to come back as
@@ -698,4 +688,73 @@ fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_solid() {
         fine.triangle_count(),
         coarse.triangle_count()
     );
+}
+
+/// The nine-holed plate again, forty times over, with every input coordinate
+/// nudged by a few units in the last place.
+///
+/// It exists because a boolean's answer is not a continuous function of its
+/// input. `sin` and `cos` differ by an ULP between one platform's libm and
+/// another's, the BSP amplifies that by nine orders of magnitude where two
+/// surfaces meet at a grazing angle, and a repair sized for the ~1e-12mm noise
+/// of a *single* boolean then leaves a seam a few microns wide. That is exactly
+/// how v0.0.8 built clean on Linux and failed this crate's own manifold check
+/// on Windows: nothing was wrong with the code that ran here, and nothing here
+/// could see it. Jitter can.
+///
+/// Seven of these forty were broken when it was written, and six of forty on
+/// the kernel before that one -- the fragility is older than either. Collapsing
+/// the short edges the weld leaves behind takes it to none.
+///
+/// Ignored only because it takes half a minute:
+///
+/// ```text
+/// cargo test -p simple3d-geom -- --ignored --nocapture jitter
+/// ```
+#[test]
+#[ignore = "half a minute of arithmetic; run it after touching the kernel"]
+fn a_chain_of_booleans_survives_the_last_bits_of_its_input() {
+    let mut seed = 0x5eed_u64;
+    let mut next = move || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((seed >> 33) as f64 / (1u64 << 31) as f64) - 1.0
+    };
+    let jitter = |mesh: &Mesh, next: &mut dyn FnMut() -> f64| {
+        let nudge = |v: f64, r: f64| v + v.abs().max(1.0) * r * 4.0 * f64::EPSILON;
+        let positions = mesh
+            .positions
+            .iter()
+            .map(|p| Vec3::new(nudge(p.x, next()), nudge(p.y, next()), nudge(p.z, next())))
+            .collect();
+        Mesh { positions, indices: mesh.indices.clone(), tags: mesh.tags.clone() }
+    };
+
+    let mut broken = Vec::new();
+    for run in 0..40 {
+        let mut operands = vec![primitives::box_mesh(100.0, 20.0, 4.0)];
+        for i in 0..9 {
+            operands.push(primitives::cylinder_mesh(6.0, 6.0, 20.0, 12).translated(Vec3::new(
+                -40.0 + i as f64 * 10.0,
+                0.0,
+                0.0,
+            )));
+        }
+        let operands: Vec<Mesh> = operands.iter().map(|m| jitter(m, &mut next)).collect();
+        let result = evaluate_boolean(BooleanOp::Difference, &operands);
+        if let Some(issue) = result.manifold_issue() {
+            println!("run {run}: {issue}");
+            broken.push(run);
+        }
+    }
+    assert!(broken.is_empty(), "{} of 40 jittered runs came back non-manifold: {broken:?}", broken.len());
+}
+
+#[test]
+fn a_convex_body_is_recognised_as_splitting_nothing() {
+    // What the one-pass build rests on: no face of a convex solid divides any
+    // other, and a solid with a dent in it has faces that do.
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 64)));
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::spherical_cap_mesh(20.0, 10.0, 64)));
+    assert!(crate::csg_bsp::debug_splits_nothing(&primitives::cylinder_mesh(20.0, 20.0, 20.0, 64.0 as u32)));
+    assert!(!crate::csg_bsp::debug_splits_nothing(&primitives::torus_mesh(30.0, 8.0, 360.0, 64)));
 }
