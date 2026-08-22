@@ -22,6 +22,13 @@ pub struct Frame {
     /// RGBA, row-major from the top left -- the layout `egui::ColorImage` wants.
     pub color: Vec<u8>,
     key: Vec<f32>,
+    /// Which item owns the depth at each pixel: `tag` at the time it was
+    /// written, and 0 for a pixel no solid has claimed. What lets a line ask
+    /// *what* is in front of it rather than only whether something is -- an
+    /// origin axis is not hidden by the solid it runs through, and is hidden by
+    /// every other one.
+    owner: Vec<u16>,
+    tag: u16,
 }
 
 /// One projected vertex: screen position and depth key.
@@ -46,23 +53,39 @@ impl Frame {
     }
 
     pub fn new(width: usize, height: usize) -> Frame {
-        Frame { width, height, color: vec![0; width * height * 4], key: vec![f32::NEG_INFINITY; width * height] }
+        Frame {
+            width,
+            height,
+            color: vec![0; width * height * 4],
+            key: vec![f32::NEG_INFINITY; width * height],
+            owner: vec![0; width * height],
+            tag: 0,
+        }
+    }
+
+    /// Whose depth writes are from here on. The renderer sets it to the item it
+    /// is about to draw, and back to 0 for anything that belongs to no item.
+    pub fn set_tag(&mut self, tag: u16) {
+        self.tag = tag;
     }
 
     /// Depth-tested, optionally alpha-blended write. `write_depth` is false for
     /// translucent passes, so ghosts do not hide each other.
     fn put(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool) {
-        self.put_with(x, y, key, rgba, write_depth, true);
+        self.put_with(x, y, key, rgba, write_depth, None);
     }
 
-    /// As `put`, with the depth *test* itself optional. An overlay -- something
-    /// that has to be seen through the model rather than hidden by it, which is
-    /// what the origin axes are -- is written with `depth_test` false, and never
-    /// writes depth of its own.
-    fn put_with(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool, depth_test: bool) {
+    /// As `put`, with a list of the items this write may be drawn through,
+    /// indexed by their tag. A pixel that loses the depth test is still written
+    /// if what won it is one of them -- which is how an axis crosses the solid
+    /// it runs into without crossing the ones it merely passes behind.
+    fn put_with(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool, through: Option<&[bool]>) {
         let i = y * self.width + x;
-        if depth_test && key <= self.key[i] {
-            return;
+        if key <= self.key[i] {
+            let seen = through.is_some_and(|items| items.get(self.owner[i] as usize).copied().unwrap_or(false));
+            if !seen {
+                return;
+            }
         }
         let o = i * 4;
         if rgba[3] == 255 {
@@ -78,6 +101,7 @@ impl Frame {
         }
         if write_depth {
             self.key[i] = key;
+            self.owner[i] = self.tag;
         }
     }
 
@@ -133,17 +157,18 @@ impl Frame {
     }
 
     pub fn line_with_depth(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool) {
-        self.line_inner(a, b, rgba, bias, write_depth, true);
+        self.line_inner(a, b, rgba, bias, write_depth, None);
     }
 
-    /// A line drawn over whatever is already in the frame, depth neither tested
-    /// nor written: the origin axes, which run across a solid standing on the
-    /// origin rather than stopping at it.
-    pub fn line_overlay(&mut self, a: Vertex, b: Vertex, rgba: Rgba) {
-        self.line_inner(a, b, rgba, 0.0, false, false);
+    /// A line the items in `through` do not hide -- they are indexed by tag, so
+    /// `through[tag]` says whether the item drawn under that tag is one the line
+    /// is seen through. Everything else hides it as usual, and the line leaves
+    /// no depth of its own.
+    pub fn line_through(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, through: &[bool]) {
+        self.line_inner(a, b, rgba, bias, false, Some(through));
     }
 
-    fn line_inner(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool, depth_test: bool) {
+    fn line_inner(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool, through: Option<&[bool]>) {
         let Some((a, b)) = self.clip_to_frame(a, b) else { return };
         let steps = ((b.pos.x - a.pos.x).abs().max((b.pos.y - a.pos.y).abs()).ceil() as usize).max(1);
         for step in 0..=steps {
@@ -158,7 +183,7 @@ impl Frame {
                 continue;
             }
             let key = a.key + (b.key - a.key) * t;
-            self.put_with(x, y, key + bias, rgba, write_depth, depth_test);
+            self.put_with(x, y, key + bias, rgba, write_depth, through);
         }
     }
 
