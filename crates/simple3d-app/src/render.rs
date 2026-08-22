@@ -227,7 +227,11 @@ pub fn render(request: &Request<'_>) -> Frame {
     if request.grid.visible {
         draw_grid(&mut frame, &view, &request.grid, &request.palette);
     }
-    draw_axes(&mut frame, &view, &request.palette, &request.grid, false);
+    // Before the model and depth-tested against it: an axis is a mark on the
+    // ground, and a solid standing on the origin covers the part of it that
+    // runs inside the solid, the way the solid covers anything else behind it
+    // (issue 36).
+    draw_axes(&mut frame, &view, &request.palette, &request.grid);
 
     for item in &request.items {
         match item.style {
@@ -248,16 +252,6 @@ pub fn render(request: &Request<'_>) -> Frame {
             }
             Style::Ghost => draw_ghost(&mut frame, &view, item.renderable, request.palette.ghost),
         }
-    }
-    // The axes again, faintly, over everything: an axis that simply stops
-    // where a solid begins reads as an axis *behind* the solid, and the one
-    // place that matters most is a shape sitting on the origin, where all three
-    // of them disappear into it (issue 36). The first pass above is the solid
-    // one and is still hidden by the model; this one shows the rest of the line
-    // through it, so the axis reads as running past the shape rather than
-    // ending at it.
-    if request.mode != DisplayMode::Wireframe {
-        draw_axes(&mut frame, &view, &request.palette, &request.grid, true);
     }
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
@@ -423,13 +417,8 @@ fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgb
     draw_world_line_with_depth(frame, view, a, b, colour, bias, true)
 }
 
-/// A world-space line drawn over everything already in the frame, depth
-/// neither tested nor written.
-fn draw_world_line_overlay(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba) {
-    let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
-    frame.line_overlay(va, vb, colour);
-}
-
+/// As `draw_world_line`, with the depth *write* optional: the grid and the axes
+/// are depth-tested against the model but leave no depth of their own.
 fn draw_world_line_with_depth(
     frame: &mut Frame,
     view: &View,
@@ -565,7 +554,6 @@ fn draw_grid_level(
             radius,
             shade(cx + offset),
             GRID_BIAS,
-            false,
         );
         faded_line(
             frame,
@@ -576,7 +564,6 @@ fn draw_grid_level(
             radius,
             shade(cy + offset),
             GRID_BIAS,
-            false,
         );
     }
 }
@@ -598,7 +585,6 @@ fn faded_line(
     radius: f64,
     colour: Rgba,
     bias: f32,
-    overlay: bool,
 ) {
     for step in 0..FADE_STEPS {
         let t0 = step as f64 / FADE_STEPS as f64;
@@ -613,14 +599,7 @@ fn faded_line(
         if fade <= 0.03 {
             continue;
         }
-        let strength = if overlay { fade * AXIS_OVERLAY_ALPHA } else { fade };
-        let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * strength).round() as u8];
-        if overlay {
-            // Depth ignored altogether, so the line shows through whatever is
-            // in front of it.
-            draw_world_line_overlay(frame, view, a, b, faded);
-            continue;
-        }
+        let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
         // Never writes depth: the grid and the axes are drawn before the model
         // and must lose every tie with it, including the exact ties a ground
         // plane makes with a plate whose side walls it cuts.
@@ -628,12 +607,7 @@ fn faded_line(
     }
 }
 
-/// How much of an axis's colour is left in the pass that is drawn over the
-/// model. Enough to follow the line through a solid, far too little to be
-/// mistaken for the part in front of it.
-const AXIS_OVERLAY_ALPHA: f64 = 0.30;
-
-fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, overlay: bool) {
+fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid) {
     let spacing = effective_grid_spacing(view, grid.spacing);
     let radius = grid_radius(view);
     let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
@@ -684,7 +658,6 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, ove
                 reach,
                 colours[axis],
                 AXIS_BIAS,
-                overlay,
             );
         }
     }
@@ -1223,6 +1196,47 @@ mod tests {
         assert!(
             count_non_background(&frame, &Palette::dark()) > count_non_background(&bare, &Palette::dark()),
             "the grid did not draw"
+        );
+    }
+
+    #[test]
+    fn a_solid_on_the_origin_hides_the_axes_that_run_inside_it() {
+        // Issue 36: the axes are ground, not an overlay. A box standing on the
+        // origin covers the parts of them that run inside it, exactly as it
+        // covers anything else behind it -- nothing of the line shows through.
+        let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+        let with_axes = render(&req);
+
+        // The same frame with nothing on the ground, to find where the box drew.
+        let mut bare = Request {
+            grid: Grid { visible: false, axes: [false; 3], ..req.grid },
+            ..request(Vec::new(), DisplayMode::Shaded)
+        };
+        bare.items = vec![Item { renderable: &prepared, style: Style::Solid }];
+        let box_only = render(&bare);
+
+        let mut covered = 0_usize;
+        for i in 0..with_axes.width * with_axes.height {
+            if is_background(&box_only, i, &req.palette) {
+                continue;
+            }
+            covered += 1;
+            let o = i * 4;
+            assert_eq!(with_axes.color[o..o + 4], box_only.color[o..o + 4], "an axis drew over the solid at pixel {i}");
+        }
+        assert!(covered > 1000, "the box did not draw, so nothing was covered");
+        // ...and the part of the Z axis standing clear above the box still is.
+        let mut without_z = Request {
+            grid: Grid { axes: [true, true, false], ..req.grid },
+            ..request(Vec::new(), DisplayMode::Shaded)
+        };
+        without_z.items = vec![Item { renderable: &prepared, style: Style::Solid }];
+        let without_z = render(&without_z);
+        assert!(
+            count_non_background(&with_axes, &req.palette) > count_non_background(&without_z, &req.palette),
+            "the Z axis vanished entirely instead of only where the box covers it"
         );
     }
 
