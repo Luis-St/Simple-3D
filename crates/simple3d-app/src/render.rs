@@ -686,12 +686,19 @@ fn faded_line(
 struct AxisMaterial {
     /// Per axis, the stretches inside a solid, as coordinates along that axis.
     inside: [Vec<(f64, f64)>; 3],
-    /// Per axis, the bodies it runs through, indexed by their tag: the solids
-    /// that may not hide that axis. Per body and per axis both -- a box the Y
-    /// axis runs through is still an ordinary occluder for X and Z, and a box
-    /// the axes never touch is an ordinary occluder for all three, however many
-    /// other shapes it was merged into one mesh with (img2).
-    through: [Vec<bool>; 3],
+    /// Per axis, the bodies it runs through: the stretch inside each one, with
+    /// that body's tag. Per body and per axis both -- a box the Y axis runs
+    /// through is still an ordinary occluder for X and Z, and a box the axes
+    /// never touch is an ordinary occluder for all three, however many other
+    /// shapes it was merged into one mesh with (img2).
+    ///
+    /// The span is kept, not just the tag, because *where* a stretch of the
+    /// line sits relative to it decides whether that body may hide it: only the
+    /// approach, on the eye's side of the material, is drawn over the shape.
+    through: [Vec<(f64, f64, u16)>; 3],
+    /// One past the largest tag in `through`, so a lookup table indexed by tag
+    /// can be sized once.
+    tags: usize,
     /// The distance from the origin to the model's furthest vertex. What an
     /// origin axis's arms have to be longer than, or a shape standing on the
     /// origin holds the whole arm and the axis is never seen at all.
@@ -715,6 +722,7 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
         through: [Vec::new(), Vec::new(), Vec::new()],
+        tags: 0,
         reach: 0.0,
     };
     for (item, tag_base) in items.iter().zip(tag_bases(items)) {
@@ -731,11 +739,8 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
             }
             for (span, tag) in axis_inside_spans(item, axis, tag_base) {
                 material.inside[axis].push(span);
-                let through = &mut material.through[axis];
-                if through.len() <= tag as usize {
-                    through.resize(tag as usize + 1, false);
-                }
-                through[tag as usize] = true;
+                material.through[axis].push((span.0, span.1, tag));
+                material.tags = material.tags.max(tag as usize + 1);
             }
         }
     }
@@ -754,8 +759,16 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
 /// and only a mark on the face was left (issue 47). Asked of the model instead
 /// -- is this stretch of the line inside anything? -- the answer is the one the
 /// picture wants: the line runs unbroken up to the surface it goes into, stops
-/// there, and picks up again where it comes out. The stretch behind the shape is
-/// the same line, so it is drawn like the rest of it (issues 20, 36, 47).
+/// there, and picks up again where it comes out (issues 20, 36, 47).
+///
+/// That exception is the *approach*, and nothing else. It is granted to the
+/// stretch of the line on the eye's side of the material, because the stretch
+/// beyond the far surface really is behind the shape: drawing it over the solid
+/// as well put the line on the face of a box it had already left, which reads
+/// as an axis running inside the object instead of out the back of it. So every
+/// piece asks the question for itself, and the arm going away is
+/// depth-tested like anything else -- hidden by the box, and picked up again
+/// where it comes out past the silhouette.
 #[allow(clippy::too_many_arguments)]
 fn faded_axis_line(
     frame: &mut Frame,
@@ -766,8 +779,13 @@ fn faded_axis_line(
     colour: Rgba,
     axis: usize,
     inside: &[(f64, f64)],
-    through: &[bool],
+    through: &[(f64, f64, u16)],
+    tags: usize,
 ) {
+    // Which way depth runs along this axis: positive when travelling along
+    // +axis moves away from the eye.
+    let away = component(view.forward(), axis);
+    let mut seen = vec![false; tags + 1];
     for step in 0..FADE_STEPS {
         let t0 = step as f64 / FADE_STEPS as f64;
         let t1 = (step + 1) as f64 / FADE_STEPS as f64;
@@ -785,8 +803,33 @@ fn faded_axis_line(
             }
             let (start, end) = (along(axis, from), along(axis, to));
             let (va, vb) = (to_vertex(view, view.to_view(start)), to_vertex(view, view.to_view(end)));
-            frame.line_through(va, vb, faded, AXIS_BIAS, through);
+            seen_through(&mut seen, through, (from + to) / 2.0, away);
+            frame.line_through(va, vb, faded, AXIS_BIAS, &seen);
         }
+    }
+}
+
+/// Fill `seen`, indexed by body tag, with the bodies that may not hide the piece
+/// of an axis at `at` along it.
+///
+/// A body qualifies only when that piece is on the eye's side of the stretch the
+/// axis runs through it: the line is being drawn over the shape so that it can
+/// be seen *arriving* at the surface it enters, and past the far surface there
+/// is no arrival left to show -- only a solid the line is genuinely behind.
+/// `away` is how depth runs along the axis; when it is about zero the axis lies
+/// in the screen plane, the two sides are the same distance off, and the
+/// exception applies to both.
+fn seen_through(seen: &mut [bool], through: &[(f64, f64, u16)], at: f64, away: f64) {
+    seen.fill(false);
+    for &(lo, hi, tag) in through {
+        let Some(slot) = seen.get_mut(tag as usize) else { continue };
+        *slot |= if away > 1e-9 {
+            at <= lo
+        } else if away < -1e-9 {
+            at >= hi
+        } else {
+            true
+        };
     }
 }
 
@@ -917,7 +960,9 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
         }
         // Where this axis runs through material, and so is not drawn at all...
         let inside = &material.inside[axis];
-        // ...and the bodies it runs through, which do not hide the rest of it.
+        // ...and the bodies it runs through, each with the stretch inside it, so
+        // the approach to a surface is drawn over that body and the arm beyond
+        // it is not.
         let through = &material.through[axis];
         // The two styles are two different things, and each is drawn as what it
         // is. Along the grid, an axis *is* a grid line: it runs the width of the
@@ -970,6 +1015,7 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
                 axis,
                 inside,
                 through,
+                material.tags,
             );
         }
     }
@@ -1516,12 +1562,18 @@ mod tests {
     }
 
     #[test]
-    fn an_axis_stops_at_the_material_it_runs_into_and_starts_again_where_it_comes_out() {
+    fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_way_out() {
         // Issue 47, and the rule the three earlier passes all missed. What
-        // hides an axis is the material it runs *through*, not the depth
-        // buffer: a shape merely standing in front of the line is no reason to
-        // drop it, or the stretch arriving at that shape goes missing and only
-        // the point where the line meets the surface is left.
+        // hides an axis on the way *in* is the material it runs through, not
+        // the depth buffer: a shape merely standing in front of the line is no
+        // reason to drop it, or the stretch arriving at that shape goes missing
+        // and only the point where the line meets the surface is left.
+        //
+        // On the way out it is the other way round. Past the far surface the
+        // line has left the solid and is simply behind it, so the depth buffer
+        // is exactly the right question -- and answering it the same way as the
+        // approach drew the arm across the face of a box it had already come
+        // out of, which reads as a line inside the object.
         //
         // Sampled at points on the line itself, in the world, and measured as
         // the difference switching that one axis off makes -- a line is faded
@@ -1556,16 +1608,28 @@ mod tests {
                 })
             };
 
+            // Which way this axis runs into the frame: the arm on the eye's
+            // side is the one that arrives at a surface, and the other one
+            // leaves through the back.
+            let near = -component(req.view.forward(), axis).signum();
+
             // Inside the box, which spans -15..15: nothing of the line.
             for at in [-12.0, -6.0, 0.0, 6.0, 12.0] {
                 assert!(!drawn_at(at), "axis {axis} drew inside the solid, at {at}");
             }
-            // Outside it: the line is there, unbroken, right up to the surface
-            // it goes into -- including where it is still over the box's own
+            // The near arm is there unbroken right up to the surface it goes
+            // into -- including where it is still over the box's own
             // silhouette, which is the stretch the depth test used to eat.
-            for at in [-24.0, -18.0, -16.0, 16.0, 18.0, 24.0] {
-                assert!(drawn_at(at), "axis {axis} left a gap outside the solid, at {at}");
+            for at in [16.0, 18.0, 24.0] {
+                assert!(drawn_at(at * near), "axis {axis} left a gap arriving at the solid, at {at}");
             }
+            // The far arm is behind the box, so the box hides it like anything
+            // else: nothing while it is over the silhouette...
+            for at in [16.0, 18.0, 22.0] {
+                assert!(!drawn_at(at * -near), "axis {axis} drew behind the solid, at {at}");
+            }
+            // ...and the line again once it is clear of it.
+            assert!(drawn_at(40.0 * -near), "axis {axis} never came out from behind the solid");
         }
     }
 
@@ -1659,7 +1723,7 @@ mod tests {
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
         let material = axis_material(&items, &req.grid);
         for axis in 0..3 {
-            let seen = material.through[axis].iter().filter(|&&through| through).count();
+            let seen = material.through[axis].len();
             assert_eq!(seen, 1, "axis {axis} is seen through {seen} of the two bodies");
         }
 
@@ -1680,7 +1744,9 @@ mod tests {
         let all = frame([true; 3], solid(&prepared));
         let bare = frame([true; 3], Vec::new());
 
-        let mut behind_the_far_box = 0;
+        // Counted across all three axes: the far box sits on one side, so it can
+        // cover the whole approach of one axis while leaving the others clear.
+        let (mut behind_the_far_box, mut arriving) = (0, 0);
         for axis in 0..3 {
             let mut axes = [true; 3];
             axes[axis] = false;
@@ -1702,10 +1768,16 @@ mod tests {
                 (drawn, pixel)
             };
 
-            // Just outside the box on the origin, where the line runs up to the
-            // surface it goes into: drawn, over that box's own silhouette.
-            let mut arriving = 0;
-            for sample in [-13.0, -12.0, -11.5, 11.5, 12.0, 13.0] {
+            // Just outside the box on the origin, on the eye's side, where the
+            // line runs up to the surface it goes into: drawn, over that box's
+            // own silhouette. Only that arm -- the one leaving through the back
+            // is behind the box, and the box hides it.
+            let near = -component(req.view.forward(), axis).signum();
+            // The samples are found rather than guessed: the far box sits off
+            // to one side and may cover any given point of the near arm, so
+            // walk out along it and take every point it does not cover.
+            for step in 0..40 {
+                let sample = (11.0 + step as f64 * 0.5) * near;
                 let (drawn, pixel) = at(&all, &without, sample);
                 // Only where the far box is not the one in the way: that stretch
                 // is its own case, tested below.
@@ -1715,7 +1787,6 @@ mod tests {
                 arriving += 1;
                 assert!(drawn, "axis {axis} stopped short of the solid it enters, at {sample}");
             }
-            assert!(arriving > 0, "axis {axis}: every sample beside the near box was covered by the far one");
 
             // ...and behind the box it never enters: not drawn. The samples are
             // found rather than guessed -- a point on this axis that the far box
@@ -1739,6 +1810,7 @@ mod tests {
                 }
             }
         }
+        assert!(arriving > 0, "every sample beside the near box was covered by the far one");
         assert!(
             behind_the_far_box >= 2,
             "only {behind_the_far_box} samples landed behind the far box, so nothing was really tested"
@@ -1763,10 +1835,10 @@ mod tests {
         // The second box is off the Y axis entirely, so only the first is on it.
         assert_eq!(material.inside[1].len(), 1);
         // Both boxes are run through by X, so neither may hide it...
-        assert_eq!(material.through[0].iter().filter(|&&through| through).count(), 2, "{:?}", material.through[0]);
+        assert_eq!(material.through[0].len(), 2, "{:?}", material.through[0]);
         // ...while for Y only the one it goes into is seen through, which is
         // the whole of img2: the other box hides Y like anything else.
-        assert_eq!(material.through[1].iter().filter(|&&through| through).count(), 1, "{:?}", material.through[1]);
+        assert_eq!(material.through[1].len(), 1, "{:?}", material.through[1]);
         // The furthest corner of the further box, which the arms have to clear.
         assert!(material.reach > 45.0, "reach was {}", material.reach);
 
@@ -1776,14 +1848,14 @@ mod tests {
         let material = axis_material(&items, &grid);
         assert!(material.inside.iter().all(|spans| spans.is_empty()), "a solid off the axes cut one of them");
         assert!(
-            material.through.iter().all(|bodies| !bodies.contains(&true)),
+            material.through.iter().all(|bodies| bodies.is_empty()),
             "a solid the axes never enter was marked see-through, so it would not hide them"
         );
 
         // A ghost hides nothing: it is see-through, and so is the axis in it.
         let ghosted = vec![Item { renderable: &centred, style: Style::Ghost }];
         let material = axis_material(&ghosted, &grid);
-        assert!(material.through.iter().all(|bodies| !bodies.contains(&true)), "a ghost was marked see-through");
+        assert!(material.through.iter().all(|bodies| bodies.is_empty()), "a ghost was marked see-through");
         assert!(material.inside[0].is_empty(), "a ghost cut the axis");
 
         // An axis that is switched off is not looked for at all.
