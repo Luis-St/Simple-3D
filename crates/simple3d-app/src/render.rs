@@ -1021,16 +1021,29 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
     }
 }
 
+/// The colour a principal plane's mark is drawn in, indexed by the axis that
+/// plane is perpendicular to.
+///
+/// X and Y are exchanged here, and only here: the mark left by the plane
+/// perpendicular to X is green and the one perpendicular to Y is red, the
+/// opposite way round from the axis lines, which keep the usual X red / Y green.
+/// Asked for -- on a shape standing on the origin the conventional pairing reads
+/// as the wrong way round, and the mark on the surface is what is being read at
+/// that moment. Z is the same blue in both.
+fn mark_colours(palette: &Palette) -> [Rgba; 3] {
+    [palette.axis_y, palette.axis_x, palette.axis_z]
+}
+
 /// Draw, on the surface of each solid, the line where a principal plane cuts
 /// through it.
 ///
 /// The ground plane crossing a shape is a real dimension -- how much of the
 /// shape is below the build plate -- and until something marks it the only way
 /// to read it is to orbit until the grid is edge-on. The mark is drawn on the
-/// surface itself, where the plane meets it, in the colour of the axis the
-/// plane is perpendicular to.
+/// surface itself, where the plane meets it, in the colour `mark_colours` gives
+/// for the axis the plane is perpendicular to.
 fn draw_plane_marks(frame: &mut Frame, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
-    let colours = [palette.axis_x, palette.axis_y, palette.axis_z];
+    let colours = mark_colours(palette);
     for item in items.iter().filter(|i| i.style == Style::Solid) {
         for (axis, colour) in colours.into_iter().enumerate() {
             if !grid.axes[axis] {
@@ -1415,8 +1428,9 @@ mod tests {
             plane_marks: true,
         };
         let frame = render(&req);
-        assert!(pixels_of(&frame, req.palette.axis_x) > 0, "the X plane's mark should be drawn");
-        assert_eq!(pixels_of(&frame, req.palette.axis_z), 0, "the Z plane's mark should be off with its axis");
+        let marks = mark_colours(&req.palette);
+        assert!(pixels_of(&frame, marks[0]) > 0, "the X plane's mark should be drawn");
+        assert_eq!(pixels_of(&frame, marks[2]), 0, "the Z plane's mark should be off with its axis");
     }
 
     #[test]
