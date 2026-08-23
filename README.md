@@ -232,6 +232,7 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 | Manipulator handle behaviour and modifiers | `simple3d-app/src/gizmo.rs` |
 | What a numeric field accepts | `simple3d-core/src/unit.rs` |
 | The docks, and what moves between them | `simple3d-app/src/dock.rs` |
+| The menu bar, and the dialogs that are windows of their own | `simple3d-app/src/app_chrome.rs` (`dialog`) |
 | A colour, a row height or a type size | `simple3d-app/src/theme.rs` — nothing else names one |
 | An icon, a primitive's silhouette, or the window's own icon | `simple3d-app/src/icon.rs` |
 | The ground grid, the origin axes and how they fade | `simple3d-app/src/render.rs` (`grid_levels`, `draw_axes`) |

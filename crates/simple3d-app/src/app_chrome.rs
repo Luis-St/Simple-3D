@@ -7,7 +7,6 @@ use crate::gizmo::Mode;
 use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
-use crate::window_chrome;
 use simple3d_core::config::{self, DisplayMode, Panel, Side};
 use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
@@ -98,70 +97,48 @@ impl App {
         }
     }
 
-    /// The menu bar, which is also the window's title bar.
+    /// The menu bar.
     ///
-    /// One bar rather than two: the decorations are off (see `window_chrome`),
-    /// and a separate strip holding nothing but three buttons would waste a row
-    /// of a window that is mostly viewport. Files and every browser merge them
-    /// the same way.
+    /// Only the menus and the document's name: the window system draws the
+    /// title bar above this row, so there are no window buttons to place and
+    /// nothing here drags the window. What used to be drawn by hand -- the
+    /// buttons, the drag, the eight resize grips -- is the compositor's again,
+    /// which is where the snapping, the window menu and the user's own button
+    /// layout come from.
     pub(crate) fn menu_bar(&mut self, ctx: &egui::Context) {
-        // The top two corners of the window are this bar's corners.
-        let radius = if window_chrome::is_maximized(ctx) { 0 } else { window_chrome::corner_radius() };
-        let frame = egui::Frame::NONE
-            .fill(theme::token::SURFACE_2)
-            .corner_radius(egui::CornerRadius { nw: radius, ne: radius, sw: 0, se: 0 })
-            .inner_margin(egui::Margin {
-                left: 8,
-                right: if window_chrome::CHROME == window_chrome::Chrome::Windows { 0 } else { 6 },
-                top: 0,
-                bottom: 0,
-            });
-        let maximized = window_chrome::is_maximized(ctx);
-        let panel =
-            egui::TopBottomPanel::top("menu").frame(frame).exact_height(window_chrome::bar_height()).show(ctx, |ui| {
-                // Claimed before the contents are laid out, so that every menu
-                // and button placed after it sits on top and takes its own
-                // press: what is left over is title bar, and drags the window.
-                let bar = ui.max_rect();
-                let drag = ui.interact(bar, egui::Id::new("title-bar"), egui::Sense::click_and_drag());
-                window_chrome::header_underline(ui, bar);
-                ui.horizontal_centered(|ui| {
-                    // The application's own name, once, at the left.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(APP_NAME).size(13.0).strong().color(theme::token::TEXT_HI),
-                        )
-                        .selectable(false),
-                    );
-                    ui.add_space(10.0);
-                    egui::MenuBar::new().ui(ui, |ui| {
-                        self.file_menu(ui);
-                        self.edit_menu(ui);
-                        self.add_menu(ui);
-                        self.view_menu(ui);
-                        self.manipulate_menu(ui);
-                        self.help_menu(ui);
-                    });
-                    // The window buttons at the corner, then the document name
-                    // inside them: what is open and whether it still matches
-                    // what is on disk.
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        window_chrome::window_buttons(ui, maximized);
-                        ui.add_space(8.0);
-                        let name = self
-                            .path
-                            .as_ref()
-                            .and_then(|p| p.file_name())
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "Untitled".to_string());
-                        let marker = if self.unsaved() { " \u{2022}" } else { "" };
-                        ui.add(egui::Label::new(theme::hint(format!("{name}{marker}"))).selectable(false))
-                            .on_hover_text(if self.unsaved() { "Unsaved changes" } else { "Saved" });
-                    });
+        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 0,
+            bottom: 0,
+        });
+        egui::TopBottomPanel::top("menu").frame(frame).exact_height(theme::metric::MENU_BAR).show(ctx, |ui| {
+            ui.horizontal_centered(|ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    self.file_menu(ui);
+                    self.edit_menu(ui);
+                    self.add_menu(ui);
+                    self.view_menu(ui);
+                    self.manipulate_menu(ui);
+                    self.help_menu(ui);
                 });
-                drag
+                // The document's name at the far end: what is open, and whether
+                // it still matches what is on disk. The title bar carries it
+                // too, but a title bar can be off the top of a maximised
+                // screen's attention while this row never is.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let name = self
+                        .path
+                        .as_ref()
+                        .and_then(|p| p.file_name())
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string());
+                    let marker = if self.unsaved() { " \u{2022}" } else { "" };
+                    ui.add(egui::Label::new(theme::hint(format!("{name}{marker}"))).selectable(false))
+                        .on_hover_text(if self.unsaved() { "Unsaved changes" } else { "Saved" });
+                });
             });
-        window_chrome::title_bar_drag(ctx, &panel.inner, maximized);
+        });
     }
 
     fn command_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
@@ -449,12 +426,12 @@ impl App {
     }
 
     pub(crate) fn status_bar(&mut self, ctx: &egui::Context) {
-        // And the bottom two are this one's.
-        let radius = if window_chrome::is_maximized(ctx) { 0 } else { window_chrome::corner_radius() };
-        let frame = egui::Frame::NONE
-            .fill(theme::token::SURFACE_2)
-            .corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: radius, se: radius })
-            .inner_margin(egui::Margin { left: 8, right: 8, top: 0, bottom: 0 });
+        let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
+            left: 8,
+            right: 8,
+            top: 0,
+            bottom: 0,
+        });
         egui::TopBottomPanel::bottom("status").frame(frame).exact_height(theme::metric::STATUS_BAR).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
@@ -622,192 +599,250 @@ impl App {
         }
     }
 
-    fn export_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        egui::Window::new("Export")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Format");
-                    egui::ComboBox::from_id_salt("export-format").selected_text(self.export_format.label()).show_ui(
-                        ui,
-                        |ui| {
-                            for format in Format::ALL {
-                                ui.selectable_value(&mut self.export_format, format, format.label());
-                            }
-                        },
-                    );
-                    ui.end_row();
-
-                    ui.label("Units");
-                    if self.export_format.carries_units() {
-                        ui.label("Millimetres, recorded in the file");
-                    } else {
-                        // For formats that do not carry units, state the
-                        // assumption (spec section 9).
-                        ui.label(
-                            egui::RichText::new(
-                                "This format does not record units. Numbers are written in millimetres.",
-                            )
-                            .weak(),
-                        );
-                    }
-                    ui.end_row();
-
-                    ui.label("Scale");
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.export_scale).desired_width(70.0));
-                        ui.label(match simple3d_core::unit::parse_number(&self.export_scale) {
-                            Some(v) if v > 0.0 => format!("x{}", format_number(v, 4)),
-                            _ => "must be a positive number".to_string(),
-                        });
-                    });
-                    ui.end_row();
-
-                    ui.label("Contents");
-                    ui.vertical(|ui| {
-                        ui.radio_value(&mut self.export_selection_only, false, "The whole scene");
-                        ui.add_enabled_ui(!self.selection.is_empty(), |ui| {
-                            ui.radio_value(&mut self.export_selection_only, true, "The current selection");
-                        });
-                    });
-                    ui.end_row();
-                });
-
-                ui.separator();
-                if self.evaluated.errors.is_empty() {
-                    // The count is of what will actually be written -- the scene
-                    // or the selection -- rather than always of the whole scene.
-                    let triangles = self.export_triangle_count();
-                    ui.label(format!(
-                        "{triangles} triangles will be verified as watertight before anything is written."
-                    ));
-                } else {
-                    ui.colored_label(
-                        ui.visuals().error_fg_color,
-                        "The scene has geometry that could not be evaluated; export will refuse.",
-                    );
+    /// One of the application's dialogs, as a window of the window system's own
+    /// rather than a rectangle drawn over the viewport (issue 53).
+    ///
+    /// `show_viewport_immediate` opens a real top-level window and builds its
+    /// contents in the same pass as the main one, so a dialog goes on reading
+    /// and writing the application state directly; the deferred kind takes a
+    /// `'static` callback and could not. A backend with no viewports at all --
+    /// and the headless context the tests drive -- hands the body straight back
+    /// as `Embedded`, and it is drawn inside the main window as it used to be.
+    ///
+    /// egui's `ViewportBuilder` exposes neither transient-for nor a modal flag,
+    /// so the two things a dialog would otherwise inherit from its parent are
+    /// asked for by hand: it opens over the middle of the parent and asks to
+    /// stay above it. Wayland grants neither -- a client there does not place
+    /// its own windows -- and ignores both without complaint.
+    fn dialog(
+        &mut self,
+        ctx: &egui::Context,
+        key: &str,
+        title: &str,
+        size: egui::Vec2,
+        resizable: bool,
+        mut body: impl FnMut(&mut Self, &mut egui::Ui),
+    ) {
+        let mut builder = egui::ViewportBuilder::default()
+            .with_title(title)
+            .with_icon(crate::icon::shared_icon())
+            .with_inner_size(size)
+            .with_resizable(resizable)
+            // A dialog is not a window to put away and come back to: what is
+            // fixed in size has nothing to maximise, and minimising one out of
+            // sight while the application waits on it is a trap.
+            .with_minimize_button(false)
+            .with_maximize_button(resizable)
+            .with_window_level(egui::WindowLevel::AlwaysOnTop);
+        if let Some(parent) = ctx.input(|i| i.viewport().outer_rect) {
+            builder = builder.with_position(parent.center() - size * 0.5);
+        }
+        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(key), builder, |ctx, class| {
+            if class == egui::ViewportClass::Embedded {
+                let mut open = true;
+                egui::Window::new(title)
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(resizable)
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                    .show(ctx, |ui| body(self, ui));
+                if !open {
+                    self.dismiss_modal();
                 }
-                ui.separator();
-                ui.horizontal(|ui| {
-                    if ui.button("Export...").clicked() {
-                        self.start_export();
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.modal = Modal::None;
-                    }
-                });
-            });
-        if !open {
-            self.modal = Modal::None;
+                return;
+            }
+            let frame = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin::same(12));
+            egui::CentralPanel::default().frame(frame).show(ctx, |ui| body(self, ui));
+            // The window's own close button, which no longer passes through any
+            // code of ours: whatever the open dialog is, closing it cancels it.
+            if ctx.input(|i| i.viewport().close_requested()) {
+                self.dismiss_modal();
+            }
+        });
+    }
+
+    /// Close whatever dialog is open, the way that dialog is cancelled.
+    fn dismiss_modal(&mut self) {
+        match self.modal {
+            Modal::SavePrimitive => self.cancel_save_primitive(),
+            Modal::Keymap => {
+                self.recording = None;
+                self.modal = Modal::None;
+            }
+            _ => self.modal = Modal::None,
         }
     }
 
-    fn scene_settings_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        egui::Window::new("Scene settings")
-            .open(&mut open)
-            .collapsible(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                egui::Grid::new("scene-settings").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Display unit");
-                    egui::ComboBox::from_id_salt("settings-unit").selected_text(self.unit().suffix()).show_ui(
-                        ui,
-                        |ui| {
-                            for unit in Unit::ALL {
-                                if ui.selectable_label(self.unit() == unit, unit.suffix()).clicked() {
-                                    self.scene.settings.unit = unit;
-                                    self.fields.clear();
-                                }
-                            }
-                        },
-                    );
-                    ui.end_row();
+    fn export_window(&mut self, ctx: &egui::Context) {
+        self.dialog(ctx, "dialog-export", "Export", egui::vec2(560.0, 300.0), true, Self::export_body);
+    }
 
-                    ui.label("Default segments");
-                    let mut segments = self.scene.settings.default_segments as f64;
-                    if ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).max_decimals(0)).changed() {
-                        self.edit("Default segments", Some("scene:segments"));
-                        self.scene.settings.default_segments = segments.round() as u32;
-                    }
-                    ui.end_row();
-
-                    ui.label("Grid spacing");
-                    let unit = self.unit();
-                    let mut spacing = unit.from_mm(self.scene.settings.grid_spacing);
-                    if ui
-                        .add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1))
-                        .on_hover_text("How far apart the ground grid's lines are drawn.")
-                        .changed()
-                    {
-                        self.edit("Grid spacing", Some("scene:grid"));
-                        self.scene.settings.grid_spacing = unit.to_mm(spacing).max(1e-6);
-                    }
-                    ui.label(unit.suffix());
-                    ui.end_row();
-
-                    ui.label("Step");
-                    let mut step = unit.from_mm(self.scene.settings.snap_step);
-                    if ui
-                        .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
-                        .on_hover_text("One nudge, and one snapped step of a move or resize drag.")
-                        .changed()
-                    {
-                        self.edit("Step", Some("scene:step"));
-                        self.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
-                    }
-                    ui.label(unit.suffix());
-                    ui.end_row();
-
-                    ui.label("Rotation snap");
-                    ui.add(egui::DragValue::new(&mut self.settings.rotate_snap_deg).range(0.1..=90.0).suffix(" deg"));
-                    ui.end_row();
-
-                    ui.label("Show grid");
-                    ui.checkbox(&mut self.scene.settings.grid_visible, "");
-                    ui.end_row();
-
-                    ui.label("Show axes");
-                    ui.horizontal(|ui| {
-                        for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
-                            ui.checkbox(&mut self.scene.settings.axes_visible[axis], name);
-                        }
-                    });
-                    ui.end_row();
-
-                    ui.label("Axis style");
-                    ui.horizontal(|ui| {
-                        for option in simple3d_core::scene::AxisStyle::ALL {
-                            let showing = self.scene.settings.axis_style == option;
-                            if ui.selectable_label(showing, option.label()).clicked() {
-                                self.scene.settings.axis_style = option;
-                            }
-                        }
-                    });
-                    ui.end_row();
-
-                    ui.label("Plane marks");
-                    ui.checkbox(&mut self.scene.settings.plane_marks, "")
-                        .on_hover_text("Mark where a principal plane cuts through a shape, on the shape itself");
-                    ui.end_row();
-                });
-                ui.separator();
-                ui.label("Notes");
-                let mut notes = self.scene.settings.notes.clone();
-                if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0)).changed() {
-                    self.edit("Notes", Some("scene:notes"));
-                    self.scene.settings.notes = notes;
-                }
-                ui.separator();
-                if ui.button("Close").clicked() {
-                    self.modal = Modal::None;
+    fn export_body(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            ui.label("Format");
+            egui::ComboBox::from_id_salt("export-format").selected_text(self.export_format.label()).show_ui(ui, |ui| {
+                for format in Format::ALL {
+                    ui.selectable_value(&mut self.export_format, format, format.label());
                 }
             });
-        if !open {
+            ui.end_row();
+
+            ui.label("Units");
+            if self.export_format.carries_units() {
+                ui.label("Millimetres, recorded in the file");
+            } else {
+                // For formats that do not carry units, state the
+                // assumption (spec section 9).
+                ui.label(
+                    egui::RichText::new("This format does not record units. Numbers are written in millimetres.")
+                        .weak(),
+                );
+            }
+            ui.end_row();
+
+            ui.label("Scale");
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.export_scale).desired_width(70.0));
+                ui.label(match simple3d_core::unit::parse_number(&self.export_scale) {
+                    Some(v) if v > 0.0 => format!("x{}", format_number(v, 4)),
+                    _ => "must be a positive number".to_string(),
+                });
+            });
+            ui.end_row();
+
+            ui.label("Contents");
+            ui.vertical(|ui| {
+                ui.radio_value(&mut self.export_selection_only, false, "The whole scene");
+                ui.add_enabled_ui(!self.selection.is_empty(), |ui| {
+                    ui.radio_value(&mut self.export_selection_only, true, "The current selection");
+                });
+            });
+            ui.end_row();
+        });
+
+        ui.separator();
+        if self.evaluated.errors.is_empty() {
+            // The count is of what will actually be written -- the scene
+            // or the selection -- rather than always of the whole scene.
+            let triangles = self.export_triangle_count();
+            ui.label(format!("{triangles} triangles will be verified as watertight before anything is written."));
+        } else {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "The scene has geometry that could not be evaluated; export will refuse.",
+            );
+        }
+        ui.separator();
+        ui.horizontal(|ui| {
+            if ui.button("Export...").clicked() {
+                self.start_export();
+            }
+            if ui.button("Cancel").clicked() {
+                self.modal = Modal::None;
+            }
+        });
+    }
+
+    fn scene_settings_window(&mut self, ctx: &egui::Context) {
+        self.dialog(
+            ctx,
+            "dialog-scene-settings",
+            "Scene settings",
+            egui::vec2(560.0, 520.0),
+            true,
+            Self::scene_settings_body,
+        );
+    }
+
+    fn scene_settings_body(&mut self, ui: &mut egui::Ui) {
+        egui::Grid::new("scene-settings").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            ui.label("Display unit");
+            egui::ComboBox::from_id_salt("settings-unit").selected_text(self.unit().suffix()).show_ui(ui, |ui| {
+                for unit in Unit::ALL {
+                    if ui.selectable_label(self.unit() == unit, unit.suffix()).clicked() {
+                        self.scene.settings.unit = unit;
+                        self.fields.clear();
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Default segments");
+            let mut segments = self.scene.settings.default_segments as f64;
+            if ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).max_decimals(0)).changed() {
+                self.edit("Default segments", Some("scene:segments"));
+                self.scene.settings.default_segments = segments.round() as u32;
+            }
+            ui.end_row();
+
+            ui.label("Grid spacing");
+            let unit = self.unit();
+            let mut spacing = unit.from_mm(self.scene.settings.grid_spacing);
+            if ui
+                .add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1))
+                .on_hover_text("How far apart the ground grid's lines are drawn.")
+                .changed()
+            {
+                self.edit("Grid spacing", Some("scene:grid"));
+                self.scene.settings.grid_spacing = unit.to_mm(spacing).max(1e-6);
+            }
+            ui.label(unit.suffix());
+            ui.end_row();
+
+            ui.label("Step");
+            let mut step = unit.from_mm(self.scene.settings.snap_step);
+            if ui
+                .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
+                .on_hover_text("One nudge, and one snapped step of a move or resize drag.")
+                .changed()
+            {
+                self.edit("Step", Some("scene:step"));
+                self.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
+            }
+            ui.label(unit.suffix());
+            ui.end_row();
+
+            ui.label("Rotation snap");
+            ui.add(egui::DragValue::new(&mut self.settings.rotate_snap_deg).range(0.1..=90.0).suffix(" deg"));
+            ui.end_row();
+
+            ui.label("Show grid");
+            ui.checkbox(&mut self.scene.settings.grid_visible, "");
+            ui.end_row();
+
+            ui.label("Show axes");
+            ui.horizontal(|ui| {
+                for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+                    ui.checkbox(&mut self.scene.settings.axes_visible[axis], name);
+                }
+            });
+            ui.end_row();
+
+            ui.label("Axis style");
+            ui.horizontal(|ui| {
+                for option in simple3d_core::scene::AxisStyle::ALL {
+                    let showing = self.scene.settings.axis_style == option;
+                    if ui.selectable_label(showing, option.label()).clicked() {
+                        self.scene.settings.axis_style = option;
+                    }
+                }
+            });
+            ui.end_row();
+
+            ui.label("Plane marks");
+            ui.checkbox(&mut self.scene.settings.plane_marks, "")
+                .on_hover_text("Mark where a principal plane cuts through a shape, on the shape itself");
+            ui.end_row();
+        });
+        ui.separator();
+        ui.label("Notes");
+        let mut notes = self.scene.settings.notes.clone();
+        if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0)).changed() {
+            self.edit("Notes", Some("scene:notes"));
+            self.scene.settings.notes = notes;
+        }
+        ui.separator();
+        if ui.button("Close").clicked() {
             self.modal = Modal::None;
         }
     }
@@ -815,10 +850,16 @@ impl App {
     /// The keymap editor: every command grouped by area, with a search box, the
     /// current binding shown, and click-to-record (spec section 8.2).
     fn keymap_window(&mut self, ctx: &egui::Context) {
+        self.dialog(ctx, "dialog-keymap", "Keyboard and mouse", egui::vec2(620.0, 660.0), true, Self::keymap_body);
+    }
+
+    fn keymap_body(&mut self, ui: &mut egui::Ui) {
         // Recording swallows the next key press, so it cannot also fire the
-        // command it is being bound to.
+        // command it is being bound to. The keys are read from *this* window's
+        // context: the dialog is a window of its own now, and the press that is
+        // being bound is delivered to whichever window has the keyboard.
         if let Some(command) = self.recording {
-            let pressed: Option<(egui::Key, egui::Modifiers)> = ctx.input(|input| {
+            let pressed: Option<(egui::Key, egui::Modifiers)> = ui.input(|input| {
                 input.events.iter().find_map(|event| match event {
                     egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
                     _ => None,
@@ -845,168 +886,154 @@ impl App {
             }
         }
 
-        let mut open = true;
-        egui::Window::new("Keyboard and mouse").open(&mut open).default_width(560.0).default_height(560.0).show(
-            ctx,
-            |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Preset");
-                    let mut preset = self.keymap.preset;
-                    egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).show_ui(ui, |ui| {
-                        for option in Preset::ALL {
-                            ui.selectable_value(&mut preset, option, option.label());
+        ui.horizontal(|ui| {
+            ui.label("Preset");
+            let mut preset = self.keymap.preset;
+            egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).show_ui(ui, |ui| {
+                for option in Preset::ALL {
+                    ui.selectable_value(&mut preset, option, option.label());
+                }
+            });
+            if preset != self.keymap.preset {
+                // A preset is a starting point the user can then modify.
+                self.keymap.switch_preset(preset);
+                self.persist_keymap();
+                self.status = Status::Info(format!("Keymap preset: {}", preset.label()));
+            }
+            if ui.button("Reset everything to the preset").clicked() {
+                self.keymap.reset_all();
+                self.persist_keymap();
+            }
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Export...").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Simple 3D keymap", &["json"])
+                    .set_file_name("simple3d-keymap.json")
+                    .save_file()
+                {
+                    if let Err(e) = std::fs::write(&path, self.keymap.to_text()) {
+                        self.fail("Could not write the keymap", &e.to_string());
+                    }
+                }
+            }
+            if ui.button("Import...").clicked() {
+                if let Some(path) = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]).pick_file() {
+                    match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| Keymap::from_text(&t))
+                    {
+                        Ok(keymap) => {
+                            self.keymap = keymap;
+                            self.persist_keymap();
+                        }
+                        Err(e) => self.fail("Could not read the keymap", &e),
+                    }
+                }
+            }
+        });
+        ui.separator();
+
+        ui.horizontal(|ui| {
+            ui.label("Navigation");
+        });
+        egui::Grid::new("nav-grid").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
+            let mut nav = self.keymap.nav;
+            for (label, drag) in [("Orbit", 0), ("Pan", 1)] {
+                ui.label(label);
+                let binding = if drag == 0 { &mut nav.orbit } else { &mut nav.pan };
+                egui::ComboBox::from_id_salt(format!("nav-button-{drag}"))
+                    .selected_text(binding.button.label())
+                    .width(90.0)
+                    .show_ui(ui, |ui| {
+                        for button in MouseButton::ALL {
+                            ui.selectable_value(&mut binding.button, button, button.label());
                         }
                     });
-                    if preset != self.keymap.preset {
-                        // A preset is a starting point the user can then modify.
-                        self.keymap.switch_preset(preset);
-                        self.persist_keymap();
-                        self.status = Status::Info(format!("Keymap preset: {}", preset.label()));
-                    }
-                    if ui.button("Reset everything to the preset").clicked() {
-                        self.keymap.reset_all();
-                        self.persist_keymap();
-                    }
-                });
                 ui.horizontal(|ui| {
-                    if ui.button("Export...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Simple 3D keymap", &["json"])
-                            .set_file_name("simple3d-keymap.json")
-                            .save_file()
-                        {
-                            if let Err(e) = std::fs::write(&path, self.keymap.to_text()) {
-                                self.fail("Could not write the keymap", &e.to_string());
-                            }
-                        }
-                    }
-                    if ui.button("Import...").clicked() {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]).pick_file()
-                        {
-                            match std::fs::read_to_string(&path)
-                                .map_err(|e| e.to_string())
-                                .and_then(|t| Keymap::from_text(&t))
-                            {
-                                Ok(keymap) => {
-                                    self.keymap = keymap;
-                                    self.persist_keymap();
-                                }
-                                Err(e) => self.fail("Could not read the keymap", &e),
-                            }
-                        }
-                    }
+                    ui.checkbox(&mut binding.ctrl, "Ctrl");
+                    ui.checkbox(&mut binding.shift, "Shift");
+                    ui.checkbox(&mut binding.alt, "Alt");
                 });
-                ui.separator();
-
-                ui.horizontal(|ui| {
-                    ui.label("Navigation");
-                });
-                egui::Grid::new("nav-grid").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
-                    let mut nav = self.keymap.nav;
-                    for (label, drag) in [("Orbit", 0), ("Pan", 1)] {
-                        ui.label(label);
-                        let binding = if drag == 0 { &mut nav.orbit } else { &mut nav.pan };
-                        egui::ComboBox::from_id_salt(format!("nav-button-{drag}"))
-                            .selected_text(binding.button.label())
-                            .width(90.0)
-                            .show_ui(ui, |ui| {
-                                for button in MouseButton::ALL {
-                                    ui.selectable_value(&mut binding.button, button, button.label());
-                                }
-                            });
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut binding.ctrl, "Ctrl");
-                            ui.checkbox(&mut binding.shift, "Shift");
-                            ui.checkbox(&mut binding.alt, "Alt");
-                        });
-                        ui.end_row();
-                    }
-                    ui.label("Zoom wheel");
-                    ui.checkbox(&mut nav.invert_zoom, "Inverted");
-                    ui.label("");
-                    ui.end_row();
-                    if nav != self.keymap.nav {
-                        // Applies immediately, without a restart.
-                        self.keymap.nav = nav;
-                        self.persist_keymap();
-                    }
-                });
-                if self.keymap.nav.orbit.button == self.keymap.nav.pan.button
-                    && self.keymap.nav.orbit.ctrl == self.keymap.nav.pan.ctrl
-                    && self.keymap.nav.orbit.shift == self.keymap.nav.pan.shift
-                    && self.keymap.nav.orbit.alt == self.keymap.nav.pan.alt
-                {
-                    ui.colored_label(
-                        ui.visuals().warn_fg_color,
-                        "Orbit and pan are on the same binding; pan will never fire.",
-                    );
-                }
-
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Search");
-                    ui.add(egui::TextEdit::singleline(&mut self.keymap_search).desired_width(200.0));
-                    if ui.button("Clear").clicked() {
-                        self.keymap_search.clear();
-                    }
-                });
-
-                let needle = self.keymap_search.to_lowercase();
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for area in Area::ALL {
-                        let commands: Vec<Command> = Command::ALL
-                            .iter()
-                            .copied()
-                            .filter(|c| c.area() == area)
-                            .filter(|c| needle.is_empty() || c.label().to_lowercase().contains(&needle))
-                            .collect();
-                        if commands.is_empty() {
-                            continue;
-                        }
-                        ui.add_space(4.0);
-                        ui.strong(area.label());
-                        egui::Grid::new(format!("keymap-{}", area.label())).num_columns(3).spacing([10.0, 4.0]).show(
-                            ui,
-                            |ui| {
-                                for command in commands {
-                                    ui.label(command.label());
-                                    let recording = self.recording == Some(command);
-                                    let text = if recording {
-                                        "press a key...".to_string()
-                                    } else {
-                                        let shown = self.keymap.shortcut_text(command);
-                                        if shown.is_empty() {
-                                            "unbound".to_string()
-                                        } else {
-                                            shown
-                                        }
-                                    };
-                                    if ui.add(egui::Button::new(text).min_size(egui::vec2(130.0, 0.0))).clicked() {
-                                        self.recording = Some(command);
-                                    }
-                                    if ui.small_button("Reset").clicked() {
-                                        self.keymap.reset(command);
-                                        self.persist_keymap();
-                                    }
-                                    ui.end_row();
-                                }
-                            },
-                        );
-                    }
-                });
-            },
-        );
-        if !open {
-            self.modal = Modal::None;
-            self.recording = None;
+                ui.end_row();
+            }
+            ui.label("Zoom wheel");
+            ui.checkbox(&mut nav.invert_zoom, "Inverted");
+            ui.label("");
+            ui.end_row();
+            if nav != self.keymap.nav {
+                // Applies immediately, without a restart.
+                self.keymap.nav = nav;
+                self.persist_keymap();
+            }
+        });
+        if self.keymap.nav.orbit.button == self.keymap.nav.pan.button
+            && self.keymap.nav.orbit.ctrl == self.keymap.nav.pan.ctrl
+            && self.keymap.nav.orbit.shift == self.keymap.nav.pan.shift
+            && self.keymap.nav.orbit.alt == self.keymap.nav.pan.alt
+        {
+            ui.colored_label(ui.visuals().warn_fg_color, "Orbit and pan are on the same binding; pan will never fire.");
         }
 
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Search");
+            ui.add(egui::TextEdit::singleline(&mut self.keymap_search).desired_width(200.0));
+            if ui.button("Clear").clicked() {
+                self.keymap_search.clear();
+            }
+        });
+
+        let needle = self.keymap_search.to_lowercase();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for area in Area::ALL {
+                let commands: Vec<Command> = Command::ALL
+                    .iter()
+                    .copied()
+                    .filter(|c| c.area() == area)
+                    .filter(|c| needle.is_empty() || c.label().to_lowercase().contains(&needle))
+                    .collect();
+                if commands.is_empty() {
+                    continue;
+                }
+                ui.add_space(4.0);
+                ui.strong(area.label());
+                egui::Grid::new(format!("keymap-{}", area.label())).num_columns(3).spacing([10.0, 4.0]).show(
+                    ui,
+                    |ui| {
+                        for command in commands {
+                            ui.label(command.label());
+                            let recording = self.recording == Some(command);
+                            let text = if recording {
+                                "press a key...".to_string()
+                            } else {
+                                let shown = self.keymap.shortcut_text(command);
+                                if shown.is_empty() {
+                                    "unbound".to_string()
+                                } else {
+                                    shown
+                                }
+                            };
+                            if ui.add(egui::Button::new(text).min_size(egui::vec2(130.0, 0.0))).clicked() {
+                                self.recording = Some(command);
+                            }
+                            if ui.small_button("Reset").clicked() {
+                                self.keymap.reset(command);
+                                self.persist_keymap();
+                            }
+                            ui.end_row();
+                        }
+                    },
+                );
+            }
+        });
+
+        // Drawn over the keymap dialog, inside it: a question about the key that
+        // was just pressed belongs to the window that took the press.
         if let Some((command, chord, holder)) = self.keymap_conflict.clone() {
             egui::Window::new("That combination is already in use")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 40.0))
-                .show(ctx, |ui| {
+                .show(ui.ctx(), |ui| {
                     ui.label(format!("{chord} is currently bound to \"{}\".", holder.label()));
                     ui.label(format!("Reassign it to \"{}\"?", command.label()));
                     ui.horizontal(|ui| {
@@ -1024,30 +1051,30 @@ impl App {
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        egui::Window::new(format!("About {APP_NAME}"))
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                ui.heading(APP_NAME);
-                ui.label(format!("Version {VERSION}"));
-                ui.add_space(6.0);
-                ui.label("Parametric 3D modelling with exact metric dimensions.");
-                ui.label("Everything is stored in millimetres; the display unit only changes what you read.");
-                ui.add_space(6.0);
-                ui.label(format!("Project files: .{PROJECT_EXTENSION}"));
-                ui.label(format!("Settings: {}", self.config_dir().display()));
-                if config::portable_mode() {
-                    ui.label("Running in portable mode: settings live beside the executable.");
-                }
-                ui.add_space(6.0);
-                if ui.button("Close").clicked() {
-                    self.modal = Modal::None;
-                }
-            });
-        if !open {
+        self.dialog(
+            ctx,
+            "dialog-about",
+            format!("About {APP_NAME}").as_str(),
+            egui::vec2(460.0, 250.0),
+            false,
+            Self::about_body,
+        );
+    }
+
+    fn about_body(&mut self, ui: &mut egui::Ui) {
+        ui.heading(APP_NAME);
+        ui.label(format!("Version {VERSION}"));
+        ui.add_space(6.0);
+        ui.label("Parametric 3D modelling with exact metric dimensions.");
+        ui.label("Everything is stored in millimetres; the display unit only changes what you read.");
+        ui.add_space(6.0);
+        ui.label(format!("Project files: .{PROJECT_EXTENSION}"));
+        ui.label(format!("Settings: {}", self.config_dir().display()));
+        if config::portable_mode() {
+            ui.label("Running in portable mode: settings live beside the executable.");
+        }
+        ui.add_space(6.0);
+        if ui.button("Close").clicked() {
             self.modal = Modal::None;
         }
     }
@@ -1055,37 +1082,36 @@ impl App {
     /// Failures are shown in a scrollable, copyable window with the specific
     /// reason, never a generic message (spec section 9).
     fn error_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        let title = self.error_title.clone();
+        self.dialog(
+            ctx,
+            "dialog-error",
+            // A window with no title in its bar reads as a broken window; every
+            // failure names itself, but nothing here depends on that.
+            if self.error_title.is_empty() { "Something went wrong".to_string() } else { self.error_title.clone() }
+                .as_str(),
+            egui::vec2(560.0, 360.0),
+            true,
+            Self::error_body,
+        );
+    }
+
+    fn error_body(&mut self, ui: &mut egui::Ui) {
         let mut detail = self.error_detail.clone();
-        egui::Window::new(&title)
-            .open(&mut open)
-            .collapsible(false)
-            .default_width(520.0)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    // A read-only multiline field, so the text can be selected
-                    // and copied.
-                    ui.add(
-                        egui::TextEdit::multiline(&mut detail)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(6)
-                            .interactive(true),
-                    );
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Copy").clicked() {
-                        ui.ctx().copy_text(self.error_detail.clone());
-                    }
-                    if ui.button("Close").clicked() {
-                        self.modal = Modal::None;
-                    }
-                });
-            });
-        if !open {
-            self.modal = Modal::None;
-        }
+        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            // A read-only multiline field, so the text can be selected
+            // and copied.
+            ui.add(
+                egui::TextEdit::multiline(&mut detail).desired_width(f32::INFINITY).desired_rows(6).interactive(true),
+            );
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Copy").clicked() {
+                ui.ctx().copy_text(self.error_detail.clone());
+            }
+            if ui.button("Close").clicked() {
+                self.modal = Modal::None;
+            }
+        });
     }
 
     /// Naming a group, or a whole project, before it goes on the palette.
@@ -1094,87 +1120,88 @@ impl App {
     /// user's library, not into the document: it outlives this project, and it
     /// is the only thing the palette will show, so it is worth stopping to type.
     fn save_primitive_window(&mut self, ctx: &egui::Context) {
-        let mut open = true;
-        let mut save = false;
-        egui::Window::new("Save as primitive")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                let count = self.primitive_clip.as_ref().map(|c| c.nodes.len()).unwrap_or(0);
-                ui.label(format!(
-                    "{count} node{} will be kept on the palette, ready to drop into any project.",
-                    if count == 1 { "" } else { "s" }
-                ));
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    ui.label("Name");
-                    let field = ui.add(
-                        egui::TextEdit::singleline(&mut self.primitive_name).desired_width(240.0).hint_text("Bracket"),
-                    );
-                    field.request_focus();
-                    if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        save = true;
-                    }
-                });
-                let tidied = simple3d_core::library::sanitise(&self.primitive_name);
-                if tidied.is_empty() {
-                    ui.add(egui::Label::new(theme::hint("A saved primitive needs a name.")).selectable(false));
-                } else if tidied != self.primitive_name.trim() {
-                    ui.add(
-                        egui::Label::new(theme::hint(format!("It will be saved as \u{201C}{tidied}\u{201D}.")))
-                            .selectable(false),
-                    );
-                } else if simple3d_core::library::exists(self.config_dir(), &tidied) {
-                    ui.add(
-                        egui::Label::new(theme::hint(format!(
-                            "\u{201C}{tidied}\u{201D} is already on the palette; saving replaces it."
-                        )))
-                        .selectable(false),
-                    );
-                }
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    if ui.add_enabled(!tidied.is_empty(), egui::Button::new("Save")).clicked() {
-                        save = true;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.cancel_save_primitive();
-                    }
-                });
-            });
-        if save {
-            self.confirm_save_primitive();
-        } else if !open {
-            self.cancel_save_primitive();
+        self.dialog(
+            ctx,
+            "dialog-save-primitive",
+            "Save as primitive",
+            egui::vec2(480.0, 190.0),
+            false,
+            Self::save_primitive_body,
+        );
+    }
+
+    fn save_primitive_body(&mut self, ui: &mut egui::Ui) {
+        let count = self.primitive_clip.as_ref().map(|c| c.nodes.len()).unwrap_or(0);
+        ui.label(format!(
+            "{count} node{} will be kept on the palette, ready to drop into any project.",
+            if count == 1 { "" } else { "s" }
+        ));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label("Name");
+            let field =
+                ui.add(egui::TextEdit::singleline(&mut self.primitive_name).desired_width(240.0).hint_text("Bracket"));
+            field.request_focus();
+            if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                self.confirm_save_primitive();
+            }
+        });
+        let tidied = simple3d_core::library::sanitise(&self.primitive_name);
+        if tidied.is_empty() {
+            ui.add(egui::Label::new(theme::hint("A saved primitive needs a name.")).selectable(false));
+        } else if tidied != self.primitive_name.trim() {
+            ui.add(
+                egui::Label::new(theme::hint(format!("It will be saved as \u{201C}{tidied}\u{201D}.")))
+                    .selectable(false),
+            );
+        } else if simple3d_core::library::exists(self.config_dir(), &tidied) {
+            ui.add(
+                egui::Label::new(theme::hint(format!(
+                    "\u{201C}{tidied}\u{201D} is already on the palette; saving replaces it."
+                )))
+                .selectable(false),
+            );
         }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.add_enabled(!tidied.is_empty(), egui::Button::new("Save")).clicked() {
+                self.confirm_save_primitive();
+            }
+            if ui.button("Cancel").clicked() {
+                self.cancel_save_primitive();
+            }
+        });
     }
 
     fn confirm_quit_window(&mut self, ctx: &egui::Context) {
-        egui::Window::new("Unsaved changes")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
-            .show(ctx, |ui| {
-                ui.label("This project has changes that have not been saved.");
-                ui.horizontal(|ui| {
-                    if ui.button("Save and quit").clicked() {
-                        self.save();
-                        if !self.unsaved() {
-                            self.confirm_quit();
-                        }
-                        self.modal = Modal::None;
-                    }
-                    if ui.button("Quit without saving").clicked() {
-                        self.confirm_quit();
-                        self.modal = Modal::None;
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.modal = Modal::None;
-                    }
-                });
-            });
+        self.dialog(
+            ctx,
+            "dialog-confirm-quit",
+            "Unsaved changes",
+            egui::vec2(430.0, 140.0),
+            false,
+            Self::confirm_quit_body,
+        );
+    }
+
+    fn confirm_quit_body(&mut self, ui: &mut egui::Ui) {
+        ui.label("This project has changes that have not been saved.");
+        ui.horizontal(|ui| {
+            if ui.button("Save and quit").clicked() {
+                self.save();
+                if !self.unsaved() {
+                    self.confirm_quit();
+                }
+                self.modal = Modal::None;
+            }
+            if ui.button("Quit without saving").clicked() {
+                self.confirm_quit();
+                self.modal = Modal::None;
+            }
+            if ui.button("Cancel").clicked() {
+                self.modal = Modal::None;
+            }
+        });
     }
 }
 

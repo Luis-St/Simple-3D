@@ -25,7 +25,6 @@ mod render;
 mod theme;
 mod ui;
 mod view;
-mod window_chrome;
 mod worker;
 
 use std::path::PathBuf;
@@ -53,12 +52,16 @@ fn main() -> eframe::Result<()> {
         .with_icon(icon::app_icon(256))
         .with_inner_size(settings.window_size)
         .with_min_inner_size([900.0, 560.0])
-        // The application draws its own title bar (see `window_chrome`), in the
-        // shape the host desktop uses. Left to the window system it would be a
-        // GNOME-flavoured imitation on every Wayland desktop and nothing at all
-        // where the compositor declines to decorate.
-        .with_decorations(false)
-        .with_transparent(window_chrome::wants_transparency());
+        // Decorated by the window system, not by us. Windows, X11, KDE and the
+        // wlroots compositors all hand out a real frame -- on Wayland through
+        // the `xdg-decoration` protocol -- and with it the snapping, the
+        // right-click window menu, the keyboard shortcuts and the button layout
+        // the user configured, none of which a drawn title bar can offer.
+        // GNOME's mutter still refuses that protocol, so there winit draws the
+        // Adwaita frame its `wayland-csd-adwaita` feature provides: an
+        // imitation, but a maintained one that follows the desktop's own
+        // colour scheme.
+        .with_decorations(true);
     if settings.window_maximized {
         viewport = viewport.with_maximized(true);
     }

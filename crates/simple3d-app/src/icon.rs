@@ -403,6 +403,16 @@ pub fn button(ui: &mut egui::Ui, glyph: Glyph, size: f32, active: bool, enabled:
     response
 }
 
+/// The same icon, rasterized once and shared.
+///
+/// The dialogs (see `app_chrome`) are real windows now, and each one wants an
+/// icon of its own; rasterizing the drawing again on every frame one of them is
+/// open would be paying for a picture that never changes.
+pub fn shared_icon() -> std::sync::Arc<egui::IconData> {
+    static ICON: std::sync::OnceLock<std::sync::Arc<egui::IconData>> = std::sync::OnceLock::new();
+    ICON.get_or_init(|| std::sync::Arc::new(app_icon(256))).clone()
+}
+
 /// The application's own icon, rasterized from the same drawing the packaged
 /// icon files carry (`packaging/deb/net.simple3d.Simple3D.svg`): the box in the
 /// accent colour on the darkest surface, with the rounded corners a desktop
