@@ -623,6 +623,63 @@ fn the_rows_a_drag_carries_stay_where_they_are_while_it_is_held() {
 }
 
 #[test]
+fn a_long_name_widens_the_outliner_rows_instead_of_wrapping() {
+    // Issue 50. A row is a fixed 22 px, so a name broken over two lines is a
+    // name with its second half cut off. The rows are made as wide as the
+    // longest one and the tree scrolls sideways to reach it.
+    let mut harness = harness("outliner-long-name");
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    harness.step();
+    let narrow = rect_of(&harness, crate::panel_outliner::row_id(plate));
+
+    let long = "a name far longer than any outliner panel is ever going to be wide, by some way";
+    harness.state_mut().scene.get_mut(plate).unwrap().name = long.to_string();
+    harness.step();
+    harness.step();
+    let wide = rect_of(&harness, crate::panel_outliner::row_id(plate));
+
+    assert_eq!(wide.height(), narrow.height(), "the row grew a line instead of growing wider");
+    assert!(wide.width() > narrow.width(), "the row stayed the panel's width, so the name was wrapped or cut");
+}
+
+#[test]
+fn the_gap_under_an_open_group_drops_into_it_rather_than_beside_it() {
+    // Issue 49. The gap under a group's row is the gap above its first child,
+    // so what lands there belongs to the group -- it was landing in the
+    // group's parent instead, a level out from where the line was drawn.
+    let mut harness = harness("outliner-drop-under-group");
+    let root = harness.state().scene.root();
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let group = harness.state_mut().scene.add_group(simple3d_core::scene::GroupOp::Union, root, 1);
+    let inner = harness.state_mut().scene.add_primitive("box", group, 0).expect("the box is in the registry");
+    harness.state_mut().select_only(plate);
+    harness.step();
+    harness.step();
+
+    let row = rect_of(&harness, crate::panel_outliner::row_id(group));
+    let from = rect_of(&harness, crate::panel_outliner::row_id(plate)).center();
+    press(&mut harness, from);
+    move_to(&mut harness, from + egui::vec2(0.0, 4.0));
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert!(harness.state().outliner_drag.is_some(), "the drag never started");
+
+    // The bottom edge of the group's row: the gap between it and its first child.
+    let at = egui::pos2(row.center().x, row.bottom() - 1.0);
+    move_to(&mut harness, at);
+    harness.step();
+    let target = harness.state().drop_target.expect("no drop target under the group's row");
+    assert_eq!(target.parent, group, "the gap under the group named another parent");
+    assert_eq!(target.index, 0, "the drop was not the group's new first child");
+
+    release(&mut harness, at);
+    harness.step();
+    assert_eq!(harness.state().scene.node(group).children, vec![plate, inner], "the drop landed outside the group");
+    assert_eq!(harness.state().scene.node(root).children, vec![group], "the plate stayed in the root");
+}
+
+#[test]
 fn the_gap_between_two_rows_is_one_drop_position_all_the_way_across() {
     // Issue 48. The rows are laid out with a gap between them, and a pointer in
     // that gap is claimed by the rows either side of it -- so both drew the

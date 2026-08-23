@@ -15,7 +15,10 @@ use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
 /// Where a pointer at `fraction` down a row would drop: into the row's node, or
 /// between it and one of its siblings. Kept separate from the drawing so the rule
 /// can be reasoned about (and tested) on its own.
-pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId) -> Option<DropTarget> {
+///
+/// `open` says the row is a group showing its children, which changes what the
+/// gap under it means (issue 49).
+pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId, open: bool) -> Option<DropTarget> {
     let node = scene.get(over)?;
     let is_group = node.is_group();
     // The top and bottom fifths of a row mean "beside"; the middle means "into",
@@ -24,6 +27,15 @@ pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId) -
     let after = fraction > 0.75;
     if is_group && !before && !after {
         return Some(DropTarget { parent: over, index: scene.node(over).children.len(), into: Some(over) });
+    }
+    // The gap under an open group's row is the gap above its first child, and
+    // what lands in it is the group's new first child. Read as "beside the
+    // group" it landed in the group's parent instead -- a level out from the
+    // one the line was drawn at, which is not where the pointer was aiming
+    // (issue 49). A shut group has nothing under it, so its gap still means
+    // "beside".
+    if is_group && after && open {
+        return Some(DropTarget { parent: over, index: 0, into: None });
     }
     if over == root {
         // The root has no siblings, so any drop on it goes inside.
@@ -129,11 +141,18 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     // -- and the "N selected" line above appears and disappears with the
     // selection, which would renumber every row inside on the frame a selection
     // changed.
-    area.id_salt("outliner-tree").show(ui, |ui| {
+    //
+    // It scrolls sideways as well as down: a name is a name, so a narrow panel
+    // is a reason to reach the rest of it, not to break it over two lines that
+    // a 22 px row then cuts in half (issue 50).
+    area.scroll([true, true]).id_salt("outliner-tree").show(ui, |ui| {
         ui.set_style(restore);
         ui.add_space(2.0);
         let ids = visible_rows(app);
-        for id in ids {
+        // Every row is as wide as the widest one, so the eye and the operator
+        // badge stay in a column and the selection tint covers a whole row.
+        let width = ids.iter().map(|&id| row_width(app, ui, id)).fold(ui.available_width(), f32::max);
+        for &id in &ids {
             // What is being dragged stays in the tree, drawn as a shadow of
             // itself: taking the rows out re-flowed everything below them the
             // moment a drag started, so the gaps the drop line points at moved
@@ -141,14 +160,12 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
             // and faded, the tree holds still, the shadow says where the load
             // came from and the slab on the pointer says it is held (issue 46).
             let shadowed = carried.iter().any(|&source| id == source || app.scene.is_ancestor_of(source, id));
-            row(app, ui, id, &carried, shadowed);
+            row(app, ui, id, &carried, shadowed, width);
         }
         // Dropping in the empty space below the tree means "at the end of the
         // root", which is otherwise awkward to reach.
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width(), ui.available_height().max(24.0)),
-            egui::Sense::hover(),
-        );
+        let (rect, response) =
+            ui.allocate_exact_size(egui::vec2(width, ui.available_height().max(24.0)), egui::Sense::hover());
         // `contains_pointer`, not `hovered`: egui reserves hovering for a frame
         // where nothing is being dragged, which is every frame of a drag but the
         // one it ends on. Asking the wrong question is why the drop indicator
@@ -169,6 +186,24 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
         finish_drag(app);
     }
+}
+
+/// How wide a row has to be to show everything on it: the indent, the twisty
+/// and glyph columns, the name at its natural width, whatever badges it wears,
+/// and the eye at the right edge.
+///
+/// The tree takes the widest of these rather than the panel's width, which is
+/// what lets a name be read in full in a narrow panel by scrolling to it
+/// (issue 50).
+fn row_width(app: &App, ui: &egui::Ui, id: NodeId) -> f32 {
+    let node = app.scene.node(id);
+    let name = ui.fonts(|fonts| {
+        fonts.layout_no_wrap(node.name.clone(), egui::FontId::proportional(theme::font::VALUE), token::TEXT_HI).size().x
+    });
+    // 6 px of margin, the indent, the twisty, the type glyph, the name, then
+    // one column per badge and the eye's 28 px at the right edge.
+    let badges = operator_badge(&app.scene, id).is_some() as i32 + app.evaluated.error_for(id).is_some() as i32;
+    6.0 + app.scene.depth(id) as f32 * 12.0 + 14.0 + 18.0 + name + badges as f32 * 20.0 + 28.0
 }
 
 /// The rows the tree shows: depth-first, minus everything under a group that
@@ -319,7 +354,7 @@ pub fn row_id(id: NodeId) -> egui::Id {
 /// is on the pointer.
 const DRAG_SHADOW: f32 = 0.38;
 
-fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowed: bool) {
+fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowed: bool, width: f32) {
     let depth = app.scene.depth(id);
     let node = app.scene.node(id);
     let name = node.name.clone();
@@ -331,8 +366,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     let badge = operator_badge(&app.scene, id);
     let type_id = node.spec().map(|s| s.type_id).unwrap_or("");
 
-    let full = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, metric::ROW), egui::Sense::hover());
     // A shadowed row is a picture of where the load came from and nothing else:
     // it cannot be clicked, hovered, renamed, dropped on or dragged again while
     // it is in the air.
@@ -479,13 +513,18 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     } else {
         token::TEXT_HI.gamma_multiply(0.85)
     };
-    let galley = painter.layout(
-        name.clone(),
-        egui::FontId::proportional(theme::font::VALUE),
-        text_colour,
-        (name_right - x).max(1.0),
+    // Laid out without wrapping: the row is a fixed 22 px, so a wrapped name
+    // is a name with its second half cut off. The tree is made wide enough for
+    // the longest one instead, and scrolls sideways to reach it (issue 50).
+    let galley = painter.layout_no_wrap(name.clone(), egui::FontId::proportional(theme::font::VALUE), text_colour);
+    // Clipped at the badge column rather than wrapped, so that the name never
+    // runs under a badge even on the frame a rename makes it longer than the
+    // width the tree was measured for.
+    let mut text = painter.clone();
+    text.set_clip_rect(
+        painter.clip_rect().intersect(egui::Rect::from_min_max(rect.left_top(), egui::pos2(name_right, rect.bottom()))),
     );
-    painter.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, text_colour);
+    text.galley(egui::pos2(x, rect.center().y - galley.size().y / 2.0), galley, text_colour);
 
     let response = if shadowed {
         response
@@ -534,7 +573,8 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
         let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(band.center());
         let fraction = ((pointer.y - band.top()) / band.height().max(1.0)).clamp(0.0, 1.0);
         let root = app.scene.root();
-        if let Some(target) = drop_position(&app.scene, id, fraction, root) {
+        let open = !app.collapsed.contains(&id) && !app.scene.node(id).children.is_empty();
+        if let Some(target) = drop_position(&app.scene, id, fraction, root, open) {
             if drop_is_legal(&app.scene, carried, &target) {
                 app.drop_target = Some(target);
                 let stroke = egui::Stroke::new(2.0_f32, token::ACCENT);
@@ -557,7 +597,10 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
                         // between them drew the line under a row the drop was
                         // going above.
                         let own = app.scene.node(target.parent).children.iter().position(|&c| c == id);
-                        let after = own.is_some_and(|index| target.index > index);
+                        // Landing as this group's own first child is a line
+                        // under its row, not over it: the row is the parent of
+                        // the gap, not a sibling beside it (issue 49).
+                        let after = target.parent == id || own.is_some_and(|index| target.index > index);
                         let y = gap_line_y(rect, half_gap * 2.0, after);
                         // A child of `target.parent` sits one level in from it,
                         // which is the level the line has to sit at.
@@ -852,7 +895,7 @@ mod tests {
     #[test]
     fn the_middle_of_a_group_row_drops_into_it() {
         let (scene, root, group, _, _) = tree();
-        let target = drop_position(&scene, group, 0.5, root).unwrap();
+        let target = drop_position(&scene, group, 0.5, root, true).unwrap();
         assert_eq!(target.into, Some(group));
         assert_eq!(target.parent, group);
     }
@@ -860,19 +903,48 @@ mod tests {
     #[test]
     fn the_edges_of_a_row_drop_beside_it() {
         let (scene, root, group, _, sibling) = tree();
-        let before = drop_position(&scene, sibling, 0.05, root).unwrap();
+        let before = drop_position(&scene, sibling, 0.05, root, false).unwrap();
         assert_eq!(before.parent, root);
         assert_eq!(before.index, 1);
         assert_eq!(before.into, None);
 
-        let after = drop_position(&scene, sibling, 0.95, root).unwrap();
+        let after = drop_position(&scene, sibling, 0.95, root, false).unwrap();
         assert_eq!(after.index, 2);
 
         // A group's edges also mean "beside", not "into".
-        let beside_group = drop_position(&scene, group, 0.05, root).unwrap();
+        let beside_group = drop_position(&scene, group, 0.05, root, true).unwrap();
         assert_eq!(beside_group.parent, root);
         assert_eq!(beside_group.index, 0);
         assert_eq!(beside_group.into, None);
+    }
+
+    #[test]
+    fn the_gap_under_an_open_group_lands_inside_it() {
+        // Issue 49: dragged into the gap between a group's row and its first
+        // child, an item was landing beside the group in the group's parent --
+        // a level out from where the line was drawn. It now becomes the
+        // group's first child.
+        let (scene, root, group, inner, _) = tree();
+        let target = drop_position(&scene, group, 0.95, root, true).unwrap();
+        assert_eq!(target.parent, group);
+        assert_eq!(target.index, 0);
+        assert_eq!(target.into, None);
+        // And that index is the one the move honours.
+        let mut scene = scene;
+        let sibling = scene.node(root).children[1];
+        scene.reparent(sibling, target.parent, target.index).unwrap();
+        assert_eq!(scene.node(group).children, vec![sibling, inner]);
+    }
+
+    #[test]
+    fn the_gap_under_a_shut_group_still_lands_beside_it() {
+        // Nothing of the group is shown under its row while it is collapsed,
+        // so the gap there is the one between it and its next sibling.
+        let (scene, root, group, _, _) = tree();
+        let target = drop_position(&scene, group, 0.95, root, false).unwrap();
+        assert_eq!(target.parent, root);
+        assert_eq!(target.index, 1);
+        assert_eq!(target.into, None);
     }
 
     #[test]
@@ -894,7 +966,7 @@ mod tests {
     fn a_leaf_row_never_drops_into_itself() {
         let (scene, root, _, inner, _) = tree();
         for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
-            let target = drop_position(&scene, inner, fraction, root).unwrap();
+            let target = drop_position(&scene, inner, fraction, root, false).unwrap();
             assert_eq!(target.into, None, "a leaf accepted a child at {fraction}");
         }
     }
@@ -903,7 +975,7 @@ mod tests {
     fn any_drop_on_the_root_goes_inside_it() {
         let (scene, root, _, _, _) = tree();
         for fraction in [0.0, 0.5, 1.0] {
-            let target = drop_position(&scene, root, fraction, root).unwrap();
+            let target = drop_position(&scene, root, fraction, root, false).unwrap();
             assert_eq!(target.parent, root);
             assert_eq!(target.into, Some(root));
         }
@@ -913,7 +985,7 @@ mod tests {
     fn the_index_a_drop_reports_is_the_one_reparent_expects() {
         // The two have to agree, or a drop lands one row away from the indicator.
         let (mut scene, root, group, inner, sibling) = tree();
-        let target = drop_position(&scene, sibling, 0.95, root).unwrap();
+        let target = drop_position(&scene, sibling, 0.95, root, false).unwrap();
         scene.reparent(inner, target.parent, target.index).unwrap();
         assert_eq!(scene.node(root).children, vec![group, sibling, inner]);
     }
