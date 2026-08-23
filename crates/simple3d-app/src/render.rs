@@ -514,17 +514,53 @@ fn draw_world_line_with_depth(
     }
 }
 
+/// Half the viewport's diagonal, in millimetres at the current zoom: how far
+/// the frame itself reaches, with no ground plane involved. What the pinned
+/// axis cross is measured against -- it is a mark on the frame, so it is sized
+/// by the frame, and it must not grow when a tilt makes the ground reach
+/// further or the two axis styles stop being two different pictures.
+pub fn frame_reach(view: &View) -> f64 {
+    let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
+    half_diagonal / view.pixels_per_mm().max(1e-9)
+}
+
+/// How much further than the face-on reach a tilted ground may be asked to
+/// cover. A view a few degrees off edge-on would otherwise want a grid of
+/// unbounded extent, and by then its lines are a wash rather than a measure.
+const MAX_TILT_REACH: f64 = 6.0;
+
 /// The world radius the ground grid and the axes cover.
 ///
-/// It is derived from the frame rather than from the grid's spacing: half the
-/// viewport's diagonal, converted to millimetres at the current zoom, with a
-/// margin so the fade finishes just outside the corners. That makes it
-/// continuous in the zoom -- the extent of the ground grows smoothly as the
-/// camera pulls back, instead of jumping tenfold whenever the spacing steps up
-/// a decade, which is what made zooming out lurch.
+/// It is derived from the frame rather than from the grid's spacing: the
+/// furthest the viewport reaches across the ground plane at the current zoom.
+/// That makes it continuous in the zoom -- the extent of the ground grows
+/// smoothly as the camera pulls back, instead of jumping tenfold whenever the
+/// spacing steps up a decade, which is what made zooming out lurch.
+///
+/// The ground is only face-on from straight above. Seen at an angle it is
+/// foreshortened, so the frame reaches much further across it along the view
+/// than across it sideways -- half the viewport's diagonal is the right answer
+/// for a top view and far too small for any other. Taking it as the answer for
+/// all of them left the grid stopping short of the top and bottom of the
+/// viewport, in a flattened diamond, while the axes carried on past it. So the
+/// four corners of the frame are put back onto the ground and the furthest one
+/// is what the grid has to reach.
 pub fn grid_radius(view: &View) -> f64 {
-    let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
-    half_diagonal / view.pixels_per_mm().max(1e-9) * 1.35
+    let face_on = frame_reach(view);
+    let centre = Vec3::new(view.camera.target.x, view.camera.target.y, 0.0);
+    let half = view.size / 2.0;
+    let mut reach: f64 = 0.0;
+    for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let corner = egui::pos2(view.centre.x + half.x * sx, view.centre.y + half.y * sy);
+        // Edge-on: the ground is a line on the screen, with no extent to cover.
+        let Some(hit) = view.ray_plane(corner, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)) else {
+            return face_on * 1.35;
+        };
+        reach = reach.max((hit - centre).length());
+    }
+    // A little past the corner it is reaching, and never less than the face-on
+    // answer, so a top view keeps exactly the extent it had.
+    (reach * 1.08).clamp(face_on * 1.35, face_on * MAX_TILT_REACH)
 }
 
 /// The narrowest a grid cell may be drawn, in pixels, and the width at which it
@@ -532,6 +568,27 @@ pub fn grid_radius(view: &View) -> f64 {
 /// decade of the grid arrive and leave without a step.
 const CELL_FADE_OUT: f64 = 6.0;
 const CELL_FULL: f64 = 26.0;
+
+/// How much of a ground cell survives the tilt of the view, as a factor on its
+/// size on screen.
+///
+/// A cell is only square on the screen from straight above. At an angle the
+/// ground is foreshortened along the view -- at eight degrees a cell keeps a
+/// seventh of its depth -- so a spacing that is perfectly legible from above is
+/// a wash of lines seen from low down, and the finer of the two levels is a
+/// wash covering the whole frame. Asking how big a cell really is on the screen
+/// makes the level step up as the view flattens, exactly as it does when the
+/// camera pulls back, so the grid stays a measure rather than a texture.
+///
+/// The projection is parallel, so this is one number for the whole frame rather
+/// than something that varies across it: there is no horizon for cells to pile
+/// up against. It is the square root of the foreshortening because what is
+/// being judged is the cell's *area* on the screen -- the geometric mean of its
+/// two sides, one of them untouched -- which keeps the step gentle enough that
+/// orbiting does not walk the grid up and down a decade at a time.
+fn ground_squash(view: &View) -> f64 {
+    view.forward().z.abs().max(1e-3).sqrt()
+}
 
 /// The two decades of grid to draw at this zoom: the coarse one, always at full
 /// strength, the fine one below it, and how strongly that fine one shows.
@@ -545,7 +602,7 @@ const CELL_FULL: f64 = 26.0;
 /// spread across the whole decade of zoom instead.
 pub fn grid_levels(view: &View, spacing: f64) -> (f64, f64, f64) {
     let spacing = spacing.max(1e-6);
-    let pixels_per_mm = view.pixels_per_mm();
+    let pixels_per_mm = view.pixels_per_mm() * ground_squash(view);
     let mut coarse = spacing;
     // Bounded: an absurd zoom cannot ask for an unbounded number of decades.
     for _ in 0..40 {
@@ -574,18 +631,28 @@ pub fn effective_grid_spacing(view: &View, spacing: f64) -> f64 {
 }
 
 /// How many lines one level of the grid may draw either side of its centre.
-/// The fine level at its densest would otherwise be several hundred, which is
-/// pixels of work for lines that are all but invisible by then.
-const MAX_LINES: i64 = 140;
+/// The fine level at its densest would otherwise be several thousand, which is
+/// work for lines that are all but invisible by then.
+///
+/// Enough that the cap is not what decides the extent at any ordinary window
+/// size and tilt -- it is a bound on the pathological case, not a second
+/// answer to "how far does the ground reach". A line that misses the frame is
+/// dropped by `visible_span` before it is rasterized, so the ones this bounds
+/// are cheap to begin with.
+const MAX_LINES: i64 = 400;
 
 fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
     let (fine, coarse, strength) = grid_levels(view, grid.spacing);
     let radius = grid_radius(view);
-    // The fine level is drawn over a shorter reach than the coarse one: far
-    // from the centre its lines are a wash rather than a measure, and drawing
-    // them there costs the most.
+    // Both levels cover the same ground. Drawing the fine one over a shorter
+    // reach made the grid detailed around the origin and coarse everywhere
+    // else, so the ground read as a patch of detail sitting on a plainer one
+    // rather than as a single grid -- and which one you were looking at
+    // depended on where the origin happened to be in the frame. Detail is a
+    // question about the zoom, and `grid_levels` already answers it: the fine
+    // level fades in and out across the whole ground at once.
     if strength > 0.03 {
-        draw_grid_level(frame, view, fine, radius * 0.55, strength, false, palette);
+        draw_grid_level(frame, view, fine, radius, strength, false, palette);
     }
     draw_grid_level(frame, view, coarse, radius, 1.0, true, palette);
 }
@@ -608,7 +675,6 @@ fn draw_grid_level(
     let half = spacing * lines as f64;
     let cx = (view.camera.target.x / spacing).round() * spacing;
     let cy = (view.camera.target.y / spacing).round() * spacing;
-    let centre = Vec3::new(cx, cy, 0.0);
     // A major line every ten, counted in whole multiples of the spacing from
     // the world origin rather than from the centre, so which lines are major
     // stays put while the camera pans over them.
@@ -624,8 +690,6 @@ fn draw_grid_level(
             view,
             Vec3::new(cx + offset, cy - half, 0.0),
             Vec3::new(cx + offset, cy + half, 0.0),
-            centre,
-            radius,
             shade(cx + offset),
             GRID_BIAS,
         );
@@ -634,8 +698,6 @@ fn draw_grid_level(
             view,
             Vec3::new(cx - half, cy + offset, 0.0),
             Vec3::new(cx + half, cy + offset, 0.0),
-            centre,
-            radius,
             shade(cy + offset),
             GRID_BIAS,
         );
@@ -650,26 +712,74 @@ const FADE_STEPS: usize = 24;
 /// Draw one grid line as a run of short segments whose alpha falls off with
 /// distance from the grid's centre. A grid that simply stops leaves a hard
 /// square edge in mid-air, and the eye reads that edge as part of the model.
-fn faded_line(
-    frame: &mut Frame,
-    view: &View,
-    from: Vec3,
-    to: Vec3,
-    centre: Vec3,
-    radius: f64,
-    colour: Rgba,
-    bias: f32,
-) {
+/// The stretch of a world segment, as a parameter range inside `[0, 1]`, whose
+/// projection lands in the frame -- `None` when none of it does.
+///
+/// The grid's lines run far outside the viewport, and at a shallow angle the
+/// ground reaches several times the width of the frame. Subdividing the whole
+/// segment would spend the fade's steps on the part nobody sees and leave two
+/// or three of them for the part they do, which shows as banding across the
+/// frame; finding the visible stretch first spends them all where they are
+/// seen, and drops a line that misses the frame entirely before it costs
+/// anything.
+fn visible_span(view: &View, from: Vec3, to: Vec3) -> Option<(f64, f64)> {
+    let a = view.view_to_screen(view.to_view(from)).0;
+    let b = view.view_to_screen(view.to_view(to)).0;
+    let (dx, dy) = ((b.x - a.x) as f64, (b.y - a.y) as f64);
+    let (width, height) = (view.size.x as f64, view.size.y as f64);
+    let left = view.centre.x as f64 - width / 2.0;
+    let top = view.centre.y as f64 - height / 2.0;
+    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+    // Liang-Barsky against the frame, as the rasterizer does with pixels.
+    for (edge, room) in [
+        (-dx, a.x as f64 - left),
+        (dx, left + width - a.x as f64),
+        (-dy, a.y as f64 - top),
+        (dy, top + height - a.y as f64),
+    ] {
+        if edge == 0.0 {
+            if room < 0.0 {
+                return None; // parallel to this edge and outside it
+            }
+        } else {
+            let at = room / edge;
+            if edge < 0.0 {
+                if at > t1 {
+                    return None;
+                }
+                t0 = t0.max(at);
+            } else {
+                if at < t0 {
+                    return None;
+                }
+                t1 = t1.min(at);
+            }
+        }
+    }
+    (t1 > t0).then_some((t0, t1))
+}
+
+fn faded_line(frame: &mut Frame, view: &View, from: Vec3, to: Vec3, colour: Rgba, bias: f32) {
+    let Some((visible_from, visible_to)) = visible_span(view, from, to) else { return };
+    let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
+    let span = visible_to - visible_from;
     for step in 0..FADE_STEPS {
-        let t0 = step as f64 / FADE_STEPS as f64;
-        let t1 = (step + 1) as f64 / FADE_STEPS as f64;
+        let t0 = visible_from + span * (step as f64 / FADE_STEPS as f64);
+        let t1 = visible_from + span * ((step + 1) as f64 / FADE_STEPS as f64);
         let a = from + (to - from) * t0;
         let b = from + (to - from) * t1;
         let mid = (a + b) * 0.5;
-        let distance = (mid - centre).length();
-        // Squared falloff: near the origin the grid is at full strength, and it
-        // is gone well before the last line rather than at it.
-        let fade = 1.0 - (distance / (radius * 0.8)).min(1.0).powi(2);
+        // Measured on the screen, not in the world. In the world it is a circle
+        // about the origin, which the tilt of the ground turns into an ellipse
+        // on the screen -- so the grid faded out before the top and bottom of
+        // the viewport at every angle but straight down, however far it
+        // reached. On the screen the falloff is the same in every direction and
+        // the ground covers the frame at any tilt.
+        let screen = view.view_to_screen(view.to_view(mid)).0;
+        let distance = ((screen.x - view.centre.x) as f64).hypot((screen.y - view.centre.y) as f64);
+        // Squared falloff: full strength in the middle of the frame, and gone
+        // just past the corners rather than at them.
+        let fade = 1.0 - (distance / (half_diagonal * 1.08)).min(1.0).powi(2);
         if fade <= 0.03 {
             continue;
         }
@@ -987,17 +1097,19 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
             // `reach` past the length, so the fade only softens the last part of
             // each arm instead of consuming the whole of it.
             AxisStyle::Origin => {
-                // Bounded, and always well inside the ground's own reach, so it
-                // reads as a cross at the origin rather than as another pair of
-                // grid lines however far the camera is pulled back.
-                let length = (spacing * 12.0).min(radius * 0.45);
+                // Bounded, and always well inside the frame, so it reads as a
+                // cross at the origin rather than as another pair of grid lines
+                // however far the camera is pulled back. Measured against the
+                // frame rather than the ground's reach, which a tilt stretches.
+                let frame_reach = frame_reach(view);
+                let length = (spacing * 12.0).min(frame_reach * 0.61);
                 // ...but never so short that the model swallows the whole arm.
                 // The arms are measured from the origin, which is inside a shape
                 // standing on it, so an arm that ends inside that shape is an
                 // axis with nothing left to draw -- which is what zooming in on
                 // a box at the origin gave: a mark on the face and no line
                 // arriving at it.
-                let clear = (clearance * 1.6 + 30.0 / view.pixels_per_mm().max(1e-9)).min(radius * 1.5);
+                let clear = (clearance * 1.6 + 30.0 / view.pixels_per_mm().max(1e-9)).min(frame_reach * 2.0);
                 let length = length.max(clear);
                 (Vec3::ZERO, length, length * 2.0)
             }
@@ -2020,5 +2132,82 @@ mod tests {
         // the centre the near box must still win.
         let centre = (120 / 2 * 160 + 160 / 2) * 4;
         assert_eq!(with_both.color[centre..centre + 4], only_near.color[centre..centre + 4]);
+    }
+
+    /// A grid-only frame at `pitch`, with no model and no axes on it, so every
+    /// pixel that is not the background is a grid line.
+    fn ground_only(pitch: f64) -> (Frame, Palette) {
+        let (w, h) = (400, 300);
+        let camera = Camera { yaw: -55.0, pitch, distance: 900.0, ..Camera::default() };
+        let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32)));
+        let req = Request {
+            view,
+            size: [w, h],
+            mode: DisplayMode::Shaded,
+            palette: Palette::dark(),
+            grid: Grid { visible: true, spacing: 10.0, axes: [false; 3], style: AxisStyle::Grid, plane_marks: false },
+            items: Vec::new(),
+        };
+        (render(&req), req.palette)
+    }
+
+    #[test]
+    fn the_ground_covers_the_viewport_at_every_tilt() {
+        // The ground is only face-on from straight above, and its extent was
+        // worked out as though it always were: half the viewport's diagonal,
+        // whatever the angle. Seen from anywhere else the grid stopped short of
+        // the top and bottom of the viewport in a flattened diamond -- at ten
+        // degrees it covered rows 107 to 192 of 300 and left the rest empty,
+        // while the axes carried on across the whole frame.
+        //
+        // Measured along the middle row and column rather than into the
+        // corners, where the fade is meant to take the grid out.
+        for pitch in [10.0, 28.0, 45.0, 60.0, 89.0] {
+            let (frame, palette) = ground_only(pitch);
+            let (w, h) = (frame.width, frame.height);
+            let painted = |x: usize, y: usize| !is_background(&frame, y * w + x, &palette);
+            let top = (0..h).find(|&y| painted(w / 2, y)).unwrap_or(h);
+            let bottom = (0..h).rev().find(|&y| painted(w / 2, y)).unwrap_or(0);
+            let left = (0..w).find(|&x| painted(x, h / 2)).unwrap_or(w);
+            let right = (0..w).rev().find(|&x| painted(x, h / 2)).unwrap_or(0);
+            // Within a seventh of the frame of each edge: the lines are a whole
+            // cell apart, so the nearest one to an edge is not *on* it.
+            assert!(top < h * 15 / 100, "pitch {pitch}: the ground starts {top} rows down, of {h}");
+            assert!(bottom > h * 85 / 100, "pitch {pitch}: the ground ends at row {bottom}, of {h}");
+            assert!(left < w * 15 / 100, "pitch {pitch}: the ground starts {left} columns in, of {w}");
+            assert!(right > w * 85 / 100, "pitch {pitch}: the ground ends at column {right}, of {w}");
+        }
+    }
+
+    #[test]
+    fn the_ground_is_drawn_at_one_detail_all_the_way_across() {
+        // The fine level used to be drawn over half the reach of the coarse
+        // one, which made the ground a patch of detail around the origin
+        // sitting on a plainer one -- and which of the two you were looking at
+        // depended on where the origin happened to be in the frame. At ten
+        // degrees a band across the bottom of the viewport held no grid at all
+        // against 2304 pixels of it across the middle; at twenty-eight, 59
+        // against 892.
+        //
+        // Detail is a question about the zoom, and one answer has to serve the
+        // whole ground: a band at the edge of the frame carries as much grid as
+        // a band through the middle of it.
+        for pitch in [10.0, 28.0, 45.0, 60.0, 89.0] {
+            let (frame, palette) = ground_only(pitch);
+            let (w, h) = (frame.width, frame.height);
+            let band = |from: usize, to: usize| {
+                (from..to)
+                    .map(|y| (0..w).filter(|&x| !is_background(&frame, y * w + x, &palette)).count())
+                    .sum::<usize>()
+            };
+            let middle = band(h / 2 - 15, h / 2 + 15);
+            let edge = band(h - 32, h - 2);
+            assert!(middle > 0, "pitch {pitch}: nothing drawn across the middle, so this proves nothing");
+            assert!(
+                edge * 10 >= middle * 6,
+                "pitch {pitch}: {edge} grid pixels at the edge against {middle} in the middle -- \
+                 the detail does not reach the edge of the frame"
+            );
+        }
     }
 }
