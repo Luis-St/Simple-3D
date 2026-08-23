@@ -53,17 +53,76 @@ fn section_titled(ui: &mut egui::Ui, name: &str, note: &str, add_contents: impl 
 /// start at the same x and a column of numbers reads as a column.
 const LABEL_WIDTH: f32 = 84.0;
 
+/// The narrowest a row can be and still be worth splitting into a label column
+/// and a field column: the column itself, plus enough beside it for a number
+/// and its unit. Below this the row stacks instead (issue 51).
+const STACK_BELOW: f32 = LABEL_WIDTH + 130.0;
+
+/// The narrowest an axis field can be and still show a measurement. Three of
+/// them side by side below this is three fields nobody can read, so they stack.
+const MIN_AXIS_FIELD: f32 = 52.0;
+
+/// A width a control would like, capped at what the row actually has left.
+fn fits(ui: &egui::Ui, wanted: f32) -> f32 {
+    wanted.min(ui.available_width()).max(48.0)
+}
+
+/// Whether the panel is too narrow for a label column beside the fields.
+fn stacked(ui: &egui::Ui) -> bool {
+    ui.available_width() < STACK_BELOW
+}
+
+/// A row's name, in its own column, wrapped inside that column rather than
+/// running under the field beside it.
 fn row_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, theme::metric::INPUT_ROW), egui::Sense::hover());
-    ui.painter().text(
-        egui::pos2(rect.left(), rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        text,
+    let galley = ui.painter().layout(
+        text.to_string(),
         egui::FontId::proportional(theme::font::LABEL),
         token::TEXT_LO,
+        LABEL_WIDTH,
     );
+    // The column keeps its width whatever the name does with it, and grows
+    // downwards for a name that needed two lines, so the field beside it is
+    // still where a field is expected.
+    let height = galley.size().y.max(theme::metric::INPUT_ROW);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(LABEL_WIDTH, height), egui::Sense::hover());
+    ui.painter().galley(egui::pos2(rect.left(), rect.center().y - galley.size().y / 2.0), galley, token::TEXT_LO);
     response
+}
+
+/// One property row: what it is called, and whatever edits it.
+///
+/// Given the width for it, the name is a fixed column with the controls beside
+/// it, so a column of numbers lines up down the panel. Dragged in narrower than
+/// that, the name goes on its own line and the controls take the full width
+/// underneath, rather than the two of them squeezing a field down to nothing or
+/// pushing it off the panel edge (issue 51). Either way the controls are laid
+/// out wrapped, so a row of choices that no longer fits across breaks onto a
+/// second line instead of overflowing.
+fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
+    if stacked(ui) {
+        ui.vertical(|ui| {
+            if !label.is_empty() {
+                let name = ui.add(
+                    egui::Label::new(egui::RichText::new(label).size(theme::font::LABEL).color(token::TEXT_LO))
+                        .selectable(false)
+                        .wrap(),
+                );
+                if !hover.is_empty() {
+                    name.on_hover_text(hover);
+                }
+            }
+            ui.horizontal_wrapped(contents);
+        });
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        let name = row_label(ui, label);
+        if !hover.is_empty() {
+            name.on_hover_text(hover);
+        }
+        contents(ui);
+    });
 }
 
 /// The id of a value field's scrub gesture, named after the value it scrubs
@@ -151,11 +210,13 @@ fn shared_type(app: &App, targets: &[NodeId]) -> Option<String> {
 fn document(app: &mut App, ui: &mut egui::Ui) {
     section(ui, "Document", |ui| {
         let unit = app.unit();
-        ui.horizontal(|ui| {
-            row_label(ui, "Unit");
-            egui::ComboBox::from_id_salt("doc-unit").selected_text(theme::value(unit.suffix())).width(72.0).show_ui(
-                ui,
-                |ui| {
+        field_row(ui, "Unit", "", |ui| {
+            // Every fixed width here is a ceiling, not a size: the control gives
+            // up width with the panel rather than pushing past its edge (issue 51).
+            egui::ComboBox::from_id_salt("doc-unit")
+                .selected_text(theme::value(unit.suffix()))
+                .width(fits(ui, 72.0))
+                .show_ui(ui, |ui| {
                     for option in Unit::ALL {
                         // Switching never rescales the model: the unit only
                         // changes what the fields read (spec section 4).
@@ -164,11 +225,9 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                             app.fields.clear();
                         }
                     }
-                },
-            );
+                });
         });
-        ui.horizontal(|ui| {
-            row_label(ui, "Grid");
+        field_row(ui, "Grid", "", |ui| {
             let mut spacing = unit.from_mm(app.scene.settings.grid_spacing);
             if ui.add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1)).changed() {
                 app.edit("Grid spacing", Some("scene:grid"));
@@ -181,11 +240,10 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         // grid, the step and the segment default answer -- and it used to sit
         // under the palette, where it read as part of the shapes rather than as
         // a setting. The palette still says which answer is in force.
-        ui.horizontal(|ui| {
-            row_label(ui, "Add at").on_hover_text("Where a shape from the palette or the Add menu lands");
+        field_row(ui, "Add at", "Where a shape from the palette or the Add menu lands", |ui| {
             egui::ComboBox::from_id_salt("doc-placement")
                 .selected_text(theme::value(app.settings.placement.label()))
-                .width(150.0)
+                .width(fits(ui, 150.0))
                 .show_ui(ui, |ui| {
                     for option in Placement::ALL {
                         ui.selectable_value(&mut app.settings.placement, option, option.label());
@@ -196,8 +254,7 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         // puts it roughly where it is wanted; this is where it is given the
         // exact place (issue 42).
         cursor_rows(app, ui);
-        ui.horizontal(|ui| {
-            row_label(ui, "Axes");
+        field_row(ui, "Axes", "", |ui| {
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
                 let mut on = app.scene.settings.axes_visible[axis];
                 if ui
@@ -209,28 +266,32 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                 }
             }
         });
-        ui.horizontal_wrapped(|ui| {
-            row_label(ui, "Axis style").on_hover_text(
-                "Along the grid: X and Y are the grid's own lines through zero and travel with it. \
+        field_row(
+            ui,
+            "Axis style",
+            "Along the grid: X and Y are the grid's own lines through zero and travel with it. \
                  Pinned: a cross at the origin that fades out at its own length.",
-            );
-            for option in AxisStyle::ALL {
-                let showing = app.scene.settings.axis_style == option;
-                if ui.selectable_label(showing, option.label()).clicked() && !showing {
-                    app.scene.settings.axis_style = option;
+            |ui| {
+                for option in AxisStyle::ALL {
+                    let showing = app.scene.settings.axis_style == option;
+                    if ui.selectable_label(showing, option.label()).clicked() && !showing {
+                        app.scene.settings.axis_style = option;
+                    }
                 }
-            }
-        });
-        ui.horizontal(|ui| {
-            row_label(ui, "Plane marks")
-                .on_hover_text("Mark on a shape's surface where the ground plane, or either upright plane, cuts it");
-            let mut on = app.scene.settings.plane_marks;
-            if ui.checkbox(&mut on, "").changed() {
-                app.scene.settings.plane_marks = on;
-            }
-        });
-        ui.horizontal(|ui| {
-            row_label(ui, "Segments");
+            },
+        );
+        field_row(
+            ui,
+            "Plane marks",
+            "Mark on a shape's surface where the ground plane, or either upright plane, cuts it",
+            |ui| {
+                let mut on = app.scene.settings.plane_marks;
+                if ui.checkbox(&mut on, "").changed() {
+                    app.scene.settings.plane_marks = on;
+                }
+            },
+        );
+        field_row(ui, "Segments", "", |ui| {
             let mut segments = app.scene.settings.default_segments as f64;
             if ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).speed(0.5).max_decimals(0)).changed() {
                 app.edit("Default segments", Some("scene:segments"));
@@ -246,9 +307,8 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         let unit = app.unit();
         match app.evaluated.mesh.bounds() {
             Some((lo, hi)) => {
-                ui.horizontal(|ui| {
-                    row_label(ui, "Bounds");
-                    ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false));
+                field_row(ui, "Bounds", "", |ui| {
+                    ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false).wrap());
                 });
             }
             None => {
@@ -271,28 +331,34 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
     let at = app.cursor.unwrap_or(Vec3::ZERO);
     let mut components = [at.x, at.y, at.z];
     let mut changed = false;
-    ui.horizontal(|ui| {
-        row_label(ui, "3D cursor").on_hover_text(
-            "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
+    field_row(
+        ui,
+        "3D cursor",
+        "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
              Shift+right-click in the viewport puts it under the pointer.",
-        );
-        for (axis, value) in components.iter_mut().enumerate() {
-            let mut shown = unit.from_mm(*value);
-            let field = egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
-            let response = ui.add_sized(egui::vec2(56.0, theme::metric::INPUT_ROW), field);
-            if response.changed() {
-                *value = unit.to_mm(shown);
-                changed = true;
+        |ui| {
+            // Three numbers and a unit out of whatever the row has: they shrink
+            // with the panel, and wrap onto a second line rather than shrinking
+            // past being readable (issue 51).
+            let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            for (axis, value) in components.iter_mut().enumerate() {
+                let mut shown = unit.from_mm(*value);
+                let field =
+                    egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
+                let response = ui.add_sized(egui::vec2(each, theme::metric::INPUT_ROW), field);
+                if response.changed() {
+                    *value = unit.to_mm(shown);
+                    changed = true;
+                }
+                let _ = axis;
             }
-            let _ = axis;
-        }
-        ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
-    });
+            ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
+        },
+    );
     if changed {
         app.cursor = Some(Vec3::new(components[0], components[1], components[2]));
     }
-    ui.horizontal(|ui| {
-        row_label(ui, "");
+    field_row(ui, "", "", |ui| {
         if ui
             .add_enabled(app.cursor.is_some(), egui::Button::new("Back to the origin"))
             .on_hover_text("The cursor goes back to 0, 0, 0")
@@ -314,8 +380,7 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let mut anchor = node.anchor;
     let many = targets.len() > 1;
 
-    ui.horizontal(|ui| {
-        row_label(ui, "Name");
+    field_row(ui, "Name", "", |ui| {
         if many {
             // Renaming several nodes to one name would make the outliner
             // unreadable, so the field says what is selected instead.
@@ -331,53 +396,59 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     // Three states rather than a checkbox: hidden means *gone*, and a body that
     // has to be seen while it is positioned -- the one about to be subtracted --
     // is a ghost, which is a property of that body and not of the document.
-    ui.horizontal_wrapped(|ui| {
-        row_label(ui, "Shown").on_hover_text(
-            "Visible: part of the model. Ghost: excluded from the model, drawn as a translucent shell. \
+    field_row(
+        ui,
+        "Shown",
+        "Visible: part of the model. Ghost: excluded from the model, drawn as a translucent shell. \
              Hidden: excluded and not drawn at all.",
-        );
-        ui.add_enabled_ui(!is_root, |ui| {
-            for option in Visibility::ALL {
-                let showing = !mixed_visibility && visibility == option;
-                if ui.selectable_label(showing, option.label()).clicked() && (mixed_visibility || visibility != option)
-                {
-                    app.edit("Visibility", None);
-                    for target in targets {
-                        if let Some(node) = app.scene.get_mut(*target) {
-                            node.set_visibility(option);
+        |ui| {
+            ui.add_enabled_ui(!is_root, |ui| {
+                for option in Visibility::ALL {
+                    let showing = !mixed_visibility && visibility == option;
+                    if ui.selectable_label(showing, option.label()).clicked()
+                        && (mixed_visibility || visibility != option)
+                    {
+                        app.edit("Visibility", None);
+                        for target in targets {
+                            if let Some(node) = app.scene.get_mut(*target) {
+                                node.set_visibility(option);
+                            }
                         }
                     }
                 }
-            }
-        });
-    });
+            });
+        },
+    );
 
-    ui.horizontal(|ui| {
-        row_label(ui, "Colour").on_hover_text(
-            "What this node is painted. Painting a group paints everything in it, \
+    field_row(
+        ui,
+        "Colour",
+        "What this node is painted. Painting a group paints everything in it, \
              and the colour follows each surface through a boolean.",
-        );
-        // The swatch starts from whatever the node shows now -- its own colour,
-        // one inherited from a group above it, or the theme's colour for an
-        // unpainted solid -- so opening the picker never jumps to black.
-        let inherited = app.scene.effective_colour(id);
-        let mut rgb = inherited.map_or_else(|| unpainted_swatch(ui.visuals().dark_mode), |c| c.0);
-        let mixed = targets.iter().any(|t| app.scene.effective_colour(*t) != inherited);
-        if ui.color_edit_button_srgb(&mut rgb).changed() {
-            // One undo step for a whole drag through the picker, the way a
-            // scrubbed field is one step.
-            app.paint(targets, Some(Colour(rgb)), Some("colour"));
-        }
-        // Enabled only where clearing would do something: a node that merely
-        // inherits a group's colour has none of its own to take away.
-        let painted = targets.iter().any(|t| app.scene.subtree_is_painted(*t));
-        if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked() {
-            app.paint(targets, None, None);
-        }
-        if mixed {
-            ui.add(egui::Label::new(theme::value("mixed")).selectable(false));
-        }
-    });
+        |ui| {
+            // The swatch starts from whatever the node shows now -- its own colour,
+            // one inherited from a group above it, or the theme's colour for an
+            // unpainted solid -- so opening the picker never jumps to black.
+            let inherited = app.scene.effective_colour(id);
+            let mut rgb = inherited.map_or_else(|| unpainted_swatch(ui.visuals().dark_mode), |c| c.0);
+            let mixed = targets.iter().any(|t| app.scene.effective_colour(*t) != inherited);
+            if ui.color_edit_button_srgb(&mut rgb).changed() {
+                // One undo step for a whole drag through the picker, the way a
+                // scrubbed field is one step.
+                app.paint(targets, Some(Colour(rgb)), Some("colour"));
+            }
+            // Enabled only where clearing would do something: a node that merely
+            // inherits a group's colour has none of its own to take away.
+            let painted = targets.iter().any(|t| app.scene.subtree_is_painted(*t));
+            if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked()
+            {
+                app.paint(targets, None, None);
+            }
+            if mixed {
+                ui.add(egui::Label::new(theme::value("mixed")).selectable(false));
+            }
+        },
+    );
 
     // The same swatches the outliner's menu offers, and the colours this
     // document has actually been painted in: opening the picker to find a
@@ -392,9 +463,7 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         swatch_row(app, ui, "Recent", &recent, targets);
     }
 
-    ui.horizontal(|ui| {
-        row_label(ui, "Anchor")
-            .on_hover_text("Where this node's origin sits. Changing it moves the origin, never the shape.");
+    field_row(ui, "Anchor", "Where this node's origin sits. Changing it moves the origin, never the shape.", |ui| {
         let mixed = targets.iter().any(|t| app.scene.node(*t).anchor != anchor);
         for option in Anchor::ALL {
             let showing = !mixed && anchor == option;
@@ -417,10 +486,9 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 /// uses them: one click, and the colour is on the shape.
 fn swatch_row(app: &mut App, ui: &mut egui::Ui, label: &str, colours: &[(String, egui::Color32)], targets: &[NodeId]) {
     let mut chosen: Option<Colour> = None;
-    ui.horizontal_wrapped(|ui| {
-        // The label column is kept even when empty, so the swatches line up
-        // under the picker rather than under the labels.
-        row_label(ui, label);
+    // The label column is kept even when empty, so the swatches line up under
+    // the picker rather than under the labels.
+    field_row(ui, label, "", |ui| {
         for (name, colour) in colours {
             let swatch = egui::Button::new("")
                 .fill(*colour)
@@ -448,8 +516,7 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     // wider than the dock at its default width, and a row that overflows widens
     // the whole column behind it -- which is what used to carry the Z field of
     // Position, Rotation and Scale off the panel with no way to reach it.
-    ui.horizontal_wrapped(|ui| {
-        row_label(ui, "Operation");
+    field_row(ui, "Operation", "", |ui| {
         for option in GroupOp::ALL {
             if ui.selectable_label(op == option, option.label()).clicked() && op != option {
                 op = option;
@@ -494,19 +561,10 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
             } else {
                 ""
             };
-            if ui.selectable_label(app.is_selected(child), theme::value(format!("{}. {name}", index + 1))).clicked() {
-                app.select_only(child);
-            }
-            if !mark.is_empty() {
-                ui.add(
-                    egui::Label::new(egui::RichText::new(mark).size(theme::font::SMALL).color(if cut {
-                        token::DANGER
-                    } else {
-                        token::TEXT_LO
-                    }))
-                    .selectable(false),
-                );
-            }
+            // The two reorder buttons are placed first, pinned to the right-hand
+            // edge, and the name takes whatever is left: laid out the other way
+            // round, a long name in a narrow panel pushed the buttons off the
+            // edge, out of reach (issue 51).
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add_enabled(index + 1 < children.len(), egui::Button::new("\u{25BE}").small()).clicked() {
                     app.edit("Reorder", None);
@@ -516,6 +574,22 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
                     app.edit("Reorder", None);
                     app.scene.reorder(child, -1);
                 }
+                if !mark.is_empty() {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(mark).size(theme::font::SMALL).color(if cut {
+                            token::DANGER
+                        } else {
+                            token::TEXT_LO
+                        }))
+                        .selectable(false),
+                    );
+                }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let text = theme::value(format!("{}. {name}", index + 1));
+                    if ui.selectable_label(app.is_selected(child), text).clicked() {
+                        app.select_only(child);
+                    }
+                });
             });
         });
     }
@@ -546,8 +620,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
         match param.kind {
             // Radio-style choices where a measurement is ambiguous.
             ParamKind::Choice { options } => {
-                ui.horizontal(|ui| {
-                    row_label(ui, param.label);
+                field_row(ui, param.label, "", |ui| {
                     let mut chosen = value.as_u32();
                     ui.vertical(|ui| {
                         for (index, option) in options.iter().enumerate() {
@@ -565,8 +638,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
                 });
             }
             ParamKind::Bool => {
-                ui.horizontal(|ui| {
-                    row_label(ui, param.label);
+                field_row(ui, param.label, "", |ui| {
                     let mut on = value.as_bool();
                     if ui.checkbox(&mut on, "").changed() {
                         app.edit("Set flag", None);
@@ -577,8 +649,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
                 });
             }
             kind => {
-                ui.horizontal(|ui| {
-                    row_label(ui, param.label);
+                field_row(ui, param.label, "", |ui| {
                     let step = ui::scrub_increment(kind, unit);
                     // A lock toggle where the type offers one: a sphere's three
                     // diameters, a cylinder's two.
@@ -636,8 +707,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
     }
 
     if spec.segmented {
-        ui.horizontal(|ui| {
-            row_label(ui, "Segments").on_hover_text("Overrides the scene default for this object's curved surfaces.");
+        field_row(ui, "Segments", "Overrides the scene default for this object's curved surfaces.", |ui| {
             let mut overridden = app.scene.node(id).segments.is_some();
             if ui.checkbox(&mut overridden, "").changed() {
                 app.edit("Segment override", None);
@@ -872,8 +942,7 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 /// selected.
 pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
-    ui.horizontal(|ui| {
-        row_label(ui, "Step");
+    field_row(ui, "Step", "", |ui| {
         let mut step = unit.from_mm(app.scene.settings.snap_step);
         let response = ui
             .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
@@ -894,8 +963,7 @@ fn axis_row(
     label: &str,
     mut field: impl FnMut(&mut App, &mut egui::Ui, usize, &str),
 ) {
-    ui.horizontal(|ui| {
-        row_label(ui, label);
+    field_row(ui, label, "", |ui| {
         // Three fields, three chips, and the gaps between them all have to come
         // out of the row: getting this wrong pushes the Z field off the panel.
         // The panel's own edge decides how much there is to share out, never the
@@ -904,7 +972,22 @@ fn axis_row(
         let available = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left());
         let chips = 3.0 * (theme::AXIS_CHIP_WIDTH + ui.spacing().item_spacing.x);
         let gaps = 2.0 * ui.spacing().item_spacing.x;
-        let each = ((available - chips - gaps) / 3.0).max(30.0);
+        let each = (available - chips - gaps) / 3.0;
+        // Below a width where a number is still readable, the three axes go one
+        // to a line at full width rather than three unusable slivers (issue 51).
+        // Each keeps its colour chip, which is what says which axis it is.
+        if each < MIN_AXIS_FIELD {
+            ui.vertical(|ui| {
+                for axis in 0..3 {
+                    ui.horizontal(|ui| {
+                        theme::axis_chip(ui, ui.id().with((label, axis)), axis);
+                        let name = format!("{label}:{axis}");
+                        field(app, ui, axis, &name);
+                    });
+                }
+            });
+            return;
+        }
         for axis in 0..3 {
             // The chip is a label, not a handle: it says which axis this column
             // is, and the field beside it carries the drag.
@@ -997,12 +1080,10 @@ fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selected: usize) {
     let unit = app.unit();
     match app.evaluated.node_world_bounds.get(&id).copied() {
         Some((lo, hi)) => {
-            ui.horizontal(|ui| {
-                row_label(ui, "Size");
-                ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false));
+            field_row(ui, "Size", "", |ui| {
+                ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false).wrap());
             });
-            ui.horizontal(|ui| {
-                row_label(ui, "Centre");
+            field_row(ui, "Centre", "", |ui| {
                 ui.add(
                     egui::Label::new(theme::numeric(format!(
                         "{}, {}, {} {}",
@@ -1011,7 +1092,8 @@ fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selected: usize) {
                         format_length((lo.z + hi.z) / 2.0, unit),
                         unit.suffix()
                     )))
-                    .selectable(false),
+                    .selectable(false)
+                    .wrap(),
                 );
             });
         }

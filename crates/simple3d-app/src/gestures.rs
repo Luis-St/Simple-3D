@@ -29,6 +29,13 @@ use simple3d_geom::Vec3;
 /// An `App` on its own config directory, wired into a harness that draws one
 /// real frame per step.
 fn harness(name: &str) -> Harness<'static, App> {
+    harness_configured(name, |_| {})
+}
+
+/// The same, with a chance to change the application's settings before the
+/// first frame is drawn -- a dock width, say, which egui remembers from the
+/// frame the panel first appeared in and not from the setting afterwards.
+fn harness_configured(name: &str, setup: impl FnOnce(&mut App)) -> Harness<'static, App> {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-gesture-test-{name}-{}-{:?}",
         std::process::id(),
@@ -50,6 +57,7 @@ fn harness(name: &str) -> Harness<'static, App> {
     app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
     app.frame_all();
     app.history.clear();
+    setup(&mut app);
 
     let mut themed = false;
     let mut harness = Harness::builder().with_size(egui::vec2(1400.0, 880.0)).build_state(
@@ -620,6 +628,32 @@ fn the_rows_a_drag_carries_stay_where_they_are_while_it_is_held() {
     harness.step();
     assert!(harness.state().outliner_drag.is_none(), "the drag outlived the release");
     assert_eq!(rect_of(&harness, crate::panel_outliner::row_id(last)), below);
+}
+
+#[test]
+fn a_narrow_properties_panel_stacks_its_rows_instead_of_overflowing() {
+    // Issue 51. At the dock's narrowest, a label column plus three fields does
+    // not fit across the panel: the fields used to shrink to slivers and the
+    // last one went over the edge. The rows stack instead -- name above, one
+    // axis per line -- and everything stays inside the panel.
+    let mut harness = harness_configured("properties-narrow", |app| app.settings.properties_width = 200.0);
+    let grips: Vec<egui::Rect> = (0..3)
+        .map(|axis| rect_of(&harness, crate::panel_properties::grip_id(&format!("Position (mm):{axis}"))))
+        .collect();
+    // One to a line, all at the same x: three columns would put them side by
+    // side at the same y.
+    for pair in grips.windows(2) {
+        assert!(pair[1].top() > pair[0].top(), "the axis fields are still laid out across the row: {grips:?}");
+        assert!((pair[1].left() - pair[0].left()).abs() < 1.0, "the stacked fields do not line up: {grips:?}");
+    }
+    // And none of them is past the panel's right-hand edge.
+    let right = harness.state().settings.properties_width;
+    let screen = harness.ctx.screen_rect().right();
+    for grip in &grips {
+        assert!(grip.right() <= screen - 4.0, "a field ran off the screen: {grip:?}");
+        assert!(grip.width() >= 44.0, "a field was squeezed below being readable: {grip:?} in {right}");
+    }
+    harness.step();
 }
 
 #[test]
