@@ -174,8 +174,8 @@ impl Palette {
             ghost: [40, 110, 220, 60],
             grid: [214, 218, 224, 255],
             grid_major: [186, 192, 200, 255],
-            axis_x: [50, 140, 50, 255],
-            axis_y: [186, 54, 54, 255],
+            axis_x: [186, 54, 54, 255],
+            axis_y: [50, 140, 50, 255],
             axis_z: [46, 96, 200, 255],
             wire: [64, 70, 80, 255],
             edge: [70, 76, 86, 255],
@@ -1524,7 +1524,7 @@ mod tests {
         let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Ghost }], DisplayMode::Shaded);
         // No axes: a ghost hides nothing, so all three are drawn across it at
-        // full strength, and `AXIS_Y` is the same red as `DANGER` -- they would
+        // full strength, and `AXIS_X` is the same red as `DANGER` -- they would
         // answer the question this test is asking.
         req.grid.axes = [false; 3];
         let frame = render(&req);

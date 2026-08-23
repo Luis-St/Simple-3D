@@ -43,14 +43,8 @@ pub mod token {
     /// Difference operands, destructive actions, errors.
     pub const DANGER: Color32 = Color32::from_rgb(0xD4, 0x57, 0x4E);
 
-    // Green for X and red for Y, which is the swap of the usual convention:
-    // asked for because the conventional pair reads as the wrong way round in
-    // this viewport. Z is unchanged. Everything that colours an axis is keyed
-    // by axis index and reads these, so the lines, the marks on a surface, the
-    // gizmo handles, the view cube and the chips in front of the number fields
-    // all say the same thing.
-    pub const AXIS_X: Color32 = Color32::from_rgb(0x6F, 0xBF, 0x5B);
-    pub const AXIS_Y: Color32 = Color32::from_rgb(0xD4, 0x57, 0x4E);
+    pub const AXIS_X: Color32 = Color32::from_rgb(0xD4, 0x57, 0x4E);
+    pub const AXIS_Y: Color32 = Color32::from_rgb(0x6F, 0xBF, 0x5B);
     pub const AXIS_Z: Color32 = Color32::from_rgb(0x55, 0x90, 0xD9);
 }
 

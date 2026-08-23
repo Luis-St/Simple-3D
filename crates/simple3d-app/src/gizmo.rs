@@ -668,8 +668,8 @@ pub fn axis_name(axis: usize) -> &'static str {
 /// Axis colours, matching the origin axes so a handle's meaning is obvious.
 pub fn axis_colour(axis: usize) -> egui::Color32 {
     match axis {
-        0 => egui::Color32::from_rgb(112, 200, 112),
-        1 => egui::Color32::from_rgb(226, 92, 92),
+        0 => egui::Color32::from_rgb(226, 92, 92),
+        1 => egui::Color32::from_rgb(112, 200, 112),
         _ => egui::Color32::from_rgb(104, 152, 245),
     }
 }
