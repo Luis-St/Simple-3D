@@ -21,6 +21,7 @@ mod panel_viewport;
 mod pick;
 mod raster;
 mod render;
+mod tabs;
 mod theme;
 mod ui;
 mod view;

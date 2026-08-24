@@ -64,6 +64,8 @@ pub mod metric {
     /// Height of the menu bar. The window's own title bar sits above it and is
     /// the window system's business, so this row holds nothing but menus.
     pub const MENU_BAR: f32 = 28.0;
+    /// The row of document tabs under it (issue 61).
+    pub const TAB_BAR: f32 = 26.0;
     /// Height of the status bar.
     pub const STATUS_BAR: f32 = 24.0;
     /// Room kept clear at the right end of the status bar for the timing, node

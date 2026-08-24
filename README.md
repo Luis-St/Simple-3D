@@ -96,6 +96,11 @@ portable.
   the result still holds. The grouping is saved with the project, so a re-export
   after a change only needs whatever is new to be placed. STL, OBJ and PLY hold
   one body, and say so.
+- **Several models at once.** A row of tabs holds every open document, each with
+  its own model, selection, undo history and camera. New opens a tab rather than
+  replacing what is open, a file already open is shown rather than opened twice,
+  and Ctrl+Tab walks the row. Closing a document with unsaved changes asks first,
+  and so does quitting while any tab has them.
 - **A window you can rearrange.** Panels move between the two docks by dragging
   their header and roll up by clicking it; Tab hides both docks and View ▸ Reset
   panel layout puts them back. The arrangement survives a restart. The
@@ -242,6 +247,7 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 | Manipulator handle behaviour and modifiers | `simple3d-app/src/gizmo.rs` |
 | What a numeric field accepts | `simple3d-core/src/unit.rs` |
 | The docks, and what moves between them | `simple3d-app/src/dock.rs` |
+| Several documents open at once, and what switching a tab swaps | `simple3d-app/src/tabs.rs` |
 | The menu bar, and the dialogs that are windows of their own | `simple3d-app/src/app_chrome.rs` (`dialog`) |
 | A colour, a row height or a type size | `simple3d-app/src/theme.rs` — nothing else names one |
 | An icon, a primitive's silhouette, or the window's own icon | `simple3d-app/src/icon.rs` |

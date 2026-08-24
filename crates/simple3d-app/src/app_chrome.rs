@@ -182,6 +182,10 @@ impl App {
             });
 
             ui.separator();
+            self.command_item(ui, Command::CloseTab, true);
+            self.command_item(ui, Command::NextTab, self.tab_count() > 1);
+            self.command_item(ui, Command::PreviousTab, self.tab_count() > 1);
+            ui.separator();
             self.command_item(ui, Command::Save, true);
             self.command_item(ui, Command::SaveAs, true);
             ui.separator();
@@ -573,6 +577,7 @@ impl App {
             Modal::About => self.about_window(ctx),
             Modal::Error => self.error_window(ctx),
             Modal::ConfirmQuit => self.confirm_quit_window(ctx),
+            Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
         }
     }
@@ -643,6 +648,7 @@ impl App {
     fn dismiss_modal(&mut self) {
         match self.modal {
             Modal::SavePrimitive => self.cancel_save_primitive(),
+            Modal::ConfirmCloseTab => self.cancel_close_tab(),
             Modal::Keymap => {
                 self.recording = None;
                 self.modal = Modal::None;
@@ -1317,6 +1323,33 @@ impl App {
         });
     }
 
+    fn confirm_close_tab_window(&mut self, ctx: &egui::Context) {
+        self.dialog(
+            ctx,
+            "dialog-confirm-close-tab",
+            "Unsaved changes",
+            egui::vec2(430.0, 140.0),
+            false,
+            Self::confirm_close_tab_body,
+        );
+    }
+
+    fn confirm_close_tab_body(&mut self, ui: &mut egui::Ui) {
+        let name = self.pending_close.map(|index| self.tab_summary(index).0).unwrap_or_default();
+        ui.label(format!("{name} has changes that have not been saved."));
+        ui.horizontal(|ui| {
+            if ui.button("Save and close").clicked() {
+                self.save_and_close_tab();
+            }
+            if ui.button("Close without saving").clicked() {
+                self.confirm_close_tab();
+            }
+            if ui.button("Cancel").clicked() {
+                self.cancel_close_tab();
+            }
+        });
+    }
+
     fn confirm_quit_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
@@ -1329,7 +1362,12 @@ impl App {
     }
 
     fn confirm_quit_body(&mut self, ui: &mut egui::Ui) {
-        ui.label("This project has changes that have not been saved.");
+        let others = (0..self.tab_count()).filter(|i| self.tab_summary(*i).1).count().saturating_sub(1);
+        ui.label(match others {
+            0 => "This project has changes that have not been saved.".to_string(),
+            1 => "This project, and one other open document, have changes that have not been saved.".to_string(),
+            n => format!("This project, and {n} other open documents, have changes that have not been saved."),
+        });
         ui.horizontal(|ui| {
             if ui.button("Save and quit").clicked() {
                 self.save();

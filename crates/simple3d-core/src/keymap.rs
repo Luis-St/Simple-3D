@@ -25,6 +25,9 @@ use std::str::FromStr;
 pub enum Command {
     New,
     Open,
+    CloseTab,
+    NextTab,
+    PreviousTab,
     Save,
     SaveAs,
     Export,
@@ -102,6 +105,9 @@ impl Command {
     pub const ALL: &'static [Command] = &[
         Command::New,
         Command::Open,
+        Command::CloseTab,
+        Command::NextTab,
+        Command::PreviousTab,
         Command::Save,
         Command::SaveAs,
         Command::Export,
@@ -155,6 +161,9 @@ impl Command {
         match self {
             New => "New project",
             Open => "Open project",
+            CloseTab => "Close the open document",
+            NextTab => "Next document",
+            PreviousTab => "Previous document",
             Save => "Save",
             SaveAs => "Save as",
             Export => "Export",
@@ -207,7 +216,7 @@ impl Command {
     pub fn area(self) -> Area {
         use Command::*;
         match self {
-            New | Open | Save | SaveAs | Export | Quit => Area::File,
+            New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility | MoveUp
             | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
@@ -450,6 +459,11 @@ impl Keymap {
 
         set(New, Chord::ctrl("N"));
         set(Open, Chord::ctrl("O"));
+        // The document keys every tabbed program shares, so nobody has to look
+        // them up (issue 61).
+        set(CloseTab, Chord::ctrl("W"));
+        set(NextTab, Chord::ctrl("Tab"));
+        set(PreviousTab, Chord::ctrl_shift("Tab"));
         set(Save, Chord::ctrl("S"));
         set(SaveAs, Chord::ctrl_shift("S"));
         set(Export, Chord::ctrl("E"));
