@@ -870,7 +870,9 @@ impl App {
                 // As tall as the list needs, up to whatever the window has
                 // left under the controls above it; past that it scrolls.
                 let room = (ui.available_height() - 24.0).max(80.0);
-                egui::ScrollArea::vertical().max_height(room).auto_shrink([false, true]).show(ui, |ui| {
+                let (area, restore) = theme::list_scroll_area(ui);
+                area.max_height(room).auto_shrink([false, true]).show(ui, |ui| {
+                    ui.set_style(restore);
                     for (id, depth) in rows {
                         let node = self.scene.node(id);
                         let (name, visible, mark) = (node.name.clone(), node.visible, node.export_body);
@@ -1076,8 +1078,15 @@ impl App {
             }
         }
 
-        egui::Grid::new("keymap-top").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-            ui.label("Preset");
+        // The window is wider than the contents used to claim, which left every
+        // row bunched against the left edge with a band of empty window beside
+        // it. The rows are laid out to the width there actually is: one label
+        // column for both grids, and the command list below spreading its
+        // binding and Reset buttons out to the right-hand edge (issue 63).
+        let full = ui.available_width();
+        let label_column = 130.0_f32;
+        egui::Grid::new("keymap-top").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
+            label_cell(ui, "Preset", label_column);
             ui.horizontal(|ui| {
                 let mut preset = self.keymap.preset;
                 egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).width(190.0).show_ui(
@@ -1101,7 +1110,7 @@ impl App {
             });
             ui.end_row();
 
-            ui.label("Keymap file");
+            label_cell(ui, "Keymap file", label_column);
             ui.horizontal(|ui| {
                 if ui.button("Export...").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
@@ -1134,10 +1143,10 @@ impl App {
         ui.separator();
 
         ui.add(egui::Label::new(theme::header_text("Navigation")).selectable(false));
-        egui::Grid::new("nav-grid").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
+        egui::Grid::new("nav-grid").num_columns(3).spacing([12.0, 8.0]).show(ui, |ui| {
             let mut nav = self.keymap.nav;
             for (label, drag) in [("Orbit", 0), ("Pan", 1)] {
-                ui.label(label);
+                label_cell(ui, label, label_column);
                 let binding = if drag == 0 { &mut nav.orbit } else { &mut nav.pan };
                 egui::ComboBox::from_id_salt(format!("nav-button-{drag}"))
                     .selected_text(binding.button.label())
@@ -1154,7 +1163,7 @@ impl App {
                 });
                 ui.end_row();
             }
-            ui.label("Zoom wheel");
+            label_cell(ui, "Zoom wheel", label_column);
             ui.checkbox(&mut nav.invert_zoom, "Inverted");
             ui.label("");
             ui.end_row();
@@ -1174,20 +1183,33 @@ impl App {
 
         ui.separator();
         ui.horizontal(|ui| {
-            ui.label("Search");
-            ui.add(egui::TextEdit::singleline(&mut self.keymap_search).desired_width(200.0));
-            if ui.button("Clear").clicked() {
+            label_cell(ui, "Search", label_column);
+            let clear = 64.0;
+            ui.add(
+                egui::TextEdit::singleline(&mut self.keymap_search)
+                    .desired_width((full - label_column - clear - 32.0).max(120.0))
+                    .hint_text("Filter by name"),
+            );
+            if ui.add(egui::Button::new("Clear").min_size(egui::vec2(clear, 0.0))).clicked() {
                 self.keymap_search.clear();
             }
         });
 
         let needle = self.keymap_search.to_lowercase();
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        // The bindings sit at the right-hand edge and the command name takes
+        // whatever is left, so the list is as wide as the window rather than a
+        // narrow column with the rest of the window empty beside it.
+        let binding_column = 190.0_f32;
+        let reset_column = 72.0_f32;
+        let name_column = (full - binding_column - reset_column - 48.0).max(160.0);
+        let (area, restore) = theme::list_scroll_area(ui);
+        area.show(ui, |ui| {
+            ui.set_style(restore);
             // One grid for every area rather than one each: a grid measures its
             // own columns, so a grid per area put each area's bindings at its
             // own indent and the buttons down the list did not line up with one
             // another (issue 63). The area names are rows of this one grid.
-            egui::Grid::new("keymap-commands").num_columns(3).spacing([10.0, 4.0]).show(ui, |ui| {
+            egui::Grid::new("keymap-commands").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
                 for area in Area::ALL {
                     let commands: Vec<Command> = Command::ALL
                         .iter()
@@ -1201,7 +1223,7 @@ impl App {
                     ui.add(egui::Label::new(theme::header_text(area.label())).selectable(false));
                     ui.end_row();
                     for command in commands {
-                        ui.label(command.label());
+                        label_cell(ui, command.label(), name_column);
                         let recording = self.recording == Some(command);
                         let text = if recording {
                             "press a key...".to_string()
@@ -1213,10 +1235,12 @@ impl App {
                                 shown
                             }
                         };
-                        if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, theme::metric::ROW))).clicked() {
+                        let button = egui::vec2(binding_column, theme::metric::INPUT_ROW);
+                        if ui.add(egui::Button::new(text).min_size(button)).clicked() {
                             self.recording = Some(command);
                         }
-                        if ui.add(egui::Button::new("Reset").min_size(egui::vec2(60.0, theme::metric::ROW))).clicked() {
+                        let reset = egui::vec2(reset_column, theme::metric::INPUT_ROW);
+                        if ui.add(egui::Button::new("Reset").min_size(reset)).clicked() {
                             self.keymap.reset(command);
                             self.persist_keymap();
                         }
@@ -1297,7 +1321,9 @@ impl App {
         // The field fills the window: a failure is often a path and a system
         // message, and the room to read it is the point of the window.
         let height = ui.available_height().max(120.0);
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        let (area, restore) = theme::list_scroll_area(ui);
+        area.show(ui, |ui| {
+            ui.set_style(restore);
             // A read-only multiline field, so the text can be selected
             // and copied. Sized to the room the window has rather than to a
             // row count, so the field is the window and not a box in it.
@@ -1457,6 +1483,23 @@ impl App {
             self.modal = Modal::None;
         }
     }
+}
+
+/// A label that claims a whole column of a dialog's grid, so the rows below it
+/// line up with the rows above and the fields beside them start in the same
+/// place. A plain `ui.label` takes the width of its own text, which is what left
+/// each grid measuring its own indent.
+fn label_cell(ui: &mut egui::Ui, text: &str, width: f32) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(width, theme::metric::INPUT_ROW),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            // The point of the cell is the width: without this the region
+            // shrinks back to the text and the column is ragged again.
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).truncate().selectable(false));
+        },
+    );
 }
 
 /// What a dialog's window is: what it is called, how big it opens and whether it
