@@ -66,6 +66,11 @@ pub mod metric {
     pub const MENU_BAR: f32 = 28.0;
     /// The row of document tabs under it (issue 61).
     pub const TAB_BAR: f32 = 26.0;
+    /// The row of buttons along the foot of every dialog, and the size each of
+    /// those buttons is: one place, so no dialog can drift from the rest.
+    pub const DIALOG_ACTIONS: f32 = 44.0;
+    pub const DIALOG_BUTTON: f32 = 26.0;
+    pub const DIALOG_BUTTON_WIDTH: f32 = 96.0;
     /// Height of the status bar.
     pub const STATUS_BAR: f32 = 24.0;
     /// Room kept clear at the right end of the status bar for the timing, node
@@ -82,6 +87,9 @@ pub mod font {
     pub const LABEL: f32 = 12.0;
     pub const VALUE: f32 = 13.0;
     pub const HEADER: f32 = 12.0;
+    /// A dialog's own title, where one is written into the body: bigger than the
+    /// text under it, or it is not a title at all.
+    pub const TITLE: f32 = 17.0;
     pub const SMALL: f32 = 11.0;
 }
 
@@ -244,7 +252,7 @@ pub fn apply(ctx: &egui::Context) {
         (egui::TextStyle::Small, egui::FontId::proportional(font::SMALL)),
         (egui::TextStyle::Body, egui::FontId::proportional(font::LABEL)),
         (egui::TextStyle::Button, egui::FontId::proportional(font::LABEL)),
-        (egui::TextStyle::Heading, egui::FontId::proportional(font::HEADER)),
+        (egui::TextStyle::Heading, egui::FontId::proportional(font::TITLE)),
         (egui::TextStyle::Monospace, egui::FontId::monospace(font::VALUE)),
     ] {
         style.text_styles.insert(text_style, id);

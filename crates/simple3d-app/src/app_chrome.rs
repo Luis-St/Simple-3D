@@ -597,15 +597,21 @@ impl App {
     /// asked for by hand: it opens over the middle of the parent and asks to
     /// stay above it. Wayland grants neither -- a client there does not place
     /// its own windows -- and ignores both without complaint.
+    ///
+    /// Every dialog is the same shape: the contents fill the window, and the
+    /// buttons sit in a row of their own along the foot, right-aligned and all
+    /// one size, under a rule (issue 63). The row is a panel rather than the
+    /// last thing the body draws, so the buttons are in the same place in every
+    /// dialog whatever the contents above them do -- and a body that scrolls can
+    /// never push them off the bottom edge.
     fn dialog(
         &mut self,
         ctx: &egui::Context,
-        key: &str,
-        title: &str,
-        size: egui::Vec2,
-        resizable: bool,
+        spec: DialogSpec<'_>,
         mut body: impl FnMut(&mut Self, &mut egui::Ui),
+        mut actions: impl FnMut(&mut Self, &mut egui::Ui),
     ) {
+        let DialogSpec { key, title, size, resizable } = spec;
         let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_icon(crate::icon::shared_icon())
@@ -628,12 +634,27 @@ impl App {
                     .collapsible(false)
                     .resizable(resizable)
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .show(ctx, |ui| body(self, ui));
+                    .show(ctx, |ui| {
+                        body(self, ui);
+                        ui.separator();
+                        action_row(ui, |ui| actions(self, ui));
+                    });
                 if !open {
                     self.dismiss_modal();
                 }
                 return;
             }
+            let footer = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin {
+                left: 12,
+                right: 12,
+                top: 8,
+                bottom: 8,
+            });
+            egui::TopBottomPanel::bottom("dialog-actions")
+                .frame(footer)
+                .exact_height(theme::metric::DIALOG_ACTIONS)
+                .show_separator_line(true)
+                .show(ctx, |ui| action_row(ui, |ui| actions(self, ui)));
             let frame = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin::same(12));
             egui::CentralPanel::default().frame(frame).show(ctx, |ui| body(self, ui));
             // The window's own close button, which no longer passes through any
@@ -665,18 +686,33 @@ impl App {
         } else {
             egui::vec2(560.0, 320.0)
         };
-        self.dialog(ctx, "dialog-export", "Export", size, true, Self::export_body);
+        self.dialog(
+            ctx,
+            DialogSpec { key: "dialog-export", title: "Export", size, resizable: true },
+            Self::export_body,
+            Self::export_actions,
+        );
     }
 
     fn export_body(&mut self, ui: &mut egui::Ui) {
-        // Bottom-up: the buttons and the count are laid out first and end up at
-        // the foot of the window, and everything else takes the room left above
-        // them. In a `bottom_up` layout the items are added in the order they
-        // stack upwards, which is why the footer comes first here.
+        // Bottom-up: the count of what is about to be written is laid out first
+        // and ends up at the foot of the contents, just over the buttons, and
+        // everything else takes the room left above it. In a `bottom_up` layout
+        // the items are added in the order they stack upwards, which is why the
+        // summary comes first here.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            self.export_footer(ui);
+            self.export_summary_line(ui);
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| self.export_controls(ui));
         });
+    }
+
+    fn export_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Export...", true).clicked() {
+            self.start_export();
+        }
+        if ui::dialog_button(ui, "Cancel", true).clicked() {
+            self.modal = Modal::None;
+        }
     }
 
     fn export_controls(&mut self, ui: &mut egui::Ui) {
@@ -761,19 +797,10 @@ impl App {
         }
     }
 
-    /// What the export is about to do, and the two buttons. Drawn before the
-    /// rest of the window and at the bottom of it, so a body list long enough
-    /// to scroll can never push Export off the edge.
-    fn export_footer(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            if ui.button("Export...").clicked() {
-                self.start_export();
-            }
-            if ui.button("Cancel").clicked() {
-                self.modal = Modal::None;
-            }
-        });
-        ui.separator();
+    /// What the export is about to do. Drawn before the rest of the window and
+    /// at the bottom of it, so a body list long enough to scroll cannot push the
+    /// count out of sight.
+    fn export_summary_line(&mut self, ui: &mut egui::Ui) {
         if self.evaluated.errors.is_empty() {
             // The count is of what will actually be written -- the scene
             // or the selection -- rather than always of the whole scene.
@@ -894,11 +921,14 @@ impl App {
     fn scene_settings_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
-            "dialog-scene-settings",
-            "Scene settings",
-            egui::vec2(560.0, 520.0),
-            true,
+            DialogSpec {
+                key: "dialog-scene-settings",
+                title: "Scene settings",
+                size: egui::vec2(560.0, 520.0),
+                resizable: true,
+            },
             Self::scene_settings_body,
+            Self::close_action,
         );
     }
 
@@ -982,15 +1012,17 @@ impl App {
                 .on_hover_text("Mark where a principal plane cuts through a shape, on the shape itself");
             ui.end_row();
         });
-        ui.separator();
-        ui.label("Notes");
+        ui.add_space(8.0);
+        ui.add(egui::Label::new(theme::header_text("Notes")).selectable(false));
         let mut notes = self.scene.settings.notes.clone();
         if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0)).changed() {
             self.edit("Notes", Some("scene:notes"));
             self.scene.settings.notes = notes;
         }
-        ui.separator();
-        if ui.button("Close").clicked() {
+    }
+
+    fn close_action(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Close", true).clicked() {
             self.modal = Modal::None;
         }
     }
@@ -998,7 +1030,17 @@ impl App {
     /// The keymap editor: every command grouped by area, with a search box, the
     /// current binding shown, and click-to-record (spec section 8.2).
     fn keymap_window(&mut self, ctx: &egui::Context) {
-        self.dialog(ctx, "dialog-keymap", "Keyboard and mouse", egui::vec2(620.0, 660.0), true, Self::keymap_body);
+        self.dialog(
+            ctx,
+            DialogSpec {
+                key: "dialog-keymap",
+                title: "Keyboard and mouse",
+                size: egui::vec2(620.0, 660.0),
+                resizable: true,
+            },
+            Self::keymap_body,
+            Self::close_action,
+        );
     }
 
     fn keymap_body(&mut self, ui: &mut egui::Ui) {
@@ -1034,55 +1076,64 @@ impl App {
             }
         }
 
-        ui.horizontal(|ui| {
+        egui::Grid::new("keymap-top").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
             ui.label("Preset");
-            let mut preset = self.keymap.preset;
-            egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).show_ui(ui, |ui| {
-                for option in Preset::ALL {
-                    ui.selectable_value(&mut preset, option, option.label());
+            ui.horizontal(|ui| {
+                let mut preset = self.keymap.preset;
+                egui::ComboBox::from_id_salt("keymap-preset").selected_text(preset.label()).width(190.0).show_ui(
+                    ui,
+                    |ui| {
+                        for option in Preset::ALL {
+                            ui.selectable_value(&mut preset, option, option.label());
+                        }
+                    },
+                );
+                if preset != self.keymap.preset {
+                    // A preset is a starting point the user can then modify.
+                    self.keymap.switch_preset(preset);
+                    self.persist_keymap();
+                    self.status = Status::Info(format!("Keymap preset: {}", preset.label()));
+                }
+                if ui.button("Reset everything to the preset").clicked() {
+                    self.keymap.reset_all();
+                    self.persist_keymap();
                 }
             });
-            if preset != self.keymap.preset {
-                // A preset is a starting point the user can then modify.
-                self.keymap.switch_preset(preset);
-                self.persist_keymap();
-                self.status = Status::Info(format!("Keymap preset: {}", preset.label()));
-            }
-            if ui.button("Reset everything to the preset").clicked() {
-                self.keymap.reset_all();
-                self.persist_keymap();
-            }
-        });
-        ui.horizontal(|ui| {
-            if ui.button("Export...").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("Simple 3D keymap", &["json"])
-                    .set_file_name("simple3d-keymap.json")
-                    .save_file()
-                {
-                    if let Err(e) = std::fs::write(&path, self.keymap.to_text()) {
-                        self.fail("Could not write the keymap", &e.to_string());
-                    }
-                }
-            }
-            if ui.button("Import...").clicked() {
-                if let Some(path) = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]).pick_file() {
-                    match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| Keymap::from_text(&t))
+            ui.end_row();
+
+            ui.label("Keymap file");
+            ui.horizontal(|ui| {
+                if ui.button("Export...").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Simple 3D keymap", &["json"])
+                        .set_file_name("simple3d-keymap.json")
+                        .save_file()
                     {
-                        Ok(keymap) => {
-                            self.keymap = keymap;
-                            self.persist_keymap();
+                        if let Err(e) = std::fs::write(&path, self.keymap.to_text()) {
+                            self.fail("Could not write the keymap", &e.to_string());
                         }
-                        Err(e) => self.fail("Could not read the keymap", &e),
                     }
                 }
-            }
+                if ui.button("Import...").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]).pick_file() {
+                        match std::fs::read_to_string(&path)
+                            .map_err(|e| e.to_string())
+                            .and_then(|t| Keymap::from_text(&t))
+                        {
+                            Ok(keymap) => {
+                                self.keymap = keymap;
+                                self.persist_keymap();
+                            }
+                            Err(e) => self.fail("Could not read the keymap", &e),
+                        }
+                    }
+                }
+            });
+            ui.end_row();
         });
         ui.separator();
 
-        ui.horizontal(|ui| {
-            ui.label("Navigation");
-        });
+        ui.add(egui::Label::new(theme::header_text("Navigation")).selectable(false));
         egui::Grid::new("nav-grid").num_columns(3).spacing([10.0, 6.0]).show(ui, |ui| {
             let mut nav = self.keymap.nav;
             for (label, drag) in [("Orbit", 0), ("Pan", 1)] {
@@ -1132,46 +1183,48 @@ impl App {
 
         let needle = self.keymap_search.to_lowercase();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for area in Area::ALL {
-                let commands: Vec<Command> = Command::ALL
-                    .iter()
-                    .copied()
-                    .filter(|c| c.area() == area)
-                    .filter(|c| needle.is_empty() || c.label().to_lowercase().contains(&needle))
-                    .collect();
-                if commands.is_empty() {
-                    continue;
-                }
-                ui.add_space(4.0);
-                ui.strong(area.label());
-                egui::Grid::new(format!("keymap-{}", area.label())).num_columns(3).spacing([10.0, 4.0]).show(
-                    ui,
-                    |ui| {
-                        for command in commands {
-                            ui.label(command.label());
-                            let recording = self.recording == Some(command);
-                            let text = if recording {
-                                "press a key...".to_string()
+            // One grid for every area rather than one each: a grid measures its
+            // own columns, so a grid per area put each area's bindings at its
+            // own indent and the buttons down the list did not line up with one
+            // another (issue 63). The area names are rows of this one grid.
+            egui::Grid::new("keymap-commands").num_columns(3).spacing([10.0, 4.0]).show(ui, |ui| {
+                for area in Area::ALL {
+                    let commands: Vec<Command> = Command::ALL
+                        .iter()
+                        .copied()
+                        .filter(|c| c.area() == area)
+                        .filter(|c| needle.is_empty() || c.label().to_lowercase().contains(&needle))
+                        .collect();
+                    if commands.is_empty() {
+                        continue;
+                    }
+                    ui.add(egui::Label::new(theme::header_text(area.label())).selectable(false));
+                    ui.end_row();
+                    for command in commands {
+                        ui.label(command.label());
+                        let recording = self.recording == Some(command);
+                        let text = if recording {
+                            "press a key...".to_string()
+                        } else {
+                            let shown = self.keymap.shortcut_text(command);
+                            if shown.is_empty() {
+                                "unbound".to_string()
                             } else {
-                                let shown = self.keymap.shortcut_text(command);
-                                if shown.is_empty() {
-                                    "unbound".to_string()
-                                } else {
-                                    shown
-                                }
-                            };
-                            if ui.add(egui::Button::new(text).min_size(egui::vec2(130.0, 0.0))).clicked() {
-                                self.recording = Some(command);
+                                shown
                             }
-                            if ui.small_button("Reset").clicked() {
-                                self.keymap.reset(command);
-                                self.persist_keymap();
-                            }
-                            ui.end_row();
+                        };
+                        if ui.add(egui::Button::new(text).min_size(egui::vec2(150.0, theme::metric::ROW))).clicked() {
+                            self.recording = Some(command);
                         }
-                    },
-                );
-            }
+                        if ui.add(egui::Button::new("Reset").min_size(egui::vec2(60.0, theme::metric::ROW))).clicked() {
+                            self.keymap.reset(command);
+                            self.persist_keymap();
+                        }
+                        ui.end_row();
+                    }
+                    ui.end_row();
+                }
+            });
         });
 
         // Drawn over the keymap dialog, inside it: a question about the key that
@@ -1199,13 +1252,12 @@ impl App {
     }
 
     fn about_window(&mut self, ctx: &egui::Context) {
+        let title = format!("About {APP_NAME}");
         self.dialog(
             ctx,
-            "dialog-about",
-            format!("About {APP_NAME}").as_str(),
-            egui::vec2(460.0, 280.0),
-            false,
+            DialogSpec { key: "dialog-about", title: &title, size: egui::vec2(460.0, 270.0), resizable: false },
             Self::about_body,
+            Self::close_action,
         );
     }
 
@@ -1223,45 +1275,46 @@ impl App {
         if config::portable_mode() {
             ui.label("Running in portable mode: settings live beside the executable.");
         }
-        ui.add_space(6.0);
-        if ui.button("Close").clicked() {
-            self.modal = Modal::None;
-        }
     }
 
     /// Failures are shown in a scrollable, copyable window with the specific
     /// reason, never a generic message (spec section 9).
     fn error_window(&mut self, ctx: &egui::Context) {
+        // A window with no title in its bar reads as a broken window; every
+        // failure names itself, but nothing here depends on that.
+        let title =
+            if self.error_title.is_empty() { "Something went wrong".to_string() } else { self.error_title.clone() };
         self.dialog(
             ctx,
-            "dialog-error",
-            // A window with no title in its bar reads as a broken window; every
-            // failure names itself, but nothing here depends on that.
-            if self.error_title.is_empty() { "Something went wrong".to_string() } else { self.error_title.clone() }
-                .as_str(),
-            egui::vec2(560.0, 360.0),
-            true,
+            DialogSpec { key: "dialog-error", title: &title, size: egui::vec2(560.0, 360.0), resizable: true },
             Self::error_body,
+            Self::error_actions,
         );
     }
 
     fn error_body(&mut self, ui: &mut egui::Ui) {
         let mut detail = self.error_detail.clone();
-        egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+        // The field fills the window: a failure is often a path and a system
+        // message, and the room to read it is the point of the window.
+        let height = ui.available_height().max(120.0);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             // A read-only multiline field, so the text can be selected
-            // and copied.
-            ui.add(
-                egui::TextEdit::multiline(&mut detail).desired_width(f32::INFINITY).desired_rows(6).interactive(true),
+            // and copied. Sized to the room the window has rather than to a
+            // row count, so the field is the window and not a box in it.
+            ui.add_sized(
+                egui::vec2(ui.available_width(), height),
+                egui::TextEdit::multiline(&mut detail).desired_width(f32::INFINITY).interactive(true),
             );
         });
-        ui.horizontal(|ui| {
-            if ui.button("Copy").clicked() {
-                ui.ctx().copy_text(self.error_detail.clone());
-            }
-            if ui.button("Close").clicked() {
-                self.modal = Modal::None;
-            }
-        });
+    }
+
+    fn error_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Close", true).clicked() {
+            self.modal = Modal::None;
+        }
+        if ui::dialog_button(ui, "Copy", true).clicked() {
+            ui.ctx().copy_text(self.error_detail.clone());
+        }
     }
 
     /// Naming a group, or a whole project, before it goes on the palette.
@@ -1272,11 +1325,14 @@ impl App {
     fn save_primitive_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
-            "dialog-save-primitive",
-            "Save as primitive",
-            egui::vec2(480.0, 190.0),
-            false,
+            DialogSpec {
+                key: "dialog-save-primitive",
+                title: "Save as primitive",
+                size: egui::vec2(480.0, 200.0),
+                resizable: false,
+            },
             Self::save_primitive_body,
+            Self::save_primitive_actions,
         );
     }
 
@@ -1312,52 +1368,65 @@ impl App {
                 .selectable(false),
             );
         }
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            if ui.add_enabled(!tidied.is_empty(), egui::Button::new("Save")).clicked() {
-                self.confirm_save_primitive();
-            }
-            if ui.button("Cancel").clicked() {
-                self.cancel_save_primitive();
-            }
-        });
+    }
+
+    fn save_primitive_actions(&mut self, ui: &mut egui::Ui) {
+        let named = !simple3d_core::library::sanitise(&self.primitive_name).is_empty();
+        if ui::dialog_button(ui, "Save", named).clicked() {
+            self.confirm_save_primitive();
+        }
+        if ui::dialog_button(ui, "Cancel", true).clicked() {
+            self.cancel_save_primitive();
+        }
     }
 
     fn confirm_close_tab_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
-            "dialog-confirm-close-tab",
-            "Unsaved changes",
-            egui::vec2(430.0, 140.0),
-            false,
+            DialogSpec {
+                key: "dialog-confirm-close-tab",
+                title: "Unsaved changes",
+                size: egui::vec2(440.0, 150.0),
+                resizable: false,
+            },
             Self::confirm_close_tab_body,
+            Self::confirm_close_tab_actions,
         );
     }
 
     fn confirm_close_tab_body(&mut self, ui: &mut egui::Ui) {
         let name = self.pending_close.map(|index| self.tab_summary(index).0).unwrap_or_default();
         ui.label(format!("{name} has changes that have not been saved."));
-        ui.horizontal(|ui| {
-            if ui.button("Save and close").clicked() {
-                self.save_and_close_tab();
-            }
-            if ui.button("Close without saving").clicked() {
-                self.confirm_close_tab();
-            }
-            if ui.button("Cancel").clicked() {
-                self.cancel_close_tab();
-            }
-        });
+        ui.add_space(4.0);
+        ui.add(
+            egui::Label::new(theme::hint("Saving writes it to its file; closing without saving discards it."))
+                .selectable(false),
+        );
+    }
+
+    fn confirm_close_tab_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Save and close", true).clicked() {
+            self.save_and_close_tab();
+        }
+        if ui::dialog_button(ui, "Close without saving", true).clicked() {
+            self.confirm_close_tab();
+        }
+        if ui::dialog_button(ui, "Cancel", true).clicked() {
+            self.cancel_close_tab();
+        }
     }
 
     fn confirm_quit_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
-            "dialog-confirm-quit",
-            "Unsaved changes",
-            egui::vec2(430.0, 140.0),
-            false,
+            DialogSpec {
+                key: "dialog-confirm-quit",
+                title: "Unsaved changes",
+                size: egui::vec2(500.0, 150.0),
+                resizable: false,
+            },
             Self::confirm_quit_body,
+            Self::confirm_quit_actions,
         );
     }
 
@@ -1368,23 +1437,50 @@ impl App {
             1 => "This project, and one other open document, have changes that have not been saved.".to_string(),
             n => format!("This project, and {n} other open documents, have changes that have not been saved."),
         });
-        ui.horizontal(|ui| {
-            if ui.button("Save and quit").clicked() {
-                self.save();
-                if !self.unsaved() {
-                    self.confirm_quit();
-                }
-                self.modal = Modal::None;
-            }
-            if ui.button("Quit without saving").clicked() {
-                self.confirm_quit();
-                self.modal = Modal::None;
-            }
-            if ui.button("Cancel").clicked() {
-                self.modal = Modal::None;
-            }
-        });
+        ui.add_space(4.0);
+        ui.add(egui::Label::new(theme::hint("Only the document on screen can be saved from here.")).selectable(false));
     }
+
+    fn confirm_quit_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Save and quit", true).clicked() {
+            self.save();
+            if !self.unsaved() {
+                self.confirm_quit();
+            }
+            self.modal = Modal::None;
+        }
+        if ui::dialog_button(ui, "Quit without saving", true).clicked() {
+            self.confirm_quit();
+            self.modal = Modal::None;
+        }
+        if ui::dialog_button(ui, "Cancel", true).clicked() {
+            self.modal = Modal::None;
+        }
+    }
+}
+
+/// What a dialog's window is: what it is called, how big it opens and whether it
+/// can be resized. One argument rather than four, so the call sites read as the
+/// window they describe.
+struct DialogSpec<'a> {
+    key: &'a str,
+    title: &'a str,
+    size: egui::Vec2,
+    resizable: bool,
+}
+
+/// The buttons of a dialog, laid out the one way they are laid out everywhere:
+/// along the foot of the window, right-aligned, the affirmative one last.
+///
+/// The contents are added *right to left*, so the closure names the rightmost
+/// button first -- the one Enter would press if a dialog had a default -- and
+/// the one that walks away from the dialog ends up furthest left, where the eye
+/// arrives last.
+fn action_row(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = theme::metric::GAP * 2.0;
+        contents(ui);
+    });
 }
 
 /// The status bar's separator: a dot, not a rule. A vertical line every few

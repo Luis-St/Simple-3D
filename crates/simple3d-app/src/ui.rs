@@ -446,6 +446,13 @@ pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Respon
 
 /// Translate an egui key press into the chord form the keymap stores. Uses
 /// egui's own key names, so there is no translation table to drift out of date.
+/// A button in a dialog's action row: every one the same size, so a row of them
+/// is a row and not a ragged line (issue 63).
+pub fn dialog_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
+    let size = egui::vec2(crate::theme::metric::DIALOG_BUTTON_WIDTH, crate::theme::metric::DIALOG_BUTTON);
+    ui.add_enabled(enabled, egui::Button::new(label).min_size(size))
+}
+
 pub fn chord_from_egui(key: egui::Key, modifiers: egui::Modifiers) -> Chord {
     Chord {
         key: key.name().to_string(),

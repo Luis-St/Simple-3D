@@ -1893,6 +1893,7 @@ mod tests {
             Modal::About,
             Modal::Error,
             Modal::ConfirmQuit,
+            Modal::ConfirmCloseTab,
             Modal::SavePrimitive,
         ] {
             app.modal = modal;
