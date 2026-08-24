@@ -63,7 +63,7 @@ names, but it rejects `Directory/@Name` there and cannot bind the `.msi` -- so
 the package itself only ever comes out of that job.
 
 `license.rtf` is the repository's licence in the format the installer's licence
-page needs. `license-rtf.py` generates it from `LICENSE`, so the page shown at
+page needs. `license-rtf.py` generates it from `LICENSE.md`, so the page shown at
 install time and the file in the repository cannot say different things:
 
 ```sh

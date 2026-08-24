@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Regenerate `license.rtf` from the repository's `LICENSE`.
+"""Regenerate `license.rtf` from the repository's `LICENSE.md`.
 
-The installer's licence page reads RTF, and `LICENSE` is the plain-text
+The installer's licence page reads RTF, and `LICENSE.md` is the plain-text
 PolyForm Noncommercial 1.0.0 with its Markdown headings. Generating one from
 the other is what keeps the page shown at install time and the file in the
 repository from ever saying different things -- run this after changing
-`LICENSE`.
+`LICENSE.md`.
 """
 
 import pathlib
 import re
 
 root = pathlib.Path(__file__).resolve().parents[2]
-text = (root / "LICENSE").read_text()
+text = (root / "LICENSE.md").read_text()
 
 out = [r"{\rtf1\ansi\ansicpg1252\deff0{\fonttbl{\f0\fswiss\fcharset0 Segoe UI;}}", r"\fs18"]
 for line in text.split("\n"):

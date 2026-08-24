@@ -260,4 +260,4 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0).
 Free for any noncommercial purpose — personal projects, hobby work, study,
 research, and use by schools, charities and public bodies. Commercial use
-needs a separate licence. See `LICENSE` for the full terms.
+needs a separate licence. See `LICENSE.md` for the full terms.

@@ -63,7 +63,7 @@ install -d "$tree/usr/share/doc/$package"
     printf 'Files: *\nCopyright: 2026 Luis Staudt\nLicense: PolyForm-Noncommercial-1.0.0\n'
     # A blank line inside a field ends it, so the licence body is indented and
     # its empty lines are marked with a lone full stop, as the format requires.
-    sed -e 's/^/ /' -e 's/^ $/ ./' "$root/LICENSE"
+    sed -e 's/^/ /' -e 's/^ $/ ./' "$root/LICENSE.md"
 } > "$tree/usr/share/doc/$package/copyright"
 chmod 644 "$tree/usr/share/doc/$package/copyright"
 
