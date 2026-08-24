@@ -8,16 +8,24 @@
   rather have the application in the Start menu and on the desktop than keep
   track of a file, which is what issue 19 asked for.
 
-  Both shortcuts are their own feature, so the installer's feature tree lets
-  either one be turned off before it runs — the Start menu entry and the
-  desktop shortcut are separate decisions, and nobody should have to undo one
-  afterwards.
+  The dialog set is WixUI_InstallDir, so the install directory can be typed or
+  browsed to rather than being fixed at Program Files (issue 56). The optional
+  parts — the two shortcuts and the .simple3d file association — are three
+  check boxes on a page of their own instead of a feature tree, because
+  "select the components to install" is a worse question than "what would you
+  like set up".
+
+  The file association is written here rather than by the application (issue
+  54): the installer already knows where the executable will live, it is
+  already elevated, and it is the only one of the two that can take the keys
+  back out again on uninstall.
 
   Built with:
     wix build -arch x64 -d Version=1.2.3 -d ExePath=path\to\simple-3d.exe \
               -ext WixToolset.UI.wixext packaging/windows/simple-3d.wxs -o simple-3d.msi
   The release workflow does exactly that on the Windows runner, from the same
-  binary it uploads on its own.
+  binary it uploads on its own. WiX only runs on Windows, so this file cannot
+  be compiled anywhere else.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
@@ -41,6 +49,17 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/Luis-St/Simple-3D" />
     <Property Id="ARPNOREPAIR" Value="1" />
 
+    <!-- The three optional parts, on by default. Public (all upper case) so a
+         silent install can turn any of them off:
+           msiexec /i simple-3d.msi /qn INSTALLDESKTOPSHORTCUT=0
+         An unticked check box clears its property, and the components below
+         are conditioned on it. -->
+    <Property Id="INSTALLSTARTMENUSHORTCUT" Value="1" />
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+    <Property Id="ASSOCIATESIMPLE3DFILES" Value="1" />
+
+    <!-- The default the install directory page starts from; the page can put
+         it anywhere. -->
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="Simple 3D" />
     </StandardDirectory>
@@ -50,16 +69,13 @@
     <StandardDirectory Id="ProgramMenuFolder" />
     <StandardDirectory Id="DesktopFolder" />
 
+    <!-- One feature, so there is no feature tree to present. What is optional
+         is optional per component, decided by the check boxes. -->
     <Feature Id="Application" Title="Simple 3D" Description="The application itself." Level="1" AllowAbsent="no">
       <ComponentRef Id="MainExecutable" />
-
-      <Feature Id="StartMenuShortcut" Title="Start menu entry" Description="A Simple 3D entry in the Start menu." Level="1">
-        <ComponentRef Id="StartMenuShortcut" />
-      </Feature>
-
-      <Feature Id="DesktopShortcut" Title="Desktop shortcut" Description="A Simple 3D shortcut on the desktop." Level="1">
-        <ComponentRef Id="DesktopShortcut" />
-      </Feature>
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="FileAssociation" />
     </Feature>
 
     <Component Id="MainExecutable" Directory="INSTALLFOLDER" Guid="554466D7-4B08-4078-82B3-3CE3ED699916">
@@ -70,7 +86,8 @@
          keyed on; a registry value under the install scope's own root is the
          shape the installer expects. HKMU is HKLM for this per-machine
          package. -->
-    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="E503949E-458D-49F0-984E-D5A1D5E7CDBA">
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="E503949E-458D-49F0-984E-D5A1D5E7CDBA"
+               Condition="INSTALLSTARTMENUSHORTCUT">
       <Shortcut Id="StartMenuShortcutItem"
                 Name="Simple 3D"
                 Description="Parametric 3D modelling with exact metric dimensions"
@@ -80,7 +97,8 @@
       <RegistryValue Root="HKMU" Key="Software\Simple3D\Shortcuts" Name="startmenu" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="4714D97C-F261-4AB0-A3F9-52447751C41B">
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Guid="4714D97C-F261-4AB0-A3F9-52447751C41B"
+               Condition="INSTALLDESKTOPSHORTCUT">
       <Shortcut Id="DesktopShortcutItem"
                 Name="Simple 3D"
                 Description="Parametric 3D modelling with exact metric dimensions"
@@ -90,10 +108,74 @@
       <RegistryValue Root="HKMU" Key="Software\Simple3D\Shortcuts" Name="desktop" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <!-- The feature tree, because the two shortcuts are the whole point of
-         having an installer: it is the stock dialog set that lets them be
-         chosen. -->
-    <ui:WixUI Id="WixUI_FeatureTree" InstallDirectory="INSTALLFOLDER" />
+    <!--
+      The .simple3d association, which used to be the application's own job and
+      is the installer's now (issue 54). The four keys are the same ones a
+      shell association always needs:
+
+        * the extension names the ProgID: what kind of thing a .simple3d file is;
+        * the ProgID's default value is the type name Explorer shows in the Type
+          column;
+        * DefaultIcon is the installed executable's first icon — index 0, the
+          one build.rs compiled in;
+        * shell\open\command passes the file as the first argument, which is
+          what `main` already reads.
+
+      Written under HKMU (HKLM here, because the package is per-machine) so the
+      association belongs to the installation and goes away with it: uninstalling
+      removes the component's keys, which is the part the application could never
+      do for a file it did not install.
+    -->
+    <Component Id="FileAssociation" Directory="INSTALLFOLDER" Guid="049C36AC-1E06-4297-9A77-3C5737A19936"
+               Condition="ASSOCIATESIMPLE3DFILES">
+      <RegistryValue Root="HKMU" Key="Software\Classes\.simple3d" Type="string" Value="Simple3D.Project" KeyPath="yes" />
+      <RegistryValue Root="HKMU" Key="Software\Classes\Simple3D.Project" Type="string" Value="Simple 3D project" />
+      <RegistryValue Root="HKMU" Key="Software\Classes\Simple3D.Project\DefaultIcon" Type="string" Value="[INSTALLFOLDER]simple-3d.exe,0" />
+      <RegistryValue Root="HKMU" Key="Software\Classes\Simple3D.Project\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]simple-3d.exe&quot; &quot;%1&quot;" />
+    </Component>
+
+    <UI>
+      <!-- Welcome, licence, install directory, options, ready. ARPNOMODIFY is
+           set by this dialog set, so Apps & Features offers uninstall only. -->
+      <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+      <!-- WixUI_InstallDir sends Next to VerifyReadyDlg at order 4; a later
+           NewDialog on the same button is what redirects it, and the Back
+           button of VerifyReadyDlg has to come back here rather than to the
+           directory page. Ordered above the two Backs that dialog set
+           publishes (1 for a first install, 2 for maintenance). -->
+      <Publish Dialog="InstallDirDlg" Control="Next" Event="NewDialog" Value="OptionsDlg" Order="5" />
+      <Publish Dialog="OptionsDlg" Control="Back" Event="NewDialog" Value="InstallDirDlg" />
+      <Publish Dialog="OptionsDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="OptionsDlg" Order="3" Condition="NOT Installed" />
+
+      <!-- The page that replaces the feature tree. Its geometry is the stock
+           WixUI one (370x270, banner to y=44, buttons on y=243) so it is the
+           same window as the pages either side of it. -->
+      <Dialog Id="OptionsDlg" Width="370" Height="270" Title="!(loc.InstallDirDlg_Title)">
+        <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="373" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="373" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Set up Simple 3D" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose what to set up alongside the application." />
+
+        <Control Id="StartMenuCheckBox" Type="CheckBox" X="20" Y="65" Width="330" Height="17"
+                 Property="INSTALLSTARTMENUSHORTCUT" CheckBoxValue="1" Text="Add a Simple 3D entry to the Start menu" />
+        <Control Id="DesktopCheckBox" Type="CheckBox" X="20" Y="90" Width="330" Height="17"
+                 Property="INSTALLDESKTOPSHORTCUT" CheckBoxValue="1" Text="Put a Simple 3D shortcut on the desktop" />
+        <Control Id="AssociateCheckBox" Type="CheckBox" X="20" Y="115" Width="330" Height="17"
+                 Property="ASSOCIATESIMPLE3DFILES" CheckBoxValue="1" Text="Open .simple3d files with Simple 3D" />
+        <Control Id="AssociateNote" Type="Text" X="34" Y="134" Width="316" Height="24" NoPrefix="yes"
+                 Text="Gives .simple3d files this application's icon and opens them with it. Removed again when Simple 3D is uninstalled." />
+      </Dialog>
+    </UI>
+
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
   </Package>
 </Wix>

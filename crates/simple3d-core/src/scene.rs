@@ -105,6 +105,15 @@ impl GroupOp {
         self == GroupOp::Difference
     }
 
+    /// Whether the result still contains its operands as pieces that can be
+    /// taken out of it. A union is its operands standing side by side; a
+    /// difference, an intersection and a hull are one new surface, and a child
+    /// of one of those is not a solid that exists in the result at all -- so it
+    /// can never be a body of its own in an export.
+    pub fn separable(self) -> bool {
+        self == GroupOp::Union
+    }
+
     pub fn to_geom(self) -> BooleanOp {
         match self {
             GroupOp::Union => BooleanOp::Union,
@@ -113,6 +122,23 @@ impl GroupOp {
             GroupOp::Hull => BooleanOp::Hull,
         }
     }
+}
+
+/// What a node is in an export that lets the user choose its bodies (issue 58).
+///
+/// The absence of one -- `Node::export_body` being `None` -- means "a body of
+/// its own", which is what every node is until it is told otherwise. An
+/// untouched project therefore exports exactly as "top level bodies" does, and
+/// a mark is only ever needed where the answer differs from that.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportBody {
+    /// Merged, as one solid, with every other node carrying the same number.
+    Shared(u32),
+    /// Not a body itself: its children are each considered in its place, which
+    /// is how an export reaches inside a group. Only a separable group can
+    /// carry this -- see [`GroupOp::separable`].
+    Split,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -156,6 +182,9 @@ pub struct Node {
     pub colour: Option<Colour>,
     /// Per-object override of the scene's default segment count.
     pub segments: Option<u32>,
+    /// What this node is in an export whose bodies the user chooses. `None`,
+    /// which is nearly always, means a body of its own.
+    pub export_body: Option<ExportBody>,
     pub body: Body,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
@@ -386,6 +415,7 @@ impl Scene {
             ghost: false,
             colour: None,
             segments: None,
+            export_body: None,
             body: Body::Group { op: GroupOp::Union },
             children: Vec::new(),
             parent: None,
@@ -531,6 +561,7 @@ impl Scene {
             ghost: false,
             colour: None,
             segments: None,
+            export_body: None,
             body: Body::Primitive { type_id: type_id.to_string(), params: spec.default_params() },
             children: Vec::new(),
             parent: Some(parent),
@@ -553,6 +584,7 @@ impl Scene {
             ghost: false,
             colour: None,
             segments: None,
+            export_body: None,
             body: Body::Group { op },
             children: Vec::new(),
             parent: Some(parent),
@@ -735,6 +767,7 @@ impl Scene {
             ghost: node.ghost,
             colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
+            export_body: node.export_body,
             params,
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
         })
@@ -762,6 +795,7 @@ impl Scene {
             ghost: data.ghost,
             colour: data.colour.as_deref().and_then(Colour::from_hex),
             segments: data.segments,
+            export_body: data.export_body,
             body,
             children: Vec::new(),
             parent: Some(parent),
@@ -807,6 +841,50 @@ impl Scene {
     /// the nearest painted ancestor's, else nothing at all. This is what makes
     /// painting a group paint every shape inside it without touching any of
     /// them, and what a shape painted inside a painted group overrides.
+    /// Whether `id` is a group whose children an export could consider one by
+    /// one. A primitive has no parts, and a boolean that fuses its operands has
+    /// none that survive it.
+    pub fn can_split_for_export(&self, id: NodeId) -> bool {
+        self.get(id).and_then(|n| n.group_op()).is_some_and(GroupOp::separable)
+    }
+
+    /// Every export body mark in the scene, by node, in a stable order. Small
+    /// -- a scene nobody has grouped has none -- and it is what tells a cached
+    /// export summary that the grouping has been edited under it.
+    pub fn export_body_marks(&self) -> Vec<(NodeId, ExportBody)> {
+        self.nodes.iter().filter_map(|(id, node)| node.export_body.map(|body| (*id, body))).collect()
+    }
+
+    /// The largest body number used anywhere, so a picker can offer the next
+    /// one. Zero when nothing is grouped, which makes the first offer "Body 1".
+    pub fn highest_export_body(&self) -> u32 {
+        self.export_body_marks()
+            .into_iter()
+            .filter_map(|(_, body)| match body {
+                ExportBody::Shared(n) => Some(n),
+                ExportBody::Split => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Give `id` a body mark, clearing anything below it that the mark makes
+    /// unreachable: marking a group as a body of its own leaves the marks
+    /// inside it saying something that is no longer true, and a stale mark that
+    /// springs back when the group is split again is worse than none.
+    pub fn set_export_body(&mut self, id: NodeId, body: Option<ExportBody>) {
+        if let Some(node) = self.get_mut(id) {
+            node.export_body = body;
+        }
+        if body != Some(ExportBody::Split) {
+            for descendant in self.descendants(id) {
+                if let Some(node) = self.get_mut(descendant) {
+                    node.export_body = None;
+                }
+            }
+        }
+    }
+
     pub fn effective_colour(&self, id: NodeId) -> Option<Colour> {
         let mut at = Some(id);
         while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
@@ -896,6 +974,12 @@ pub struct NodeData {
     pub colour: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub segments: Option<u32>,
+    /// Absent from the file for every node that is a body of its own, which is
+    /// every node until an export is told to group them differently -- so a
+    /// project written by this version still diffs cleanly against one written
+    /// before export bodies existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_body: Option<ExportBody>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1181,6 +1265,7 @@ mod tests {
             ghost: false,
             colour: None,
             segments: None,
+            export_body: None,
             params: Params::new(),
             children: vec![NodeData {
                 name: "From the future".into(),
@@ -1194,6 +1279,7 @@ mod tests {
                 ghost: false,
                 colour: None,
                 segments: None,
+                export_body: None,
                 params: Params::new(),
                 children: vec![],
             }],

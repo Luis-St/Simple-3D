@@ -60,7 +60,7 @@ install -d "$tree/usr/share/doc/$package"
     printf 'Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/\n'
     printf 'Upstream-Name: Simple 3D\n'
     printf 'Source: https://github.com/Luis-St/Simple-3D\n\n'
-    printf 'Files: *\nCopyright: 2026 Luis Staudt\nLicense: MIT\n'
+    printf 'Files: *\nCopyright: 2026 Luis Staudt\nLicense: PolyForm-Noncommercial-1.0.0\n'
     # A blank line inside a field ends it, so the licence body is indented and
     # its empty lines are marked with a lone full stop, as the format requires.
     sed -e 's/^/ /' -e 's/^ $/ ./' "$root/LICENSE"

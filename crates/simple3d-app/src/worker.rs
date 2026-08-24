@@ -130,9 +130,14 @@ pub struct ExportJob {
 }
 
 impl ExportJob {
+    /// Each pair is one object of the export and the name it is written under;
+    /// a single-body export is one part with no name of its own. Whether
+    /// several of them become separate components or are merged into one body
+    /// is `options.bodies`, which the writer applies (issue 58).
+    ///
     /// `limit` is the point at which the export gives up with a clear message
     /// rather than hanging indefinitely (spec section 9).
-    pub fn spawn(path: PathBuf, mesh: Arc<Mesh>, options: Options, limit: Duration) -> ExportJob {
+    pub fn spawn_parts(path: PathBuf, parts: Vec<(String, Arc<Mesh>)>, options: Options, limit: Duration) -> ExportJob {
         let progress = Arc::new(AtomicU32::new(0));
         let cancelled = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
@@ -154,7 +159,9 @@ impl ExportJob {
                     }
                     !worker_cancelled.load(Ordering::Relaxed)
                 };
-                let outcome = simple3d_export::write(&worker_path, &mesh, &options, &mut report);
+                let borrowed: Vec<simple3d_export::Part<'_>> =
+                    parts.iter().map(|(name, mesh)| simple3d_export::Part { name, mesh }).collect();
+                let outcome = simple3d_export::write_parts(&worker_path, &borrowed, &options, &mut report);
                 let outcome = match outcome {
                     Err(ExportError::Cancelled) if Instant::now() > deadline => Err(ExportError::Io(format!(
                         "the export took longer than {} seconds and was stopped; no file was written",
@@ -291,9 +298,9 @@ mod tests {
     fn an_export_reports_progress_and_finishes() {
         let mesh = Arc::new(simple3d_geom::primitives::box_mesh(40.0, 20.0, 4.0));
         let path = std::env::temp_dir().join(format!("simple3d-worker-{}.3mf", std::process::id()));
-        let job = ExportJob::spawn(
+        let job = ExportJob::spawn_parts(
             path.clone(),
-            mesh,
+            vec![(String::new(), mesh)],
             Options { format: Format::ThreeMf, ..Default::default() },
             Duration::from_secs(30),
         );
@@ -309,9 +316,9 @@ mod tests {
         // Spec acceptance criterion 16.
         let mesh = Arc::new(simple3d_geom::primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 200));
         let path = std::env::temp_dir().join(format!("simple3d-cancel-{}.3mf", std::process::id()));
-        let job = ExportJob::spawn(
+        let job = ExportJob::spawn_parts(
             path.clone(),
-            mesh,
+            vec![(String::new(), mesh)],
             Options { format: Format::ThreeMf, ..Default::default() },
             Duration::from_secs(30),
         );
@@ -333,9 +340,9 @@ mod tests {
     fn an_export_that_runs_past_its_time_limit_says_so() {
         let mesh = Arc::new(simple3d_geom::primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 400));
         let path = std::env::temp_dir().join(format!("simple3d-limit-{}.ply", std::process::id()));
-        let job = ExportJob::spawn(
+        let job = ExportJob::spawn_parts(
             path.clone(),
-            mesh,
+            vec![(String::new(), mesh)],
             Options { format: simple3d_export::Format::PlyAscii, ..Default::default() },
             // Effectively zero, so the first progress callback trips it.
             Duration::from_nanos(1),

@@ -62,9 +62,38 @@ const STACK_BELOW: f32 = LABEL_WIDTH + 130.0;
 /// them side by side below this is three fields nobody can read, so they stack.
 const MIN_AXIS_FIELD: f32 = 52.0;
 
+/// The margin a section's frame keeps at its right-hand edge, which is the
+/// edge every row in it has to stay inside.
+const EDGE_PAD: f32 = 8.0;
+
+/// How much room is left on the line a row is currently laying out on:
+/// from where the next control will start to the row's own right-hand edge.
+///
+/// Not [`egui::Ui::available_width`]. In a *wrapped* horizontal layout that
+/// reports the width a new line would have, not what is left on this one -- so
+/// a field sized by it started after the label column and still asked for the
+/// whole row, and ran that far past the panel's edge (issue 57). The row's
+/// right-hand edge is pinned by [`field_row`] before anything is drawn in it,
+/// which is what makes this exact.
+fn room_left(ui: &egui::Ui) -> f32 {
+    (ui.max_rect().right() - ui.cursor().left()).max(0.0)
+}
+
+/// The width a label takes at the size the panel writes its asides in, plus the
+/// gap before it -- what a control has to leave behind for a suffix.
+fn suffix_room(ui: &egui::Ui, text: &str) -> f32 {
+    if text.is_empty() {
+        return 0.0;
+    }
+    let width = ui.fonts(|fonts| {
+        fonts.layout_no_wrap(text.to_string(), egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO).size().x
+    });
+    width + ui.spacing().item_spacing.x
+}
+
 /// A width a control would like, capped at what the row actually has left.
 fn fits(ui: &egui::Ui, wanted: f32) -> f32 {
-    wanted.min(ui.available_width()).max(48.0)
+    wanted.min(room_left(ui)).max(48.0)
 }
 
 /// Whether the panel is too narrow for a label column beside the fields.
@@ -116,7 +145,13 @@ fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(
         });
         return;
     }
+    // The row's right-hand edge, fixed before anything is laid out inside it. A
+    // wrapped horizontal ui lets its `max_rect` grow to hold whatever overflowed
+    // it, so a row that ran off the panel once went on doing so for as long as
+    // the panel was open. Pinned here, it cannot, and `room_left` is exact.
+    let right = ui.max_rect().right().min(ui.clip_rect().right() - EDGE_PAD);
     ui.horizontal_wrapped(|ui| {
+        ui.set_max_width((right - ui.max_rect().left()).max(LABEL_WIDTH));
         let name = row_label(ui, label);
         if !hover.is_empty() {
             name.on_hover_text(hover);
@@ -675,8 +710,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
                         ParamKind::Angle { .. } => "deg",
                         _ => "",
                     };
-                    let suffix_width = if suffix.is_empty() { 0.0 } else { 26.0 };
-                    let field_width = (ui.available_width() - suffix_width).max(40.0);
+                    let field_width = (room_left(ui) - suffix_room(ui, suffix)).max(40.0);
                     let field_id = ui.id().with((id, param.key));
                     // With several nodes selected, a field shows the value they
                     // agree on and an em dash when they do not.
@@ -969,7 +1003,7 @@ fn axis_row(
         // The panel's own edge decides how much there is to share out, never the
         // widest row above -- one row wide enough to overflow would otherwise
         // take Z with it.
-        let available = ui.available_width().min(ui.clip_rect().right() - ui.cursor().left());
+        let available = room_left(ui);
         let chips = 3.0 * (theme::AXIS_CHIP_WIDTH + ui.spacing().item_spacing.x);
         let gaps = 2.0 * ui.spacing().item_spacing.x;
         let each = (available - chips - gaps) / 3.0;

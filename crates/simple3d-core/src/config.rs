@@ -287,6 +287,11 @@ pub struct AppSettings {
     pub last_export_dir: Option<PathBuf>,
     pub last_export_format: String,
     pub last_export_scale: f64,
+    /// How the last export decided its bodies, by `BodyMode::id`. Newer than
+    /// the settings file, so absent means the single merged body an export
+    /// always used to write.
+    #[serde(default)]
+    pub last_export_bodies: String,
     pub recent_files: Vec<PathBuf>,
 }
 
@@ -310,6 +315,7 @@ impl Default for AppSettings {
             // 3MF by default, because it records units.
             last_export_format: "3mf".to_string(),
             last_export_scale: 1.0,
+            last_export_bodies: "one".to_string(),
             recent_files: Vec::new(),
         }
     }

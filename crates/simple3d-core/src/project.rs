@@ -286,6 +286,38 @@ mod tests {
     }
 
     #[test]
+    fn export_bodies_survive_the_file_so_a_re_export_only_needs_what_changed() {
+        // Issue 58: the whole point of choosing the bodies is not having to
+        // choose them again. They live on the nodes, so saving carries them.
+        use crate::scene::{ExportBody, GroupOp};
+
+        let mut scene = sample();
+        let root = scene.root();
+        let first = scene.node(root).children[0];
+        let group = scene.add_group(GroupOp::Union, root, 1);
+        let inner = scene.add_primitive("box", group, 0).expect("the box is in the registry");
+        scene.set_export_body(first, Some(ExportBody::Shared(2)));
+        scene.set_export_body(group, Some(ExportBody::Split));
+        scene.set_export_body(inner, Some(ExportBody::Shared(2)));
+
+        let text = to_string(&scene);
+        let back = from_str(&text).expect("it should load again");
+        let first = back.node(back.root()).children[0];
+        let group = back.node(back.root()).children[1];
+        let inner = back.node(group).children[0];
+        assert_eq!(back.node(first).export_body, Some(ExportBody::Shared(2)));
+        assert_eq!(back.node(group).export_body, Some(ExportBody::Split));
+        assert_eq!(back.node(inner).export_body, Some(ExportBody::Shared(2)), "the mark inside the group was lost");
+    }
+
+    #[test]
+    fn a_scene_nobody_has_grouped_writes_no_export_body_at_all() {
+        // A file written by this version has to diff cleanly against one
+        // written before export bodies existed.
+        assert!(!to_string(&sample()).contains("export_body"));
+    }
+
+    #[test]
     fn a_colour_that_is_not_a_colour_loads_as_unpainted() {
         // A hand-edited or truncated value must not fail the whole file.
         let text = to_string(&sample()).replace("\"visible\": true", "\"visible\": true, \"colour\": \"nonsense\"");

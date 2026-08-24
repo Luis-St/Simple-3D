@@ -47,6 +47,9 @@ fn write_mesh(path: &Path, mesh: &Arc<simple3d_geom::Mesh>) {
         scale: 1.0,
         unit: simple3d_export::Unit3mf::Millimeter,
         allow_invalid: false,
+        // One file per group here, so there is never more than one object in a
+        // file to keep apart.
+        bodies: simple3d_export::BodyMode::One,
     };
     let mut progress = |_: f32| true;
     match simple3d_export::write(path, mesh, &options, &mut progress) {

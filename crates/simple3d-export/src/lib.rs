@@ -75,6 +75,62 @@ impl Format {
     pub fn carries_units(self) -> bool {
         self == Format::ThreeMf
     }
+
+    /// Whether the format can hold several named objects rather than one body.
+    /// 3MF has `<object>` and `<build><item>`; STL is a bag of triangles, and
+    /// OBJ and PLY have no notion a slicer would read back as separate parts,
+    /// so for those an export is one mesh whatever the option says.
+    pub fn keeps_objects_separate(self) -> bool {
+        self == Format::ThreeMf
+    }
+}
+
+/// How an export decides what its objects are (issue 58). Only a format that
+/// [`Format::keeps_objects_separate`] can act on anything but [`BodyMode::One`];
+/// for the rest an export is one mesh whatever this says.
+///
+/// The writer only ever sees the difference between "one body" and "the parts I
+/// was handed". Which parts those are is the caller's decision, and what the
+/// other two modes name.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BodyMode {
+    /// Everything merged into a single solid, as an export always was.
+    #[default]
+    One,
+    /// One object per top-level shape or group.
+    TopLevel,
+    /// One object per body the user has grouped the scene into.
+    Selected,
+}
+
+impl BodyMode {
+    pub const ALL: [BodyMode; 3] = [BodyMode::One, BodyMode::TopLevel, BodyMode::Selected];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            BodyMode::One => "One body",
+            BodyMode::TopLevel => "Top level bodies",
+            BodyMode::Selected => "User selected bodies",
+        }
+    }
+
+    /// A stable identifier for remembering the user's last choice.
+    pub fn id(self) -> &'static str {
+        match self {
+            BodyMode::One => "one",
+            BodyMode::TopLevel => "top_level",
+            BodyMode::Selected => "selected",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<BodyMode> {
+        BodyMode::ALL.iter().copied().find(|mode| mode.id() == id)
+    }
+
+    /// Whether this mode keeps the parts it was handed apart.
+    pub fn separates(self) -> bool {
+        self != BodyMode::One
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -89,11 +145,21 @@ pub struct Options {
     /// Skip the manifold check. Only for a user who has read the warning and
     /// chosen to write the file anyway.
     pub allow_invalid: bool,
+    /// What the objects of the export are (issue 58). Only a caller that passes
+    /// more than one [`Part`] has anything to separate, and only a
+    /// [`Format::keeps_objects_separate`] format can hold it.
+    pub bodies: BodyMode,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { format: Format::ThreeMf, scale: 1.0, unit: Unit3mf::Millimeter, allow_invalid: false }
+        Options {
+            format: Format::ThreeMf,
+            scale: 1.0,
+            unit: Unit3mf::Millimeter,
+            allow_invalid: false,
+            bodies: BodyMode::One,
+        }
     }
 }
 
@@ -191,18 +257,98 @@ pub fn signed_volume(mesh: &Mesh) -> f64 {
     total / 6.0
 }
 
-/// Write `mesh` to `path`. The mesh is welded and scaled first, verified unless
-/// the caller opted out, then written to a temporary file and renamed into place.
+/// One object of an export: a mesh and the name of the node it came from.
+///
+/// A single-body export is one unnamed part, which is what [`write`] makes;
+/// [`write_parts`] is what an export that keeps its objects apart passes
+/// several of. The name only reaches the file for a format that has somewhere
+/// to put it.
+#[derive(Clone, Copy, Debug)]
+pub struct Part<'a> {
+    pub name: &'a str,
+    pub mesh: &'a Mesh,
+}
+
+impl<'a> Part<'a> {
+    /// The whole export as one part, with no name to give it.
+    pub fn whole(mesh: &'a Mesh) -> Part<'a> {
+        Part { name: "", mesh }
+    }
+}
+
+/// Write `mesh` to `path` as a single body. The mesh is welded and scaled
+/// first, verified unless the caller opted out, then written to a temporary
+/// file and renamed into place.
 pub fn write(path: &Path, mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<(), ExportError> {
-    if mesh.triangle_count() == 0 {
+    write_one(path, mesh, options, progress)
+}
+
+/// Write `parts` to `path`, each as its own object where the format and the
+/// options both allow it (issue 58) and merged into one body otherwise.
+///
+/// Separating them is not just a matter of how the file is laid out: merged,
+/// the parts are welded together and verified as one surface, so two objects
+/// that touch are a single watertight solid. Kept apart, each one is welded and
+/// verified on its own -- which is stricter, since a part that is only closed
+/// because its neighbour fills a gap is now reported.
+pub fn write_parts(
+    path: &Path,
+    parts: &[Part<'_>],
+    options: &Options,
+    progress: Progress<'_>,
+) -> Result<(), ExportError> {
+    let separate = options.bodies.separates() && options.format.keeps_objects_separate();
+    if !separate || parts.len() < 2 {
+        let mut merged = Mesh::new();
+        for part in parts {
+            merged.append(part.mesh);
+        }
+        return write_one(path, &merged, options, progress);
+    }
+
+    if parts.iter().all(|part| part.mesh.triangle_count() == 0) {
         return Err(ExportError::Empty);
     }
     if !progress(0.0) {
         return Err(ExportError::Cancelled);
     }
 
-    // Welding makes the vertex count meaningful for the indexed formats and is
-    // what lets the manifold check see a connected surface.
+    let mut prepared: Vec<(String, Mesh)> = Vec::with_capacity(parts.len());
+    let mut problems = Vec::new();
+    for (i, part) in parts.iter().enumerate() {
+        if part.mesh.triangle_count() == 0 {
+            continue;
+        }
+        let mesh = prepare(part.mesh, options);
+        if !options.allow_invalid {
+            // The node's own name in front of every problem: with several
+            // objects in one file, "the mesh is not watertight" on its own does
+            // not say which one to go and fix.
+            problems.extend(verify(&mesh).into_iter().map(|problem| format!("{}: {problem}", part.name)));
+        }
+        prepared.push((part.name.to_string(), mesh));
+        if !progress(0.2 * ((i + 1) as f32 / parts.len() as f32)) {
+            return Err(ExportError::Cancelled);
+        }
+    }
+    if !problems.is_empty() {
+        return Err(ExportError::Invalid(problems));
+    }
+
+    let borrowed: Vec<Part<'_>> = prepared.iter().map(|(name, mesh)| Part { name, mesh }).collect();
+    let bytes = three_mf(&borrowed, options, progress)?;
+    if !progress(0.9) {
+        return Err(ExportError::Cancelled);
+    }
+    write_atomically(path, &bytes)?;
+    progress(1.0);
+    Ok(())
+}
+
+/// Welding makes the vertex count meaningful for the indexed formats and is
+/// what lets the manifold check see a connected surface; the export scale is
+/// applied in the same pass, so nothing downstream has to know about it.
+fn prepare(mesh: &Mesh, options: &Options) -> Mesh {
     let mut prepared = mesh.weld();
     if (options.scale - 1.0).abs() > f64::EPSILON {
         let scale = options.scale;
@@ -210,6 +356,18 @@ pub fn write(path: &Path, mesh: &Mesh, options: &Options, progress: Progress<'_>
             *p = *p * scale;
         }
     }
+    prepared
+}
+
+fn write_one(path: &Path, mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<(), ExportError> {
+    if mesh.triangle_count() == 0 {
+        return Err(ExportError::Empty);
+    }
+    if !progress(0.0) {
+        return Err(ExportError::Cancelled);
+    }
+
+    let prepared = prepare(mesh, options);
     if !progress(0.1) {
         return Err(ExportError::Cancelled);
     }
@@ -225,7 +383,7 @@ pub fn write(path: &Path, mesh: &Mesh, options: &Options, progress: Progress<'_>
     }
 
     let bytes = match options.format {
-        Format::ThreeMf => three_mf(&prepared, options, progress)?,
+        Format::ThreeMf => three_mf(&[Part::whole(&prepared)], options, progress)?,
         Format::StlBinary => stl_binary(&prepared, progress)?,
         Format::StlAscii => stl_ascii(&prepared, progress)?,
         Format::Obj => obj(&prepared, progress)?,
@@ -284,37 +442,76 @@ fn coord(v: f64) -> String {
     s
 }
 
-/// The distinct colours the mesh's faces are painted, in the order they first
-/// appear, together with each triangle's index into that list. Index 0 is
-/// always the unpainted default, so an unpainted mesh yields a list of one and
-/// nothing downstream has to special-case it.
-fn colour_table(mesh: &Mesh) -> (Vec<[u8; 3]>, Vec<usize>) {
+/// The distinct colours the faces are painted, in the order they first appear,
+/// together with each triangle's index into that list -- one list per mesh, in
+/// the order the meshes were given. Index 0 is always the unpainted default, so
+/// an unpainted model yields a list of one and nothing downstream has to
+/// special-case it.
+///
+/// The table spans every mesh because the file has one colour group for the
+/// whole model: two objects painted the same colour name the same entry.
+fn colour_table(meshes: &[&Mesh]) -> (Vec<[u8; 3]>, Vec<Vec<usize>>) {
     // The colour an unpainted surface is given in the file. 3MF has no "no
     // colour" for a face inside a coloured object, so this is the neutral the
     // viewport would have drawn.
     const DEFAULT: [u8; 3] = [0x9A, 0xA4, 0xB2];
     let mut colours = vec![DEFAULT];
-    let mut per_triangle = Vec::with_capacity(mesh.indices.len());
-    for i in 0..mesh.indices.len() {
-        let index = match tag_colour(mesh.tag(i)) {
-            None => 0,
-            Some(rgb) => colours.iter().position(|c| *c == rgb).unwrap_or_else(|| {
-                colours.push(rgb);
-                colours.len() - 1
-            }),
-        };
-        per_triangle.push(index);
+    let mut per_mesh = Vec::with_capacity(meshes.len());
+    for mesh in meshes {
+        let mut per_triangle = Vec::with_capacity(mesh.indices.len());
+        for i in 0..mesh.indices.len() {
+            let index = match tag_colour(mesh.tag(i)) {
+                None => 0,
+                Some(rgb) => colours.iter().position(|c| *c == rgb).unwrap_or_else(|| {
+                    colours.push(rgb);
+                    colours.len() - 1
+                }),
+            };
+            per_triangle.push(index);
+        }
+        per_mesh.push(per_triangle);
     }
-    (colours, per_triangle)
+    (colours, per_mesh)
 }
 
-fn three_mf(mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<Vec<u8>, ExportError> {
-    let (colours, triangle_colour) = colour_table(mesh);
+/// XML text escaping, for the one place a name the user typed reaches a file.
+fn escape_xml(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            // A control character is not valid XML 1.0 text at all; the file
+            // has to stay parseable whatever a node was called.
+            c if (c as u32) < 0x20 && c != '\t' && c != '\n' && c != '\r' => out.push(' '),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The 3MF document for `parts`: one `<object>` each, one `<item>` each in the
+/// build, and one colour group for the model if anything in it is painted.
+///
+/// Object ids run 1..=n so a single-part model is written exactly as it always
+/// was, and the colour group takes the id after the last object -- it is
+/// emitted first all the same, because a resource has to be declared before the
+/// object that names it.
+fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress<'_>) -> Result<Vec<u8>, ExportError> {
+    let meshes: Vec<&Mesh> = parts.iter().map(|part| part.mesh).collect();
+    let (colours, triangle_colour) = colour_table(&meshes);
     // Only a painted model carries the materials extension: an unpainted one
     // is written exactly as it was before colours existed, so nothing that
     // reads plain 3MF has to cope with a namespace it does not need.
     let painted = colours.len() > 1;
-    let mut model = String::with_capacity(mesh.positions.len() * 48 + mesh.indices.len() * 40);
+    let colour_group_id = parts.len() + 1;
+    let total_vertices: usize = meshes.iter().map(|m| m.positions.len()).sum();
+    let total_triangles: usize = meshes.iter().map(|m| m.indices.len()).sum();
+
+    let mut model = String::with_capacity(total_vertices * 48 + total_triangles * 40);
     model.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     model.push_str(&format!(
         "<model unit=\"{}\" xml:lang=\"en-US\" \
@@ -327,38 +524,54 @@ fn three_mf(mesh: &Mesh, options: &Options, progress: Progress<'_>) -> Result<Ve
         // One colour group holding every colour in the model; each triangle
         // then names its own entry. Not declared as a required extension: a
         // reader that ignores colour still gets the whole solid.
-        model.push_str("  <m:colorgroup id=\"2\">\n");
+        model.push_str(&format!("  <m:colorgroup id=\"{colour_group_id}\">\n"));
         for rgb in &colours {
             model.push_str(&format!("   <m:color color=\"#{:02X}{:02X}{:02X}\"/>\n", rgb[0], rgb[1], rgb[2]));
         }
         model.push_str("  </m:colorgroup>\n");
     }
-    model.push_str(&format!(
-        "  <object id=\"1\" type=\"model\"{}>\n   <mesh>\n    <vertices>\n",
-        if painted { " pid=\"2\" pindex=\"0\"" } else { "" }
-    ));
-    for (i, p) in mesh.positions.iter().enumerate() {
-        model.push_str(&format!("     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>\n", coord(p.x), coord(p.y), coord(p.z)));
-        if i % 4096 == 0 && !progress(0.2 + 0.4 * (i as f32 / mesh.positions.len().max(1) as f32)) {
-            return Err(ExportError::Cancelled);
+
+    // Progress across every part together, so the bar means the same thing
+    // whether one object is being written or twenty.
+    let mut vertices_done = 0usize;
+    let mut triangles_done = 0usize;
+    for (index, part) in parts.iter().enumerate() {
+        let mesh = part.mesh;
+        let name = if part.name.is_empty() { String::new() } else { format!(" name=\"{}\"", escape_xml(part.name)) };
+        model.push_str(&format!(
+            "  <object id=\"{}\" type=\"model\"{name}{}>\n   <mesh>\n    <vertices>\n",
+            index + 1,
+            if painted { format!(" pid=\"{colour_group_id}\" pindex=\"0\"") } else { String::new() }
+        ));
+        for (i, p) in mesh.positions.iter().enumerate() {
+            model.push_str(&format!("     <vertex x=\"{}\" y=\"{}\" z=\"{}\"/>\n", coord(p.x), coord(p.y), coord(p.z)));
+            if i % 4096 == 0 && !progress(0.2 + 0.4 * ((vertices_done + i) as f32 / total_vertices.max(1) as f32)) {
+                return Err(ExportError::Cancelled);
+            }
         }
-    }
-    model.push_str("    </vertices>\n    <triangles>\n");
-    for (i, t) in mesh.indices.iter().enumerate() {
-        let paint = if painted {
-            // One index for the whole triangle: p1 alone means a flat face,
-            // which is what a painted body has.
-            format!(" p1=\"{}\"", triangle_colour[i])
-        } else {
-            String::new()
-        };
-        model.push_str(&format!("     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"{paint}/>\n", t[0], t[1], t[2]));
-        if i % 4096 == 0 && !progress(0.6 + 0.3 * (i as f32 / mesh.indices.len().max(1) as f32)) {
-            return Err(ExportError::Cancelled);
+        vertices_done += mesh.positions.len();
+        model.push_str("    </vertices>\n    <triangles>\n");
+        for (i, t) in mesh.indices.iter().enumerate() {
+            let paint = if painted {
+                // One index for the whole triangle: p1 alone means a flat face,
+                // which is what a painted body has.
+                format!(" p1=\"{}\"", triangle_colour[index][i])
+            } else {
+                String::new()
+            };
+            model.push_str(&format!("     <triangle v1=\"{}\" v2=\"{}\" v3=\"{}\"{paint}/>\n", t[0], t[1], t[2]));
+            if i % 4096 == 0 && !progress(0.6 + 0.3 * ((triangles_done + i) as f32 / total_triangles.max(1) as f32)) {
+                return Err(ExportError::Cancelled);
+            }
         }
+        triangles_done += mesh.indices.len();
+        model.push_str("    </triangles>\n   </mesh>\n  </object>\n");
     }
-    model.push_str("    </triangles>\n   </mesh>\n  </object>\n </resources>\n");
-    model.push_str(" <build>\n  <item objectid=\"1\"/>\n </build>\n</model>\n");
+    model.push_str(" </resources>\n <build>\n");
+    for index in 0..parts.len() {
+        model.push_str(&format!("  <item objectid=\"{}\"/>\n", index + 1));
+    }
+    model.push_str(" </build>\n</model>\n");
 
     const CONTENT_TYPES: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
         <Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">\
@@ -706,7 +919,7 @@ mod tests {
     fn an_unpainted_model_is_written_without_the_colour_extension() {
         // Nothing that reads plain 3MF should have to cope with a namespace a
         // model does not use.
-        let bytes = three_mf(&plate(), &Options::default(), &mut no_progress()).unwrap();
+        let bytes = three_mf(&[Part::whole(&plate())], &Options::default(), &mut no_progress()).unwrap();
         let text = String::from_utf8_lossy(&bytes).to_string();
         assert!(!text.contains("colorgroup"));
         assert!(!text.contains("xmlns:m="));
@@ -722,7 +935,7 @@ mod tests {
         other.set_tag(simple3d_geom::colour_tag([0xFF, 0x00, 0x00]));
         mesh.append(&other);
 
-        let bytes = three_mf(&mesh, &Options::default(), &mut no_progress()).unwrap();
+        let bytes = three_mf(&[Part::whole(&mesh)], &Options::default(), &mut no_progress()).unwrap();
         let text = String::from_utf8_lossy(&bytes).to_string();
         assert!(text.contains("xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\""));
         assert!(text.contains("<m:color color=\"#204080\"/>"));
@@ -736,15 +949,105 @@ mod tests {
     }
 
     #[test]
+    fn separate_objects_write_one_component_each_with_its_node_s_name() {
+        // Issue 58: a 3MF whose objects are all one component gives a slicer
+        // nothing to select. Two boxes, well apart, exported separately.
+        let left = plate();
+        let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        let parts = [Part { name: "Base plate", mesh: &left }, Part { name: "Peg", mesh: &right }];
+        let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
+
+        let bytes = three_mf(&parts, &options, &mut no_progress()).unwrap();
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        assert_eq!(text.matches("<object id=").count(), 2, "{text}");
+        assert!(text.contains("<object id=\"1\" type=\"model\" name=\"Base plate\">"), "{text}");
+        assert!(text.contains("<object id=\"2\" type=\"model\" name=\"Peg\">"), "{text}");
+        // Both have to be in the build, or a slicer loads an empty plate.
+        assert!(text.contains("<item objectid=\"1\"/>"), "{text}");
+        assert!(text.contains("<item objectid=\"2\"/>"), "{text}");
+        // Every triangle of both is there: the split is in the file's structure,
+        // not in what it holds.
+        assert_eq!(
+            text.matches("<triangle ").count(),
+            left.weld().indices.len() + right.weld().indices.len(),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_same_objects_merge_into_one_component_when_the_option_is_off() {
+        // The other half of the assertion above: without the option the file is
+        // exactly the single-object one it always was.
+        let left = plate();
+        let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        let parts = [Part { name: "Base plate", mesh: &left }, Part { name: "Peg", mesh: &right }];
+        let path = temp_dir().join("merged.3mf");
+        write_parts(&path, &parts, &Options::default(), &mut no_progress()).unwrap();
+        let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_string();
+        assert_eq!(text.matches("<object id=").count(), 1, "{text}");
+        assert_eq!(text.matches("<item objectid=").count(), 1, "{text}");
+        assert!(!text.contains("name=\"Base plate\""), "a merged body has no part names to give");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_separated_object_is_verified_on_its_own_and_named_when_it_fails() {
+        // Merged, a hole in one body can be hidden by the surface of another;
+        // kept apart it cannot, and the message has to say which object to fix.
+        let good = plate();
+        let mut broken = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        broken.indices.pop();
+        broken.tags.pop();
+        let parts = [Part { name: "Base plate", mesh: &good }, Part { name: "Peg", mesh: &broken }];
+        let path = temp_dir().join("broken-part.3mf");
+        let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
+        let err = write_parts(&path, &parts, &options, &mut no_progress()).unwrap_err();
+        match err {
+            ExportError::Invalid(problems) => {
+                assert!(problems.iter().all(|p| p.starts_with("Peg: ")), "{problems:?}");
+            }
+            other => panic!("expected the broken part to be reported, got {other:?}"),
+        }
+        assert!(!path.exists(), "a refused export left a file behind");
+    }
+
+    #[test]
+    fn separated_objects_share_one_colour_group() {
+        // Two objects painted the same colour name the same entry, and the
+        // group's id sits clear of the objects' own ids.
+        let mut left = plate();
+        left.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
+        let mut right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        right.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
+        let parts = [Part { name: "A", mesh: &left }, Part { name: "B", mesh: &right }];
+        let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
+        let text = String::from_utf8_lossy(&three_mf(&parts, &options, &mut no_progress()).unwrap()).to_string();
+        assert_eq!(text.matches("<m:colorgroup").count(), 1, "{text}");
+        assert_eq!(text.matches("<m:color ").count(), 2, "one default and one painted colour: {text}");
+        assert_eq!(text.matches("pid=\"3\" pindex=\"0\"").count(), 2, "{text}");
+        assert_eq!(text.matches(" p1=\"1\"").count(), left.weld().indices.len() + right.weld().indices.len());
+    }
+
+    #[test]
+    fn a_name_with_xml_in_it_cannot_break_the_document() {
+        let mesh = plate();
+        let other = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
+        let parts = [Part { name: "<Bracket & \"clip\">", mesh: &mesh }, Part { name: "B", mesh: &other }];
+        let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
+        let text = String::from_utf8_lossy(&three_mf(&parts, &options, &mut no_progress()).unwrap()).to_string();
+        assert!(text.contains("name=\"&lt;Bracket &amp; &quot;clip&quot;&gt;\""), "{text}");
+    }
+
+    #[test]
     fn the_colour_table_lists_each_colour_once_in_the_order_it_appears() {
         let mut mesh = plate();
         mesh.set_tag(simple3d_geom::colour_tag([1, 2, 3]));
         let mut second = plate().translated(Vec3::new(100.0, 0.0, 0.0));
         second.set_tag(simple3d_geom::colour_tag([1, 2, 3]));
         mesh.append(&second);
-        let (colours, per_triangle) = colour_table(&mesh);
+        let (colours, per_mesh) = colour_table(&[&mesh]);
         assert_eq!(colours, vec![[0x9A, 0xA4, 0xB2], [1, 2, 3]]);
-        assert!(per_triangle.iter().all(|&i| i == 1));
+        assert!(per_mesh[0].iter().all(|&i| i == 1));
     }
 
     #[test]

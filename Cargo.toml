@@ -13,7 +13,7 @@ members = [
 version = "0.0.0"
 edition = "2021"
 rust-version = "1.97"
-license = "MIT"
+license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/Luis-St/Simple-3D"
 
 [profile.release]

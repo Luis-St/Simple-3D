@@ -65,6 +65,24 @@ pub enum Modal {
     ConfirmQuit,
 }
 
+/// What the export dialog was last asked to count, so the answer can be reused
+/// until something it depends on changes.
+#[derive(Clone, PartialEq)]
+pub(crate) struct ExportPreviewKey {
+    pub selection_only: bool,
+    pub selection: Vec<NodeId>,
+    pub generation: u64,
+    pub bodies: simple3d_export::BodyMode,
+    pub marks: Vec<(NodeId, simple3d_core::scene::ExportBody)>,
+}
+
+/// What an export is about to write.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ExportSummary {
+    pub triangles: usize,
+    pub bodies: usize,
+}
+
 pub struct App {
     pub scene: Scene,
     pub history: History,
@@ -74,6 +92,16 @@ pub struct App {
     /// The current selection, in click order. The last entry is the primary one
     /// the property editor and the manipulator act on.
     pub selection: Vec<NodeId>,
+    /// The row a Shift+click measures its range from: the last outliner row
+    /// clicked without Shift (issue 60).
+    pub(crate) selection_anchor: Option<NodeId>,
+    /// The row the last outliner click landed on, whatever modifiers it had.
+    ///
+    /// egui decides a double click from the delay between two clicks alone --
+    /// the second one does not have to be on the widget the first was -- so two
+    /// quick clicks on different rows used to open a rename on the second one
+    /// (issue 59). A rename asks this whether both clicks were on the same row.
+    pub(crate) outliner_last_click: Option<NodeId>,
     pub clipboard: Option<Clip>,
 
     pub worker: EvalWorker,
@@ -150,11 +178,14 @@ pub struct App {
     pub export_format: Format,
     pub export_scale: String,
     pub export_selection_only: bool,
+    /// What the objects of an export are (issue 58). Only 3MF can hold more
+    /// than one, so the dialog offers the choice only there.
+    pub export_bodies: simple3d_export::BodyMode,
     /// What the export dialog last counted, and what it counted it for: the
     /// contents choice, the selection and the evaluation it was measured
     /// against. Counting a selection means evaluating it, which must not happen
     /// on every frame the dialog is open.
-    pub(crate) export_preview: Option<(bool, Vec<NodeId>, u64, usize)>,
+    pub(crate) export_preview: Option<(ExportPreviewKey, ExportSummary)>,
 
     pub modal: Modal,
     pub error_title: String,
@@ -227,6 +258,8 @@ impl App {
             paint_run_colours: None,
             keymap,
             selection: Vec::new(),
+            selection_anchor: None,
+            outliner_last_click: None,
             clipboard: None,
             worker: EvalWorker::spawn(),
             evaluated: Evaluated {
@@ -272,6 +305,7 @@ impl App {
             export_format: Format::ThreeMf,
             export_scale: "1".to_string(),
             export_selection_only: false,
+            export_bodies: simple3d_export::BodyMode::One,
             export_preview: None,
             modal: Modal::None,
             error_title: String::new(),
@@ -289,6 +323,7 @@ impl App {
         };
         app.export_format = Format::from_id(&app.settings.last_export_format).unwrap_or(Format::ThreeMf);
         app.export_scale = simple3d_core::unit::format_number(app.settings.last_export_scale, 4);
+        app.export_bodies = simple3d_export::BodyMode::from_id(&app.settings.last_export_bodies).unwrap_or_default();
         app.refresh_library();
         match open {
             // Opening a project by passing its path on the command line, so file
@@ -322,6 +357,7 @@ impl App {
 
     pub fn select_only(&mut self, id: NodeId) {
         self.selection = vec![id];
+        self.selection_anchor = Some(id);
         self.on_selection_changed();
     }
 
@@ -330,6 +366,43 @@ impl App {
             self.selection.remove(at);
         } else {
             self.selection.push(id);
+        }
+        // Ctrl+click puts the anchor on the row it touched, so a Shift+click
+        // after it measures from where the pointer last was rather than from
+        // wherever a range happened to start (issue 60).
+        self.selection_anchor = Some(id);
+        self.on_selection_changed();
+    }
+
+    /// Select everything between the anchor and `id`, over `rows` -- the rows
+    /// the outliner is actually showing, so a range never reaches into a
+    /// collapsed group the user cannot see (issue 60).
+    ///
+    /// Replacing the selection rather than adding to it is what Shift+click
+    /// means in every list: the range is the selection, and Shift+clicking
+    /// somewhere else re-measures it from the same anchor instead of piling
+    /// ranges up. The anchor itself does not move, which is what lets a range
+    /// be adjusted by clicking again.
+    ///
+    /// The scene root is left out: it is every other row's ancestor, and a
+    /// selection holding it means "everything" to every command that reads one.
+    pub fn select_range_to(&mut self, id: NodeId, rows: &[NodeId]) {
+        let root = self.scene.root();
+        let anchor = match self.selection_anchor {
+            Some(anchor) if anchor != id && rows.contains(&anchor) => anchor,
+            // Nothing to measure from: a Shift+click with no anchor is a plain
+            // click, and sets one.
+            _ => return self.select_only(id),
+        };
+        let (Some(from), Some(to)) =
+            (rows.iter().position(|row| *row == anchor), rows.iter().position(|row| *row == id))
+        else {
+            return self.select_only(id);
+        };
+        let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
+        self.selection = rows[lo..=hi].iter().copied().filter(|row| *row != root).collect();
+        if self.selection.is_empty() {
+            self.selection = vec![id];
         }
         self.on_selection_changed();
     }
@@ -1355,18 +1428,77 @@ impl App {
         }
     }
 
-    /// The triangle count the export dialog promises, for whichever contents are
-    /// chosen -- the number that is then verified as watertight.
-    pub fn export_triangle_count(&mut self) -> usize {
-        let key = (self.export_selection_only, self.selection.clone(), self.evaluation_generation);
-        if let Some((only, selection, generation, count)) = &self.export_preview {
-            if (*only, selection, *generation) == (key.0, &key.1, key.2) {
-                return *count;
+    /// The objects an export keeps apart: the scene's own top-level nodes, or
+    /// the top-level nodes of the selection.
+    ///
+    /// A node is one object however deep it goes -- a boolean group is the
+    /// shape it evaluates to, the same body the viewport draws, not its
+    /// operands. Evaluated fresh rather than merged out of `Evaluated`, for the
+    /// reason `export_mesh` gives.
+    pub fn export_parts(&self) -> Vec<simple3d_core::eval::Part> {
+        let roots = self.export_roots();
+        let frames = &self.evaluated.node_frames;
+        match self.export_body_mode() {
+            simple3d_export::BodyMode::One => Vec::new(),
+            simple3d_export::BodyMode::TopLevel => simple3d_core::eval::part_meshes(&self.scene, &roots, frames),
+            simple3d_export::BodyMode::Selected => simple3d_core::eval::body_meshes(&self.scene, &roots, frames),
+        }
+    }
+
+    /// What this export's bodies really are: the mode chosen, unless the format
+    /// has nowhere to put more than one, in which case there is only ever the
+    /// single merged body.
+    pub fn export_body_mode(&self) -> simple3d_export::BodyMode {
+        if self.export_format.keeps_objects_separate() {
+            self.export_bodies
+        } else {
+            simple3d_export::BodyMode::One
+        }
+    }
+
+    /// The nodes an export starts from: the scene's own top level, or the
+    /// top-level nodes of the selection. Also what the body picker's tree
+    /// shows, and where `Scene::body_lock` stops walking upwards.
+    pub fn export_roots(&self) -> Vec<NodeId> {
+        if self.export_selection_only {
+            self.top_level_selection()
+        } else {
+            self.scene.node(self.scene.root()).children.clone()
+        }
+    }
+
+    /// What the export dialog promises: how many triangles will be verified as
+    /// watertight, and how many bodies they will be written as.
+    ///
+    /// Separated bodies are counted unmerged, which is what will be written:
+    /// merging two touching bodies drops the triangles buried inside the join,
+    /// and keeping them apart does not.
+    ///
+    /// Cached, because working it out in the user-chosen mode means unioning
+    /// every body -- far too much to do on each frame the window is open. The
+    /// key carries the export body marks as well as the evaluation, since
+    /// regrouping changes the answer without changing any geometry.
+    pub fn export_summary(&mut self) -> ExportSummary {
+        let key = ExportPreviewKey {
+            selection_only: self.export_selection_only,
+            selection: self.selection.clone(),
+            generation: self.evaluation_generation,
+            bodies: self.export_body_mode(),
+            marks: self.scene.export_body_marks(),
+        };
+        if let Some((cached, summary)) = &self.export_preview {
+            if *cached == key {
+                return *summary;
             }
         }
-        let count = self.export_mesh().triangle_count();
-        self.export_preview = Some((key.0, key.1, key.2, count));
-        count
+        let summary = if key.bodies.separates() {
+            let parts = self.export_parts();
+            ExportSummary { triangles: parts.iter().map(|part| part.mesh.triangle_count()).sum(), bodies: parts.len() }
+        } else {
+            ExportSummary { triangles: self.export_mesh().triangle_count(), bodies: 1 }
+        };
+        self.export_preview = Some((key, summary));
+        summary
     }
 
     pub fn start_export(&mut self) {
@@ -1388,8 +1520,13 @@ impl App {
             self.fail("Export refused: the scene has unevaluated geometry", &detail);
             return;
         }
-        let mesh = self.export_mesh();
-        if mesh.triangle_count() == 0 {
+        let bodies = self.export_body_mode();
+        let parts: Vec<(String, std::sync::Arc<simple3d_geom::Mesh>)> = if bodies.separates() {
+            self.export_parts().into_iter().map(|part| (part.name, std::sync::Arc::new(part.mesh))).collect()
+        } else {
+            vec![(String::new(), self.export_mesh())]
+        };
+        if parts.iter().all(|(_, mesh)| mesh.triangle_count() == 0) {
             self.fail("There is nothing to export", "The scene, or the selection, has no visible geometry.");
             return;
         }
@@ -1419,14 +1556,16 @@ impl App {
         self.settings.last_export_dir = path.parent().map(|p| p.to_path_buf());
         self.settings.last_export_format = self.export_format.id().to_string();
         self.settings.last_export_scale = scale;
+        self.settings.last_export_bodies = self.export_bodies.id().to_string();
 
         let options = simple3d_export::Options {
             format: self.export_format,
             scale,
             unit: simple3d_export::Unit3mf::Millimeter,
             allow_invalid: false,
+            bodies,
         };
-        self.export_job = Some(ExportJob::spawn(path, mesh, options, EXPORT_LIMIT));
+        self.export_job = Some(ExportJob::spawn_parts(path, parts, options, EXPORT_LIMIT));
         self.modal = Modal::None;
     }
 
@@ -2495,6 +2634,232 @@ mod tests {
         let (whole_lo, whole_hi) = app.export_mesh().bounds().expect("the scene exported nothing");
         assert!((whole_lo.z - lo.z).abs() < 1e-6 && (whole_hi.z - hi.z).abs() < 1e-6);
     }
+    /// Issue 58: a 3MF used to hold the whole scene as one component, so a
+    /// slicer had nothing to pick apart. The objects an export separates are
+    /// the scene's top-level nodes, each named and each the body it evaluates
+    /// to -- a difference is its cut shape, not its two operands.
+    #[test]
+    fn separating_objects_writes_one_per_top_level_node_by_name() {
+        let mut app = app_in(temp_config_dir("export-parts"));
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        let group = app.scene.add_group(GroupOp::Difference, root, 1);
+        let base = app.scene.add_primitive("plate", group, 0).expect("the plate is in the registry");
+        let cutter = app.scene.add_primitive("box", group, 1).expect("the box is in the registry");
+        if let Some(node) = app.scene.get_mut(plate) {
+            node.name = "Lid".into();
+            node.position = Vec3::new(200.0, 0.0, 0.0);
+        }
+        if let Some(node) = app.scene.get_mut(group) {
+            node.name = "Drilled base".into();
+        }
+        app.reevaluate_for_test();
+        app.export_bodies = simple3d_export::BodyMode::TopLevel;
+
+        let parts = app.export_parts();
+        let names: Vec<&str> = parts.iter().map(|part| part.name.as_str()).collect();
+        assert_eq!(names, vec!["Lid", "Drilled base"], "one object per top-level node, in the outliner's order");
+
+        // The group is its cut shape: the cutter pokes out of the plate, so a
+        // part holding the operands would be taller than the plate ever is.
+        let (plate_lo, plate_hi) = app.evaluated.node_meshes[&base].bounds().expect("the plate has bounds");
+        let (cut_lo, cut_hi) = app.evaluated.node_meshes[&cutter].bounds().expect("the cutter has bounds");
+        assert!(cut_lo.z < plate_lo.z && cut_hi.z > plate_hi.z, "this test needs a cutter taller than the plate");
+        let (lo, hi) = parts[1].mesh.bounds().expect("the group exported nothing");
+        assert!(
+            lo.z >= plate_lo.z - 1e-6 && hi.z <= plate_hi.z + 1e-6,
+            "the group's part reaches {lo:?}..{hi:?}, beyond the plate it cut -- its operands were written out"
+        );
+
+        // Each is a closed solid on its own, which is what letting the exporter
+        // verify them separately depends on.
+        for part in &parts {
+            assert!(part.mesh.manifold_issue().is_none(), "{} is not a closed solid", part.name);
+        }
+
+        // And the mode only takes effect where the format can hold it.
+        app.export_bodies = simple3d_export::BodyMode::TopLevel;
+        app.export_format = simple3d_export::Format::ThreeMf;
+        assert_eq!(app.export_body_mode(), simple3d_export::BodyMode::TopLevel);
+        app.export_format = simple3d_export::Format::StlBinary;
+        assert_eq!(
+            app.export_body_mode(),
+            simple3d_export::BodyMode::One,
+            "STL holds one body; separating them there is not a thing to promise"
+        );
+    }
+
+    /// The third export mode: the user says what shares a body, the marks live
+    /// on the nodes, and everything unmarked stays a body of its own -- so a
+    /// project nobody has grouped exports exactly as "top level bodies" does.
+    #[test]
+    fn user_selected_bodies_merge_what_is_marked_and_split_what_is_opened() {
+        use simple3d_core::scene::ExportBody;
+
+        let mut app = app_in(temp_config_dir("export-bodies"));
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        let bracket = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+        let frame = app.scene.add_group(GroupOp::Union, root, 2);
+        let left = app.scene.add_primitive("box", frame, 0).expect("the box is in the registry");
+        let right = app.scene.add_primitive("box", frame, 1).expect("the box is in the registry");
+        for (id, name, x) in
+            [(plate, "Plate", 0.0), (bracket, "Bracket", 200.0), (left, "Left rail", 0.0), (right, "Right rail", 60.0)]
+        {
+            let node = app.scene.get_mut(id).unwrap();
+            node.name = name.into();
+            node.position = Vec3::new(x, 0.0, 0.0);
+        }
+        app.scene.get_mut(frame).unwrap().name = "Frame".into();
+        app.scene.get_mut(frame).unwrap().position = Vec3::new(0.0, 300.0, 0.0);
+        app.reevaluate_for_test();
+        app.export_bodies = simple3d_export::BodyMode::Selected;
+
+        // Untouched, it is the top-level answer exactly.
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate", "Bracket", "Frame"], "an unmarked project is not the top-level grouping");
+
+        // The same number on two shapes writes them as one body, named for
+        // what is in it, and leaves the rest alone.
+        app.scene.set_export_body(plate, Some(ExportBody::Shared(1)));
+        app.scene.set_export_body(bracket, Some(ExportBody::Shared(1)));
+        let parts = app.export_parts();
+        let names: Vec<&str> = parts.iter().map(|part| part.name.as_str()).collect();
+        assert_eq!(names, vec!["Plate + Bracket", "Frame"], "the two marked shapes did not become one body");
+        // Merged, not merely appended: two solids in one object have to be one
+        // closed surface or the export refuses them.
+        assert!(parts[0].mesh.manifold_issue().is_none(), "the merged body is not a closed solid");
+
+        // Splitting a group offers what is inside it, in its place.
+        app.scene.set_export_body(frame, Some(ExportBody::Split));
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate + Bracket", "Left rail", "Right rail"], "splitting the group did not reach in");
+
+        // And a body reaches across the tree: a rail can join the plate.
+        app.scene.set_export_body(left, Some(ExportBody::Shared(1)));
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate + Bracket + Left rail", "Right rail"], "a body did not reach into the group");
+
+        // Closing the group again takes the marks inside it with it, rather
+        // than leaving one to spring back the next time it is opened.
+        app.scene.set_export_body(frame, None);
+        assert_eq!(app.scene.node(left).export_body, None, "a mark survived the group being closed over it");
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate + Bracket", "Frame"]);
+    }
+
+    /// The point of choosing the bodies is not having to choose them again: a
+    /// shape added afterwards is the only thing left to decide.
+    #[test]
+    fn a_shape_added_later_is_the_only_body_left_to_place() {
+        use simple3d_core::scene::ExportBody;
+
+        let mut app = app_in(temp_config_dir("export-bodies-reexport"));
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        let bracket = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+        app.scene.get_mut(plate).unwrap().name = "Plate".into();
+        app.scene.get_mut(bracket).unwrap().name = "Bracket".into();
+        app.scene.get_mut(bracket).unwrap().position = Vec3::new(200.0, 0.0, 0.0);
+        app.export_bodies = simple3d_export::BodyMode::Selected;
+        app.scene.set_export_body(plate, Some(ExportBody::Shared(1)));
+        app.scene.set_export_body(bracket, Some(ExportBody::Shared(1)));
+        app.reevaluate_for_test();
+        assert_eq!(app.export_parts().len(), 1, "the two marked shapes are one body");
+
+        // Modelling carries on: a new shape, and the marks that were already
+        // made still stand.
+        let lid = app.scene.add_primitive("box", root, 2).expect("the box is in the registry");
+        app.scene.get_mut(lid).unwrap().name = "Lid".into();
+        app.scene.get_mut(lid).unwrap().position = Vec3::new(400.0, 0.0, 0.0);
+        app.reevaluate_for_test();
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate + Bracket", "Lid"], "the grouping did not survive the scene changing");
+
+        // And placing it is one choice, not a re-grouping of everything.
+        app.scene.set_export_body(lid, Some(ExportBody::Shared(1)));
+        let names: Vec<String> = app.export_parts().into_iter().map(|part| part.name).collect();
+        assert_eq!(names, vec!["Plate + Bracket + Lid"]);
+    }
+
+    /// End to end, through the writer the export job really calls: the bodies
+    /// the user grouped come out as the components of the file.
+    #[test]
+    fn the_written_3mf_holds_one_named_component_per_chosen_body() {
+        use simple3d_core::scene::ExportBody;
+
+        let dir = temp_config_dir("export-bodies-file");
+        let mut app = app_in(dir.clone());
+        let root = app.scene.root();
+        let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        let bracket = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+        let lid = app.scene.add_primitive("box", root, 2).expect("the box is in the registry");
+        for (id, name, x) in [(plate, "Plate", 0.0), (bracket, "Bracket", 200.0), (lid, "Lid", 400.0)] {
+            let node = app.scene.get_mut(id).unwrap();
+            node.name = name.into();
+            node.position = Vec3::new(x, 0.0, 0.0);
+        }
+        app.reevaluate_for_test();
+        app.export_bodies = simple3d_export::BodyMode::Selected;
+        app.scene.set_export_body(plate, Some(ExportBody::Shared(1)));
+        app.scene.set_export_body(bracket, Some(ExportBody::Shared(1)));
+
+        // Exactly what `start_export` hands the export job, written by exactly
+        // the call the job makes.
+        let parts = app.export_parts();
+        let meshes: Vec<(String, simple3d_geom::Mesh)> = parts.into_iter().map(|p| (p.name, p.mesh)).collect();
+        let borrowed: Vec<simple3d_export::Part<'_>> =
+            meshes.iter().map(|(name, mesh)| simple3d_export::Part { name, mesh }).collect();
+        let options = simple3d_export::Options {
+            format: simple3d_export::Format::ThreeMf,
+            bodies: app.export_body_mode(),
+            ..Default::default()
+        };
+        let path = dir.join("bodies.3mf");
+        simple3d_export::write_parts(&path, &borrowed, &options, &mut |_| true).expect("the export should succeed");
+
+        let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_string();
+        assert_eq!(text.matches("<object id=").count(), 2, "{text}");
+        assert!(text.contains("name=\"Plate + Bracket\""), "the merged body is not named for what is in it");
+        assert!(text.contains("name=\"Lid\""), "the untouched shape lost its own body");
+        assert_eq!(text.matches("<item objectid=").count(), 2, "both bodies have to be in the build");
+    }
+
+    /// A difference is one new surface: its operands are not shapes the result
+    /// still holds, so no export can write one of them as a body.
+    #[test]
+    fn a_boolean_that_fuses_its_operands_cannot_be_split_into_them() {
+        use simple3d_core::scene::ExportBody;
+
+        let mut app = app_in(temp_config_dir("export-bodies-fused"));
+        let root = app.scene.root();
+        let cut = app.scene.add_group(GroupOp::Difference, root, 0);
+        let base = app.scene.add_primitive("plate", cut, 0).expect("the plate is in the registry");
+        let bore = app.scene.add_primitive("box", cut, 1).expect("the box is in the registry");
+        app.scene.get_mut(cut).unwrap().name = "Drilled".into();
+        app.reevaluate_for_test();
+        app.export_bodies = simple3d_export::BodyMode::Selected;
+
+        assert!(!app.scene.can_split_for_export(cut), "a difference offered to be split into its operands");
+        assert!(app.scene.can_split_for_export(app.scene.root()), "the scene's own top level is a union");
+
+        // Even asked to directly -- a file edited by hand, or a union turned
+        // into a difference after it was split -- the export writes the shape
+        // the viewport shows rather than the operands that made it.
+        app.scene.get_mut(cut).unwrap().export_body = Some(ExportBody::Split);
+        app.scene.get_mut(bore).unwrap().export_body = Some(ExportBody::Shared(2));
+        let parts = app.export_parts();
+        let names: Vec<&str> = parts.iter().map(|part| part.name.as_str()).collect();
+        assert_eq!(names, vec!["Drilled"], "the difference was taken apart into its operands");
+
+        let (plate_lo, plate_hi) = app.evaluated.node_meshes[&base].bounds().expect("the plate has bounds");
+        let (lo, hi) = parts[0].mesh.bounds().expect("the difference exported nothing");
+        assert!(
+            lo.z >= plate_lo.z - 1e-6 && hi.z <= plate_hi.z + 1e-6,
+            "the exported body reaches {lo:?}..{hi:?}, past the plate it cut"
+        );
+    }
+
     #[test]
     fn moving_among_siblings_moves_everything_that_is_selected() {
         // Issue 41: with more than one node selected, only the primary used to

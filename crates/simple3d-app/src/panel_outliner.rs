@@ -541,14 +541,31 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     // The eye and the twisty own their own clicks: pressing either must not
     // also select the row.
     if !shadowed && !eye.hovered() && !twisty_hovered {
+        // Whether the click before this one was on this same row. Read before
+        // it is overwritten below, because the second click of a double click
+        // reports both `clicked` and `double_clicked` on the one frame.
+        let same_row_again = app.outliner_last_click == Some(id);
         if response.clicked() {
-            if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+            app.outliner_last_click = Some(id);
+            let modifiers = ui.input(|i| i.modifiers);
+            // Shift extends from the anchor over the rows on screen, Ctrl (Cmd
+            // on macOS) adds or removes the one row, and a plain click starts
+            // again from it -- the three modes every list has (issue 60).
+            if modifiers.shift {
+                let rows = visible_rows(app);
+                app.select_range_to(id, &rows);
+            } else if modifiers.command {
                 app.toggle_selected(id);
             } else {
                 app.select_only(id);
             }
         }
-        if response.double_clicked() && !is_root {
+        // Both clicks have to have been on this row: egui reports a double
+        // click from the delay alone, so without this a quick click on one row
+        // followed by a click on another opened a rename on the second one
+        // (issue 59). A modifier means the two clicks were building a
+        // selection, which is not a request to rename anything either.
+        if response.double_clicked() && same_row_again && !is_root && !ui.input(|i| i.modifiers.any()) {
             app.rename = Some((id, name.clone()));
         }
         if response.drag_started() && !is_root {

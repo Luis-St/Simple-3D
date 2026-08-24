@@ -39,22 +39,25 @@ icon and MIME type that put Simple 3D in the applications menu and let a file
 manager open `.simple3d` files with it. It is built by `packaging/deb/build.sh`
 from the binary the same job produced.
 
-The `.msi` is the Windows counterpart: the same executable, installed into
-`Program Files`, with a Start menu entry and a desktop shortcut that are each
-their own feature, so either can be turned off in the installer before it runs.
-It is built from `packaging/windows/simple-3d.wxs` by the same job that uploads
-the `.exe`. Neither package replaces the portable executable, which still
-installs nothing.
+The `.msi` is the Windows counterpart: the same executable, installed wherever
+the installer's directory page is pointed at (`Program Files\Simple 3D` by
+default), with three tick boxes for what to set up alongside it — a Start menu
+entry, a desktop shortcut, and the `.simple3d` file association. Each is on by
+default and each can be turned off, before the install or on the command line
+for a silent one. It is built from `packaging/windows/simple-3d.wxs` by the same
+job that uploads the `.exe`. Neither package replaces the portable executable,
+which still installs nothing.
 
 Put a file named `portable` (or `portable.txt`) beside the executable and it
 keeps its settings there instead of in the user profile — otherwise they live in
 `%APPDATA%\Simple3D` or `$XDG_CONFIG_HOME/simple3d`.
 
 Projects are `.simple3d` files (JSON, versioned, human-readable). Passing one
-as an argument opens it, so file associations work on both platforms. The
-`.deb` registers the type on Linux, icon included; on Windows, Help ▸
-Associate .simple3d files writes the association for the current user, giving
-those files the application's own icon.
+as an argument opens it, so file associations work on both platforms. Both are
+the packages' job: the `.deb` registers the type on Linux and the `.msi` does on
+Windows, icon included, and each takes its registration back out when it is
+removed. The portable executables register nothing, which is what makes them
+portable.
 
 ## What it does
 
@@ -86,6 +89,13 @@ those files the application's own icon.
   arbitrarily. Results are checked for manifoldness on every evaluation; a
   boolean that cannot be evaluated names its own node in the outliner while the
   rest of the scene still previews, and export refuses while the error stands.
+- **An export that keeps its parts.** A 3MF can be one solid, one component per
+  top-level object, or bodies you group yourself: shapes given the same body are
+  written as one solid, a group can be split open so its contents are considered
+  one by one, and a difference stays whole because its operands are not shapes
+  the result still holds. The grouping is saved with the project, so a re-export
+  after a change only needs whatever is new to be placed. STL, OBJ and PLY hold
+  one body, and say so.
 - **A window you can rearrange.** Panels move between the two docks by dragging
   their header and roll up by clicking it; Tab hides both docks and View ▸ Reset
   panel layout puts them back. The arrangement survives a restart. The
@@ -99,11 +109,11 @@ those files the application's own icon.
 
 ## Status
 
-**v0.0.15.** All four crates are implemented and all 29 of the spec's acceptance
+**v0.0.16.** All four crates are implemented and all 29 of the spec's acceptance
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **426 tests**, none failing, and every
+`cargo test --workspace` runs **440 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
@@ -247,4 +257,7 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 
 ## Licence
 
-MIT. See `LICENSE`.
+[PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0).
+Free for any noncommercial purpose — personal projects, hobby work, study,
+research, and use by schools, charities and public bodies. Commercial use
+needs a separate licence. See `LICENSE` for the full terms.

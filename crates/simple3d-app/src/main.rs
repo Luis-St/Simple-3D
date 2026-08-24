@@ -8,7 +8,6 @@
 mod app;
 mod app_chrome;
 mod dock;
-mod file_assoc;
 // Pointer gestures, executed rather than only reasoned about. Test-only.
 #[cfg(test)]
 mod gestures;

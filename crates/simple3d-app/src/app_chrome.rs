@@ -10,9 +10,18 @@ use crate::ui;
 use simple3d_core::config::{self, DisplayMode, Panel, Side};
 use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
-use simple3d_core::scene::{GroupOp, NodeId, Visibility};
+use simple3d_core::scene::{ExportBody, GroupOp, NodeId, Scene, Visibility};
 use simple3d_core::unit::{format_number, Unit};
-use simple3d_export::Format;
+use simple3d_export::{BodyMode, Format};
+
+/// What one export-body mark is called, in the picker's button and in its menu.
+fn body_label(body: Option<ExportBody>) -> String {
+    match body {
+        None => "A body of its own".to_string(),
+        Some(ExportBody::Shared(key)) => format!("Body {key}"),
+        Some(ExportBody::Split) => "Split into its parts".to_string(),
+    }
+}
 use std::hash::{Hash, Hasher};
 
 impl App {
@@ -391,37 +400,6 @@ impl App {
                 self.modal = Modal::About;
                 ui.close();
             }
-            // Only where the application can do it itself. On Linux the .deb
-            // ships the desktop entry, the MIME type and the icon, and a
-            // portable build there has nothing to write them into.
-            if crate::file_assoc::supported() {
-                ui.separator();
-                if ui
-                    .button("Associate .simple3d files\u{2026}")
-                    .on_hover_text(
-                        "Give .simple3d files this application's icon and open them with it. \
-                         Written for the current user only; no administrator rights are needed.",
-                    )
-                    .clicked()
-                {
-                    self.status = match crate::file_assoc::register() {
-                        Ok(()) => Status::Info(
-                            ".simple3d files are now opened by Simple 3D. Explorer may need reopening to \
-                             redraw their icons."
-                                .into(),
-                        ),
-                        Err(error) => Status::Warning(error),
-                    };
-                    ui.close();
-                }
-                if ui.button("Remove the .simple3d association").clicked() {
-                    self.status = match crate::file_assoc::unregister() {
-                        Ok(()) => Status::Info(".simple3d files are no longer associated with Simple 3D.".into()),
-                        Err(error) => Status::Warning(error),
-                    };
-                    ui.close();
-                }
-            }
         });
     }
 
@@ -674,10 +652,28 @@ impl App {
     }
 
     fn export_window(&mut self, ctx: &egui::Context) {
-        self.dialog(ctx, "dialog-export", "Export", egui::vec2(560.0, 300.0), true, Self::export_body);
+        // Tall enough for the body picker, which is the one part of this
+        // window that is a list rather than a row.
+        let size = if self.export_body_mode() == BodyMode::Selected {
+            egui::vec2(600.0, 560.0)
+        } else {
+            egui::vec2(560.0, 320.0)
+        };
+        self.dialog(ctx, "dialog-export", "Export", size, true, Self::export_body);
     }
 
     fn export_body(&mut self, ui: &mut egui::Ui) {
+        // Bottom-up: the buttons and the count are laid out first and end up at
+        // the foot of the window, and everything else takes the room left above
+        // them. In a `bottom_up` layout the items are added in the order they
+        // stack upwards, which is why the footer comes first here.
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            self.export_footer(ui);
+            ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| self.export_controls(ui));
+        });
+    }
+
+    fn export_controls(&mut self, ui: &mut egui::Ui) {
         egui::Grid::new("export-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
             ui.label("Format");
             egui::ComboBox::from_id_salt("export-format").selected_text(self.export_format.label()).show_ui(ui, |ui| {
@@ -718,21 +714,51 @@ impl App {
                 });
             });
             ui.end_row();
+
+            // Only where the format has objects to keep apart; for the rest the
+            // question has no answer, so it is disabled rather than ignored.
+            ui.label("Bodies");
+            ui.vertical(|ui| {
+                let separates = self.export_format.keeps_objects_separate();
+                ui.add_enabled_ui(separates, |ui| {
+                    egui::ComboBox::from_id_salt("export-bodies")
+                        .selected_text(self.export_body_mode().label())
+                        .show_ui(ui, |ui| {
+                            for mode in BodyMode::ALL {
+                                ui.selectable_value(&mut self.export_bodies, mode, mode.label());
+                            }
+                        });
+                });
+                ui.label(
+                    egui::RichText::new(match self.export_body_mode() {
+                        _ if !separates => {
+                            format!("{} holds one body; everything is merged into it.", self.export_format.label())
+                        }
+                        BodyMode::One => "Everything is merged into a single solid.".to_string(),
+                        BodyMode::TopLevel => {
+                            "One component per top-level shape or group, each named and verified on its own."
+                                .to_string()
+                        }
+                        BodyMode::Selected => {
+                            "One component per body below. What is grouped is saved with the project.".to_string()
+                        }
+                    })
+                    .weak(),
+                );
+            });
+            ui.end_row();
         });
 
-        ui.separator();
-        if self.evaluated.errors.is_empty() {
-            // The count is of what will actually be written -- the scene
-            // or the selection -- rather than always of the whole scene.
-            let triangles = self.export_triangle_count();
-            ui.label(format!("{triangles} triangles will be verified as watertight before anything is written."));
-        } else {
-            ui.colored_label(
-                ui.visuals().error_fg_color,
-                "The scene has geometry that could not be evaluated; export will refuse.",
-            );
+        if self.export_body_mode() == BodyMode::Selected {
+            ui.add_space(4.0);
+            self.body_picker(ui);
         }
-        ui.separator();
+    }
+
+    /// What the export is about to do, and the two buttons. Drawn before the
+    /// rest of the window and at the bottom of it, so a body list long enough
+    /// to scroll can never push Export off the edge.
+    fn export_footer(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             if ui.button("Export...").clicked() {
                 self.start_export();
@@ -741,6 +767,122 @@ impl App {
                 self.modal = Modal::None;
             }
         });
+        ui.separator();
+        if self.evaluated.errors.is_empty() {
+            // The count is of what will actually be written -- the scene
+            // or the selection -- rather than always of the whole scene.
+            let summary = self.export_summary();
+            let bodies = match summary.bodies {
+                1 => "one body".to_string(),
+                n => format!("{n} bodies"),
+            };
+            ui.label(format!(
+                "{} triangles in {bodies}, each verified as watertight before anything is written.",
+                summary.triangles
+            ));
+        } else {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "The scene has geometry that could not be evaluated; export will refuse.",
+            );
+        }
+        ui.separator();
+    }
+
+    /// The rows the body picker shows: the export's own roots, and the children
+    /// of every group that has been split open, in tree order.
+    ///
+    /// Only what can be answered is listed. A group that is a body is one solid
+    /// and what is inside it is not a decision to be made -- splitting it is
+    /// what turns its children into rows, which is also what makes the list
+    /// short enough to read on a scene of any size.
+    fn body_rows(&self) -> Vec<(NodeId, usize)> {
+        fn walk(scene: &Scene, id: NodeId, depth: usize, rows: &mut Vec<(NodeId, usize)>) {
+            if !scene.contains(id) {
+                return;
+            }
+            rows.push((id, depth));
+            if scene.node(id).export_body == Some(ExportBody::Split) && scene.can_split_for_export(id) {
+                for &child in &scene.node(id).children {
+                    walk(scene, child, depth + 1, rows);
+                }
+            }
+        }
+        let mut rows = Vec::new();
+        for id in self.export_roots() {
+            walk(&self.scene, id, 0, &mut rows);
+        }
+        rows
+    }
+
+    /// Which body each node goes in, chosen a row at a time. The marks live on
+    /// the nodes, so they are saved with the project and a later export only
+    /// has to say what has changed since (issue 58).
+    fn body_picker(&mut self, ui: &mut egui::Ui) {
+        let rows = self.body_rows();
+        if rows.is_empty() {
+            ui.label(theme::hint("Nothing to export, so there are no bodies to group."));
+            return;
+        }
+        // One past the highest in use, so picking the last entry is how a new
+        // body gets made.
+        let offered = self.scene.highest_export_body() + 1;
+        let mut change: Option<(NodeId, Option<ExportBody>)> = None;
+
+        egui::Frame::NONE
+            .fill(theme::token::SURFACE_2)
+            .stroke(egui::Stroke::new(1.0_f32, theme::token::SURFACE_3))
+            .inner_margin(egui::Margin::same(6))
+            .show(ui, |ui| {
+                // As tall as the list needs, up to whatever the window has
+                // left under the controls above it; past that it scrolls.
+                let room = (ui.available_height() - 24.0).max(80.0);
+                egui::ScrollArea::vertical().max_height(room).auto_shrink([false, true]).show(ui, |ui| {
+                    for (id, depth) in rows {
+                        let node = self.scene.node(id);
+                        let (name, visible, mark) = (node.name.clone(), node.visible, node.export_body);
+                        let splittable = self.scene.can_split_for_export(id);
+                        ui.horizontal(|ui| {
+                            ui.add_space(depth as f32 * 14.0);
+                            let label = if visible {
+                                theme::value(&name)
+                            } else {
+                                theme::hint(format!("{name} (hidden, not exported)"))
+                            };
+                            ui.add(egui::Label::new(label).selectable(false).truncate());
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let mut chosen = mark;
+                                egui::ComboBox::from_id_salt(("export-body", id))
+                                    .width(150.0)
+                                    .selected_text(body_label(mark))
+                                    .show_ui(ui, |ui| {
+                                        ui.selectable_value(&mut chosen, None, body_label(None));
+                                        for key in 1..=offered {
+                                            let shared = Some(ExportBody::Shared(key));
+                                            ui.selectable_value(&mut chosen, shared, body_label(shared));
+                                        }
+                                        if splittable {
+                                            let split = Some(ExportBody::Split);
+                                            ui.selectable_value(&mut chosen, split, body_label(split));
+                                        }
+                                    });
+                                if chosen != mark {
+                                    change = Some((id, chosen));
+                                }
+                            });
+                        });
+                    }
+                });
+            });
+        ui.label(theme::hint(
+            "A body of its own is one component. The same number on two shapes writes them as one solid. \
+             Splitting a group offers what is inside it.",
+        ));
+
+        if let Some((id, body)) = change {
+            self.edit("Group export bodies", None);
+            self.scene.set_export_body(id, body);
+        }
     }
 
     fn scene_settings_window(&mut self, ctx: &egui::Context) {
@@ -1055,7 +1197,7 @@ impl App {
             ctx,
             "dialog-about",
             format!("About {APP_NAME}").as_str(),
-            egui::vec2(460.0, 250.0),
+            egui::vec2(460.0, 280.0),
             false,
             Self::about_body,
         );
@@ -1067,6 +1209,8 @@ impl App {
         ui.add_space(6.0);
         ui.label("Parametric 3D modelling with exact metric dimensions.");
         ui.label("Everything is stored in millimetres; the display unit only changes what you read.");
+        ui.add_space(6.0);
+        ui.label("PolyForm Noncommercial License 1.0.0: free for any noncommercial purpose.");
         ui.add_space(6.0);
         ui.label(format!("Project files: .{PROJECT_EXTENSION}"));
         ui.label(format!("Settings: {}", self.config_dir().display()));
