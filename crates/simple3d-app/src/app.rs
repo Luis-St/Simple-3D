@@ -1698,11 +1698,14 @@ impl App {
     /// gesture nothing checks.
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.menu_bar(ctx);
-        crate::tabs::show(self, ctx);
         self.status_bar(ctx);
         crate::panel_toolrail::show(self, ctx);
         crate::dock::show(self, ctx, Side::Left);
         crate::dock::show(self, ctx, Side::Right);
+        // After the docks and the rail, so the row of tabs spans the workspace
+        // itself rather than the whole window: the documents belong to the
+        // viewport under them, not to the window's chrome.
+        crate::tabs::show(self, ctx);
         panel_viewport::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         self.modals(ctx);

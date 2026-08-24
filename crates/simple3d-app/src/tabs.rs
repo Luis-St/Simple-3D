@@ -322,7 +322,8 @@ impl App {
     }
 }
 
-/// The row of open documents, under the menu bar and over everything else.
+/// The row of open documents: the top of the workspace, between the docks and
+/// over the viewport, so a tab sits above the model it holds.
 ///
 /// Drawn by hand rather than out of widgets so a tab can be a shape -- the
 /// active one lit along its top edge and joined to the workspace below it --
