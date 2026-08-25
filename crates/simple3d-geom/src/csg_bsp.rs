@@ -47,13 +47,30 @@ struct Polygon {
     /// and split so the surfaces that survive a boolean still say what they
     /// belonged to.
     tag: u32,
+    /// The polygon's own bounding box, carried beside it rather than
+    /// recomputed. `clip_polygons` asks for it once per polygon per node of
+    /// the tree it is descending, and for a convex operand that tree is a
+    /// chain one node deep per face -- so recomputing it there walked every
+    /// vertex of every fragment tens of thousands of times over.
+    bounds: (Vec3, Vec3),
 }
 
 impl Polygon {
+    fn new(vertices: Vec<Vec3>, plane: Plane, tag: u32) -> Polygon {
+        let mut lo = vertices[0];
+        let mut hi = vertices[0];
+        for v in &vertices[1..] {
+            lo = lo.min(*v);
+            hi = hi.max(*v);
+        }
+        Polygon { vertices, plane, tag, bounds: (lo, hi) }
+    }
+
+    /// Flipping reverses the winding and the plane; the box is the same box.
     fn flip(&self) -> Polygon {
         let mut v = self.vertices.clone();
         v.reverse();
-        Polygon { vertices: v, plane: self.plane.flip(), tag: self.tag }
+        Polygon { vertices: v, plane: self.plane.flip(), tag: self.tag, bounds: self.bounds }
     }
 }
 
@@ -62,67 +79,88 @@ const FRONT: i32 = 1;
 const BACK: i32 = 2;
 const SPANNING: i32 = 3;
 
-/// Split `poly` by `plane`, appending results into the four buckets.
-fn split_polygon(
-    plane: &Plane,
-    poly: &Polygon,
-    coplanar_front: &mut Vec<Polygon>,
-    coplanar_back: &mut Vec<Polygon>,
-    front: &mut Vec<Polygon>,
-    back: &mut Vec<Polygon>,
-) {
-    let mut polygon_type = 0;
-    let mut types = Vec::with_capacity(poly.vertices.len());
-    for v in &poly.vertices {
-        let t = plane.normal.dot(*v) - plane.w;
-        let ty = if t < -EPSILON {
-            BACK
-        } else if t > EPSILON {
-            FRONT
-        } else {
-            COPLANAR
-        };
-        polygon_type |= ty;
-        types.push(ty);
-    }
+/// Scratch buffers for splitting, so the hot loop allocates nothing.
+///
+/// `clip_polygons` calls `split` once per polygon per node it descends. For a
+/// dense convex operand that is a chain one node deep per face, and the count
+/// runs into the hundred million: the three `Vec`s this used to build afresh
+/// inside every call, and the clone every polygon that did not actually need
+/// splitting was given, were between them most of the cost of a boolean.
+#[derive(Default)]
+struct Splitter {
+    types: Vec<i32>,
+    front: Vec<Vec3>,
+    back: Vec<Vec3>,
+}
 
-    match polygon_type {
-        COPLANAR => {
-            if plane.normal.dot(poly.plane.normal) > 0.0 {
-                coplanar_front.push(poly.clone());
+impl Splitter {
+    /// Split `poly` by `plane`, appending results into the four buckets.
+    ///
+    /// Takes the polygon *by value*: three of the four outcomes hand it on
+    /// whole, and moving it there costs nothing where copying it cost an
+    /// allocation and a walk over its vertices.
+    fn split(
+        &mut self,
+        plane: &Plane,
+        poly: Polygon,
+        coplanar_front: &mut Vec<Polygon>,
+        coplanar_back: &mut Vec<Polygon>,
+        front: &mut Vec<Polygon>,
+        back: &mut Vec<Polygon>,
+    ) {
+        let mut polygon_type = 0;
+        self.types.clear();
+        for v in &poly.vertices {
+            let t = plane.normal.dot(*v) - plane.w;
+            let ty = if t < -EPSILON {
+                BACK
+            } else if t > EPSILON {
+                FRONT
             } else {
-                coplanar_back.push(poly.clone());
-            }
+                COPLANAR
+            };
+            polygon_type |= ty;
+            self.types.push(ty);
         }
-        FRONT => front.push(poly.clone()),
-        BACK => back.push(poly.clone()),
-        _ => {
-            let mut f: Vec<Vec3> = Vec::new();
-            let mut b: Vec<Vec3> = Vec::new();
-            let n = poly.vertices.len();
-            for i in 0..n {
-                let j = (i + 1) % n;
-                let (ti, tj) = (types[i], types[j]);
-                let (vi, vj) = (poly.vertices[i], poly.vertices[j]);
-                if ti != BACK {
-                    f.push(vi);
-                }
-                if ti != FRONT {
-                    b.push(vi);
-                }
-                if (ti | tj) == SPANNING {
-                    let denom = plane.normal.dot(vj - vi);
-                    let t = (plane.w - plane.normal.dot(vi)) / denom;
-                    let v = vi.lerp(vj, t);
-                    f.push(v);
-                    b.push(v);
+
+        match polygon_type {
+            COPLANAR => {
+                if plane.normal.dot(poly.plane.normal) > 0.0 {
+                    coplanar_front.push(poly);
+                } else {
+                    coplanar_back.push(poly);
                 }
             }
-            if f.len() >= 3 {
-                front.push(Polygon { vertices: f, plane: poly.plane, tag: poly.tag });
-            }
-            if b.len() >= 3 {
-                back.push(Polygon { vertices: b, plane: poly.plane, tag: poly.tag });
+            FRONT => front.push(poly),
+            BACK => back.push(poly),
+            _ => {
+                self.front.clear();
+                self.back.clear();
+                let n = poly.vertices.len();
+                for i in 0..n {
+                    let j = (i + 1) % n;
+                    let (ti, tj) = (self.types[i], self.types[j]);
+                    let (vi, vj) = (poly.vertices[i], poly.vertices[j]);
+                    if ti != BACK {
+                        self.front.push(vi);
+                    }
+                    if ti != FRONT {
+                        self.back.push(vi);
+                    }
+                    if (ti | tj) == SPANNING {
+                        let denom = plane.normal.dot(vj - vi);
+                        let t = (plane.w - plane.normal.dot(vi)) / denom;
+                        let v = vi.lerp(vj, t);
+                        self.front.push(v);
+                        self.back.push(v);
+                    }
+                }
+                if self.front.len() >= 3 {
+                    front.push(Polygon::new(self.front.clone(), poly.plane, poly.tag));
+                }
+                if self.back.len() >= 3 {
+                    back.push(Polygon::new(self.back.clone(), poly.plane, poly.tag));
+                }
             }
         }
     }
@@ -164,11 +202,10 @@ const BOX_LEAF: usize = 4;
 
 impl BoxTree {
     fn new(polygons: &[Polygon]) -> Option<BoxTree> {
-        let boxes: Vec<(Vec3, Vec3)> =
-            polygons.iter().filter_map(|p| polygon_bounds(std::slice::from_ref(p))).collect();
-        if boxes.len() != polygons.len() || boxes.is_empty() {
+        if polygons.is_empty() {
             return None;
         }
+        let boxes: Vec<(Vec3, Vec3)> = polygons.iter().map(|p| p.bounds).collect();
         let order: Vec<u32> = (0..boxes.len() as u32).collect();
         let mut tree = BoxTree { nodes: Vec::new(), order, boxes };
         tree.split();
@@ -230,8 +267,13 @@ impl BoxTree {
     }
 
     /// Does any polygon's box come within `EPSILON` of `query`?
-    fn meets(&self, query: (Vec3, Vec3)) -> bool {
-        let mut stack = vec![0u32];
+    ///
+    /// `stack` is the caller's, reused across calls: this is asked once per
+    /// polygon per node of the tree being descended, and a fresh allocation
+    /// for each was showing up as a share of the whole boolean.
+    fn meets(&self, query: (Vec3, Vec3), stack: &mut Vec<u32>) -> bool {
+        stack.clear();
+        stack.push(0);
         while let Some(i) = stack.pop() {
             let node = &self.nodes[i as usize];
             if !boxes_meet((node.lo, node.hi), query) {
@@ -323,19 +365,6 @@ struct BspNode {
     surface: Option<BoxTree>,
 }
 
-fn polygon_bounds(polygons: &[Polygon]) -> Option<(Vec3, Vec3)> {
-    let mut bounds: Option<(Vec3, Vec3)> = None;
-    for p in polygons {
-        for v in &p.vertices {
-            bounds = Some(match bounds {
-                None => (*v, *v),
-                Some((lo, hi)) => (lo.min(*v), hi.max(*v)),
-            });
-        }
-    }
-    bounds
-}
-
 /// Do the two boxes come within `EPSILON` of each other? Deliberately generous:
 /// the point of the test is to prove that a polygon *cannot* meet a surface, and
 /// a box that only just misses proves nothing.
@@ -348,6 +377,15 @@ fn boxes_meet(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
         && blo.y <= ahi.y + EPSILON
         && alo.z <= bhi.z + EPSILON
         && blo.z <= ahi.z + EPSILON
+}
+
+/// The buffers a clip reuses from one polygon to the next. Held by `op` for
+/// the whole boolean rather than by any one call, so the deepest chain costs
+/// no more allocations than the shallowest tree.
+#[derive(Default)]
+struct ClipScratch {
+    splitter: Splitter,
+    boxes: Vec<u32>,
 }
 
 /// Every walk over the tree below is written with an explicit stack rather
@@ -413,12 +451,14 @@ impl BspNode {
         }
     }
 
-    fn clip_polygons(&self, polygons: &[Polygon]) -> Vec<Polygon> {
+    /// Clip `polygons` against this body, consuming them: a polygon that
+    /// survives whole is handed straight back rather than copied.
+    fn clip_polygons(&self, polygons: Vec<Polygon>, scratch: &mut ClipScratch) -> Vec<Polygon> {
         let mut kept = Vec::new();
         // Pushed back-subtree first so the front one is popped first: the
         // surviving polygons come out in the same order the recursive walk
         // produced them, and so therefore does the mesh built from them.
-        let mut stack: Vec<(&BspNode, Vec<Polygon>)> = vec![(self, polygons.to_vec())];
+        let mut stack: Vec<(&BspNode, Vec<Polygon>)> = vec![(self, polygons)];
         while let Some((node, polygons)) = stack.pop() {
             let Some(plane) = node.plane else {
                 kept.extend(polygons);
@@ -428,7 +468,7 @@ impl BspNode {
             let mut cb = Vec::new();
             let mut front = Vec::new();
             let mut back = Vec::new();
-            for p in &polygons {
+            for p in polygons {
                 // A polygon that comes near no face of this body at all cannot
                 // be crossed by its surface, so it is wholly inside or wholly
                 // outside, and one point settles which. The classic algorithm
@@ -440,17 +480,17 @@ impl BspNode {
                 // than this subtree on purpose: for a convex body the subtree is
                 // a chain whose own box is the whole body, which proves nothing
                 // about anything.
-                let clear = match (&self.surface, polygon_bounds(std::slice::from_ref(p))) {
-                    (Some(surface), Some(poly)) => !surface.meets(poly),
-                    _ => false,
+                let clear = match &self.surface {
+                    Some(surface) => !surface.meets(p.bounds, &mut scratch.boxes),
+                    None => false,
                 };
                 if clear {
                     if node.keeps_point(p.vertices[0]) {
-                        kept.push(p.clone());
+                        kept.push(p);
                     }
                     continue;
                 }
-                split_polygon(&plane, p, &mut cf, &mut cb, &mut front, &mut back);
+                scratch.splitter.split(&plane, p, &mut cf, &mut cb, &mut front, &mut back);
             }
             front.extend(cf);
             back.extend(cb);
@@ -470,10 +510,10 @@ impl BspNode {
         kept
     }
 
-    fn clip_to(&mut self, other: &BspNode) {
+    fn clip_to(&mut self, other: &BspNode, scratch: &mut ClipScratch) {
         let mut stack: Vec<&mut BspNode> = vec![self];
         while let Some(node) = stack.pop() {
-            node.polygons = other.clip_polygons(&node.polygons);
+            node.polygons = other.clip_polygons(std::mem::take(&mut node.polygons), scratch);
             stack.extend(node.front.as_deref_mut());
             stack.extend(node.back.as_deref_mut());
         }
@@ -493,6 +533,7 @@ impl BspNode {
     }
 
     fn build(&mut self, polygons: Vec<Polygon>) {
+        let mut splitter = Splitter::default();
         // The hierarchy describes the polygons the tree already had; polygons
         // arriving now are not in it, so the shortcut it serves is withdrawn.
         // Nothing in `op` clips a tree after building into it.
@@ -508,7 +549,7 @@ impl BspNode {
                     continue;
                 }
             }
-            node.build_one_level(polygons, &mut stack);
+            node.build_one_level(polygons, &mut stack, &mut splitter);
         }
     }
 
@@ -538,7 +579,12 @@ impl BspNode {
 
     /// Partition `polygons` by this node's plane, keeping what is coplanar with
     /// it and handing the two sides to the children.
-    fn build_one_level<'a>(&'a mut self, polygons: Vec<Polygon>, stack: &mut Vec<(&'a mut BspNode, Vec<Polygon>)>) {
+    fn build_one_level<'a>(
+        &'a mut self,
+        polygons: Vec<Polygon>,
+        stack: &mut Vec<(&'a mut BspNode, Vec<Polygon>)>,
+        splitter: &mut Splitter,
+    ) {
         let node = self;
         if node.plane.is_none() {
             node.plane = Some(polygons[0].plane);
@@ -551,7 +597,7 @@ impl BspNode {
             let mut cb = Vec::new();
             let mut fr = Vec::new();
             let mut bk = Vec::new();
-            split_polygon(&plane, &p, &mut cf, &mut cb, &mut fr, &mut bk);
+            splitter.split(&plane, p, &mut cf, &mut cb, &mut fr, &mut bk);
             node.polygons.extend(cf);
             node.polygons.extend(cb);
             front.extend(fr);
@@ -669,7 +715,7 @@ fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane, tag: u32) -> O
         // this group's triangles in individually.
         return None;
     }
-    Some(Polygon { vertices: verts, plane, tag })
+    Some(Polygon::new(verts, plane, tag))
 }
 
 /// True if the loop turns the same way at every vertex when viewed along the
@@ -739,7 +785,7 @@ fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
             let t = mesh.indices[i];
             let (a, b, c) =
                 (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
-            polygons.push(Polygon { vertices: vec![a, b, c], plane, tag });
+            polygons.push(Polygon::new(vec![a, b, c], plane, tag));
         }
     }
     polygons
@@ -842,36 +888,40 @@ fn non_splitting_order(polygons: &[Polygon]) -> Option<Vec<Vec<usize>>> {
 fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {
     let mut na = BspNode::new(mesh_to_polygons(a));
     let mut nb = BspNode::new(mesh_to_polygons(b));
+    let scratch = &mut ClipScratch::default();
     let polys = match kind {
         BoolOp::Union => {
-            na.clip_to(&nb);
-            nb.clip_to(&na);
+            na.clip_to(&nb, scratch);
+            nb.clip_to(&na, scratch);
             nb.invert();
-            nb.clip_to(&na);
+            nb.clip_to(&na, scratch);
             nb.invert();
-            na.build(nb.all_polygons());
-            na.all_polygons()
+            let mut polys = na.all_polygons();
+            polys.extend(nb.all_polygons());
+            polys
         }
         BoolOp::Subtract => {
             na.invert();
-            na.clip_to(&nb);
-            nb.clip_to(&na);
+            na.clip_to(&nb, scratch);
+            nb.clip_to(&na, scratch);
             nb.invert();
-            nb.clip_to(&na);
+            nb.clip_to(&na, scratch);
             nb.invert();
-            na.build(nb.all_polygons());
             na.invert();
-            na.all_polygons()
+            let mut polys = na.all_polygons();
+            polys.extend(nb.all_polygons().iter().map(Polygon::flip));
+            polys
         }
         BoolOp::Intersect => {
             na.invert();
-            nb.clip_to(&na);
+            nb.clip_to(&na, scratch);
             nb.invert();
-            na.clip_to(&nb);
-            nb.clip_to(&na);
-            na.build(nb.all_polygons());
+            na.clip_to(&nb, scratch);
+            nb.clip_to(&na, scratch);
             na.invert();
-            na.all_polygons()
+            let mut polys = na.all_polygons();
+            polys.extend(nb.all_polygons().iter().map(Polygon::flip));
+            polys
         }
     };
     // The BSP clips whole polygons, which leaves T-junctions wherever two

@@ -10,6 +10,8 @@ pub mod vec3;
 
 mod tests;
 
+mod bench;
+
 pub use mesh::{colour_tag, tag_colour, Mesh};
 pub use vec3::Vec3;
 
