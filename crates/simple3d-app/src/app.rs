@@ -55,7 +55,6 @@ pub enum Modal {
     None,
     Export,
     Keymap,
-    SceneSettings,
     About,
     /// A failure worth stopping for, shown in a scrollable, copyable window.
     Error,
@@ -196,6 +195,10 @@ pub struct App {
     pub(crate) export_preview: Option<(ExportPreviewKey, ExportSummary)>,
 
     pub modal: Modal,
+    /// The dialog window that has already been placed over the middle of the
+    /// main window. A dialog is centred once, when it opens; after that it is
+    /// the window manager's and the user's to move.
+    pub(crate) dialog_placed: Option<egui::ViewportId>,
     /// The tab a close confirmation is about, while that dialog is open.
     pub(crate) pending_close: Option<usize>,
     pub error_title: String,
@@ -312,6 +315,7 @@ impl App {
             export_bodies: simple3d_export::BodyMode::One,
             export_preview: None,
             modal: Modal::None,
+            dialog_placed: None,
             pending_close: None,
             error_title: String::new(),
             error_detail: String::new(),
@@ -1889,7 +1893,6 @@ mod tests {
         for modal in [
             Modal::Export,
             Modal::Keymap,
-            Modal::SceneSettings,
             Modal::About,
             Modal::Error,
             Modal::ConfirmQuit,

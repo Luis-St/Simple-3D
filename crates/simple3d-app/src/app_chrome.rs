@@ -1,6 +1,5 @@
 //! The window furniture: keyboard dispatch, menu bar, status bar and the modal
-//! windows (export, keymap editor, scene settings, about, errors, quit
-//! confirmation).
+//! windows (export, keymap editor, about, errors, quit confirmation).
 
 use crate::app::{App, Modal, Status, APP_NAME, PROJECT_EXTENSION, VERSION};
 use crate::gizmo::Mode;
@@ -207,11 +206,6 @@ impl App {
                 .clicked()
             {
                 self.save_project_as_primitive();
-                ui.close();
-            }
-            ui.separator();
-            if ui.button("Scene settings...").clicked() {
-                self.modal = Modal::SceneSettings;
                 ui.close();
             }
             ui.separator();
@@ -570,10 +564,10 @@ impl App {
 
     pub(crate) fn modals(&mut self, ctx: &egui::Context) {
         match self.modal {
-            Modal::None => {}
+            // Nothing open, so the next dialog to open is placed afresh.
+            Modal::None => self.dialog_placed = None,
             Modal::Export => self.export_window(ctx),
             Modal::Keymap => self.keymap_window(ctx),
-            Modal::SceneSettings => self.scene_settings_window(ctx),
             Modal::About => self.about_window(ctx),
             Modal::Error => self.error_window(ctx),
             Modal::ConfirmQuit => self.confirm_quit_window(ctx),
@@ -611,7 +605,8 @@ impl App {
         mut body: impl FnMut(&mut Self, &mut egui::Ui),
         mut actions: impl FnMut(&mut Self, &mut egui::Ui),
     ) {
-        let DialogSpec { key, title, size, resizable } = spec;
+        let DialogSpec { key, title, size, resizable, fit_height } = spec;
+        let id = egui::ViewportId::from_hash_of(key);
         let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
             .with_icon(crate::icon::shared_icon())
@@ -623,10 +618,19 @@ impl App {
             .with_minimize_button(false)
             .with_maximize_button(resizable)
             .with_window_level(egui::WindowLevel::AlwaysOnTop);
-        if let Some(parent) = ctx.input(|i| i.viewport().outer_rect) {
-            builder = builder.with_position(parent.center() - size * 0.5);
+        // Placed once, when the dialog opens, and never again. This body runs
+        // on every frame of the parent's, and a builder that asks for a
+        // position each time is a window that is put back where it started
+        // whenever the parent repaints -- and, with the size asked for in the
+        // same breath, one the window manager may resize under its own title
+        // bar while the keyboard is somewhere else entirely.
+        if self.dialog_placed != Some(id) {
+            if let Some(parent) = ctx.input(|i| i.viewport().outer_rect) {
+                builder = builder.with_position(parent.center() - size * 0.5);
+            }
+            self.dialog_placed = Some(id);
         }
-        ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(key), builder, |ctx, class| {
+        ctx.show_viewport_immediate(id, builder, |ctx, class| {
             if class == egui::ViewportClass::Embedded {
                 let mut open = true;
                 egui::Window::new(title)
@@ -644,9 +648,10 @@ impl App {
                 }
                 return;
             }
+            let pad = theme::metric::DIALOG_PAD;
             let footer = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin {
-                left: 12,
-                right: 12,
+                left: pad as i8,
+                right: pad as i8,
                 top: 8,
                 bottom: 8,
             });
@@ -655,8 +660,28 @@ impl App {
                 .exact_height(theme::metric::DIALOG_ACTIONS)
                 .show_separator_line(true)
                 .show(ctx, |ui| action_row(ui, |ui| actions(self, ui)));
-            let frame = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin::same(12));
-            egui::CentralPanel::default().frame(frame).show(ctx, |ui| body(self, ui));
+            let frame = egui::Frame::NONE.fill(theme::token::SURFACE_1).inner_margin(egui::Margin::same(pad as i8));
+            let used = egui::CentralPanel::default()
+                .frame(frame)
+                .show(ctx, |ui| {
+                    body(self, ui);
+                    // What the contents actually took, measured from the top of
+                    // the room inside the margin to where the next thing would
+                    // go -- less the gap that would be left before it.
+                    ui.cursor().top() - ui.max_rect().top() - ui.spacing().item_spacing.y
+                })
+                .inner;
+            // A dialog whose height is its contents' asks for the height they
+            // came out at, so the last line sits the same distance above the
+            // rule as the first does below the window's edge -- whatever the
+            // font size, the display scale, or how long the paths it prints
+            // turn out to be here.
+            if fit_height {
+                let want = (used + pad * 2.0 + theme::metric::DIALOG_ACTIONS).ceil();
+                if (want - ctx.screen_rect().height()).abs() > 1.0 {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(size.x, want)));
+                }
+            }
             // The window's own close button, which no longer passes through any
             // code of ours: whatever the open dialog is, closing it cancels it.
             if ctx.input(|i| i.viewport().close_requested()) {
@@ -688,7 +713,7 @@ impl App {
         };
         self.dialog(
             ctx,
-            DialogSpec { key: "dialog-export", title: "Export", size, resizable: true },
+            DialogSpec { key: "dialog-export", title: "Export", size, resizable: true, fit_height: false },
             Self::export_body,
             Self::export_actions,
         );
@@ -920,109 +945,6 @@ impl App {
         }
     }
 
-    fn scene_settings_window(&mut self, ctx: &egui::Context) {
-        self.dialog(
-            ctx,
-            DialogSpec {
-                key: "dialog-scene-settings",
-                title: "Scene settings",
-                size: egui::vec2(560.0, 520.0),
-                resizable: true,
-            },
-            Self::scene_settings_body,
-            Self::close_action,
-        );
-    }
-
-    fn scene_settings_body(&mut self, ui: &mut egui::Ui) {
-        egui::Grid::new("scene-settings").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            ui.label("Display unit");
-            egui::ComboBox::from_id_salt("settings-unit").selected_text(self.unit().suffix()).show_ui(ui, |ui| {
-                for unit in Unit::ALL {
-                    if ui.selectable_label(self.unit() == unit, unit.suffix()).clicked() {
-                        self.scene.settings.unit = unit;
-                        self.fields.clear();
-                    }
-                }
-            });
-            ui.end_row();
-
-            ui.label("Default segments");
-            let mut segments = self.scene.settings.default_segments as f64;
-            if ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).max_decimals(0)).changed() {
-                self.edit("Default segments", Some("scene:segments"));
-                self.scene.settings.default_segments = segments.round() as u32;
-            }
-            ui.end_row();
-
-            ui.label("Grid spacing");
-            let unit = self.unit();
-            let mut spacing = unit.from_mm(self.scene.settings.grid_spacing);
-            if ui
-                .add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1))
-                .on_hover_text("How far apart the ground grid's lines are drawn.")
-                .changed()
-            {
-                self.edit("Grid spacing", Some("scene:grid"));
-                self.scene.settings.grid_spacing = unit.to_mm(spacing).max(1e-6);
-            }
-            ui.label(unit.suffix());
-            ui.end_row();
-
-            ui.label("Step");
-            let mut step = unit.from_mm(self.scene.settings.snap_step);
-            if ui
-                .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
-                .on_hover_text("One nudge, and one snapped step of a move or resize drag.")
-                .changed()
-            {
-                self.edit("Step", Some("scene:step"));
-                self.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
-            }
-            ui.label(unit.suffix());
-            ui.end_row();
-
-            ui.label("Rotation snap");
-            ui.add(egui::DragValue::new(&mut self.settings.rotate_snap_deg).range(0.1..=90.0).suffix(" deg"));
-            ui.end_row();
-
-            ui.label("Show grid");
-            ui.checkbox(&mut self.scene.settings.grid_visible, "");
-            ui.end_row();
-
-            ui.label("Show axes");
-            ui.horizontal(|ui| {
-                for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
-                    ui.checkbox(&mut self.scene.settings.axes_visible[axis], name);
-                }
-            });
-            ui.end_row();
-
-            ui.label("Axis style");
-            ui.horizontal(|ui| {
-                for option in simple3d_core::scene::AxisStyle::ALL {
-                    let showing = self.scene.settings.axis_style == option;
-                    if ui.selectable_label(showing, option.label()).clicked() {
-                        self.scene.settings.axis_style = option;
-                    }
-                }
-            });
-            ui.end_row();
-
-            ui.label("Plane marks");
-            ui.checkbox(&mut self.scene.settings.plane_marks, "")
-                .on_hover_text("Mark where a principal plane cuts through a shape, on the shape itself");
-            ui.end_row();
-        });
-        ui.add_space(8.0);
-        ui.add(egui::Label::new(theme::header_text("Notes")).selectable(false));
-        let mut notes = self.scene.settings.notes.clone();
-        if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(4).desired_width(360.0)).changed() {
-            self.edit("Notes", Some("scene:notes"));
-            self.scene.settings.notes = notes;
-        }
-    }
-
     fn close_action(&mut self, ui: &mut egui::Ui) {
         if ui::dialog_button(ui, "Close", true).clicked() {
             self.modal = Modal::None;
@@ -1039,6 +961,7 @@ impl App {
                 title: "Keyboard and mouse",
                 size: egui::vec2(620.0, 660.0),
                 resizable: true,
+                fit_height: false,
             },
             Self::keymap_body,
             Self::close_action,
@@ -1277,9 +1200,19 @@ impl App {
 
     fn about_window(&mut self, ctx: &egui::Context) {
         let title = format!("About {APP_NAME}");
+        // Nothing but text, of a length that depends on where this machine
+        // keeps its settings, so the window is exactly as tall as the lines
+        // turn out to be: no band of empty surface under the last of them, and
+        // no line cut off at the bottom either.
         self.dialog(
             ctx,
-            DialogSpec { key: "dialog-about", title: &title, size: egui::vec2(460.0, 270.0), resizable: false },
+            DialogSpec {
+                key: "dialog-about",
+                title: &title,
+                size: egui::vec2(460.0, 220.0),
+                resizable: false,
+                fit_height: true,
+            },
             Self::about_body,
             Self::close_action,
         );
@@ -1310,7 +1243,13 @@ impl App {
             if self.error_title.is_empty() { "Something went wrong".to_string() } else { self.error_title.clone() };
         self.dialog(
             ctx,
-            DialogSpec { key: "dialog-error", title: &title, size: egui::vec2(560.0, 360.0), resizable: true },
+            DialogSpec {
+                key: "dialog-error",
+                title: &title,
+                size: egui::vec2(560.0, 360.0),
+                resizable: true,
+                fit_height: false,
+            },
             Self::error_body,
             Self::error_actions,
         );
@@ -1356,6 +1295,7 @@ impl App {
                 title: "Save as primitive",
                 size: egui::vec2(480.0, 200.0),
                 resizable: false,
+                fit_height: false,
             },
             Self::save_primitive_body,
             Self::save_primitive_actions,
@@ -1414,6 +1354,7 @@ impl App {
                 title: "Unsaved changes",
                 size: egui::vec2(440.0, 150.0),
                 resizable: false,
+                fit_height: false,
             },
             Self::confirm_close_tab_body,
             Self::confirm_close_tab_actions,
@@ -1437,9 +1378,11 @@ impl App {
         if ui::dialog_button(ui, "Close without saving", true).clicked() {
             self.confirm_close_tab();
         }
-        if ui::dialog_button(ui, "Cancel", true).clicked() {
-            self.cancel_close_tab();
-        }
+        cancel_at_left(ui, |ui| {
+            if ui::dialog_button(ui, "Cancel", true).clicked() {
+                self.cancel_close_tab();
+            }
+        });
     }
 
     fn confirm_quit_window(&mut self, ctx: &egui::Context) {
@@ -1450,6 +1393,7 @@ impl App {
                 title: "Unsaved changes",
                 size: egui::vec2(500.0, 150.0),
                 resizable: false,
+                fit_height: false,
             },
             Self::confirm_quit_body,
             Self::confirm_quit_actions,
@@ -1479,9 +1423,11 @@ impl App {
             self.confirm_quit();
             self.modal = Modal::None;
         }
-        if ui::dialog_button(ui, "Cancel", true).clicked() {
-            self.modal = Modal::None;
-        }
+        cancel_at_left(ui, |ui| {
+            if ui::dialog_button(ui, "Cancel", true).clicked() {
+                self.modal = Modal::None;
+            }
+        });
     }
 }
 
@@ -1508,8 +1454,12 @@ fn label_cell(ui: &mut egui::Ui, text: &str, width: f32) {
 struct DialogSpec<'a> {
     key: &'a str,
     title: &'a str,
+    /// The size the window opens at. With `fit_height` the height is only a
+    /// starting point: the contents settle it on the first frame.
     size: egui::Vec2,
     resizable: bool,
+    /// Take the height from the contents rather than from `size`.
+    fit_height: bool,
 }
 
 /// The buttons of a dialog, laid out the one way they are laid out everywhere:
@@ -1524,6 +1474,15 @@ fn action_row(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
         ui.spacing_mut().item_spacing.x = theme::metric::GAP * 2.0;
         contents(ui);
     });
+}
+
+/// Cancel, at the far end of a dialog's button row from the buttons that go
+/// through with it. The row is laid out right to left, so what is left of it
+/// after the other buttons is claimed here and filled left to right: the
+/// button that abandons the dialog is not next to the one that commits it, and
+/// cannot be hit by aiming for it.
+fn cancel_at_left(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), contents);
 }
 
 /// The status bar's separator: a dot, not a rule. A vertical line every few

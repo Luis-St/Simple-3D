@@ -69,6 +69,10 @@ pub mod metric {
     /// The row of buttons along the foot of every dialog, and the size each of
     /// those buttons is: one place, so no dialog can drift from the rest.
     pub const DIALOG_ACTIONS: f32 = 44.0;
+    /// The margin inside a dialog, the same on all four sides of the contents
+    /// and inside the row of buttons, so what a dialog says sits the same
+    /// distance from the window's edge as from the rule over its buttons.
+    pub const DIALOG_PAD: f32 = 12.0;
     pub const DIALOG_BUTTON: f32 = 26.0;
     pub const DIALOG_BUTTON_WIDTH: f32 = 96.0;
     /// Height of the status bar.
