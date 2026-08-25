@@ -136,6 +136,18 @@ pub struct App {
     pub viewport_rect: egui::Rect,
     pub texture: Option<egui::TextureHandle>,
     pub image_key: u64,
+    /// The window's OpenGL context, when there is one. `None` under the test
+    /// harness, which has no window -- and that alone makes the GPU renderer
+    /// unavailable there, so the tests always exercise the software path.
+    pub(crate) gl: Option<std::sync::Arc<eframe::glow::Context>>,
+    /// The GPU renderer, built the first time it is asked for.
+    pub(crate) gpu: Option<crate::gpu::Gpu>,
+    /// Why the GPU renderer is not in use, when it was asked for and could not
+    /// be had. Shown beside the engine picker, and the viewport falls back to
+    /// the CPU rather than showing nothing.
+    pub(crate) gpu_error: Option<String>,
+    /// What the GPU renderer drew this frame, when it is the engine in use.
+    pub(crate) gpu_texture: Option<egui::TextureId>,
 
     pub path: Option<PathBuf>,
     pub(crate) saved_revision: u64,
@@ -252,8 +264,10 @@ pub struct DropTarget {
 }
 
 impl App {
-    pub fn new(ctx: &egui::Context, open: Option<PathBuf>) -> App {
-        App::with_config_dir(ctx, open, config::config_dir())
+    pub fn new(ctx: &egui::Context, gl: Option<std::sync::Arc<eframe::glow::Context>>, open: Option<PathBuf>) -> App {
+        let mut app = App::with_config_dir(ctx, open, config::config_dir());
+        app.gl = gl;
+        app
     }
 
     /// `new`, but reading and writing settings and the keymap in `config_dir`
@@ -291,6 +305,10 @@ impl App {
             viewport_rect: egui::Rect::NOTHING,
             texture: None,
             image_key: u64::MAX,
+            gl: None,
+            gpu: None,
+            gpu_error: None,
+            gpu_texture: None,
             path: None,
             saved_revision: 0,
             status: Status::Idle,
@@ -1700,6 +1718,43 @@ impl App {
     /// panels in the same order -- against a headless context and replay a
     /// pointer over it. A gesture that is only ever performed by hand is a
     /// gesture nothing checks.
+    /// Build the GPU renderer if it is wanted and can be had, and give egui the
+    /// texture it draws into.
+    ///
+    /// Failure here is not fatal and is not silent: the reason is kept and shown
+    /// beside the engine picker, and the viewport goes on drawing in software.
+    fn prepare_gpu(&mut self, frame: &mut eframe::Frame) {
+        if self.settings.render_engine != config::RenderEngine::Gpu || self.gpu.is_some() {
+            return;
+        }
+        if self.gpu_error.is_some() {
+            return; // asked once, refused once; do not retry every frame
+        }
+        let Some(gl) = self.gl.clone() else {
+            self.gpu_error = Some("no OpenGL context (the window has none)".to_string());
+            return;
+        };
+        let mut gpu = match crate::gpu::Gpu::new(gl) {
+            Ok(gpu) => gpu,
+            Err(why) => {
+                self.gpu_error = Some(why);
+                return;
+            }
+        };
+        // A texture of its own, made at once so there is something to register;
+        // the first real frame reallocates it to the viewport's size without
+        // changing its identity.
+        match gpu.prepare_texture() {
+            Ok(texture) => {
+                let id = frame.register_native_glow_texture(texture);
+                gpu.set_texture_id(id);
+                self.gpu = Some(gpu);
+                self.image_key = u64::MAX;
+            }
+            Err(why) => self.gpu_error = Some(why),
+        }
+    }
+
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.menu_bar(ctx);
         self.status_bar(ctx);
@@ -1726,7 +1781,13 @@ impl eframe::App for App {
         [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0]
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // The GPU renderer's texture is registered with egui exactly once, here,
+        // where `eframe::Frame` is in reach -- `App::ui` is also driven by the
+        // test harness, which has no window and so no context to register with.
+        // The texture keeps its identity across a resize, so one registration
+        // lasts the life of the application.
+        self.prepare_gpu(frame);
         // A new message restarts its clock. Watching the value rather than
         // stamping it at every assignment means no `status = ...` anywhere in
         // the application can forget to.
@@ -2066,7 +2127,7 @@ mod tests {
     #[test]
     fn the_default_config_directory_is_the_users_own() {
         let ctx = egui::Context::default();
-        let app = App::new(&ctx, None);
+        let app = App::new(&ctx, None, None);
         assert_eq!(app.config_dir(), config::config_dir().as_path());
     }
 

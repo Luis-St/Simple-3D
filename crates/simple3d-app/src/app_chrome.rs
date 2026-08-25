@@ -6,7 +6,7 @@ use crate::gizmo::Mode;
 use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
-use simple3d_core::config::{self, DisplayMode, Panel, Side};
+use simple3d_core::config::{self, DisplayMode, Panel, RenderEngine, Side};
 use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
 use simple3d_core::scene::{ExportBody, GroupOp, NodeId, Scene, Visibility};
@@ -446,6 +446,51 @@ impl App {
                             }
                         }
                     });
+
+                dot(ui);
+
+                // Which renderer draws the viewport. A dropup rather than a
+                // trip to a settings window, and here beside the frame time it
+                // changes: the two are read together or not at all. egui opens
+                // the list upwards on its own, this near the bottom of the
+                // screen.
+                let engine = self.settings.render_engine;
+                let mut chosen = engine;
+                egui::ComboBox::from_id_salt("status-engine")
+                    .selected_text(theme::value(engine.label()))
+                    .width(60.0)
+                    .show_ui(ui, |ui| {
+                        for option in RenderEngine::ALL {
+                            let entry = ui.selectable_label(engine == option, option.label());
+                            if entry.on_hover_text(option.description()).clicked() {
+                                chosen = option;
+                            }
+                        }
+                    });
+                if chosen != engine {
+                    self.settings.render_engine = chosen;
+                    // Asking again clears the last refusal, so a driver that
+                    // failed once can be tried again after the user has done
+                    // something about it.
+                    self.gpu_error = None;
+                    if chosen == RenderEngine::Cpu {
+                        self.gpu = None;
+                        self.gpu_texture = None;
+                    }
+                    // The viewport is cached on this key; the engine is not part
+                    // of it, so the switch has to say the picture is stale.
+                    self.image_key = u64::MAX;
+                    self.persist();
+                }
+                if let Some(why) = &self.gpu_error {
+                    if self.settings.render_engine == RenderEngine::Gpu {
+                        ui.add(egui::Label::new(theme::value("\u{26a0} CPU")).selectable(false)).on_hover_text(
+                            format!(
+                            "The GPU renderer is not available, so the viewport is being drawn in software.\n\n{why}"
+                        ),
+                        );
+                    }
+                }
 
                 dot(ui);
 

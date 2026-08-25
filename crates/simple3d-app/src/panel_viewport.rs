@@ -108,18 +108,40 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
             },
             items,
         };
-        let frame = render::render(&request);
-        let image = frame.to_color_image();
-        match &mut app.texture {
-            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
-            None => app.texture = Some(ui.ctx().load_texture("viewport", image, egui::TextureOptions::LINEAR)),
+        // One preparation, whichever engine draws it: the projection, the
+        // shading, the grid's falloff and the axis rule are settled here and
+        // the engine only turns the result into pixels.
+        let prepared = render::prepare_frame(&request);
+        match app.gpu.as_mut() {
+            Some(gpu) => match gpu.render(&request, &prepared) {
+                Ok(id) => app.gpu_texture = Some(id),
+                Err(why) => {
+                    // The driver said no. Say so once, and go on drawing in
+                    // software rather than showing nothing.
+                    app.gpu_error = Some(why);
+                    app.gpu = None;
+                    app.gpu_texture = None;
+                }
+            },
+            None => app.gpu_texture = None,
+        }
+        if app.gpu_texture.is_none() {
+            let image = render::render_prepared(&request, &prepared).to_color_image();
+            match &mut app.texture {
+                Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+                None => app.texture = Some(ui.ctx().load_texture("viewport", image, egui::TextureOptions::LINEAR)),
+            }
         }
         app.image_key = key;
     }
 
-    if let Some(texture) = &app.texture {
+    // The GPU renderer draws into an OpenGL texture egui was handed once; the
+    // software one uploads a fresh image. From here on they are the same thing:
+    // a texture painted over the panel.
+    let drawn = app.gpu_texture.or_else(|| app.texture.as_ref().map(|texture| texture.id()));
+    if let Some(id) = drawn {
         ui.painter().image(
-            texture.id(),
+            id,
             rect,
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             egui::Color32::WHITE,

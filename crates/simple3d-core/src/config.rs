@@ -40,6 +40,43 @@ impl DisplayMode {
     }
 }
 
+/// Which renderer draws the viewport.
+///
+/// The CPU rasterizer is the default and the fallback, and it is the one the
+/// application's promise rests on: it needs no accelerated graphics and has no
+/// shader to fail to compile (spec section 2.7, acceptance criterion 19). The
+/// GPU renderer draws the same scene through the OpenGL context the window
+/// already has, which costs nothing to have available and is a great deal
+/// faster on a large viewport -- but it can fail on a driver, and when it does
+/// the viewport falls back to the CPU rather than showing nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderEngine {
+    #[default]
+    Cpu,
+    Gpu,
+}
+
+impl RenderEngine {
+    pub const ALL: [RenderEngine; 2] = [RenderEngine::Cpu, RenderEngine::Gpu];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            RenderEngine::Cpu => "CPU",
+            RenderEngine::Gpu => "GPU",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            RenderEngine::Cpu => "Draws the viewport in software, on every core there is. Works anywhere.",
+            RenderEngine::Gpu => {
+                "Draws the viewport through OpenGL. Faster on a large viewport; needs a working driver."
+            }
+        }
+    }
+}
+
 /// Which frame the manipulator handles work in (spec section 6.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -269,6 +306,10 @@ pub struct AppSettings {
     /// on its own.
     pub reduce_motion: bool,
     pub display_mode: DisplayMode,
+    /// Which renderer draws the viewport. Newer than the settings file, so an
+    /// older one is read as the CPU renderer -- which is what it was using.
+    #[serde(default)]
+    pub render_engine: RenderEngine,
     pub show_grid: bool,
     pub show_bounding_box: bool,
     pub handle_frame: HandleFrame,
@@ -305,6 +346,7 @@ impl Default for AppSettings {
             layout: Layout::default(),
             reduce_motion: false,
             display_mode: DisplayMode::ShadedWithEdges,
+            render_engine: RenderEngine::Cpu,
             show_grid: true,
             show_bounding_box: false,
             handle_frame: HandleFrame::Object,
@@ -440,6 +482,7 @@ mod tests {
     fn settings_round_trip_and_tolerate_a_partial_file() {
         let settings = AppSettings {
             display_mode: DisplayMode::Wireframe,
+            render_engine: RenderEngine::Gpu,
             last_export_scale: 2.5,
             last_export_format: "stl".into(),
             recent_files: vec![PathBuf::from("/tmp/a.simple3d")],
@@ -454,6 +497,27 @@ mod tests {
         assert_eq!(partial.display_mode, DisplayMode::Wireframe);
         assert_eq!(partial.last_export_format, "3mf");
         assert_eq!(partial.rotate_snap_deg, 15.0);
+        // A settings file written before there was an engine to choose was
+        // written by a build that drew in software, so that is what it means.
+        assert_eq!(partial.render_engine, RenderEngine::Cpu);
+    }
+
+    /// The engine a settings file names, and the one it means when it names
+    /// nothing. The CPU renderer is the default because it is the one that
+    /// cannot fail to be available.
+    #[test]
+    fn the_render_engine_survives_the_settings_file() {
+        assert_eq!(AppSettings::default().render_engine, RenderEngine::Cpu);
+        for engine in RenderEngine::ALL {
+            let settings = AppSettings { render_engine: engine, ..AppSettings::default() };
+            let text = serde_json::to_string(&settings).unwrap();
+            let back: AppSettings = serde_json::from_str(&text).unwrap();
+            assert_eq!(back.render_engine, engine, "{}", engine.label());
+        }
+        let named: AppSettings = serde_json::from_str("{\"render_engine\":\"gpu\"}").unwrap();
+        assert_eq!(named.render_engine, RenderEngine::Gpu);
+        // An engine this build does not know is not a reason to refuse the file.
+        assert!(serde_json::from_str::<AppSettings>("{\"render_engine\":\"quantum\"}").is_err());
     }
 
     #[test]
