@@ -16,11 +16,29 @@
 /// Straight-alpha RGBA.
 pub type Rgba = [u8; 4];
 
-pub struct Frame {
+pub struct Frame<'a> {
     pub width: usize,
     pub height: usize,
-    /// RGBA, row-major from the top left -- the layout `egui::ColorImage` wants.
-    pub color: Vec<u8>,
+    /// The rows this frame actually holds, `[row_lo, row_hi)` of a frame
+    /// `height` rows tall. A whole frame owns all of them; a *band* owns a
+    /// horizontal stripe and nothing else, which is how the rasterizer is
+    /// split across threads.
+    ///
+    /// Banding is what makes the parallel path produce the very same picture
+    /// as the single-threaded one rather than merely a similar one. Every band
+    /// replays the entire draw sequence and simply drops the writes outside its
+    /// own rows, so each pixel is still written by the same primitives, in the
+    /// same order, with the same depth decisions. Splitting the *work* instead
+    /// -- a thread per item, say -- would reorder the writes that land on a
+    /// shared pixel, and the picture would depend on how the threads raced.
+    row_lo: usize,
+    row_hi: usize,
+    /// This band's rows of the image being built, RGBA and row-major. Borrowed
+    /// rather than owned: every band writes straight into its own stretch of
+    /// the one buffer that becomes the texture, so there is no gathering pass
+    /// at the end. Copying the bands together afterwards cost more than the
+    /// drawing did on a large viewport.
+    pub color: &'a mut [u8],
     key: Vec<f32>,
     /// Which item owns the depth at each pixel: `tag` at the time it was
     /// written, and 0 for a pixel no solid has claimed. What lets a line ask
@@ -31,6 +49,21 @@ pub struct Frame {
     tag: u16,
 }
 
+/// A finished frame: the colour buffer the bands wrote between them.
+pub struct Image {
+    pub width: usize,
+    pub height: usize,
+    /// RGBA, row-major from the top left -- the layout `egui::ColorImage` wants.
+    pub color: Vec<u8>,
+}
+
+impl Image {
+    /// Hand the framebuffer to egui as a texture image.
+    pub fn to_color_image(&self) -> egui::ColorImage {
+        egui::ColorImage::from_rgba_unmultiplied([self.width, self.height], &self.color)
+    }
+}
+
 /// One projected vertex: screen position and depth key.
 #[derive(Clone, Copy, Debug)]
 pub struct Vertex {
@@ -38,7 +71,7 @@ pub struct Vertex {
     pub key: f32,
 }
 
-impl Frame {
+impl Frame<'_> {
     /// Fill every pixel with one colour and reset the depth buffer. The
     /// renderer lays a gradient down instead, so this is now only how the
     /// rasterizer's own tests get a known starting frame.
@@ -52,15 +85,32 @@ impl Frame {
         }
     }
 
-    pub fn new(width: usize, height: usize) -> Frame {
+    #[cfg(test)]
+    pub fn new(color: &mut [u8], width: usize, height: usize) -> Frame<'_> {
+        Frame::band(color, width, height, 0, height)
+    }
+
+    /// A frame holding only rows `[row_lo, row_hi)`. Everything drawn into it
+    /// is clipped to those rows; the buffers are sized for them alone, so N
+    /// bands cost between them what one whole frame costs.
+    pub fn band(color: &mut [u8], width: usize, height: usize, row_lo: usize, row_hi: usize) -> Frame<'_> {
+        let rows = row_hi.saturating_sub(row_lo);
+        debug_assert_eq!(color.len(), width * rows * 4, "the slice is not this band's rows");
         Frame {
             width,
             height,
-            color: vec![0; width * height * 4],
-            key: vec![f32::NEG_INFINITY; width * height],
-            owner: vec![0; width * height],
+            row_lo,
+            row_hi,
+            color,
+            key: vec![f32::NEG_INFINITY; width * rows],
+            owner: vec![0; width * rows],
             tag: 0,
         }
+    }
+
+    /// The rows this frame owns.
+    pub fn rows(&self) -> std::ops::Range<usize> {
+        self.row_lo..self.row_hi
     }
 
     /// Whose depth writes are from here on. The renderer sets it to the item it
@@ -80,7 +130,12 @@ impl Frame {
     /// if what won it is one of them -- which is how an axis crosses the solid
     /// it runs into without crossing the ones it merely passes behind.
     fn put_with(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool, through: Option<&[bool]>) {
-        let i = y * self.width + x;
+        // A row outside this band belongs to another one, which is drawing it
+        // from the very same sequence of primitives.
+        if y < self.row_lo || y >= self.row_hi {
+            return;
+        }
+        let i = (y - self.row_lo) * self.width + x;
         if key <= self.key[i] {
             let seen = through.is_some_and(|items| items.get(self.owner[i] as usize).copied().unwrap_or(false));
             if !seen {
@@ -122,13 +177,49 @@ impl Frame {
         let max_x = (p0.x.max(p1.x).max(p2.x).ceil() as isize).clamp(0, self.width as isize - 1) as usize;
         let min_y = p0.y.min(p1.y).min(p2.y).floor().max(0.0) as usize;
         let max_y = (p0.y.max(p1.y).max(p2.y).ceil() as isize).clamp(0, self.height as isize - 1) as usize;
+        // Rows outside this band are another band's work; not walking them at
+        // all is the whole point of splitting the frame up.
+        let min_y = min_y.max(self.row_lo);
+        let max_y = max_y.min(self.row_hi.saturating_sub(1));
         if min_x > max_x || min_y > max_y {
             return;
         }
 
+        // How each edge function changes from one pixel to the next along a
+        // row. Used only to work out where the row enters and leaves the
+        // triangle -- the test itself is still the exact one below, evaluated
+        // per pixel, so the picture is the same to the last bit as when this
+        // walked the whole bounding box.
+        let slope = [-(p2.y - p1.y), -(p0.y - p2.y), -(p1.y - p0.y)];
+
         let inv_area = 1.0 / area;
         for y in min_y..=max_y {
-            for x in min_x..=max_x {
+            let start = egui::pos2(min_x as f32 + 0.5, y as f32 + 0.5);
+            let at_start = [edge(p1, p2, start), edge(p2, p0, start), edge(p0, p1, start)];
+            // The three half-planes meet in one run of pixels, this row's
+            // span. A triangle thin against the pixel grid -- which most of a
+            // curved surface's triangles are -- covers a few pixels of a
+            // bounding box hundreds wide, and this is what stops the other
+            // hundreds being tested one at a time.
+            let (mut from, mut to) = (min_x as f32, max_x as f32);
+            let mut empty = false;
+            for i in 0..3 {
+                if slope[i] > 0.0 {
+                    from = from.max(min_x as f32 - at_start[i] / slope[i]);
+                } else if slope[i] < 0.0 {
+                    to = to.min(min_x as f32 - at_start[i] / slope[i]);
+                } else if at_start[i] < 0.0 {
+                    empty = true;
+                }
+            }
+            if empty {
+                continue;
+            }
+            // A pixel of slack at each end, so rounding in the division above
+            // can never shorten the run the exact test would have accepted.
+            let from = (from.floor().max(min_x as f32) as usize).saturating_sub(1).max(min_x);
+            let to = ((to.ceil().max(0.0) as usize) + 1).min(max_x);
+            for x in from..=to {
                 let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
                 let w0 = edge(p1, p2, p);
                 let w1 = edge(p2, p0, p);
@@ -169,9 +260,19 @@ impl Frame {
     }
 
     fn line_inner(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool, through: Option<&[bool]>) {
+        // Clipped to the whole frame, never to this band: the step count and so
+        // the position of every sample along the line come out of these two
+        // endpoints, and clipping them to the band would re-space the samples.
+        // A banded frame has to draw the same line the whole frame would, and
+        // then keep the part of it that is its own.
         let Some((a, b)) = self.clip_to_frame(a, b) else { return };
         let steps = ((b.pos.x - a.pos.x).abs().max((b.pos.y - a.pos.y).abs()).ceil() as usize).max(1);
-        for step in 0..=steps {
+        // Which of those samples can land in this band. `y` runs monotonically
+        // along the segment, so they are one run, and skipping the rest is what
+        // keeps a grid line that crosses the whole frame from being stepped end
+        // to end once per band.
+        let (first, last) = self.steps_in_band(a, b, steps);
+        for step in first..=last {
             let t = step as f32 / steps as f32;
             let x = a.pos.x + (b.pos.x - a.pos.x) * t;
             let y = a.pos.y + (b.pos.y - a.pos.y) * t;
@@ -185,6 +286,26 @@ impl Frame {
             let key = a.key + (b.key - a.key) * t;
             self.put_with(x, y, key + bias, rgba, write_depth, through);
         }
+    }
+
+    /// The run of step indices, out of `0..=steps`, whose sample rows can fall
+    /// inside this band -- widened by one at each end so rounding can never
+    /// drop a sample the band should have drawn.
+    fn steps_in_band(&self, a: Vertex, b: Vertex, steps: usize) -> (usize, usize) {
+        let dy = b.pos.y - a.pos.y;
+        if dy == 0.0 {
+            let row = a.pos.y;
+            if row < self.row_lo as f32 || row >= self.row_hi as f32 {
+                return (1, 0); // an empty run
+            }
+            return (0, steps);
+        }
+        let at = |y: f32| (y - a.pos.y) / dy * steps as f32;
+        let (lo, hi) = (at(self.row_lo as f32), at(self.row_hi as f32));
+        let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+        let first = (lo.floor().max(0.0) as usize).saturating_sub(1);
+        let last = ((hi.ceil().max(0.0) as usize) + 1).min(steps);
+        (first, last)
     }
 
     /// Liang-Barsky clip of a segment against the framebuffer rectangle,
@@ -229,11 +350,6 @@ impl Frame {
         Some((at(t0), at(t1)))
     }
 
-    /// Hand the framebuffer to egui as a texture image.
-    pub fn to_color_image(&self) -> egui::ColorImage {
-        egui::ColorImage::from_rgba_unmultiplied([self.width, self.height], &self.color)
-    }
-
     #[cfg(test)]
     fn pixel(&self, x: usize, y: usize) -> Rgba {
         let o = (y * self.width + x) * 4;
@@ -259,7 +375,8 @@ mod tests {
 
     #[test]
     fn a_triangle_covers_its_interior_and_nothing_outside_it() {
-        let mut frame = Frame::new(32, 32);
+        let mut store = vec![0u8; 32 * 32 * 4];
+        let mut frame = Frame::new(&mut store, 32, 32);
         frame.clear(BG);
         frame.triangle([vertex(2.0, 2.0, 1.0), vertex(28.0, 2.0, 1.0), vertex(2.0, 28.0, 1.0)], RED, true);
         assert_eq!(frame.pixel(5, 5), RED, "inside the triangle");
@@ -270,12 +387,13 @@ mod tests {
     #[test]
     fn winding_order_does_not_change_coverage() {
         let make = |flip: bool| {
-            let mut frame = Frame::new(16, 16);
+            let mut store = vec![0u8; 16 * 16 * 4];
+            let mut frame = Frame::new(&mut store, 16, 16);
             frame.clear(BG);
             let v = [vertex(1.0, 1.0, 1.0), vertex(14.0, 1.0, 1.0), vertex(1.0, 14.0, 1.0)];
             let v = if flip { [v[0], v[2], v[1]] } else { v };
             frame.triangle(v, RED, true);
-            frame.color.clone()
+            frame.color.to_vec()
         };
         assert_eq!(make(false), make(true));
     }
@@ -283,7 +401,8 @@ mod tests {
     #[test]
     fn the_nearer_triangle_wins_regardless_of_draw_order() {
         for far_first in [true, false] {
-            let mut frame = Frame::new(16, 16);
+            let mut store = vec![0u8; 16 * 16 * 4];
+            let mut frame = Frame::new(&mut store, 16, 16);
             frame.clear(BG);
             let far = [vertex(0.0, 0.0, 0.5), vertex(16.0, 0.0, 0.5), vertex(0.0, 16.0, 0.5)];
             let near = [vertex(0.0, 0.0, 2.0), vertex(16.0, 0.0, 2.0), vertex(0.0, 16.0, 2.0)];
@@ -300,7 +419,8 @@ mod tests {
 
     #[test]
     fn a_translucent_pass_blends_without_writing_depth() {
-        let mut frame = Frame::new(8, 8);
+        let mut store = vec![0u8; 8 * 8 * 4];
+        let mut frame = Frame::new(&mut store, 8, 8);
         frame.clear(BG);
         let quad = [vertex(0.0, 0.0, 1.0), vertex(8.0, 0.0, 1.0), vertex(0.0, 8.0, 1.0)];
         frame.triangle(quad, [255, 255, 255, 128], false);
@@ -314,7 +434,8 @@ mod tests {
 
     #[test]
     fn geometry_outside_the_frame_is_clipped_not_wrapped() {
-        let mut frame = Frame::new(16, 16);
+        let mut store = vec![0u8; 16 * 16 * 4];
+        let mut frame = Frame::new(&mut store, 16, 16);
         frame.clear(BG);
         frame.triangle([vertex(-100.0, -100.0, 1.0), vertex(200.0, -50.0, 1.0), vertex(-50.0, 200.0, 1.0)], RED, true);
         // No panic, and the covered part is filled.
@@ -323,7 +444,8 @@ mod tests {
 
     #[test]
     fn a_degenerate_triangle_draws_nothing() {
-        let mut frame = Frame::new(8, 8);
+        let mut store = vec![0u8; 8 * 8 * 4];
+        let mut frame = Frame::new(&mut store, 8, 8);
         frame.clear(BG);
         frame.triangle([vertex(1.0, 1.0, 1.0), vertex(5.0, 1.0, 1.0), vertex(3.0, 1.0, 1.0)], RED, true);
         assert!(frame.color.chunks_exact(4).all(|p| p == BG), "a zero-area triangle painted something");
@@ -331,7 +453,8 @@ mod tests {
 
     #[test]
     fn lines_reach_both_endpoints() {
-        let mut frame = Frame::new(16, 16);
+        let mut store = vec![0u8; 16 * 16 * 4];
+        let mut frame = Frame::new(&mut store, 16, 16);
         frame.clear(BG);
         frame.line(vertex(2.0, 8.0, 1.0), vertex(13.0, 8.0, 1.0), RED, 0.0);
         assert_eq!(frame.pixel(2, 8), RED);
@@ -342,7 +465,8 @@ mod tests {
 
     #[test]
     fn an_edge_biased_towards_the_eye_draws_over_its_own_face() {
-        let mut frame = Frame::new(16, 16);
+        let mut store = vec![0u8; 16 * 16 * 4];
+        let mut frame = Frame::new(&mut store, 16, 16);
         frame.clear(BG);
         frame.triangle([vertex(0.0, 0.0, 1.0), vertex(16.0, 0.0, 1.0), vertex(0.0, 16.0, 1.0)], RED, true);
         frame.line(vertex(0.0, 4.0, 1.0), vertex(8.0, 4.0, 1.0), BLUE, 0.01);
@@ -352,7 +476,8 @@ mod tests {
     #[test]
     fn a_line_biased_away_from_the_eye_loses_a_depth_tie() {
         // How the ground grid gets out of the way of geometry it is coplanar with.
-        let mut frame = Frame::new(16, 16);
+        let mut store = vec![0u8; 16 * 16 * 4];
+        let mut frame = Frame::new(&mut store, 16, 16);
         frame.clear(BG);
         frame.line(vertex(0.0, 4.0, 1.0), vertex(15.0, 4.0, 1.0), BLUE, -0.01);
         frame.triangle([vertex(0.0, 0.0, 1.0), vertex(16.0, 0.0, 1.0), vertex(0.0, 16.0, 1.0)], RED, true);
@@ -364,7 +489,8 @@ mod tests {
         // The origin axes are thousands of units long; clipping has to happen
         // before stepping, or they cost thousands of rejected samples -- and an
         // earlier length cap made them vanish altogether.
-        let mut frame = Frame::new(32, 32);
+        let mut store = vec![0u8; 32 * 32 * 4];
+        let mut frame = Frame::new(&mut store, 32, 32);
         frame.clear(BG);
         frame.line(vertex(-40000.0, 16.0, 1.0), vertex(40000.0, 16.0, 1.0), RED, 0.0);
         assert_eq!(frame.pixel(0, 16), RED);
@@ -374,7 +500,8 @@ mod tests {
 
     #[test]
     fn clearing_resets_both_colour_and_depth() {
-        let mut frame = Frame::new(8, 8);
+        let mut store = vec![0u8; 8 * 8 * 4];
+        let mut frame = Frame::new(&mut store, 8, 8);
         frame.clear(BG);
         frame.triangle([vertex(0.0, 0.0, 5.0), vertex(8.0, 0.0, 5.0), vertex(0.0, 8.0, 5.0)], BLUE, true);
         frame.clear(BG);

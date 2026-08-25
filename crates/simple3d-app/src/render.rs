@@ -2,7 +2,7 @@
 //! shaded / shaded-with-edges / wireframe display, the ground grid and origin
 //! axes, the selection highlight and translucent ghosts for hidden nodes.
 
-use crate::raster::{Frame, Rgba, Vertex};
+use crate::raster::{Frame, Image, Rgba, Vertex};
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::{AxisStyle, Colour};
@@ -222,12 +222,16 @@ impl Palette {
 
 /// Lay the gradient down one row at a time, before anything else is drawn.
 fn fill_background(frame: &mut Frame, palette: &Palette) {
+    // The gradient is a property of the whole frame, so the colour is asked for
+    // by the row's place in it -- while the pixels written are this band's own.
     let height = frame.height;
-    for row in 0..height {
+    let width = frame.width;
+    let rows = frame.rows();
+    for (offset, row) in rows.enumerate() {
         let colour = palette.background_at(row, height);
-        for column in 0..frame.width {
-            let offset = (row * frame.width + column) * 4;
-            frame.color[offset..offset + 4].copy_from_slice(&colour);
+        let line = &mut frame.color[offset * width * 4..(offset + 1) * width * 4];
+        for pixel in line.chunks_exact_mut(4) {
+            pixel.copy_from_slice(&colour);
         }
     }
 }
@@ -273,32 +277,124 @@ pub struct Request<'a> {
     pub items: Vec<Item<'a>>,
 }
 
-pub fn render(request: &Request<'_>) -> Frame {
-    let [width, height] = request.size;
-    let mut frame = Frame::new(width.max(1), height.max(1));
-    fill_background(&mut frame, &request.palette);
-    if width == 0 || height == 0 {
-        return frame;
-    }
-    let view = request.view;
+/// How many rows a band must have before splitting the frame again is worth
+/// the thread it costs. Below this the whole frame goes to one band: a small
+/// viewport rasterizes in well under a millisecond, and spawning eight threads
+/// to share that out costs more than it saves.
+const MIN_BAND_ROWS: usize = 96;
 
-    if request.grid.visible {
-        draw_grid(&mut frame, &view, &request.grid, &request.palette);
-    }
-    // Where each axis runs through material: the stretches cut out of the line,
-    // and the stretches on either side of them that run up to a surface and so
-    // must not be swallowed by the shape they are arriving at.
+/// How many bands to cut the frame into: one per core, but never so many that
+/// they stop being worth starting.
+fn band_count(height: usize) -> usize {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (height / MIN_BAND_ROWS).clamp(1, cores)
+}
+
+/// Draw the scene. The frame is cut into horizontal bands and each is drawn on
+/// its own thread, from the same list of primitives in the same order -- see
+/// `Frame`'s own note on why the split is by rows rather than by work.
+///
+/// Everything that has to be decided before drawing starts is decided once,
+/// here, and shared: `axis_material` walks every triangle of every item to find
+/// where the axes run through material, and doing that once per band would put
+/// most of the work back.
+/// Prepare and draw in one step. The application prepares once and hands the
+/// result to whichever engine is drawing, so this is the tests' way in.
+#[cfg(test)]
+pub fn render(request: &Request<'_>) -> Image {
+    render_prepared(request, &prepare_frame(request))
+}
+
+/// The software renderer, from a frame that has already been prepared.
+pub fn render_prepared(request: &Request<'_>, prepared: &Prepared) -> Image {
+    let [_, height] = request.size;
+    render_in_bands(request, prepared, band_count(height.max(1)))
+}
+
+/// The scene worked out but not yet drawn: screen-space primitives in drawing
+/// order, and the pieces of the origin axes with the rule that governs them.
+///
+/// This is where the two renderers meet. Projection, culling, shading, the
+/// grid's falloff and the whole of the axis-through-material question are
+/// decided here, once, on the CPU; what the GPU renderer does differently is
+/// only how the resulting primitives are turned into pixels. Anything decided
+/// here cannot drift between the engines, which is the point of it.
+pub struct Prepared {
+    pub(crate) steps: Vec<Step>,
+    pub(crate) axes: Vec<AxisStep>,
+}
+
+pub fn prepare_frame(request: &Request<'_>) -> Prepared {
     let material = axis_material(&request.items, &request.grid);
+    let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
+    Prepared { steps: prepare(request), axes }
+}
+
+/// Draw the frame in a given number of bands. The band count must not change
+/// the picture -- see the test at the bottom of this file, which holds the two
+/// against each other -- so it is a parameter only so that the test can ask.
+fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands: usize) -> Image {
+    let [width, height] = request.size;
+    let (width, height) = (width.max(1), height.max(1));
+    let Prepared { steps, axes } = prepared;
+
+    // The one buffer the whole frame is drawn into. Each band is handed the
+    // stretch of it holding its own rows, so what the threads write is already
+    // the finished image -- no copy at the end, which on a large viewport was
+    // costing more than the drawing.
+    let mut color = vec![0u8; width * height * 4];
+
+    // Rows are handed out so the remainder is spread over the first few bands
+    // rather than piled onto the last one.
+    let ranges: Vec<(usize, usize)> =
+        (0..bands).map(|i| (height * i / bands, height * (i + 1) / bands)).filter(|(lo, hi)| lo < hi).collect();
+    if ranges.len() == 1 {
+        let mine: Vec<u32> = (0..steps.len() as u32).collect();
+        let mut frame = Frame::band(&mut color, width, height, 0, height);
+        draw(&mut frame, request, steps, &mine, axes);
+        return Image { width, height, color };
+    }
+
+    let bins = bin_steps(steps, &ranges);
+    // One disjoint slice per band, in row order.
+    let mut rest = &mut color[..];
+    let mut slices: Vec<&mut [u8]> = Vec::with_capacity(ranges.len());
+    for &(lo, hi) in &ranges {
+        let (mine, tail) = rest.split_at_mut((hi - lo) * width * 4);
+        slices.push(mine);
+        rest = tail;
+    }
+
+    std::thread::scope(|scope| {
+        for ((&(lo, hi), mine), slice) in ranges.iter().zip(&bins).zip(slices) {
+            let (steps, axes) = (steps, axes);
+            scope.spawn(move || {
+                let mut frame = Frame::band(slice, width, height, lo, hi);
+                draw(&mut frame, request, steps, mine, axes);
+            });
+        }
+    });
+    Image { width, height, color }
+}
+
+/// Everything of the model that is the same whichever rows are being drawn:
+/// projected, culled, shaded and ordered exactly as the drawing order requires.
+fn prepare(request: &Request<'_>) -> Vec<Step> {
+    let view = request.view;
+    let mut steps = Vec::new();
+    if request.grid.visible {
+        push_grid(&mut steps, &view, &request.grid, &request.palette);
+    }
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         match item.style {
             Style::Solid => match request.mode {
-                DisplayMode::Wireframe => draw_wireframe(&mut frame, &view, item.renderable, request.palette.wire),
+                DisplayMode::Wireframe => push_wireframe(&mut steps, &view, item.renderable, request.palette.wire),
                 DisplayMode::Shaded => {
-                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255, tag_base)
+                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base)
                 }
                 DisplayMode::ShadedWithEdges => {
-                    draw_shaded(&mut frame, &view, item.renderable, request.palette.solid, 255, tag_base);
-                    draw_edges(&mut frame, &view, item.renderable, request.palette.edge, tag_base);
+                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base);
+                    push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base);
                 }
             },
             Style::Selected => {
@@ -306,17 +402,24 @@ pub fn render(request: &Request<'_>) -> Frame {
                 // be visible, and an outline reads clearly over a shaded body.
                 // A larger bias than the solid's own edges, or the two would tie
                 // at equal depth and the outline would lose.
-                draw_selection(&mut frame, &view, item.renderable, request.palette.selected, tag_base);
+                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base);
             }
-            Style::Ghost => draw_ghost(&mut frame, &view, item.renderable, request.palette.ghost),
+            Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost),
         }
     }
-    frame.set_tag(0);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
         // there is no surface for it to sit on.
-        draw_plane_marks(&mut frame, &view, &request.items, &request.palette, &request.grid);
+        push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid);
     }
+    steps
+}
+
+/// Draw the whole scene into one frame -- a band of one, or the lot.
+fn draw(frame: &mut Frame, request: &Request<'_>, steps: &[Step], mine: &[u32], axes: &[AxisStep]) {
+    fill_background(frame, &request.palette);
+    draw_steps(frame, steps, mine);
+    frame.set_tag(0);
     // Last: an axis is hidden by the material it runs through, which is cut out
     // of the line, and by anything in front of it -- except on the approach to a
     // surface it is about to go into, which is drawn over the shape it is
@@ -325,8 +428,91 @@ pub fn render(request: &Request<'_>) -> Frame {
     // and the point it enters, and losing it is what made the origin read as
     // being somewhere behind the model (issue 47). The grid is untouched, drawn
     // first and covered by everything.
-    draw_axes(&mut frame, &view, &request.palette, &request.grid, &material);
-    frame
+    for step in axes {
+        frame.line_through(step.a, step.b, step.colour, AXIS_BIAS, &step.seen);
+    }
+}
+
+/// One primitive of the model, already projected into screen space and ready
+/// for any band of the frame to draw.
+///
+/// Everything that does not depend on which rows are being drawn -- projection,
+/// back-face culling, shading, the depth bias a line gets from its own distance
+/// -- is worked out once here rather than once per band. Without that the
+/// parallel path re-derives the whole model for every thread, and a dense mesh
+/// in a small viewport comes out *slower* than drawing it on one core.
+pub(crate) enum Step {
+    Triangle { v: [Vertex; 3], colour: Rgba, tag: u16, write_depth: bool },
+    Line { a: Vertex, b: Vertex, colour: Rgba, bias: f32, tag: u16, write_depth: bool },
+}
+
+impl Step {
+    /// The rows this primitive can reach. A band sharing none of them skips it
+    /// on one comparison, which is what the split is worth.
+    fn rows(&self) -> (f32, f32) {
+        match self {
+            Step::Triangle { v, .. } => {
+                let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
+                (a.min(b).min(c), a.max(b).max(c))
+            }
+            Step::Line { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
+        }
+    }
+}
+
+/// Which of `steps` each band has to draw, as indices into it.
+///
+/// Sorting the primitives into their bands once beats letting every band walk
+/// the whole list: a dense mesh is tens of thousands of primitives and a large
+/// frame is fifteen bands, and the scan alone then costs more than the fill.
+/// The indices stay ascending, so each band still draws in preparation order.
+fn bin_steps(steps: &[Step], ranges: &[(usize, usize)]) -> Vec<Vec<u32>> {
+    let mut bins: Vec<Vec<u32>> = ranges.iter().map(|_| Vec::new()).collect();
+    for (index, step) in steps.iter().enumerate() {
+        let (from, to) = step.rows();
+        for (bin, &(lo, hi)) in bins.iter_mut().zip(ranges) {
+            // A pixel of slack at each end: a line samples on rounded
+            // coordinates and a triangle's span is widened by one, so a
+            // primitive that only just misses a band's rows can still write to
+            // one of them.
+            if to >= lo as f32 - 1.0 && from <= hi as f32 + 1.0 {
+                bin.push(index as u32);
+            }
+        }
+    }
+    bins
+}
+
+/// Draw the prepared primitives listed for this band, in the order they were
+/// prepared -- which is the order the single-threaded renderer drew them in.
+fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[u32]) {
+    for &index in mine {
+        match steps[index as usize] {
+            Step::Triangle { v, colour, tag, write_depth } => {
+                frame.set_tag(tag);
+                frame.triangle(v, colour, write_depth);
+            }
+            Step::Line { a, b, colour, bias, tag, write_depth } => {
+                frame.set_tag(tag);
+                if write_depth {
+                    frame.line(a, b, colour, bias);
+                } else {
+                    frame.line_with_depth(a, b, colour, bias, false);
+                }
+            }
+        }
+    }
+}
+
+/// A world-space line, projected and given the depth bias its own distance
+/// earns it. The counterpart of `draw_world_line`, for the prepared path.
+fn line_step(view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32, tag: u16, write_depth: bool) -> Step {
+    // Nothing is clipped: a parallel projection maps a point behind the eye to
+    // its true screen position, and the depth key puts it behind everything
+    // else on its own.
+    let (a, b) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
+    let scale = (a.key.abs() + b.key.abs()) * 0.5;
+    Step::Line { a, b, colour, bias: bias * scale, tag, write_depth }
 }
 
 /// Project a world point to a rasterizer vertex, with the depth key the
@@ -375,7 +561,7 @@ fn triangle_base(item: &Renderable, index: usize, base: Rgba) -> Rgba {
     }
 }
 
-fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, colour_base: Rgba, alpha: u8, tag_base: u16) {
+fn push_shaded(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour_base: Rgba, alpha: u8, tag_base: u16) {
     let forward = view.forward();
     for (index, tri) in item.mesh.indices.iter().enumerate() {
         let world = [
@@ -395,19 +581,19 @@ fn draw_shaded(frame: &mut Frame, view: &View, item: &Renderable, colour_base: R
             continue;
         }
         let colour = shade(triangle_base(item, index, colour_base), normal, forward, alpha);
-        frame.set_tag(item.tag(index, tag_base));
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
-        frame.triangle(
-            [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
+        steps.push(Step::Triangle {
+            v: [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
             colour,
-            true,
-        );
+            tag: item.tag(index, tag_base),
+            write_depth: true,
+        });
     }
 }
 
 /// Ghosts are drawn without back-face culling and without writing depth, so a
 /// hidden tool body reads as a translucent volume rather than a flat patch.
-fn draw_ghost(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba) {
+fn push_ghost(steps: &mut Vec<Step>, view: &View, item: &Renderable, base: Rgba) {
     let forward = view.forward();
     for tri in &item.mesh.indices {
         let world = [
@@ -421,11 +607,14 @@ fn draw_ghost(frame: &mut Frame, view: &View, item: &Renderable, base: Rgba) {
         }
         let colour = shade(base, normal.normalized(), forward, base[3]);
         let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
-        frame.triangle(
-            [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
+        // A ghost writes no depth, so the tag it would have written is never
+        // read; it carries the one a solid would have had for form's sake.
+        steps.push(Step::Triangle {
+            v: [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
             colour,
-            false,
-        );
+            tag: 0,
+            write_depth: false,
+        });
     }
 }
 
@@ -453,64 +642,36 @@ const AXIS_BIAS: f32 = -5.0e-4;
 /// magnitude above this it starts showing through the far side of a solid.
 const MARK_BIAS: f32 = 3.0e-3;
 
-fn draw_edges(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
+fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
         // Tagged like the faces it creases, so an edge of the solid an axis
         // goes into does not hide that axis where the faces either side of it
         // do not.
-        frame.set_tag(item.body_tag(edge[0] as usize, tag_base));
-        draw_world_line(frame, view, a, b, colour, EDGE_BIAS);
+        let tag = item.body_tag(edge[0] as usize, tag_base);
+        steps.push(line_step(view, a, b, colour, EDGE_BIAS, tag, true));
     }
 }
 
-fn draw_selection(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
+fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
-        frame.set_tag(item.body_tag(edge[0] as usize, tag_base));
-        draw_world_line(frame, view, a, b, colour, SELECTION_BIAS);
+        let tag = item.body_tag(edge[0] as usize, tag_base);
+        steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
     }
 }
 
-fn draw_wireframe(frame: &mut Frame, view: &View, item: &Renderable, colour: Rgba) {
+fn push_wireframe(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
         // No depth bias and no filled faces, so the whole wireframe is visible
         // including the far side -- which is the point of wireframe.
-        draw_world_line(frame, view, a, b, colour, 0.0);
-    }
-}
-
-/// Draw a world-space line, clipping it against the near plane so a segment
-/// crossing behind the eye does not project to nonsense. `bias` is a fraction of
-/// the line's own depth key, not an absolute amount.
-fn draw_world_line(frame: &mut Frame, view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32) {
-    draw_world_line_with_depth(frame, view, a, b, colour, bias, true)
-}
-
-/// As `draw_world_line`, with the depth *write* optional: the grid is
-/// depth-tested against the model but leaves no depth of its own.
-fn draw_world_line_with_depth(
-    frame: &mut Frame,
-    view: &View,
-    a: Vec3,
-    b: Vec3,
-    colour: Rgba,
-    bias: f32,
-    write_depth: bool,
-) {
-    // Nothing is clipped: a parallel projection maps a point behind the eye to
-    // its true screen position, and the depth key puts it behind everything
-    // else on its own.
-    let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
-    let scale = (va.key.abs() + vb.key.abs()) * 0.5;
-    if write_depth {
-        frame.line(va, vb, colour, bias * scale);
-    } else {
-        frame.line_with_depth(va, vb, colour, bias * scale, false);
+        // The tag is the wireframe's own: nothing is filled, so nothing owns a
+        // pixel's depth in a way an axis has to see through.
+        steps.push(line_step(view, a, b, colour, 0.0, 0, true));
     }
 }
 
@@ -641,7 +802,7 @@ pub fn effective_grid_spacing(view: &View, spacing: f64) -> f64 {
 /// are cheap to begin with.
 const MAX_LINES: i64 = 400;
 
-fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
+fn push_grid(steps: &mut Vec<Step>, view: &View, grid: &Grid, palette: &Palette) {
     let (fine, coarse, strength) = grid_levels(view, grid.spacing);
     let radius = grid_radius(view);
     // Both levels cover the same ground. Drawing the fine one over a shorter
@@ -652,9 +813,9 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
     // question about the zoom, and `grid_levels` already answers it: the fine
     // level fades in and out across the whole ground at once.
     if strength > 0.03 {
-        draw_grid_level(frame, view, fine, radius, strength, false, palette);
+        push_grid_level(steps, view, fine, radius, strength, false, palette);
     }
-    draw_grid_level(frame, view, coarse, radius, 1.0, true, palette);
+    push_grid_level(steps, view, coarse, radius, 1.0, true, palette);
 }
 
 /// One decade of the ground grid, centred on the camera target so panning never
@@ -662,8 +823,8 @@ fn draw_grid(frame: &mut Frame, view: &View, grid: &Grid, palette: &Palette) {
 /// every line sits at a whole multiple of it -- which is what keeps the line
 /// through zero *on* zero, and the X and Y axes lying along the grid rather
 /// than across it.
-fn draw_grid_level(
-    frame: &mut Frame,
+fn push_grid_level(
+    steps: &mut Vec<Step>,
     view: &View,
     spacing: f64,
     radius: f64,
@@ -685,16 +846,16 @@ fn draw_grid_level(
     };
     for i in -lines..=lines {
         let offset = i as f64 * spacing;
-        faded_line(
-            frame,
+        push_faded_line(
+            steps,
             view,
             Vec3::new(cx + offset, cy - half, 0.0),
             Vec3::new(cx + offset, cy + half, 0.0),
             shade(cx + offset),
             GRID_BIAS,
         );
-        faded_line(
-            frame,
+        push_faded_line(
+            steps,
             view,
             Vec3::new(cx - half, cy + offset, 0.0),
             Vec3::new(cx + half, cy + offset, 0.0),
@@ -759,7 +920,7 @@ fn visible_span(view: &View, from: Vec3, to: Vec3) -> Option<(f64, f64)> {
     (t1 > t0).then_some((t0, t1))
 }
 
-fn faded_line(frame: &mut Frame, view: &View, from: Vec3, to: Vec3, colour: Rgba, bias: f32) {
+fn push_faded_line(steps: &mut Vec<Step>, view: &View, from: Vec3, to: Vec3, colour: Rgba, bias: f32) {
     let Some((visible_from, visible_to)) = visible_span(view, from, to) else { return };
     let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
     let span = visible_to - visible_from;
@@ -787,7 +948,7 @@ fn faded_line(frame: &mut Frame, view: &View, from: Vec3, to: Vec3, colour: Rgba
         // Never writes depth: the grid and the axes are drawn before the model
         // and must lose every tie with it, including the exact ties a ground
         // plane makes with a plate whose side walls it cuts.
-        draw_world_line_with_depth(frame, view, a, b, faded, bias, false);
+        steps.push(line_step(view, a, b, faded, bias, 0, false));
     }
 }
 
@@ -880,8 +1041,8 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
 /// depth-tested like anything else -- hidden by the box, and picked up again
 /// where it comes out past the silhouette.
 #[allow(clippy::too_many_arguments)]
-fn faded_axis_line(
-    frame: &mut Frame,
+fn push_axis_line(
+    out: &mut Vec<AxisStep>,
     view: &View,
     centre: Vec3,
     to: Vec3,
@@ -914,7 +1075,7 @@ fn faded_axis_line(
             let (start, end) = (along(axis, from), along(axis, to));
             let (va, vb) = (to_vertex(view, view.to_view(start)), to_vertex(view, view.to_view(end)));
             seen_through(&mut seen, through, (from + to) / 2.0, away);
-            frame.line_through(va, vb, faded, AXIS_BIAS, &seen);
+            out.push(AxisStep { a: va, b: vb, colour: faded, seen: seen.clone().into() });
         }
     }
 }
@@ -1058,7 +1219,22 @@ fn axis_crossing(world: [Vec3; 3], axis: usize) -> Option<f64> {
     Some(edge2.dot(qvec) * inv)
 }
 
-fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, material: &AxisMaterial) {
+/// One piece of an origin axis, ready to draw: where it runs on screen, what
+/// colour it has faded to, and which bodies may not hide it.
+///
+/// `seen` is indexed by body tag and is the whole of the axis rule -- a piece
+/// of the line that loses the depth test is still drawn when whatever won that
+/// pixel is a body the line is arriving at. It is worked out here, from the
+/// model, so that both renderers answer the question the same way.
+pub(crate) struct AxisStep {
+    pub a: Vertex,
+    pub b: Vertex,
+    pub colour: Rgba,
+    pub seen: std::sync::Arc<[bool]>,
+}
+
+fn prepare_axes(view: &View, palette: &Palette, grid: &Grid, material: &AxisMaterial) -> Vec<AxisStep> {
+    let mut out = Vec::new();
     let spacing = effective_grid_spacing(view, grid.spacing);
     let radius = grid_radius(view);
     let clearance = material.reach;
@@ -1117,8 +1293,8 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
         // Both halves fade outward from the centre, for the same reason the
         // grid does: an axis that ends abruptly reads as an object.
         for sign in [-1.0, 1.0] {
-            faded_axis_line(
-                frame,
+            push_axis_line(
+                &mut out,
                 view,
                 centre,
                 centre + directions[axis] * (length * sign),
@@ -1131,6 +1307,7 @@ fn draw_axes(frame: &mut Frame, view: &View, palette: &Palette, grid: &Grid, mat
             );
         }
     }
+    out
 }
 
 /// The colour a principal plane's mark is drawn in, indexed by the axis that
@@ -1154,7 +1331,7 @@ fn mark_colours(palette: &Palette) -> [Rgba; 3] {
 /// to read it is to orbit until the grid is edge-on. The mark is drawn on the
 /// surface itself, where the plane meets it, in the colour `mark_colours` gives
 /// for the axis the plane is perpendicular to.
-fn draw_plane_marks(frame: &mut Frame, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
+fn push_plane_marks(steps: &mut Vec<Step>, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
     let colours = mark_colours(palette);
     for item in items.iter().filter(|i| i.style == Style::Solid) {
         for (axis, colour) in colours.into_iter().enumerate() {
@@ -1168,7 +1345,7 @@ fn draw_plane_marks(frame: &mut Frame, view: &View, items: &[Item<'_>], palette:
                     item.renderable.mesh.positions[tri[2] as usize],
                 ];
                 if let Some((a, b)) = plane_crossing(world, axis) {
-                    draw_world_line(frame, view, a, b, colour, MARK_BIAS);
+                    steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
                 }
             }
         }
@@ -1231,12 +1408,12 @@ mod tests {
         }
     }
 
-    fn count_non_background(frame: &Frame, palette: &Palette) -> usize {
+    fn count_non_background(frame: &Image, palette: &Palette) -> usize {
         (0..frame.height * frame.width).filter(|&i| !is_background(frame, i, palette)).count()
     }
 
     /// Whether pixel `index` still holds the gradient it was cleared to.
-    fn is_background(frame: &Frame, index: usize, palette: &Palette) -> bool {
+    fn is_background(frame: &Image, index: usize, palette: &Palette) -> bool {
         let offset = index * 4;
         let pixel: Rgba =
             [frame.color[offset], frame.color[offset + 1], frame.color[offset + 2], frame.color[offset + 3]];
@@ -1255,6 +1432,49 @@ mod tests {
         let edges = feature_edges(&cylinder, 20.0);
         assert!(edges.len() >= 64, "both rims should be kept, got {}", edges.len());
         assert!(edges.len() < 100, "the cap triangulation leaked into the edges: {}", edges.len());
+    }
+
+    /// Splitting the frame across threads must not change one pixel of it.
+    ///
+    /// This is the whole contract the banded renderer rests on, and it is not
+    /// self-evident: the first version of it clipped each line to the band
+    /// before stepping along it, which re-spaced the samples and moved every
+    /// grid line and feature edge by up to a pixel wherever a band began. The
+    /// picture still looked right on its own; it was only wrong against the
+    /// picture one thread drew. Every case below fails on that version.
+    #[test]
+    fn bands_draw_the_very_same_frame_as_one_thread() {
+        let mut mesh = primitives::box_mesh(30.0, 20.0, 14.0);
+        // A round body, so there are many small triangles and many feature
+        // edges landing at every angle to the band boundaries.
+        mesh.append(
+            &primitives::ellipsoid_mesh(18.0, 18.0, 18.0, 24)
+                .transformed(simple3d_geom::Vec3::new(22.0, 8.0, 4.0), simple3d_geom::Vec3::ZERO),
+        );
+        let prepared = Renderable::prepare(&mesh);
+        for mode in [DisplayMode::ShadedWithEdges, DisplayMode::Shaded, DisplayMode::Wireframe] {
+            let items = vec![Item { renderable: &prepared, style: Style::Solid }];
+            let mut req = request(items, mode);
+            // The grid, the axes and the plane marks all draw lines that cross
+            // the whole frame, so they cross every band boundary there is.
+            req.grid =
+                Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Grid, plane_marks: true };
+            let prepared = prepare_frame(&req);
+            let one = render_in_bands(&req, &prepared, 1);
+            for bands in [2, 3, 7, 16] {
+                let many = render_in_bands(&req, &prepared, bands);
+                let differing =
+                    (0..one.color.len() / 4).filter(|i| one.color[i * 4..i * 4 + 4] != many.color[i * 4..i * 4 + 4]);
+                let differing: Vec<usize> = differing.collect();
+                assert!(
+                    differing.is_empty(),
+                    "{mode:?} in {bands} bands differs from one band at {} pixels, first at ({}, {})",
+                    differing.len(),
+                    differing[0] % one.width,
+                    differing[0] / one.width,
+                );
+            }
+        }
     }
 
     #[test]
@@ -1294,7 +1514,7 @@ mod tests {
     /// For a convex solid the painted silhouette *is* the hull of its projected
     /// vertices, so any such pixel means a face that faces the viewer was not
     /// drawn.
-    fn unpainted_inside(hull: &[egui::Pos2], frame: &Frame, empty: &Frame, margin: f32) -> usize {
+    fn unpainted_inside(hull: &[egui::Pos2], frame: &Image, empty: &Image, margin: f32) -> usize {
         let mut missing = 0;
         for row in 0..frame.height {
             for x in 0..frame.width {
@@ -1352,7 +1572,7 @@ mod tests {
 
     /// How many pixels of the frame carry the given colour, shaded or not.
     /// A drawn line keeps its colour exactly; only shaded faces are scaled.
-    fn pixels_of(frame: &Frame, colour: Rgba) -> usize {
+    fn pixels_of(frame: &Image, colour: Rgba) -> usize {
         (0..frame.width * frame.height)
             .filter(|&i| {
                 let o = i * 4;
@@ -1798,7 +2018,7 @@ mod tests {
             let without = frame(axes, false);
             let covered_without = frame(axes, true);
 
-            let drawn_at = |frame: &Frame, reference: &Frame, at: f64| {
+            let drawn_at = |frame: &Image, reference: &Image, at: f64| {
                 let (pos, _) = req.view.project(along(axis, at)).expect("the sample is in front of the camera");
                 let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
                 (y.saturating_sub(1)..=y + 1).any(|y| {
@@ -1877,7 +2097,7 @@ mod tests {
             let mut axes = [true; 3];
             axes[axis] = false;
             let (without, bare_without) = (frame(axes, solid(&prepared)), frame(axes, Vec::new()));
-            let at = |frame: &Frame, reference: &Frame, at: f64| {
+            let at = |frame: &Image, reference: &Image, at: f64| {
                 let (pos, _) = req.view.project(along(axis, at)).expect("the sample is in front of the camera");
                 let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
                 let drawn = (y.saturating_sub(1)..=y + 1).any(|y| {
@@ -2136,7 +2356,7 @@ mod tests {
 
     /// A grid-only frame at `pitch`, with no model and no axes on it, so every
     /// pixel that is not the background is a grid line.
-    fn ground_only(pitch: f64) -> (Frame, Palette) {
+    fn ground_only(pitch: f64) -> (Image, Palette) {
         let (w, h) = (400, 300);
         let camera = Camera { yaw: -55.0, pitch, distance: 900.0, ..Camera::default() };
         let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32)));
