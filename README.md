@@ -109,16 +109,19 @@ portable.
 - **Keys and mouse buttons are yours.** Three presets (Simple 3D default, mesh
   editor, CAD) and per-command rebinding, with conflicts named rather than
   silently taken. A rebinding applies to the next gesture, without a restart.
-- **It starts on anything.** The viewport is a from-scratch software rasterizer:
-  there is no shader to fail to compile and no GPU to be missing.
+- **It starts on anything.** The viewport is a from-scratch software rasterizer,
+  drawn across every core there is: no shader to fail to compile and no GPU to
+  be missing. A GPU renderer is offered beside it, in the footer, for a large
+  viewport -- it is a choice, never a requirement, and if a driver will not have
+  it the viewport says so and goes on drawing in software.
 
 ## Status
 
-**v0.0.18.** All four crates are implemented and all 29 of the spec's acceptance
+**v0.0.19.** All four crates are implemented and all 29 of the spec's acceptance
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **445 tests**, none failing, and every
+`cargo test --workspace` runs **447 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
@@ -153,7 +156,10 @@ them is now covered by a test that fails without its fix.
   implementation.
 - The viewport is a from-scratch software rasterizer, so the app starts and
   stays usable on a machine with no accelerated graphics (acceptance criterion
-  19). `eframe` only has to provide a window and 2D drawing.
+  19). `eframe` only has to provide a window and 2D drawing. The GPU renderer
+  the footer offers draws through the OpenGL context that window already has,
+  so it adds no dependency and no requirement: it is picked, it can fail, and
+  the software renderer is what it falls back to.
 
 ## Workspace layout
 
