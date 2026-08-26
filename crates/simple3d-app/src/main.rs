@@ -69,9 +69,23 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport,
-        // The viewport is drawn on the CPU, so vsync is all we ask of the
-        // graphics stack and there is no shader to fail to compile.
-        vsync: true,
+        // Swap interval 0, deliberately, and it is not a performance choice.
+        //
+        // `vsync: true` gives *every* surface swap interval 1, and on NVIDIA's
+        // Wayland EGL a swap then waits for that surface's frame callback. A
+        // dialog is a real window (issue 53) opened with
+        // `show_viewport_immediate`, which eframe renders inside the parent's
+        // `update()`; when the compositor scheduled no frames for that second,
+        // always-on-top toplevel, its `eglSwapBuffers` waited on a callback
+        // that never came -- with `poll(timeout = -1)`, so forever -- and took
+        // the main window's event loop down with it. The main window stayed on
+        // screen showing its last frame, took no input, and sat at 0% CPU.
+        //
+        // Nothing is given up by turning it off here. The viewport is a CPU
+        // rasterizer that repaints on demand rather than a loop running as fast
+        // as it is allowed to, so swap interval 1 was never throttling anything;
+        // it only gave the swap something to block on.
+        vsync: false,
         ..Default::default()
     };
 
