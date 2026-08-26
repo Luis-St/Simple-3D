@@ -245,46 +245,98 @@ fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
     // The triangle's boundary with the on-edge vertices spliced into it, reused
     // across triangles rather than reallocated for each.
     let mut loop_: Vec<u32> = Vec::new();
-    let mut on_edge: Vec<(f64, u32)> = Vec::new();
+    let mut on_edge: [Vec<OnEdge>; 3] = [Vec::new(), Vec::new(), Vec::new()];
 
     for (i, tri) in mesh.indices.iter().enumerate() {
         let tag = mesh.tag(i);
+        for (e, out) in on_edge.iter_mut().enumerate() {
+            on_edge_vertices(pos, &grid, size, tol, tri, e, out);
+        }
         loop_.clear();
         for e in 0..3 {
             loop_.push(tri[e]);
-            on_edge_vertices(pos, &grid, size, tol, tri, e, &mut on_edge);
-            loop_.extend(on_edge.iter().map(|&(_, v)| v));
-        }
-        // A vertex near a corner can be within the tolerance of *both* edges
-        // meeting there, and would then be spliced into the loop twice. Once is
-        // enough to make it a corner of the fan -- twice makes two triangles
-        // that lie on top of each other, and an edge used twice in the same
-        // direction is exactly as non-manifold as an edge used once.
-        let mut seen = loop_.clone();
-        seen.sort_unstable();
-        if seen.windows(2).any(|w| w[0] == w[1]) {
-            let mut kept: Vec<u32> = Vec::with_capacity(loop_.len());
-            for &v in &loop_ {
-                if !kept.contains(&v) {
-                    kept.push(v);
-                }
-            }
-            loop_ = kept;
+            loop_.extend(on_edge[e].iter().map(|v| v.vertex));
         }
         if loop_.len() == 3 {
             indices.push(*tri);
             tags.push(tag);
             continue;
         }
-        fan_from_centre(pos, tri, &loop_, tag, &mut positions, &mut indices, &mut tags);
+        let mut deduped = loop_.clone();
+        deduped.sort_unstable();
+        deduped.dedup();
+        if deduped.len() == loop_.len() {
+            fan_from_centre(pos, tri, &loop_, tag, &mut positions, &mut indices, &mut tags);
+        } else {
+            for piece in split_pinched_loops(&loop_) {
+                fan_loop_from_own_centre(pos, &piece, tag, &mut positions, &mut indices, &mut tags);
+            }
+        }
     }
 
     Mesh { positions, indices, tags }
 }
 
+/// A mesh vertex found lying on one edge of a triangle: how far along that edge
+/// it sits, and which vertex it is.
+#[derive(Clone, Copy, Debug)]
+struct OnEdge {
+    along: f64,
+    vertex: u32,
+}
+
 /// Every vertex of the mesh lying strictly inside edge `e` of `tri`, in order
 /// along the edge. Written into `out` rather than returned so the walk over a
 /// large mesh allocates nothing per triangle.
+/// Split a triangle's boundary into simple loops wherever it touches the same
+/// vertex twice.
+///
+/// A vertex is spliced into the boundary of *every* edge it lies on, and near a
+/// sharp corner it can genuinely lie on both edges meeting there. The BSP
+/// produces needles routinely -- two long, nearly parallel sides and a very
+/// short end, 2.3 mm long and 5 microns wide in the case that prompted this --
+/// and around one of those a vertex sitting exactly on one long side is inside
+/// the `tol` band of the other as well.
+///
+/// Removing one of the two occurrences is what the pass used to do, and it is
+/// the reason a boolean of two finely tessellated operands came out
+/// non-manifold. The decision is made per triangle, but an edge is shared with a
+/// neighbour that has no reason to make the same one: whichever occurrence is
+/// dropped, the triangle across that edge still splits there, and the two sides
+/// no longer agree. It cannot be repaired by running the pass again either --
+/// each run manufactures a fresh disagreement somewhere else, which is why
+/// repeating it diverged instead of converging.
+///
+/// Keeping both occurrences makes every triangle agree with its neighbours,
+/// because whether a vertex lies on a segment depends on the segment alone. What
+/// it costs is a boundary that is pinched at that vertex, and a pinched loop
+/// cannot be fanned as one polygon -- the two triangles either side of the pinch
+/// would share an edge in the same direction. So it is cut into simple loops
+/// here, and each is fanned separately.
+///
+/// Every vertex of the boundary lies on the original triangle's own sides, so
+/// each loop is convex and its own centroid is strictly inside it -- which is
+/// what makes fanning each piece from its own centre sound.
+fn split_pinched_loops(boundary: &[u32]) -> Vec<Vec<u32>> {
+    let mut loops: Vec<Vec<u32>> = Vec::new();
+    let mut stack: Vec<u32> = Vec::with_capacity(boundary.len());
+    for &v in boundary {
+        if let Some(at) = stack.iter().position(|&w| w == v) {
+            // Everything since the last visit to `v` closes a loop of its own.
+            let piece: Vec<u32> = stack[at..].to_vec();
+            if piece.len() >= 3 {
+                loops.push(piece);
+            }
+            stack.truncate(at);
+        }
+        stack.push(v);
+    }
+    if stack.len() >= 3 {
+        loops.push(stack);
+    }
+    loops
+}
+
 fn on_edge_vertices(
     pos: &[Vec3],
     grid: &HashMap<Cell, Vec<u32>>,
@@ -292,7 +344,7 @@ fn on_edge_vertices(
     tol: f64,
     tri: &[u32; 3],
     e: usize,
-    out: &mut Vec<(f64, u32)>,
+    out: &mut Vec<OnEdge>,
 ) {
     out.clear();
     let (ia, ib) = (tri[e], tri[(e + 1) % 3]);
@@ -323,17 +375,17 @@ fn on_edge_vertices(
                     if (d - ab * s).length() > tol {
                         continue;
                     }
-                    out.push((s, v));
+                    out.push(OnEdge { along: s, vertex: v });
                 }
             }
         }
     }
-    out.sort_by(|a, b| a.0.total_cmp(&b.0));
+    out.sort_by(|a, b| a.along.total_cmp(&b.along));
     // The same physical point can be present twice over -- the grid is searched
     // by cell, and a vertex sitting exactly on a cell boundary is listed in
     // both. Two boundary vertices at the same place would make a zero-length
     // edge, and the ear clipper below would have to cope with it.
-    out.dedup_by(|a, b| (a.0 - b.0).abs() <= f64::EPSILON || a.1 == b.1);
+    out.dedup_by(|a, b| (a.along - b.along).abs() <= f64::EPSILON || a.vertex == b.vertex);
 }
 
 /// Triangulate a triangle's boundary once its edges have been subdivided, by
@@ -368,6 +420,35 @@ fn fan_from_centre(
     let c = (positions.len() - 1) as u32;
     for i in 0..boundary.len() {
         let (a, b) = (boundary[i], boundary[(i + 1) % boundary.len()]);
+        indices.push([c, a, b]);
+        tags.push(tag);
+    }
+}
+
+/// Fan a loop from its own centroid, for the pieces a pinched boundary is cut
+/// into. Unlike [`fan_from_centre`] there is no original triangle to take the
+/// centre from -- the piece is only part of one -- but the piece is convex, so
+/// the average of its own vertices is inside it.
+fn fan_loop_from_own_centre(
+    pos: &[Vec3],
+    loop_: &[u32],
+    tag: u32,
+    positions: &mut Vec<Vec3>,
+    indices: &mut Vec<[u32; 3]>,
+    tags: &mut Vec<u32>,
+) {
+    if loop_.len() < 3 {
+        return;
+    }
+    let mut centre = Vec3::ZERO;
+    for &v in loop_ {
+        centre = centre + pos[v as usize];
+    }
+    let centre = centre / loop_.len() as f64;
+    positions.push(centre);
+    let c = (positions.len() - 1) as u32;
+    for i in 0..loop_.len() {
+        let (a, b) = (loop_[i], loop_[(i + 1) % loop_.len()]);
         indices.push([c, a, b]);
         tags.push(tag);
     }
@@ -464,4 +545,72 @@ fn compact(mesh: Mesh) -> Mesh {
         indices.push(out);
     }
     Mesh { positions, indices, tags: mesh.tags.clone() }
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+
+    fn is_simple(piece: &[u32]) -> bool {
+        let mut seen = piece.to_vec();
+        seen.sort_unstable();
+        let before = seen.len();
+        seen.dedup();
+        seen.len() == before
+    }
+
+    /// A boundary pinched in the middle is cut into two loops, and nothing on it
+    /// is lost. This is the shape the pass used to mishandle: a vertex spliced
+    /// into two of a triangle's edges at once, which is what happens around the
+    /// needle triangles a BSP produces.
+    #[test]
+    fn a_pinched_boundary_is_cut_into_two_simple_loops() {
+        let boundary = [0, 1, 2, 3, 4, 2, 5, 6];
+        let loops = split_pinched_loops(&boundary);
+        assert_eq!(loops.len(), 2, "got {loops:?}");
+        for piece in &loops {
+            assert!(is_simple(piece), "piece {piece:?} still visits a vertex twice");
+            assert!(piece.len() >= 3, "piece {piece:?} encloses no area");
+        }
+        let mut covered: Vec<u32> = loops.iter().flatten().copied().collect();
+        covered.sort_unstable();
+        covered.dedup();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4, 5, 6], "a vertex of the boundary was lost");
+    }
+
+    /// The pinch that actually turns up: the repeated vertex sits a hair from a
+    /// corner, on both of the edges meeting there. The piece it cuts off is that
+    /// corner and nothing else -- two vertices, enclosing no area -- so it is
+    /// dropped rather than emitted as a degenerate triangle, and the corner goes
+    /// with it. That is the right answer geometrically: the vertex and the corner
+    /// are within tolerance of each other's edges, so the wedge between them has
+    /// no surface to contribute, and the neighbouring triangles still carry the
+    /// corner. `a_dense_round_operand_meeting_a_plate_stays_manifold` is what
+    /// checks that no hole is left behind by it.
+    #[test]
+    fn a_pinch_against_a_corner_drops_the_wedge_that_has_no_area() {
+        let boundary = [0, 9, 1, 4, 5, 6, 7, 8, 9];
+        let loops = split_pinched_loops(&boundary);
+        assert_eq!(loops, vec![vec![9, 1, 4, 5, 6, 7, 8]]);
+        assert!(is_simple(&loops[0]));
+    }
+
+    /// An ordinary boundary -- every vertex distinct -- is one loop, unchanged.
+    #[test]
+    fn an_unpinched_boundary_is_left_as_one_loop() {
+        let boundary = [0, 1, 2, 3, 4];
+        assert_eq!(split_pinched_loops(&boundary), vec![vec![0, 1, 2, 3, 4]]);
+    }
+
+    /// A union of two finely tessellated operands is a closed solid. At 224 and
+    /// 256 segments this came out with holes and doubled edges before the pinch
+    /// was handled; 144 is the smallest form of the same case that still runs in
+    /// about a second.
+    #[test]
+    fn a_dense_round_operand_meeting_a_plate_stays_manifold() {
+        let cap = crate::primitives::spherical_cap_mesh(20.0, 6.0, 144);
+        let plate = crate::primitives::plate_mesh(40.0, 40.0, 4.0);
+        let result = crate::evaluate_boolean(crate::BooleanOp::Union, &[cap, plate]);
+        assert_eq!(result.manifold_issue(), None, "the union is not a closed solid");
+    }
 }
