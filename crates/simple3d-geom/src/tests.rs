@@ -837,3 +837,39 @@ fn a_convex_body_is_recognised_as_splitting_nothing() {
     assert!(crate::csg_bsp::debug_splits_nothing(&primitives::cylinder_mesh(20.0, 20.0, 20.0, 64.0 as u32)));
     assert!(!crate::csg_bsp::debug_splits_nothing(&primitives::torus_mesh(30.0, 8.0, 360.0, 64)));
 }
+
+/// A plate with a box taken out of it, sharing two of its side planes.
+///
+/// Small enough that neither operand reaches the convex shortcut, so both go
+/// through the general near-face clip -- and the shared planes are what that
+/// clip has to get right: a piece of the plate lying *in* the plane of the
+/// box's side but off the end of it says nothing about the box at all, and
+/// deciding it by the coincident-face rule instead of by where it is turned
+/// the difference back into its own operands.
+#[test]
+fn a_difference_sharing_side_planes_is_a_closed_solid() {
+    let plate = primitives::plate_mesh(40.0, 20.0, 4.0);
+    let cutter = primitives::box_mesh(20.0, 20.0, 20.0);
+    let cut = evaluate_boolean(BooleanOp::Difference, &[plate, cutter]);
+    assert_manifold("plate minus box", &cut);
+    let (lo, hi) = cut.bounds().unwrap();
+    assert!(
+        (hi.z - 2.0).abs() < 1e-9 && (lo.z + 2.0).abs() < 1e-9,
+        "the cut reaches {lo:?}..{hi:?}, past the plate it was taken out of"
+    );
+}
+
+/// Two round bodies meeting off-centre and off-axis, which is where the
+/// kernel's fixed-epsilon classification leaves a sliver belonging to neither
+/// operand. `repair::cap_boundary_loops` is what closes the hole that leaves;
+/// without it this is a surface with a triangle missing out of it.
+#[test]
+fn round_bodies_meeting_at_an_angle_come_out_closed() {
+    let sphere = primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 128);
+    let cap =
+        primitives::spherical_cap_mesh(20.0, 6.0, 128).transformed(Vec3::new(3.0, 2.0, 1.0), Vec3::new(10.0, 0.0, 0.0));
+    for op in [BooleanOp::Union, BooleanOp::Difference, BooleanOp::Intersection] {
+        let result = evaluate_boolean(op, &[sphere.clone(), cap.clone()]);
+        assert_manifold(&format!("sphere {op:?} cap"), &result);
+    }
+}

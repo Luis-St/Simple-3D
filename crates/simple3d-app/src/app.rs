@@ -237,6 +237,11 @@ pub struct App {
     /// The message the fade clock is running for, so any assignment to `status`
     /// anywhere restarts it without having to remember to.
     last_status: Status,
+    /// The title the window is already wearing. `Context::send_viewport_cmd`
+    /// requests a repaint for every command it is handed, so sending the title
+    /// unconditionally each frame asked for the next frame each frame and the
+    /// application never went idle. Only a title that changed is sent.
+    last_title: String,
     /// True while a run of held-down nudge keys is coalescing into one undo step.
     nudging: bool,
     /// Set once a quit has been confirmed, so the event loop can close the window.
@@ -345,6 +350,7 @@ impl App {
             keymap_conflict: None,
             config_dir,
             last_status: Status::Idle,
+            last_title: String::new(),
             nudging: false,
             quit_now: false,
         };
@@ -1815,7 +1821,11 @@ impl eframe::App for App {
         self.advance_camera();
         self.refresh_node_renderables();
 
-        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.title()));
+        let title = self.title();
+        if title != self.last_title {
+            self.last_title.clone_from(&title);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+        }
         self.handle_shortcuts(ctx);
 
         self.ui(ctx);
@@ -1835,14 +1845,29 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // Keep animating while work is in flight, so progress and the preview
-        // update without the user having to move the mouse.
-        if self.worker.is_busy()
-            || self.export_job.is_some()
-            || self.drag.is_some()
-            || self.camera_move.is_some()
-            || status_opacity(&self.status, self.status_at.elapsed()) > 0.0 && self.status != Status::Idle
-        {
+        // update without the user having to move the mouse. A drag and a camera
+        // move are followed frame by frame, because the next frame is the
+        // answer to the pointer; everything else asks for the frame it will
+        // actually have something new to show in, since a repaint requested
+        // with no delay is a repaint requested for right now, and the loop then
+        // runs as fast as the machine allows.
+        if self.drag.is_some() || self.camera_move.is_some() {
             ctx.request_repaint();
+        } else if self.worker.is_busy() || self.export_job.is_some() {
+            // Progress and the preview, at a rate a person can read rather than
+            // at whatever the rasterizer can manage.
+            ctx.request_repaint_after(Duration::from_millis(33));
+        } else if self.status != Status::Idle {
+            // A status message is still for its whole lifetime and only then
+            // fades. Nothing changes until the fade starts, so ask for the
+            // frame that starts it, and only during the fade for frames after
+            // that.
+            let age = self.status_at.elapsed();
+            if age < STATUS_LIFETIME {
+                ctx.request_repaint_after(STATUS_LIFETIME - age);
+            } else if status_opacity(&self.status, age) > 0.0 {
+                ctx.request_repaint_after(Duration::from_millis(33));
+            }
         }
     }
 

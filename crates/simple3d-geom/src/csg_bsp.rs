@@ -474,6 +474,17 @@ struct BspNode {
     /// meets no face of this body at all. `None` disables that shortcut, which
     /// only ever costs time.
     surface: Option<BoxTree>,
+    /// The plane of each of those polygons, indexed as `surface` indexes them.
+    /// `clip_near` cuts by these and by nothing else, so a body's far faces
+    /// never reach a polygon their own surface is nowhere near.
+    face_planes: Vec<Plane>,
+    /// The faces themselves, kept only for a body `clip_near` will be used on:
+    /// deciding a piece that lies in a face's plane needs to know whether the
+    /// face actually covers it, and a plane cannot say. A convex body needs
+    /// none of this -- its face planes support it, so anything lying in one and
+    /// outside the face is outside the body, which `ConvexBody::contains`
+    /// already answers -- so the copy is not made there.
+    faces: Vec<Polygon>,
     /// Set when this body's own planes divide none of its faces, which is what
     /// `non_splitting_order` proves. `clip_polygons` uses it instead of
     /// descending the chain. Only a root carries one; the nodes `chain` and
@@ -509,7 +520,13 @@ struct ClipScratch {
     /// The pieces a convex clip has not yet decided, and the next round of them.
     pieces: Vec<Polygon>,
     next: Vec<Polygon>,
+    /// A general clip's undecided pieces.
+    work: Vec<Undecided>,
 }
+
+/// A piece a general clip has not settled yet: the piece itself, the face index
+/// it has been cut past, and whichever face it was found to lie in the plane of.
+type Undecided = (Polygon, u32, Option<u32>);
 
 /// Every walk over the tree below is written with an explicit stack rather
 /// than by recursion, and the tree drops itself the same way.
@@ -531,11 +548,22 @@ struct ClipScratch {
 /// and `non_splitting_order` is how that stopped being so.
 impl BspNode {
     fn new(polygons: Vec<Polygon>) -> BspNode {
-        let mut node =
-            BspNode { plane: None, front: None, back: None, polygons: Vec::new(), surface: None, convex: None };
+        let mut node = BspNode {
+            plane: None,
+            front: None,
+            back: None,
+            polygons: Vec::new(),
+            surface: None,
+            face_planes: Vec::new(),
+            faces: Vec::new(),
+            convex: None,
+        };
         if !polygons.is_empty() {
             let surface = BoxTree::new(&polygons);
-            match non_splitting_order(&polygons) {
+            let face_planes: Vec<Plane> = polygons.iter().map(|p| p.plane).collect();
+            let convex_order = non_splitting_order(&polygons);
+            let faces = if convex_order.is_some() { Vec::new() } else { polygons.clone() };
+            match convex_order {
                 Some(groups) => {
                     node.convex = Some(ConvexBody::new(&polygons, &groups));
                     node.chain(polygons, groups);
@@ -549,6 +577,8 @@ impl BspNode {
                 }
             }
             node.surface = surface;
+            node.face_planes = face_planes;
+            node.faces = faces;
         }
         node
     }
@@ -558,6 +588,15 @@ impl BspNode {
         // round the solid is; inverting swaps which side of them is solid.
         if let Some(convex) = &mut self.convex {
             convex.inverted = !convex.inverted;
+        }
+        // The stored face planes are what `clip_near` cuts by, and which side
+        // of one of them is solid is the whole of the coplanar rule; a body
+        // turned inside out has to turn them with it.
+        for plane in self.face_planes.iter_mut() {
+            *plane = plane.flip();
+        }
+        for face in self.faces.iter_mut() {
+            *face = face.flip();
         }
         let mut stack: Vec<&mut BspNode> = vec![self];
         while let Some(node) = stack.pop() {
@@ -597,6 +636,9 @@ impl BspNode {
     fn clip_polygons(&self, polygons: Vec<Polygon>, scratch: &mut ClipScratch) -> Vec<Polygon> {
         if let (Some(convex), Some(surface)) = (&self.convex, &self.surface) {
             return clip_convex(convex, surface, polygons, scratch);
+        }
+        if let Some(surface) = &self.surface {
+            return clip_near(self, surface, polygons, scratch);
         }
         let mut kept = Vec::new();
         // Pushed back-subtree first so the front one is popped first: the
@@ -833,6 +875,142 @@ fn clip_convex(
         }
     }
     kept
+}
+
+/// Clip `polygons` against a body of any shape, keeping what is outside it --
+/// the convex argument of `clip_convex`, made general.
+///
+/// The classic descent carries every polygon past the plane of every node on
+/// its path through the tree, and those planes are infinite. That is what a
+/// convex operand made ruinous, and `clip_convex` is what stopped it there; but
+/// the *soundness* cost was never confined to the convex case. A plane whose
+/// own face is a centimetre away still cuts, and every cut it makes is a
+/// corner landing within `EPSILON` of the next such plane -- a grazing sliver
+/// the classification then reads as lying *on* a plane it is really just
+/// outside, so the plane that should have trimmed it leaves it standing. The
+/// triangle between that corner and where the other body's surface really
+/// comes down belongs to neither body, nothing emits it, and `heal` cannot
+/// close a hole that has no T-junction in it. That is the mechanism the torus
+/// pairs kept failing on: not convex, so never reaching the convex clip, and
+/// so still being shredded by planes belonging to the far side of the ring.
+///
+/// The same argument settles it for any body. A body's surface is the union of
+/// its faces, so wherever that surface crosses a polygon it crosses inside a
+/// face, and therefore on that face's plane -- and a face that crosses the
+/// polygon has a box that meets the polygon's. Cutting the polygon by the
+/// planes of those faces alone therefore leaves pieces whose interiors the
+/// surface does not cross, and each such piece is wholly inside the body or
+/// wholly outside it. Convexity was never what made that true; it only bought
+/// the extra shortcut of settling a piece the moment it is in front of one
+/// plane, which a body with a dent in it cannot claim. Here every undecided
+/// piece is put to a point test against the tree instead.
+///
+/// The coplanar pieces are decided on the spot rather than by that test, since
+/// their centroids lie *on* the surface, where a side test has no answer:
+/// facing the same way as the body's own face is the outside of it, facing the
+/// other way is the inside. That is the rule the classic algorithm applies at
+/// the node owning the plane, and it is what leaves exactly one copy of two
+/// coincident faces.
+fn clip_near(root: &BspNode, surface: &BoxTree, polygons: Vec<Polygon>, scratch: &mut ClipScratch) -> Vec<Polygon> {
+    let face_planes = &root.face_planes;
+    let mut kept = Vec::new();
+    let (mut cf, mut cb, mut front, mut back) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for p in polygons {
+        // Each piece carries the face it has been cut past, and whichever face
+        // it was found to lie in the plane of. The faces are taken in
+        // increasing index and never revisited, which is what makes this
+        // terminate: a piece is a subset of the piece it was cut from, so a
+        // plane the parent lay wholly in front of, wholly behind, or exactly
+        // in, the child does too -- there is never a reason to go back.
+        scratch.work.clear();
+        scratch.work.push((p, 0, None));
+        while let Some((piece, from, coplanar)) = scratch.work.pop() {
+            // Gathered afresh for every piece, not once for the polygon it came
+            // from. That is the whole of it: a plane cuts the piece from edge to
+            // edge however small the face it belongs to, so the piece that ends
+            // up away from the surface has to stop being offered planes at all,
+            // and its own box is what says so. Gathering once and applying the
+            // whole list to every piece builds the full arrangement of those
+            // planes inside the polygon instead -- thousands of cells across a
+            // plate a torus passes through, for a cut that is one curve.
+            surface.gather(piece.bounds, &mut scratch.near, &mut scratch.boxes);
+            scratch.near.sort_unstable();
+            let mut cut = None;
+            let mut lies_in = coplanar;
+            for &i in scratch.near.iter().filter(|&&i| i >= from) {
+                let plane = face_planes[i as usize];
+                let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+                for v in &piece.vertices {
+                    let t = plane.normal.dot(*v) - plane.w;
+                    lo = lo.min(t);
+                    hi = hi.max(t);
+                }
+                if lo >= -EPSILON && hi <= EPSILON {
+                    // Lying in the face's plane. Noted and passed over rather
+                    // than decided: the piece may still straddle the edge of
+                    // that face, and it is only once every plane has had its
+                    // cut that "in the plane" and "on the face" are the same
+                    // question.
+                    lies_in = lies_in.or(Some(i));
+                    continue;
+                }
+                if lo < -EPSILON && hi > EPSILON {
+                    cut = Some((i, plane));
+                    break;
+                }
+            }
+            match cut {
+                Some((i, plane)) => {
+                    scratch.splitter.split(&plane, piece, &mut cf, &mut cb, &mut front, &mut back);
+                    cf.clear();
+                    cb.clear();
+                    for piece in front.drain(..).chain(back.drain(..)) {
+                        scratch.work.push((piece, i + 1, lies_in));
+                    }
+                }
+                None => {
+                    // No face of the body crosses this piece any more, so the
+                    // surface does not either: it is wholly on one side, and
+                    // one point settles the whole of it.
+                    let centre = piece.centroid();
+                    let keep = match lies_in {
+                        // On the body's own surface, where a side test has no
+                        // answer: facing the same way as the face is the
+                        // outside of it, the other way is the inside. This is
+                        // the rule the classic algorithm applies at the node
+                        // owning the plane, and with the second clip either
+                        // side of an `invert` it is what leaves one copy of two
+                        // coincident faces rather than two or none.
+                        Some(i) if covers(&root.faces[i as usize], centre) => {
+                            face_planes[i as usize].normal.dot(piece.plane.normal) > 0.0
+                        }
+                        // In the plane of a face but off the end of it, which
+                        // says nothing about the body at all.
+                        _ => root.keeps_point(centre),
+                    };
+                    if keep {
+                        kept.push(piece);
+                    }
+                }
+            }
+        }
+    }
+    kept
+}
+
+/// Does this face cover `point`, which is taken to lie in its plane?
+///
+/// Every polygon here is convex, so being inside is being on the inner side of
+/// every edge. Generous by `EPSILON`, deliberately: a point on the shared edge
+/// of two faces is covered by both, and the two answers agree, where a point
+/// this said was covered by neither would fall through to a side test taken on
+/// the surface itself.
+fn covers(face: &Polygon, point: Vec3) -> bool {
+    let n = face.vertices.len();
+    (0..n).all(|i| {
+        let (a, b) = (face.vertices[i], face.vertices[(i + 1) % n]);
+        (b - a).cross(point - a).dot(face.plane.normal) >= -EPSILON * (b - a).length()
+    })
 }
 
 impl Drop for BspNode {

@@ -81,10 +81,21 @@ fn main() -> eframe::Result<()> {
         // the main window's event loop down with it. The main window stayed on
         // screen showing its last frame, took no input, and sat at 0% CPU.
         //
-        // Nothing is given up by turning it off here. The viewport is a CPU
-        // rasterizer that repaints on demand rather than a loop running as fast
-        // as it is allowed to, so swap interval 1 was never throttling anything;
-        // it only gave the swap something to block on.
+        // Nothing is given up by turning it off here. The viewport repaints on
+        // demand rather than as fast as it is allowed to, so swap interval 1
+        // was never throttling anything; it only gave the swap something to
+        // block on.
+        //
+        // That claim was in doubt for a while: the idle application was
+        // measured at 100% of a core two days after this went in, and a
+        // repainting loop with nothing left to throttle it was the obvious
+        // suspect. It was not the cause. `App::update` was sending the window
+        // title on every frame, and `Context::send_viewport_cmd` requests a
+        // repaint for every command it is handed, so the frame asked for the
+        // next frame and the loop never stopped. Measured with
+        // `Context::repaint_causes`, fixed in `app.rs` by sending a title only
+        // when it changes, and the idle process now takes 0% of a core with
+        // swap interval still 0.
         vsync: false,
         ..Default::default()
     };
