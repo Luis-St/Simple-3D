@@ -305,6 +305,23 @@ pub struct AppSettings {
     /// Suppress the view cube's camera transition and anything else that moves
     /// on its own.
     pub reduce_motion: bool,
+    /// Draw the dialogs inside the main window rather than as windows of the
+    /// window system's own.
+    ///
+    /// Off by default: a dialog is a real window (issue 53), which is what
+    /// gives it the desktop's own frame, its place in the window list and the
+    /// keyboard handling that goes with those. The switch exists for the one
+    /// configuration where a real window is a hazard. eframe renders every
+    /// viewport on the winit thread -- `glow_integration` spawns none -- so a
+    /// dialog surface whose `eglSwapBuffers` blocks takes the whole application
+    /// with it, and on NVIDIA's Wayland EGL a swap waits for a frame callback
+    /// the compositor may never send for a second toplevel. Turning this on
+    /// means there is no second surface to block on, which is a stronger
+    /// guarantee than swap interval 0 and the only one that does not depend on
+    /// the driver honouring anything. Newer than the settings file, so an older
+    /// one reads as off.
+    #[serde(default)]
+    pub embed_dialogs: bool,
     pub display_mode: DisplayMode,
     /// Which renderer draws the viewport. Newer than the settings file, so an
     /// older one is read as the CPU renderer -- which is what it was using.
@@ -345,6 +362,7 @@ impl Default for AppSettings {
             properties_width: 320.0,
             layout: Layout::default(),
             reduce_motion: false,
+            embed_dialogs: false,
             display_mode: DisplayMode::ShadedWithEdges,
             render_engine: RenderEngine::Cpu,
             show_grid: true,
@@ -641,5 +659,24 @@ mod tests {
         settings.remember_colour(again);
         assert_eq!(settings.recent_colours[0], again);
         assert_eq!(settings.recent_colours.iter().filter(|c| **c == again).count(), 1);
+    }
+    /// Dialogs are windows of the window system's own by default (issue 53).
+    /// The switch that draws them inside the main window instead is a way out
+    /// of the NVIDIA Wayland freeze, where a second surface is the hazard, and
+    /// it has to survive the settings file to be one -- and a settings file
+    /// written before it existed has to read as the behaviour it had.
+    #[test]
+    fn dialogs_are_their_own_windows_unless_the_settings_say_otherwise() {
+        assert!(!AppSettings::default().embed_dialogs, "a dialog is a real window by default");
+
+        let older = r#"{"window_size": [1400.0, 880.0]}"#;
+        let migrated: AppSettings = serde_json::from_str(older).expect("an older settings file still loads");
+        assert!(!migrated.embed_dialogs, "a file written before the switch existed reads as off");
+
+        let mut settings = AppSettings::default();
+        settings.embed_dialogs = true;
+        let text = serde_json::to_string(&settings).expect("settings serialise");
+        let back: AppSettings = serde_json::from_str(&text).expect("and load again");
+        assert!(back.embed_dialogs, "the switch did not survive the file");
     }
 }

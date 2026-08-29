@@ -1794,6 +1794,11 @@ impl eframe::App for App {
         // The texture keeps its identity across a resize, so one registration
         // lasts the life of the application.
         self.prepare_gpu(frame);
+        // Asked every frame rather than once at startup, so the setting takes
+        // effect on the next dialog rather than on the next run. egui reads it
+        // when a viewport is shown, and `dialog` already draws the embedded
+        // form -- it is the one the headless tests have always driven.
+        ctx.set_embed_viewports(self.settings.embed_dialogs);
         // A new message restarts its clock. Watching the value rather than
         // stamping it at every assignment means no `status = ...` anywhere in
         // the application can forget to.
