@@ -143,8 +143,19 @@ pub enum ExportBody {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Body {
-    Group { op: GroupOp },
-    Primitive { type_id: String, params: Params },
+    Group {
+        op: GroupOp,
+    },
+    Primitive {
+        type_id: String,
+        params: Params,
+    },
+    /// A node that repeats its children under a rule (issue 67). It holds
+    /// children like a group, and its parameters -- the kind of pattern and its
+    /// numbers -- ride in the same `Params` map a primitive uses.
+    Pattern {
+        params: Params,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -243,6 +254,16 @@ impl Node {
         matches!(self.body, Body::Group { .. })
     }
 
+    pub fn is_pattern(&self) -> bool {
+        matches!(self.body, Body::Pattern { .. })
+    }
+
+    /// Whether this node can hold children: a group or a pattern. A primitive
+    /// cannot, and a drag or an Add that would put a child under one is refused.
+    pub fn can_hold_children(&self) -> bool {
+        self.is_group() || self.is_pattern()
+    }
+
     pub fn group_op(&self) -> Option<GroupOp> {
         match self.body {
             Body::Group { op } => Some(op),
@@ -259,14 +280,14 @@ impl Node {
 
     pub fn params(&self) -> Option<&Params> {
         match &self.body {
-            Body::Primitive { params, .. } => Some(params),
+            Body::Primitive { params, .. } | Body::Pattern { params } => Some(params),
             _ => None,
         }
     }
 
     pub fn params_mut(&mut self) -> Option<&mut Params> {
         match &mut self.body {
-            Body::Primitive { params, .. } => Some(params),
+            Body::Primitive { params, .. } | Body::Pattern { params } => Some(params),
             _ => None,
         }
     }
@@ -521,7 +542,7 @@ impl Scene {
     /// group, otherwise directly after it as a sibling (spec sections 7.2, 8.1).
     pub fn insertion_point(&self, selection: Option<NodeId>) -> (NodeId, usize) {
         match selection.and_then(|id| self.nodes.get(&id)) {
-            Some(node) if node.is_group() => (node.id, node.children.len()),
+            Some(node) if node.can_hold_children() => (node.id, node.children.len()),
             Some(node) => {
                 let parent = node.parent.unwrap_or(self.root);
                 let index = self.nodes[&parent].children.iter().position(|&c| c == node.id).map_or(0, |i| i + 1);
@@ -594,6 +615,31 @@ impl Scene {
         id
     }
 
+    /// Add a pattern node (issue 67), which repeats whatever children are put
+    /// under it. It starts as a linear pattern with the default numbers.
+    pub fn add_pattern(&mut self, parent: NodeId, index: usize) -> NodeId {
+        let id = self.fresh_id();
+        let node = Node {
+            id,
+            name: self.unique_name(parent, "Pattern"),
+            position: Vec3::ZERO,
+            rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
+            anchor: Anchor::Centre,
+            visible: true,
+            ghost: false,
+            colour: None,
+            segments: None,
+            export_body: None,
+            body: Body::Pattern { params: crate::pattern::default_params() },
+            children: Vec::new(),
+            parent: Some(parent),
+        };
+        self.nodes.insert(id, node);
+        self.link(id, parent, index);
+        id
+    }
+
     fn link(&mut self, id: NodeId, parent: NodeId, index: usize) {
         let children = &mut self.nodes.get_mut(&parent).expect("parent exists").children;
         let index = index.min(children.len());
@@ -653,8 +699,8 @@ impl Scene {
         if !self.nodes.contains_key(&new_parent) {
             return Err("no such node");
         }
-        if !self.nodes[&new_parent].is_group() {
-            return Err("only groups can hold children");
+        if !self.nodes[&new_parent].can_hold_children() {
+            return Err("only groups and patterns can hold children");
         }
         for &id in ids {
             if id == self.root {
@@ -754,6 +800,7 @@ impl Scene {
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
+            Body::Pattern { params } => ("pattern".to_string(), None, params.clone()),
         };
         Some(NodeData {
             name: node.name.clone(),
@@ -779,6 +826,8 @@ impl Scene {
     pub fn import_subtree(&mut self, data: &NodeData, parent: NodeId, index: usize) -> Option<NodeId> {
         let body = if data.type_id == "group" {
             Body::Group { op: data.op.unwrap_or_default() }
+        } else if data.type_id == "pattern" {
+            Body::Pattern { params: crate::pattern::migrate_params(&data.params) }
         } else {
             let spec = primitive::lookup(&data.type_id)?;
             Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -1246,6 +1295,30 @@ mod tests {
         assert_eq!(scene.node(pasted_child).name, "Special");
         assert_eq!(scene.node(pasted_child).rotation, Vec3::new(0.0, 45.0, 0.0));
         assert_eq!(scene.node(pasted_child).position, Vec3::new(7.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_pattern_holds_children_and_round_trips_through_the_portable_form() {
+        use crate::primitive::ParamValue;
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        assert!(scene.node(pat).is_pattern());
+        assert!(scene.node(pat).can_hold_children(), "a pattern must be able to hold children");
+        // A child can be reparented into it, the way a group takes one.
+        let child = box_at(&mut scene, root, 3.0);
+        scene.reparent(child, pat, 0).unwrap();
+        assert_eq!(scene.node(pat).children, vec![child]);
+        scene.get_mut(pat).unwrap().params_mut().unwrap().insert("count".into(), ParamValue::Count(5));
+
+        let data = scene.export_subtree(pat).unwrap();
+        assert_eq!(data.type_id, "pattern");
+        let json = serde_json::to_string(&data).unwrap();
+        let back: NodeData = serde_json::from_str(&json).unwrap();
+        let copy = scene.import_subtree(&back, root, 1).unwrap();
+        assert!(scene.node(copy).is_pattern());
+        assert_eq!(scene.node(copy).params().unwrap().get("count"), Some(&ParamValue::Count(5)));
+        assert_eq!(scene.node(copy).children.len(), 1, "the repeated child was lost");
     }
 
     #[test]

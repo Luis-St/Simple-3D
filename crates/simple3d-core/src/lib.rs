@@ -3,6 +3,7 @@ pub mod config;
 pub mod eval;
 pub mod keymap;
 pub mod library;
+pub mod pattern;
 pub mod primitive;
 pub mod project;
 pub mod scene;

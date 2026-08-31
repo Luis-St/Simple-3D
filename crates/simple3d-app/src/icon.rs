@@ -212,7 +212,12 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
         // node makes of its children.
         Glyph::Pattern => {
             for (cx, cy) in [(0.30, 0.30), (0.70, 0.30), (0.30, 0.70), (0.70, 0.70)] {
-                pen.closed(&[(cx - 0.16, cy - 0.16), (cx + 0.16, cy - 0.16), (cx + 0.16, cy + 0.16), (cx - 0.16, cy + 0.16)]);
+                pen.closed(&[
+                    (cx - 0.16, cy - 0.16),
+                    (cx + 0.16, cy - 0.16),
+                    (cx + 0.16, cy + 0.16),
+                    (cx - 0.16, cy + 0.16),
+                ]);
             }
         }
         Glyph::Group => {

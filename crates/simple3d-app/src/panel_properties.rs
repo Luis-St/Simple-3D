@@ -204,6 +204,7 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
             }
             None => match app.scene.node(primary).body.clone() {
                 Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
+                Body::Pattern { .. } if targets.len() == 1 => section(ui, "Pattern", |ui| pattern(app, ui, primary)),
                 // A selection of different types has no shared dimension to
                 // offer. Saying so beats an empty panel or a set of fields that
                 // would edit only one of them without saying which.
@@ -569,6 +570,29 @@ fn unpainted_swatch(dark: bool) -> [u8; 3] {
     [solid[0], solid[1], solid[2]]
 }
 
+/// The pattern editor (issue 67): the kind and its numbers, driven from the
+/// shared parameter list, plus a line saying what it currently makes.
+fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    let params = app.scene.node(id).params().cloned().unwrap_or_default();
+    let unit = app.unit();
+    let targets = [id];
+    for param in simple3d_core::pattern::PARAMS {
+        if !simple3d_core::pattern::param_visible(param, &params) {
+            continue;
+        }
+        param_field(app, ui, &targets, id, param, unit);
+    }
+    let copies = simple3d_core::pattern::instances(&params).len();
+    let children = app.scene.node(id).children.len();
+    let note = if children == 0 {
+        "Put shapes under this pattern in the outliner -- or add one with it selected -- and it repeats them."
+            .to_string()
+    } else {
+        format!("{copies} copies of {children} shape{}.", if children == 1 { "" } else { "s" })
+    };
+    ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+}
+
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     let mut op = current;
     // Wrapped, not merely laid out left to right: the four names together are
@@ -675,93 +699,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
         if !spec.param_visible(param, &params) {
             continue;
         }
-        let value = params.get(param.key).copied().unwrap_or(param.default);
-        match param.kind {
-            // Radio-style choices where a measurement is ambiguous.
-            ParamKind::Choice { options } => {
-                field_row(ui, param.label, "", |ui| {
-                    let mut chosen = value.as_u32();
-                    ui.vertical(|ui| {
-                        for (index, option) in options.iter().enumerate() {
-                            if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32
-                            {
-                                chosen = index as u32;
-                                app.edit("Set measurement", None);
-                                for target in targets {
-                                    set_param(app, *target, param.key, ParamValue::Choice(chosen));
-                                    sync_wall_mode(app, *target, param.key, chosen);
-                                }
-                            }
-                        }
-                    });
-                });
-            }
-            ParamKind::Bool => {
-                field_row(ui, param.label, "", |ui| {
-                    let mut on = value.as_bool();
-                    if ui.checkbox(&mut on, "").changed() {
-                        app.edit("Set flag", None);
-                        for target in targets {
-                            set_param(app, *target, param.key, ParamValue::Bool(on));
-                        }
-                    }
-                });
-            }
-            kind => {
-                field_row(ui, param.label, "", |ui| {
-                    let step = ui::scrub_increment(kind, unit);
-                    // A lock toggle where the type offers one: a sphere's three
-                    // diameters, a cylinder's two.
-                    if param.lock_group != 0 {
-                        let locked = is_locked(app, id, param.lock_group);
-                        let response = crate::icon::button(ui, crate::icon::Glyph::Group, 18.0, locked, true);
-                        if response
-                            .on_hover_text(if locked {
-                                "Locked equal; click to unlock"
-                            } else {
-                                "Click to lock these equal"
-                            })
-                            .clicked()
-                        {
-                            toggle_lock(app, id, param.lock_group, param.key);
-                        }
-                    }
-                    // The unit rides at the right-hand end of the row, one size
-                    // down and in the label colour, so it never competes with
-                    // the number it qualifies.
-                    let suffix = match kind {
-                        ParamKind::Length { .. } => unit.suffix(),
-                        ParamKind::Angle { .. } => "deg",
-                        _ => "",
-                    };
-                    let field_width = (room_left(ui) - suffix_room(ui, suffix)).max(40.0);
-                    let field_id = ui.id().with((id, param.key));
-                    // With several nodes selected, a field shows the value they
-                    // agree on and an em dash when they do not.
-                    let shown = ui::shared_text(
-                        targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)),
-                    );
-                    // The field is the grip: dragging it changes the value
-                    // without going near the keyboard, and clicking it opens it
-                    // for typing.
-                    let outcome = ui
-                        .scope(|ui| {
-                            ui.set_width(field_width);
-                            value_field(app, ui, param.label, field_id, &shown, step)
-                        })
-                        .inner;
-                    if !suffix.is_empty() {
-                        ui.add(egui::Label::new(theme::hint(suffix)).selectable(false));
-                    }
-                    if let Some(scrubbed) = outcome.scrubbed {
-                        scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
-                    }
-                    if let Some(text) = outcome.committed {
-                        set_shared_param(app, targets, param, kind, unit, field_id, text);
-                    }
-                });
-            }
-        }
+        param_field(app, ui, targets, id, param, unit);
     }
 
     if spec.segmented {
@@ -794,6 +732,105 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
                 }
             }
         });
+    }
+}
+
+/// Render one parameter's row -- a choice, a checkbox or a number field --
+/// writing edits to every selected node. Shared by the primitive editor and the
+/// pattern editor (issue 67), which drive it from different parameter lists.
+fn param_field(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    targets: &[NodeId],
+    id: NodeId,
+    param: &simple3d_core::primitive::ParamSpec,
+    unit: Unit,
+) {
+    let value = param_value(app, id, param.key, param.default);
+    match param.kind {
+        // Radio-style choices where a measurement is ambiguous.
+        ParamKind::Choice { options } => {
+            field_row(ui, param.label, "", |ui| {
+                let mut chosen = value.as_u32();
+                ui.vertical(|ui| {
+                    for (index, option) in options.iter().enumerate() {
+                        if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
+                            chosen = index as u32;
+                            app.edit("Set measurement", None);
+                            for target in targets {
+                                set_param(app, *target, param.key, ParamValue::Choice(chosen));
+                                sync_wall_mode(app, *target, param.key, chosen);
+                            }
+                        }
+                    }
+                });
+            });
+        }
+        ParamKind::Bool => {
+            field_row(ui, param.label, "", |ui| {
+                let mut on = value.as_bool();
+                if ui.checkbox(&mut on, "").changed() {
+                    app.edit("Set flag", None);
+                    for target in targets {
+                        set_param(app, *target, param.key, ParamValue::Bool(on));
+                    }
+                }
+            });
+        }
+        kind => {
+            field_row(ui, param.label, "", |ui| {
+                let step = ui::scrub_increment(kind, unit);
+                // A lock toggle where the type offers one: a sphere's three
+                // diameters, a cylinder's two.
+                if param.lock_group != 0 {
+                    let locked = is_locked(app, id, param.lock_group);
+                    let response = crate::icon::button(ui, crate::icon::Glyph::Group, 18.0, locked, true);
+                    if response
+                        .on_hover_text(if locked {
+                            "Locked equal; click to unlock"
+                        } else {
+                            "Click to lock these equal"
+                        })
+                        .clicked()
+                    {
+                        toggle_lock(app, id, param.lock_group, param.key);
+                    }
+                }
+                // The unit rides at the right-hand end of the row, one size
+                // down and in the label colour, so it never competes with
+                // the number it qualifies.
+                let suffix = match kind {
+                    ParamKind::Length { .. } => unit.suffix(),
+                    ParamKind::Angle { .. } => "deg",
+                    _ => "",
+                };
+                let field_width = (room_left(ui) - suffix_room(ui, suffix)).max(40.0);
+                let field_id = ui.id().with((id, param.key));
+                // With several nodes selected, a field shows the value they
+                // agree on and an em dash when they do not.
+                let shown = ui::shared_text(
+                    targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)),
+                );
+                // The field is the grip: dragging it changes the value
+                // without going near the keyboard, and clicking it opens it
+                // for typing.
+                let outcome = ui
+                    .scope(|ui| {
+                        ui.set_width(field_width);
+                        value_field(app, ui, param.label, field_id, &shown, step)
+                    })
+                    .inner;
+                if !suffix.is_empty() {
+                    ui.add(egui::Label::new(theme::hint(suffix)).selectable(false));
+                }
+                if let Some(scrubbed) = outcome.scrubbed {
+                    scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
+                }
+                if let Some(text) = outcome.committed {
+                    set_shared_param(app, targets, param, kind, unit, field_id, text);
+                }
+            });
+        }
     }
 }
 

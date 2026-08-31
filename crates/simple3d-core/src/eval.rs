@@ -198,6 +198,35 @@ impl Evaluator {
                 }
                 combine(*op, &child_meshes, id, &node.name, &mut errors)
             }
+            Body::Pattern { params } => {
+                // The unit the pattern repeats: its children, placed by their own
+                // positions and appended. A pattern lays copies side by side, it
+                // does not boolean them, so this is a concatenation and stays fast
+                // however many copies there are.
+                let mut unit = Mesh::new();
+                for &child in &node.children {
+                    if !scene.node(child).visible {
+                        continue;
+                    }
+                    let child_result = self.subtree(scene, child, cancel);
+                    errors.extend(child_result.errors.iter().cloned());
+                    unit.append(&child_result.mesh);
+                }
+                if cancel.is_cancelled() {
+                    return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
+                }
+                let mut out = Mesh::new();
+                for instance in crate::pattern::instances(params) {
+                    let mut copy = apply(&instance.xform, &unit);
+                    // A reflection reverses the winding, so its faces point the
+                    // wrong way until they are flipped back.
+                    if instance.mirrored {
+                        copy.flip_winding();
+                    }
+                    out.append(&copy);
+                }
+                out
+            }
         };
 
         let anchor_offset = match (node.anchor, local.bounds()) {
@@ -299,6 +328,32 @@ impl Evaluator {
                     self.walk(scene, child, shifted, out, cancel);
                 }
             }
+            Body::Pattern { .. } => {
+                // Bounds like a group, over the whole repeated result.
+                let subtree = self.subtree(scene, id, cancel);
+                if let Some((lo, hi)) = subtree.mesh.bounds() {
+                    let inv = Xform::from_pos_rot_scale(
+                        node.position,
+                        node.rotation,
+                        crate::scene::Node::sane_scale(node.scale),
+                    )
+                    .inverse();
+                    let (a, b) = (inv.point(lo), inv.point(hi));
+                    out.local_bounds.insert(id, (a.min(b), a.max(b)));
+                    if let Some(bounds) = bounds_of(subtree.mesh.positions.iter().map(|&p| parent.point(p))) {
+                        out.world_bounds.insert(id, bounds);
+                    }
+                }
+                // The whole repeated mesh in world space, so a click on any copy
+                // -- not just the original the child sits at -- selects the
+                // pattern. The child meshes are still collected below, so the
+                // original copy also reaches the child that draws it.
+                let world = Arc::new(apply(&parent, &subtree.mesh));
+                out.meshes.insert(id, world);
+                for &child in &node.children {
+                    self.walk(scene, child, shifted, out, cancel);
+                }
+            }
         }
     }
 
@@ -339,6 +394,16 @@ impl Evaluator {
                 }
                 // Length of the visible child list, so hiding the last child of
                 // a union is not confused with having one fewer child.
+                node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
+            }
+            Body::Pattern { params } => {
+                "pattern".hash(&mut hasher.0);
+                hash_params(hasher, params);
+                for &child in &node.children {
+                    if scene.node(child).visible {
+                        self.hash_subtree(scene, child, hasher);
+                    }
+                }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
         }
@@ -1077,6 +1142,61 @@ mod tests {
         let (lo, hi) = out.node_world_bounds[&group];
         // Turned a quarter turn about Z, the 40 x 20 plate measures 20 x 40.
         assert!((hi - lo - Vec3::new(20.0, 40.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
+    }
+
+    #[test]
+    fn a_pattern_repeats_its_child_without_touching_the_original() {
+        // Issue 67: a linear pattern of a 20mm box, three copies stepping 50mm
+        // along X, spans one box either end of three centres.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        let child = scene.add_primitive("box", pat, 0).unwrap();
+        let one_box = {
+            let mut solo = Scene::new();
+            let r = solo.root();
+            solo.add_primitive("box", r, 0).unwrap();
+            Evaluator::new().evaluate(&solo, &Cancel::new()).mesh.triangle_count()
+        };
+        {
+            let p = scene.get_mut(pat).unwrap().params_mut().unwrap();
+            p.insert("kind".into(), ParamValue::Choice(0));
+            p.insert("count".into(), ParamValue::Count(3));
+            p.insert("step_x".into(), ParamValue::Length(50.0));
+        }
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (lo, hi) = out.mesh.bounds().unwrap();
+        assert!((lo.x + 10.0).abs() < 1e-6, "the first copy is not the original: {lo:?}");
+        assert!((hi.x - 110.0).abs() < 1e-6, "the third copy is not 100mm along: {hi:?}");
+        assert_eq!(out.mesh.triangle_count(), one_box * 3, "a pattern of three should be three copies");
+        let _ = child;
+
+        // The whole repeated mesh is pickable under the pattern's own id, so a
+        // click on any copy reaches the pattern.
+        assert!(out.node_meshes.contains_key(&pat), "the pattern has no pickable mesh");
+    }
+
+    #[test]
+    fn a_mirror_pattern_reflects_its_child_and_stays_watertight() {
+        // A box off to +X, mirrored across the X-normal plane: a matching box at
+        // -X, and each copy is still a solid despite the reflection's winding.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        let child = scene.add_primitive("box", pat, 0).unwrap();
+        scene.get_mut(child).unwrap().position = Vec3::new(30.0, 0.0, 0.0);
+        {
+            let p = scene.get_mut(pat).unwrap().params_mut().unwrap();
+            p.insert("kind".into(), ParamValue::Choice(3)); // Mirror
+            p.insert("mirror_axis".into(), ParamValue::Choice(0));
+        }
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (lo, hi) = out.mesh.bounds().unwrap();
+        // Symmetric about the origin: the reflection reached -X.
+        assert!((lo.x + hi.x).abs() < 1e-6, "the mirror is not symmetric: {lo:?} {hi:?}");
+        // Each of the two copies is a closed solid; a reflection whose winding was
+        // not flipped would be inside out.
+        assert!(out.mesh.manifold_issue().is_none(), "the reflected copy was left inside out");
     }
 
     #[test]

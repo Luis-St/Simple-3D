@@ -818,6 +818,7 @@ impl App {
             Duplicate => self.duplicate(),
             Delete => self.delete_selection(),
             Group => self.group_selection(),
+            Pattern => self.make_pattern(),
             Rename => {
                 if let Some(id) = self.primary() {
                     self.rename = Some((id, self.scene.node(id).name.clone()));
@@ -1188,6 +1189,62 @@ impl App {
                 self.status = Status::Info("Grouped".into());
             }
             None => self.status = Status::Warning("That selection cannot be grouped".into()),
+        }
+    }
+
+    /// The parameter keys a pattern's viewport spacing handle drives -- its
+    /// count along the first axis and the step between copies there -- or `None`
+    /// for a kind with no straight run to lay out by dragging (issue 67).
+    pub fn pattern_spacing_keys(&self, id: NodeId) -> Option<(&'static str, &'static str)> {
+        let node = self.scene.get(id)?;
+        if !node.is_pattern() {
+            return None;
+        }
+        match node.params()?.get("kind").copied().map(|v| v.as_u32()).unwrap_or(0) {
+            0 => Some(("count", "step_x")),       // Linear
+            1 => Some(("grid_x", "grid_step_x")), // Grid, along its columns
+            _ => None,
+        }
+    }
+
+    /// Set a pattern's primary step from a drag, coalesced into one undo step so
+    /// the whole drag is a single "spacing" edit.
+    pub fn set_pattern_step(&mut self, id: NodeId, step_key: &str, step: f64) {
+        self.edit("Pattern spacing", Some(&format!("pattern-step:{id}")));
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            params.insert(step_key.to_string(), simple3d_core::primitive::ParamValue::Length(step.max(0.0)));
+        }
+        self.touch();
+    }
+
+    /// The pattern creation tool (issue 67): wrap the selection in a pattern
+    /// node that repeats it, or -- with nothing selected -- drop an empty pattern
+    /// at the insertion point for shapes to be put under. Either way the pattern
+    /// is selected, so the property editor is right there to lay it out.
+    fn make_pattern(&mut self) {
+        self.edit("Pattern", None);
+        let created = if self.selection.is_empty() {
+            let (parent, index) = self.scene.insertion_point(self.primary());
+            Some(self.scene.add_pattern(parent, index))
+        } else {
+            // Reuse the grouping logic to gather the top-level selection under one
+            // new node, then make that node a pattern rather than a union.
+            let group = self.scene.group_selection(&self.selection.clone());
+            if let Some(group) = group {
+                if let Some(node) = self.scene.get_mut(group) {
+                    node.body =
+                        simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::default_params() };
+                    node.name = "Pattern".to_string();
+                }
+            }
+            group
+        };
+        match created {
+            Some(id) => {
+                self.select_only(id);
+                self.status = Status::Info("Pattern: choose its kind and numbers in the properties panel".into());
+            }
+            None => self.status = Status::Warning("That selection cannot be made into a pattern".into()),
         }
     }
 
@@ -3631,7 +3688,8 @@ mod tests {
         let mut app = headless_app();
         app.measure.active = true;
         app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: Some(crate::snap::FeatureKind::Vertex) });
-        app.measure.add(MeasurePoint { at: Vec3::new(20.0, 8.0, 5.0), kind: Some(crate::snap::FeatureKind::FaceCentre) });
+        app.measure
+            .add(MeasurePoint { at: Vec3::new(20.0, 8.0, 5.0), kind: Some(crate::snap::FeatureKind::FaceCentre) });
         draw_one_frame(&mut app);
         // And with only one end down, where the live preview line is drawn.
         app.measure.clear();
@@ -3648,6 +3706,59 @@ mod tests {
         app.run(Command::ModeRotate);
         assert!(!app.measure.active, "the measure tool held the pointer after a transform tool was chosen");
         assert!(app.measure.points.is_empty(), "its span was left hanging in the scene");
+    }
+
+    #[test]
+    fn the_pattern_tool_wraps_the_selection_and_the_editor_draws() {
+        // Issue 67: the creation tool wraps what is selected in a pattern node
+        // that repeats it, selects the pattern, and the property editor's Pattern
+        // section draws without panicking.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        assert!(app.scene.node(pat).is_pattern(), "the tool did not make a pattern");
+        assert_eq!(app.scene.node(pat).children, vec![plate], "the shape was not put under the pattern");
+        app.reevaluate_for_test();
+        draw_one_frame(&mut app);
+
+        // Turning it into a circular pattern and drawing again exercises the
+        // choice-gated fields the editor shows per kind.
+        app.scene
+            .get_mut(pat)
+            .unwrap()
+            .params_mut()
+            .unwrap()
+            .insert("kind".into(), simple3d_core::primitive::ParamValue::Choice(2));
+        app.reevaluate_for_test();
+        draw_one_frame(&mut app);
+
+        // With nothing selected the tool drops a bare pattern to fill later.
+        app.clear_selection();
+        app.run(Command::Pattern);
+        assert!(app.scene.node(app.primary().unwrap()).is_pattern());
+    }
+
+    #[test]
+    fn a_linear_patterns_spacing_is_laid_out_by_a_handle_that_follows_the_kind() {
+        use simple3d_core::primitive::ParamValue;
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        // Linear by default: the viewport handle drives its count and step.
+        assert_eq!(app.pattern_spacing_keys(pat), Some(("count", "step_x")));
+        app.set_pattern_step(pat, "step_x", 42.0);
+        assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(42.0)));
+        app.reevaluate_for_test();
+        draw_one_frame(&mut app);
+
+        // A kind with no straight run -- a mirror -- offers no spacing handle.
+        app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(3));
+        assert_eq!(app.pattern_spacing_keys(pat), None);
+
+        // Negative drags cannot push the step below zero.
+        app.set_pattern_step(pat, "step_x", -5.0);
+        assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(0.0)));
     }
 
     #[test]

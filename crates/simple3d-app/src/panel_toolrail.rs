@@ -112,6 +112,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         {
             app.run(Command::Group);
         }
+        // Patterns work with nothing selected too -- an empty one to drop shapes
+        // into -- so the button is always live.
+        if icon::button(ui, Glyph::Pattern, size, false, true)
+            .on_hover_text(format!("Make a pattern of the selection  {}", app.keymap.shortcut_text(Command::Pattern)))
+            .clicked()
+        {
+            app.run(Command::Pattern);
+        }
         if icon::button(ui, Glyph::Delete, size, false, has_selection)
             .on_hover_text(format!("Delete the selection  {}", app.keymap.shortcut_text(Command::Delete)))
             .clicked()

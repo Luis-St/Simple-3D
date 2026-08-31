@@ -41,6 +41,7 @@ pub enum Command {
     Duplicate,
     Delete,
     Group,
+    Pattern,
     Rename,
     ToggleVisibility,
     MoveUp,
@@ -122,6 +123,7 @@ impl Command {
         Command::Duplicate,
         Command::Delete,
         Command::Group,
+        Command::Pattern,
         Command::Rename,
         Command::ToggleVisibility,
         Command::MoveUp,
@@ -180,6 +182,7 @@ impl Command {
             Duplicate => "Duplicate",
             Delete => "Delete",
             Group => "Group selection",
+            Pattern => "Make a pattern of the selection",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
             MoveUp => "Move up among siblings",
@@ -223,13 +226,13 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Rename | ToggleVisibility | MoveUp
-            | MoveDown => Area::Edit,
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | Rename | ToggleVisibility
+            | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
-            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | SnapToGeometry | NudgeLeft
-            | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | SnapToGeometry
+            | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }
@@ -483,6 +486,7 @@ impl Keymap {
         set(Duplicate, Chord::ctrl("D"));
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
+        set(Pattern, Chord::ctrl_shift("P"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
         set(MoveUp, Chord::ctrl("Up"));

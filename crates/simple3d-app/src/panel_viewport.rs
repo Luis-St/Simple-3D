@@ -38,7 +38,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             } else {
                 place_cursor(app, ui, &response, &view);
                 let view = app.current_view();
-                let owned = manipulate(app, ui, &response, &view);
+                // A pattern's spacing handle takes the pointer before the
+                // manipulator, so dragging it lays the copies out rather than
+                // moving the whole pattern (issue 67).
+                let spacing_owned = pattern_spacing_interact(app, ui, &view);
+                let owned = spacing_owned || manipulate(app, ui, &response, &view);
                 // Picking is *outside* the manipulator, because it has to work when
                 // there is no manipulator: with nothing selected there is no primary
                 // node and no gizmo, and while this lived inside `manipulate` the
@@ -327,6 +331,50 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     owned
 }
 
+/// Where a pattern's spacing handle sits in the world, and along which axis it
+/// slides: at the last copy of its first run, out along that run's direction.
+/// `None` when the selected node is not a pattern with a run to lay out.
+fn pattern_spacing_handle(app: &App, view: &View) -> Option<(Vec3, Vec3, &'static str, u32)> {
+    use simple3d_core::primitive::ParamsExt;
+    let id = app.primary()?;
+    let (count_key, step_key) = app.pattern_spacing_keys(id)?;
+    let params = app.scene.node(id).params()?;
+    let count = params.int(count_key).max(1);
+    if count < 2 {
+        return None; // one copy has no spacing to drag
+    }
+    let gizmo = app.gizmo_for(id)?;
+    let (origin, axis) = (gizmo.origin, gizmo.axes[0]);
+    let handle = origin + axis * (params.num(step_key) * (count - 1) as f64);
+    let _ = view;
+    Some((handle, origin, step_key, count))
+}
+
+/// Drag the spacing handle to set a pattern's step so the last copy follows the
+/// pointer. Returns whether it owns the pointer this frame.
+fn pattern_spacing_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
+    let Some((handle, origin, step_key, count)) = pattern_spacing_handle(app, view) else { return false };
+    let Some(id) = app.primary() else { return false };
+    let Some((screen, _)) = view.project(handle) else { return false };
+    let axis = match app.gizmo_for(id) {
+        Some(gizmo) => gizmo.axes[0],
+        None => return false,
+    };
+    let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(16.0));
+    let response = ui.interact(rect, ui.id().with((id, "pattern-spacing")), egui::Sense::drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if response.dragged() {
+        if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
+            if let Some(along) = view.ray_axis(cursor, origin, axis) {
+                app.set_pattern_step(id, step_key, along / (count - 1) as f64);
+            }
+        }
+    }
+    response.dragged() || response.hovered()
+}
+
 /// The measure tool's pointer handling: a click drops a point, snapped to the
 /// nearest feature within reach, and Escape clears the span or puts the tool
 /// away (issue 69).
@@ -416,6 +464,20 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
         }
     }
 
+    // A pattern's spacing handle: a diamond at the last copy of its first run,
+    // dragged to lay the copies out (issue 67).
+    if let Some((handle, origin, _, _)) = pattern_spacing_handle(app, view) {
+        if let (Some((a, _)), Some((b, _))) = (view.project(origin), view.project(handle)) {
+            painter.line_segment([a, b], egui::Stroke::new(1.0_f32, token::ACCENT.gamma_multiply(0.6)));
+            let r = 6.0;
+            painter.add(egui::Shape::convex_polygon(
+                vec![b + egui::vec2(0.0, -r), b + egui::vec2(r, 0.0), b + egui::vec2(0.0, r), b + egui::vec2(-r, 0.0)],
+                token::ACCENT,
+                egui::Stroke::NONE,
+            ));
+        }
+    }
+
     if app.measure.active {
         draw_measure(app, ui, &painter, view);
     }
@@ -487,7 +549,10 @@ fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) 
                 );
             } else {
                 let r = 5.0;
-                painter.line_segment([screen - egui::vec2(r, r), screen + egui::vec2(r, r)], egui::Stroke::new(1.5_f32, colour));
+                painter.line_segment(
+                    [screen - egui::vec2(r, r), screen + egui::vec2(r, r)],
+                    egui::Stroke::new(1.5_f32, colour),
+                );
                 painter.line_segment(
                     [screen - egui::vec2(r, -r), screen + egui::vec2(r, -r)],
                     egui::Stroke::new(1.5_f32, colour),
@@ -518,9 +583,7 @@ fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) 
                         colour,
                     );
                 }
-                if let (Some((a, _)), Some((b, _))) =
-                    (view.project(app.measure.points[0].at), view.project(hover.at))
-                {
+                if let (Some((a, _)), Some((b, _))) = (view.project(app.measure.points[0].at), view.project(hover.at)) {
                     painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.6)));
                 }
             }
@@ -557,7 +620,12 @@ fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) 
     }
     let background = egui::Rect::from_min_size(at, size).expand(6.0);
     painter.rect_filled(background, 3.0, token::SURFACE_1.gamma_multiply(0.94));
-    painter.rect_stroke(background, 3.0, egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.5)), egui::StrokeKind::Inside);
+    painter.rect_stroke(
+        background,
+        3.0,
+        egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.5)),
+        egui::StrokeKind::Inside,
+    );
     let mut y = at.y;
     for galley in galleys {
         let h = galley.size().y;

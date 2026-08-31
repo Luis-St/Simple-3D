@@ -20,9 +20,9 @@ use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
 /// gap under it means (issue 49).
 pub fn drop_position(scene: &Scene, over: NodeId, fraction: f32, root: NodeId, open: bool) -> Option<DropTarget> {
     let node = scene.get(over)?;
-    let is_group = node.is_group();
+    let is_group = node.can_hold_children();
     // The top and bottom fifths of a row mean "beside"; the middle means "into",
-    // but only for a group, since nothing else can hold children.
+    // but only for a group or pattern, since nothing else can hold children.
     let before = fraction < 0.25;
     let after = fraction > 0.75;
     if is_group && !before && !after {
@@ -245,7 +245,9 @@ fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId, carried: usize) {
     // is: eight slabs stacked on the pointer would cover the drop indicator
     // they exist to point at.
     let name = if carried > 1 { format!("{carried} nodes") } else { node.name.clone() };
-    let glyph = if node.is_group() {
+    let glyph = if node.is_pattern() {
+        Glyph::Pattern
+    } else if node.is_group() {
         Glyph::Bracket
     } else {
         Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
@@ -360,6 +362,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     let name = node.name.clone();
     let visible = node.visible;
     let is_group = node.is_group();
+    let is_pattern = node.is_pattern();
     let is_root = id == app.scene.root();
     let selected = app.is_selected(id);
     let failed = app.evaluated.error_for(id).is_some();
@@ -450,7 +453,13 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
 
     // Type glyph: a bracket for a group, a solid mark for a shape.
     let glyph_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::Vec2::splat(14.0));
-    let glyph = if is_group { Glyph::Bracket } else { Glyph::for_primitive(type_id) };
+    let glyph = if is_pattern {
+        Glyph::Pattern
+    } else if is_group {
+        Glyph::Bracket
+    } else {
+        Glyph::for_primitive(type_id)
+    };
     let glyph_colour = if failed {
         token::DANGER
     } else if !visible {
@@ -636,10 +645,10 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
 }
 
 /// Whether everything being dragged may land on `target`: nothing can be
-/// dropped into itself or into anything it holds, and only a group can hold
-/// children at all.
+/// dropped into itself or into anything it holds, and only a group or a pattern
+/// can hold children at all.
 pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> bool {
-    scene.node(target.parent).is_group()
+    scene.node(target.parent).can_hold_children()
         && carried.iter().all(|&source| target.parent != source && !scene.is_ancestor_of(source, target.parent))
 }
 

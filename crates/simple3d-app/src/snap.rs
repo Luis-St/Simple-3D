@@ -102,8 +102,10 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     corner_indices.dedup();
     // Vertices before the edge midpoints already pushed: the whole list is
     // re-ordered vertices-first below, so the exact kind wins a screen-space tie.
-    let mut vertices: Vec<Feature> =
-        corner_indices.iter().map(|&i| Feature { point: welded.positions[i as usize], kind: FeatureKind::Vertex }).collect();
+    let mut vertices: Vec<Feature> = corner_indices
+        .iter()
+        .map(|&i| Feature { point: welded.positions[i as usize], kind: FeatureKind::Vertex })
+        .collect();
 
     // Coplanar triangles joined into one face, so a box's two triangles per side
     // report one centre in the middle rather than two triangle centroids.
@@ -146,7 +148,9 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     // Deterministic order within each kind, so two runs offer features in the
     // same sequence and a nearest-point tie breaks the same way.
     let by_point = |a: &Feature, b: &Feature| {
-        (a.point.x, a.point.y, a.point.z).partial_cmp(&(b.point.x, b.point.y, b.point.z)).unwrap_or(std::cmp::Ordering::Equal)
+        (a.point.x, a.point.y, a.point.z)
+            .partial_cmp(&(b.point.x, b.point.y, b.point.z))
+            .unwrap_or(std::cmp::Ordering::Equal)
     };
     vertices.sort_by(by_point);
     features.sort_by(by_point);
@@ -165,12 +169,12 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
 /// "that corner" is the one under the pointer, and two corners far apart in the
 /// model can sit close together in the frame. `project` returns `None` for a
 /// point that does not land on screen, which is skipped.
-pub fn nearest_on_screen<'a>(
-    features: &'a [Feature],
+pub fn nearest_on_screen(
+    features: &[Feature],
     project: impl Fn(Vec3) -> Option<egui::Pos2>,
     cursor: egui::Pos2,
     max_pixels: f32,
-) -> Option<(&'a Feature, f32)> {
+) -> Option<(&Feature, f32)> {
     let mut best: Option<(&Feature, f32)> = None;
     for feature in features {
         let Some(screen) = project(feature.point) else { continue };
@@ -209,7 +213,10 @@ mod tests {
         // The named corner, edge midpoint and face centre are all really there.
         assert!(has_point(&features, FeatureKind::Vertex, Vec3::new(5.0, 5.0, 5.0)));
         assert!(has_point(&features, FeatureKind::EdgeMidpoint, Vec3::new(0.0, 5.0, 5.0)));
-        assert!(has_point(&features, FeatureKind::FaceCentre, Vec3::new(0.0, 0.0, 5.0)), "the top face centre is missing");
+        assert!(
+            has_point(&features, FeatureKind::FaceCentre, Vec3::new(0.0, 0.0, 5.0)),
+            "the top face centre is missing"
+        );
     }
 
     #[test]
@@ -223,7 +230,10 @@ mod tests {
             has_point(&features, FeatureKind::FaceCentre, Vec3::new(0.0, 0.0, 2.0)),
             "the top face centre was not at the middle of the face"
         );
-        assert!(has_point(&features, FeatureKind::FaceCentre, Vec3::new(10.0, 0.0, 0.0)), "the +X face centre is missing");
+        assert!(
+            has_point(&features, FeatureKind::FaceCentre, Vec3::new(10.0, 0.0, 0.0)),
+            "the +X face centre is missing"
+        );
     }
 
     #[test]
