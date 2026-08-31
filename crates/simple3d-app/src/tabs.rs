@@ -157,6 +157,9 @@ impl App {
         self.pending_delete = None;
         self.camera_move = None;
         self.cube_spin = None;
+        // A measurement is about the model that was on screen, so it does not
+        // travel to the next one.
+        self.measure.clear();
         self.fields.clear();
         self.export_preview = None;
 

@@ -21,6 +21,8 @@ pub enum Glyph {
     Resize,
     Scale,
     Frame,
+    Measure,
+    Pattern,
     // Object actions.
     Group,
     Delete,
@@ -192,6 +194,26 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.line(&[(0.16, 0.84), (0.16, 0.16)]);
             pen.line(&[(0.16, 0.84), (0.84, 0.84)]);
             pen.line(&[(0.16, 0.84), (0.70, 0.34)]);
+        }
+        // A ruler laid across the tile with its ticks: the tool measures, it
+        // does not change the model.
+        Glyph::Measure => {
+            pen.closed(&[(0.10, 0.62), (0.62, 0.10), (0.90, 0.38), (0.38, 0.90)]);
+            for i in 1..4 {
+                let t = i as f32 / 4.0;
+                // Ticks stepping along the ruler and cutting across its width, the
+                // middle one longer.
+                let along = (0.10 + t * 0.52, 0.62 - t * 0.52);
+                let depth = if i == 2 { 0.22 } else { 0.13 };
+                pen.line(&[along, (along.0 + depth, along.1 + depth)]);
+            }
+        }
+        // Repeats of one shape: a grid of small squares, which is what a pattern
+        // node makes of its children.
+        Glyph::Pattern => {
+            for (cx, cy) in [(0.30, 0.30), (0.70, 0.30), (0.30, 0.70), (0.70, 0.70)] {
+                pen.closed(&[(cx - 0.16, cy - 0.16), (cx + 0.16, cy - 0.16), (cx + 0.16, cy + 0.16), (cx - 0.16, cy + 0.16)]);
+            }
         }
         Glyph::Group => {
             pen.line(&[(0.34, 0.10), (0.16, 0.10), (0.16, 0.90), (0.34, 0.90)]);

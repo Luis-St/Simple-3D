@@ -71,6 +71,7 @@ pub enum Command {
     ModeResize,
     ModeScale,
     ToggleHandleFrame,
+    MeasureTool,
     NudgeLeft,
     NudgeRight,
     NudgeUp,
@@ -148,6 +149,7 @@ impl Command {
         Command::ModeResize,
         Command::ModeScale,
         Command::ToggleHandleFrame,
+        Command::MeasureTool,
         Command::NudgeLeft,
         Command::NudgeRight,
         Command::NudgeUp,
@@ -204,6 +206,7 @@ impl Command {
             ModeResize => "Manipulator: resize",
             ModeScale => "Manipulator: scale",
             ToggleHandleFrame => "Handle frame: object / world",
+            MeasureTool => "Measure tool",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
             NudgeUp => "Nudge up",
@@ -222,8 +225,8 @@ impl Command {
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
-            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | NudgeLeft | NudgeRight | NudgeUp
-            | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | NudgeLeft
+            | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }
@@ -519,6 +522,7 @@ impl Keymap {
                 set(ModeRotate, Chord::key("E"));
                 set(ModeResize, Chord::key("R"));
                 set(ModeScale, Chord::key("T"));
+                set(MeasureTool, Chord::key("M"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Right),
                     pan: Drag::with_shift(MouseButton::Right),
@@ -530,6 +534,7 @@ impl Keymap {
                 set(ModeRotate, Chord::key("R"));
                 set(ModeResize, Chord::key("S"));
                 set(ModeScale, Chord::shift("S"));
+                set(MeasureTool, Chord::key("M"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Middle),
                     pan: Drag::with_shift(MouseButton::Middle),
@@ -541,6 +546,8 @@ impl Keymap {
                 set(ModeRotate, Chord::key("R"));
                 set(ModeResize, Chord::key("T"));
                 set(ModeScale, Chord::shift("T"));
+                // M names the move tool in this preset, so measure takes K.
+                set(MeasureTool, Chord::key("K"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Middle),
                     pan: Drag::with_ctrl(MouseButton::Middle),

@@ -71,6 +71,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.run(Command::ToggleHandleFrame);
         }
 
+        // The measure tool: a mode of its own, so it takes the active fill while
+        // it holds the pointer, and clicks read distances rather than selecting.
+        let measuring = app.measure.active;
+        let shortcut = app.keymap.shortcut_text(Command::MeasureTool);
+        if icon::button(ui, Glyph::Measure, size, measuring, true)
+            .on_hover_text(format!("Measure between two features  {shortcut}"))
+            .clicked()
+        {
+            app.run(Command::MeasureTool);
+        }
+
         separator(ui);
 
         // Booleans are momentary actions, not modes, so they never take the

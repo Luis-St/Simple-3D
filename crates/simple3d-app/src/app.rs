@@ -84,6 +84,80 @@ pub struct ExportSummary {
     pub bodies: usize,
 }
 
+/// One end of a measurement: where it is, and what kind of feature it caught, so
+/// the readout can say "vertex" or "face centre" and the marker can say the
+/// point was snapped rather than dropped on the surface.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeasurePoint {
+    pub at: Vec3,
+    pub kind: Option<crate::snap::FeatureKind>,
+}
+
+/// The measure tool's state (issue 69): whether it is holding the pointer, and
+/// the one or two points picked so far.
+///
+/// The points stay put until the tool is dismissed -- the readout is meant to be
+/// left on screen and looked at while the model is turned -- so this is its own
+/// small piece of state rather than something recomputed each frame. Picking a
+/// third point starts a fresh measurement from it.
+#[derive(Clone, Debug, Default)]
+pub struct Measure {
+    pub active: bool,
+    pub points: Vec<MeasurePoint>,
+}
+
+impl Measure {
+    /// Add a point, beginning a new measurement once a pair is complete so the
+    /// tool flows from one span to the next without a clear in between.
+    pub fn add(&mut self, point: MeasurePoint) {
+        if self.points.len() >= 2 {
+            self.points.clear();
+        }
+        self.points.push(point);
+    }
+
+    pub fn clear(&mut self) {
+        self.points.clear();
+    }
+
+    /// The finished span, once both ends are placed.
+    pub fn span(&self) -> Option<(MeasurePoint, MeasurePoint)> {
+        match self.points.as_slice() {
+            [a, b] => Some((*a, *b)),
+            _ => None,
+        }
+    }
+}
+
+/// The numbers a span reads out: the straight-line distance, the per-axis delta,
+/// the angle above the ground plane and the compass bearing around Z (issue 69).
+///
+/// The angle is split into these two because a single number cannot place a line
+/// in space: inclination says how steep it is, bearing which way it runs, and
+/// together they are the direction the delta points.
+pub struct Measurement {
+    pub distance: f64,
+    pub delta: Vec3,
+    pub inclination_deg: f64,
+    pub bearing_deg: f64,
+}
+
+impl Measurement {
+    pub fn between(a: Vec3, b: Vec3) -> Measurement {
+        let delta = b - a;
+        let distance = delta.length();
+        let horizontal = (delta.x * delta.x + delta.y * delta.y).sqrt();
+        // Inclination above the XY plane: 0 for a level span, +/-90 for a
+        // vertical one. Undefined for a zero-length span, which reads as level.
+        let inclination_deg = if distance < 1e-9 { 0.0 } else { delta.z.atan2(horizontal).to_degrees() };
+        // Bearing around Z, measured from +X towards +Y, so it agrees with how a
+        // yaw is read. A span with no horizontal run has no bearing; 0 is as good
+        // as any and does not mislead because the inclination is then +/-90.
+        let bearing_deg = if horizontal < 1e-9 { 0.0 } else { delta.y.atan2(delta.x).to_degrees() };
+        Measurement { distance, delta, inclination_deg, bearing_deg }
+    }
+}
+
 pub struct App {
     pub scene: Scene,
     pub history: History,
@@ -176,6 +250,9 @@ pub struct App {
     /// The 3D cursor: where a new shape lands. `None` means the origin, which
     /// is also where it goes back to.
     pub cursor: Option<Vec3>,
+    /// The measure tool (issue 69): when it holds the pointer, clicks pick
+    /// features to measure between rather than selecting.
+    pub measure: Measure,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.
     pub pending_delete: Option<Vec<NodeId>>,
@@ -325,6 +402,7 @@ impl App {
             outliner_drag: None,
             drop_target: None,
             cursor: None,
+            measure: Measure::default(),
             pending_delete: None,
             camera_move: None,
             cube_spin: None,
@@ -768,14 +846,17 @@ impl App {
                 self.status = Status::Info("Panel layout reset".into());
             }
 
-            ModeMove => self.mode = Mode::Move,
-            ModeRotate => self.mode = Mode::Rotate,
-            ModeResize => self.mode = Mode::Resize,
-            ModeScale => self.mode = Mode::Scale,
+            // Reaching for a transform tool puts the measure tool away: only one
+            // of them can own a click.
+            ModeMove => self.pick_transform(Mode::Move),
+            ModeRotate => self.pick_transform(Mode::Rotate),
+            ModeResize => self.pick_transform(Mode::Resize),
+            ModeScale => self.pick_transform(Mode::Scale),
             ToggleHandleFrame => {
                 self.settings.handle_frame = self.settings.handle_frame.toggled();
                 self.status = Status::Info(format!("Handles: {} frame", self.settings.handle_frame.label()));
             }
+            MeasureTool => self.toggle_measure(),
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
     }
@@ -785,6 +866,96 @@ impl App {
         self.scene.settings.axes_visible[axis] = on;
         let name = ["X", "Y", "Z"][axis];
         self.status = Status::Info(format!("{name} axis {}", if on { "shown" } else { "hidden" }));
+    }
+
+    /// Switch to a transform tool, which also takes the measure tool out of the
+    /// pointer's way and clears its span.
+    fn pick_transform(&mut self, mode: Mode) {
+        self.mode = mode;
+        if self.measure.active {
+            self.measure.active = false;
+            self.measure.clear();
+        }
+    }
+
+    /// Turn the measure tool on or off. Leaving it clears the span it was showing
+    /// -- that is what "dismiss" means -- so the next time it is picked up it
+    /// starts clean rather than with a stale line hanging in the scene.
+    pub fn toggle_measure(&mut self) {
+        self.measure.active = !self.measure.active;
+        if self.measure.active {
+            self.status = Status::Info("Measure: click two features to read the span between them".into());
+        } else {
+            self.measure.clear();
+            self.status = Status::Info("Measure tool off".into());
+        }
+    }
+
+    /// Where a measure click lands: the nearest snap feature of any shown body if
+    /// one is within reach on screen, otherwise the point on the surface under
+    /// the pointer, otherwise the ground plane. `None` only when the pointer is
+    /// on empty sky, where there is nothing to measure to.
+    pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
+        if let Some((feature, _)) = self.nearest_feature(view, cursor) {
+            return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
+        }
+        let (origin, dir) = view.ray(cursor);
+        if let Some(t) = crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
+            return Some(MeasurePoint { at: origin + dir * t, kind: None });
+        }
+        view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)).map(|at| MeasurePoint { at, kind: None })
+    }
+
+    /// The snap feature of a shown body nearest the cursor on screen, within the
+    /// catch radius. Shared by the measure tool and by geometry snapping during a
+    /// drag; `exclude` drops the bodies a drag is itself moving so it never snaps
+    /// to the very thing it is carrying.
+    pub fn nearest_feature_excluding(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+        exclude: &[NodeId],
+    ) -> Option<(crate::snap::Feature, f32)> {
+        const CATCH_PIXELS: f32 = 12.0;
+        let mut best: Option<(crate::snap::Feature, f32)> = None;
+        for (&id, mesh) in &self.evaluated.node_meshes {
+            if !self.scene.is_shown(id) || exclude.contains(&id) {
+                continue;
+            }
+            let features = crate::snap::features_of(mesh);
+            let hit = crate::snap::nearest_on_screen(
+                &features,
+                |p| view.project(p).map(|(screen, _)| screen),
+                cursor,
+                CATCH_PIXELS,
+            );
+            if let Some((feature, distance)) = hit {
+                if best.is_none_or(|(_, d)| distance < d) {
+                    best = Some((*feature, distance));
+                }
+            }
+        }
+        best
+    }
+
+    fn nearest_feature(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(crate::snap::Feature, f32)> {
+        self.nearest_feature_excluding(view, cursor, &[])
+    }
+
+    /// Record a measure click, and say what the span reads once both ends are
+    /// down (issue 69).
+    pub fn measure_click(&mut self, point: MeasurePoint) {
+        self.measure.add(point);
+        if let Some((a, b)) = self.measure.span() {
+            let m = Measurement::between(a.at, b.at);
+            self.status = Status::Info(format!(
+                "Distance {}  \u{00B7}  incline {}\u{00B0}",
+                simple3d_core::unit::format_length(m.distance, self.unit()),
+                simple3d_core::unit::format_angle(m.inclination_deg),
+            ));
+        } else {
+            self.status = Status::Info("Measure: click the second feature".into());
+        }
     }
 
     fn after_history(&mut self, message: &str) {
@@ -3293,5 +3464,87 @@ mod tests {
         app.pending_close = Some(0);
         app.modal = Modal::ConfirmCloseTab;
         draw_one_frame(&mut app);
+    }
+
+    #[test]
+    fn a_measurement_reads_distance_delta_and_the_direction_it_points() {
+        // A 3-4-0 span: five long, level, and running mostly along +Y from +X.
+        let m = Measurement::between(Vec3::ZERO, Vec3::new(3.0, 4.0, 0.0));
+        assert!((m.distance - 5.0).abs() < 1e-9);
+        assert_eq!(m.delta, Vec3::new(3.0, 4.0, 0.0));
+        assert!(m.inclination_deg.abs() < 1e-9, "a level span should not be inclined: {}", m.inclination_deg);
+        assert!((m.bearing_deg - 53.13010).abs() < 1e-3, "bearing was {}", m.bearing_deg);
+
+        // Straight up: ninety degrees of incline, and no bearing to speak of.
+        let up = Measurement::between(Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0));
+        assert!((up.inclination_deg - 90.0).abs() < 1e-9);
+        assert_eq!(up.bearing_deg, 0.0);
+
+        // A zero-length span is level rather than undefined, so the readout never
+        // shows NaN while a second point is being aimed.
+        let none = Measurement::between(Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(none.distance, 0.0);
+        assert_eq!(none.inclination_deg, 0.0);
+    }
+
+    #[test]
+    fn the_measure_tool_takes_two_points_and_the_third_begins_a_new_span() {
+        let mut measure = Measure::default();
+        assert!(measure.span().is_none());
+        measure.add(MeasurePoint { at: Vec3::ZERO, kind: None });
+        assert!(measure.span().is_none(), "one point is not a span");
+        measure.add(MeasurePoint { at: Vec3::new(10.0, 0.0, 0.0), kind: Some(crate::snap::FeatureKind::Vertex) });
+        assert!(measure.span().is_some(), "two points make a span");
+
+        // A third point starts fresh rather than piling up, so the tool flows
+        // from one measurement to the next.
+        measure.add(MeasurePoint { at: Vec3::new(5.0, 5.0, 0.0), kind: None });
+        assert_eq!(measure.points.len(), 1);
+        assert!(measure.span().is_none());
+    }
+
+    #[test]
+    fn the_measure_tool_snaps_a_click_to_a_bodys_vertex() {
+        // The whole point of picking features rather than raw surface hits: a
+        // click near a box corner reports the corner exactly.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        app.scene.get_mut(id).unwrap().position = Vec3::new(0.0, 0.0, 0.0);
+        app.reevaluate_for_test();
+
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        // A box is 20mm to a side by default; aim a hair off its +X +Y +Z corner.
+        let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+        let corner = Vec3::new(hi.x, hi.y, hi.z);
+        let (screen, _) = view.project(corner).unwrap();
+        let point = app.measure_point_at(&view, screen + egui::vec2(3.0, 3.0)).expect("a point under the cursor");
+        assert_eq!(point.kind, Some(crate::snap::FeatureKind::Vertex), "the click did not catch the corner");
+        assert!((point.at - corner).length() < 1e-6, "snapped to {:?}, not the corner {:?}", point.at, corner);
+        let _ = lo;
+    }
+
+    #[test]
+    fn the_measure_overlay_draws_a_placed_span_without_panicking() {
+        let mut app = headless_app();
+        app.measure.active = true;
+        app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: Some(crate::snap::FeatureKind::Vertex) });
+        app.measure.add(MeasurePoint { at: Vec3::new(20.0, 8.0, 5.0), kind: Some(crate::snap::FeatureKind::FaceCentre) });
+        draw_one_frame(&mut app);
+        // And with only one end down, where the live preview line is drawn.
+        app.measure.clear();
+        app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: None });
+        draw_one_frame(&mut app);
+    }
+
+    #[test]
+    fn picking_a_transform_tool_puts_the_measure_tool_away() {
+        let mut app = headless_app();
+        app.run(Command::MeasureTool);
+        assert!(app.measure.active);
+        app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: None });
+        app.run(Command::ModeRotate);
+        assert!(!app.measure.active, "the measure tool held the pointer after a transform tool was chosen");
+        assert!(app.measure.points.is_empty(), "its span was left hanging in the scene");
     }
 }

@@ -5,14 +5,14 @@
 //! manipulator, the bounding box and the drag readout are drawn on top with the
 //! toolkit's 2D painter, so they are always visible and can be hovered.
 
-use crate::app::{App, Status};
+use crate::app::{App, Measurement, Status};
 use crate::gizmo::{self, Gizmo, Handle, Mods};
 use crate::pick;
 use crate::render::{self, Grid, Item, Palette, Style};
 use crate::theme::{self, token};
 use crate::view::View;
 
-use simple3d_core::keymap::{MouseButton, NavMap};
+use simple3d_core::keymap::{Command, MouseButton, NavMap};
 use simple3d_core::scene::{Camera, NodeId};
 use simple3d_geom::Vec3;
 use std::hash::{Hash, Hasher};
@@ -31,17 +31,23 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         let taken = view_cube(app, ui, rect, &view);
         if !taken {
             navigate(app, ui, &response);
-            place_cursor(app, ui, &response, &view);
-            let view = app.current_view();
-            let owned = manipulate(app, ui, &response, &view);
-            // Picking is *outside* the manipulator, because it has to work when
-            // there is no manipulator: with nothing selected there is no primary
-            // node and no gizmo, and while this lived inside `manipulate` the
-            // first click into an empty selection was thrown away. Clicking a
-            // shape is how most people select one, so it cannot depend on
-            // already having selected one.
-            if !owned && response.clicked_by(egui::PointerButton::Primary) {
-                select_under_cursor(app, ui, &view);
+            // The measure tool owns the pointer while it is out: clicks pick
+            // features to measure between rather than selecting or manipulating.
+            if app.measure.active {
+                measure_interact(app, ui, &response, &view);
+            } else {
+                place_cursor(app, ui, &response, &view);
+                let view = app.current_view();
+                let owned = manipulate(app, ui, &response, &view);
+                // Picking is *outside* the manipulator, because it has to work when
+                // there is no manipulator: with nothing selected there is no primary
+                // node and no gizmo, and while this lived inside `manipulate` the
+                // first click into an empty selection was thrown away. Clicking a
+                // shape is how most people select one, so it cannot depend on
+                // already having selected one.
+                if !owned && response.clicked_by(egui::PointerButton::Primary) {
+                    select_under_cursor(app, ui, &view);
+                }
             }
         }
         let view = app.current_view();
@@ -316,6 +322,31 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     owned
 }
 
+/// The measure tool's pointer handling: a click drops a point, snapped to the
+/// nearest feature within reach, and Escape clears the span or puts the tool
+/// away (issue 69).
+fn measure_interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) {
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if app.measure.points.is_empty() {
+            app.run(Command::MeasureTool);
+        } else {
+            app.measure.clear();
+            app.status = Status::Info("Measurement cleared".into());
+        }
+        return;
+    }
+    if response.clicked_by(egui::PointerButton::Primary) {
+        if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
+            if let Some(point) = app.measure_point_at(view, cursor) {
+                app.measure_click(point);
+            }
+        }
+    }
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+}
+
 fn select_under_cursor(app: &mut App, ui: &mut egui::Ui, view: &View) {
     let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) else { return };
     let (origin, direction) = view.ray(cursor);
@@ -366,6 +397,10 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     // The 3D cursor, where the next shape would land.
     draw_cursor(app, &painter, view);
 
+    if app.measure.active {
+        draw_measure(app, ui, &painter, view);
+    }
+
     let hud = format!(
         "{} \u{00B7} orthographic \u{00B7} {} frame",
         app.mode.label(),
@@ -412,6 +447,104 @@ fn draw_cursor(app: &App, painter: &egui::Painter, view: &View) {
         );
     }
     painter.circle_stroke(screen, r * 0.55, egui::Stroke::new(1.0_f32, token::MEASURE));
+}
+
+/// The measure tool's marks: the placed points, the span between them once both
+/// are down, its numbers, and -- while one end is placed -- a live line to the
+/// feature under the pointer (issue 69). All in the measure colour, because it
+/// reads distances and never touches the model.
+fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
+    let colour = token::MEASURE;
+    let mark = |at: Vec3, snapped: bool| {
+        if let Some((screen, _)) = view.project(at) {
+            // A snapped point gets a hollow square, an on-surface one a small
+            // cross, so a glance says whether it caught a feature.
+            if snapped {
+                painter.rect_stroke(
+                    egui::Rect::from_center_size(screen, egui::Vec2::splat(9.0)),
+                    1.0,
+                    egui::Stroke::new(1.5_f32, colour),
+                    egui::StrokeKind::Middle,
+                );
+            } else {
+                let r = 5.0;
+                painter.line_segment([screen - egui::vec2(r, r), screen + egui::vec2(r, r)], egui::Stroke::new(1.5_f32, colour));
+                painter.line_segment(
+                    [screen - egui::vec2(r, -r), screen + egui::vec2(r, -r)],
+                    egui::Stroke::new(1.5_f32, colour),
+                );
+            }
+        }
+    };
+
+    for point in &app.measure.points {
+        mark(point.at, point.kind.is_some());
+    }
+
+    // A live line from the first point to whatever the pointer is over, so the
+    // second click can be aimed. The hover point is snapped the same way a click
+    // is, and shows the same marker.
+    if app.measure.points.len() == 1 {
+        if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
+            if let Some(hover) = app.measure_point_at(view, cursor) {
+                mark(hover.at, hover.kind.is_some());
+                // Name the feature the pointer has caught, so a snap is legible
+                // rather than a guess.
+                if let (Some(kind), Some((screen, _))) = (hover.kind, view.project(hover.at)) {
+                    painter.text(
+                        screen + egui::vec2(11.0, -11.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        kind.label(),
+                        egui::FontId::proportional(10.0),
+                        colour,
+                    );
+                }
+                if let (Some((a, _)), Some((b, _))) =
+                    (view.project(app.measure.points[0].at), view.project(hover.at))
+                {
+                    painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.6)));
+                }
+            }
+        }
+    }
+
+    let Some((a, b)) = app.measure.span() else { return };
+    let (Some((sa, _)), Some((sb, _))) = (view.project(a.at), view.project(b.at)) else { return };
+    painter.line_segment([sa, sb], egui::Stroke::new(2.0_f32, colour));
+
+    // The numbers, in a small panel by the middle of the span, kept there until
+    // the tool is dismissed.
+    let m = Measurement::between(a.at, b.at);
+    let unit = app.unit();
+    let suffix = unit.suffix();
+    let fmt = |v: f64| simple3d_core::unit::format_length(v, unit);
+    let lines = [
+        format!("Distance  {}{suffix}", fmt(m.distance)),
+        format!("\u{0394}  {}, {}, {} {suffix}", fmt(m.delta.x), fmt(m.delta.y), fmt(m.delta.z)),
+        format!(
+            "Incline  {}\u{00B0}   Bearing  {}\u{00B0}",
+            simple3d_core::unit::format_angle(m.inclination_deg),
+            simple3d_core::unit::format_angle(m.bearing_deg)
+        ),
+    ];
+    let at = ((sa.to_vec2() + sb.to_vec2()) / 2.0).to_pos2() + egui::vec2(10.0, 8.0);
+    let mut galleys = Vec::new();
+    let mut size = egui::Vec2::ZERO;
+    for line in &lines {
+        let galley = painter.layout_no_wrap(line.clone(), egui::FontId::monospace(12.0), colour);
+        size.x = size.x.max(galley.size().x);
+        size.y += galley.size().y;
+        galleys.push(galley);
+    }
+    let background = egui::Rect::from_min_size(at, size).expand(6.0);
+    painter.rect_filled(background, 3.0, token::SURFACE_1.gamma_multiply(0.94));
+    painter.rect_stroke(background, 3.0, egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.5)), egui::StrokeKind::Inside);
+    let mut y = at.y;
+    for galley in galleys {
+        let h = galley.size().y;
+        painter.galley(egui::pos2(at.x, y), galley, colour);
+        y += h;
+    }
 }
 
 /// Shift and the orbit button's opposite -- the right button -- puts the cursor
