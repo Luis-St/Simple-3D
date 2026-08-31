@@ -265,6 +265,11 @@ fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
 /// Returns whether the pointer is the manipulator's this frame, so a click that
 /// grabbed a handle does not also re-select whatever is behind it.
 fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) -> bool {
+    // Whether a move drag should snap to geometry this frame (issue 68), read
+    // from the setting and, for the hold mode, the live key state. Read here on
+    // every frame so a change of mode -- or the key going down mid-drag -- takes
+    // effect at once.
+    app.snap_requested = app.geometry_snap_wanted(|k| ui.input(|i| i.key_down(k)));
     let Some(id) = app.primary() else {
         app.drag = None;
         app.hover_handle = None;
@@ -396,6 +401,20 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
 
     // The 3D cursor, where the next shape would land.
     draw_cursor(app, &painter, view);
+
+    // Where a drag has snapped onto another body's feature (issue 68): a hollow
+    // square on the caught point, in the accent so it reads as "this is what it
+    // caught" the way a selection does.
+    if let Some(at) = app.snap_indicator {
+        if let Some((screen, _)) = view.project(at) {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(screen, egui::Vec2::splat(11.0)),
+                1.0,
+                egui::Stroke::new(1.5_f32, token::ACCENT),
+                egui::StrokeKind::Middle,
+            );
+        }
+    }
 
     if app.measure.active {
         draw_measure(app, ui, &painter, view);

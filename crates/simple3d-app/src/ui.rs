@@ -453,6 +453,13 @@ pub fn dialog_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Res
     ui.add_enabled(enabled, egui::Button::new(label).min_size(size))
 }
 
+/// The toolkit key a name stands for, the inverse of `Key::name`. Used to ask
+/// whether a bound key is being held right now -- for the snap-while-held mode
+/// (issue 68), where a binding is a key to hold rather than a press to react to.
+pub fn key_from_name(name: &str) -> Option<egui::Key> {
+    egui::Key::ALL.iter().copied().find(|k| k.name() == name)
+}
+
 pub fn chord_from_egui(key: egui::Key, modifiers: egui::Modifiers) -> Chord {
     Chord {
         key: key.name().to_string(),

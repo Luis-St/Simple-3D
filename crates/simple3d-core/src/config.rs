@@ -77,6 +77,37 @@ impl RenderEngine {
     }
 }
 
+/// When a drag snaps to the geometry of other bodies -- their vertices, edge
+/// midpoints and face centres -- rather than only to the grid step (issue 68).
+///
+/// The three answers are the three a modelling tool always ends up wanting:
+/// someone placing parts against each other wants it always on, someone laying
+/// out a field of shapes wants it never on, and most of the time the honest
+/// answer is "when I ask", which is what holding a key gives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapMode {
+    /// Snap only while the snap key is held down.
+    #[default]
+    WhileHeld,
+    /// Always snap to nearby geometry.
+    Always,
+    /// Never snap to geometry; the grid step is the only snap.
+    Never,
+}
+
+impl SnapMode {
+    pub const ALL: [SnapMode; 3] = [SnapMode::WhileHeld, SnapMode::Always, SnapMode::Never];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SnapMode::WhileHeld => "While a key is held",
+            SnapMode::Always => "Always",
+            SnapMode::Never => "Never",
+        }
+    }
+}
+
 /// Which frame the manipulator handles work in (spec section 6.2).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -333,6 +364,10 @@ pub struct AppSettings {
     /// Where a new shape lands.
     #[serde(default)]
     pub placement: Placement,
+    /// When a drag snaps to the geometry of other bodies (issue 68). Newer than
+    /// the settings file, so an older one reads as "while a key is held".
+    #[serde(default)]
+    pub geometry_snap: SnapMode,
     /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
     /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
@@ -369,6 +404,7 @@ impl Default for AppSettings {
             show_bounding_box: false,
             handle_frame: HandleFrame::Object,
             placement: Placement::Origin,
+            geometry_snap: SnapMode::default(),
             rotate_snap_deg: 15.0,
             recent_colours: Vec::new(),
             last_export_dir: None,

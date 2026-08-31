@@ -9,7 +9,7 @@ use crate::ui::FieldBuffers;
 use crate::view::{frame_bounds, CameraMove, ViewPreset};
 use crate::worker::{EvalWorker, ExportJob};
 use simple3d_core::clipboard::{self, Clip};
-use simple3d_core::config::{self, AppSettings, DisplayMode, HandleFrame, Placement, Side};
+use simple3d_core::config::{self, AppSettings, DisplayMode, HandleFrame, Placement, Side, SnapMode};
 use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::{Chord, Command, Keymap};
 use simple3d_core::library;
@@ -253,6 +253,17 @@ pub struct App {
     /// The measure tool (issue 69): when it holds the pointer, clicks pick
     /// features to measure between rather than selecting.
     pub measure: Measure,
+    /// Whether geometry snapping is being asked for this frame (issue 68), set by
+    /// the viewport from the snap-mode setting and the held key and read while a
+    /// move drag runs.
+    pub(crate) snap_requested: bool,
+    /// While a move drag runs, the world-space offset from the dragged node's
+    /// origin to the feature the drag grabbed near, so that same feature is what
+    /// lands on a target. Zero when the grab was not near the body's own geometry.
+    snap_source: Vec3,
+    /// The geometry feature the current drag is snapped onto, for the viewport to
+    /// mark. `None` when nothing is snapped this frame.
+    pub snap_indicator: Option<Vec3>,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.
     pub pending_delete: Option<Vec<NodeId>>,
@@ -403,6 +414,9 @@ impl App {
             drop_target: None,
             cursor: None,
             measure: Measure::default(),
+            snap_requested: false,
+            snap_source: Vec3::ZERO,
+            snap_indicator: None,
             pending_delete: None,
             camera_move: None,
             cube_spin: None,
@@ -857,6 +871,9 @@ impl App {
                 self.status = Status::Info(format!("Handles: {} frame", self.settings.handle_frame.label()));
             }
             MeasureTool => self.toggle_measure(),
+            // A hold key, read live while a drag runs rather than acted on when
+            // pressed, so pressing it on its own does nothing (issue 68).
+            SnapToGeometry => {}
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
     }
@@ -916,7 +933,6 @@ impl App {
         cursor: egui::Pos2,
         exclude: &[NodeId],
     ) -> Option<(crate::snap::Feature, f32)> {
-        const CATCH_PIXELS: f32 = 12.0;
         let mut best: Option<(crate::snap::Feature, f32)> = None;
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) || exclude.contains(&id) {
@@ -927,7 +943,7 @@ impl App {
                 &features,
                 |p| view.project(p).map(|(screen, _)| screen),
                 cursor,
-                CATCH_PIXELS,
+                crate::snap::CATCH_PIXELS,
             );
             if let Some((feature, distance)) = hit {
                 if best.is_none_or(|(_, d)| distance < d) {
@@ -940,6 +956,72 @@ impl App {
 
     fn nearest_feature(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(crate::snap::Feature, f32)> {
         self.nearest_feature_excluding(view, cursor, &[])
+    }
+
+    /// Whether geometry snapping is being asked for right now (issue 68): always,
+    /// never, or only while the snap key is held. `key_down` answers whether a
+    /// toolkit key is currently pressed, which only the viewport can see.
+    pub fn geometry_snap_wanted(&self, key_down: impl Fn(egui::Key) -> bool) -> bool {
+        match self.settings.geometry_snap {
+            SnapMode::Never => false,
+            SnapMode::Always => true,
+            SnapMode::WhileHeld => self
+                .keymap
+                .binding(Command::SnapToGeometry)
+                .and_then(|chord| crate::ui::key_from_name(&chord.key))
+                .is_some_and(key_down),
+        }
+    }
+
+    /// The dragged node and everything under it: the bodies a drag is carrying,
+    /// which geometry snapping must never snap to.
+    fn drag_subtree(&self, id: NodeId) -> Vec<NodeId> {
+        std::iter::once(id).chain(self.scene.descendants(id)).collect()
+    }
+
+    /// Where, relative to the dragged node's origin, the feature the drag grabbed
+    /// near sits -- so that same feature is what snaps onto a target rather than
+    /// the origin. Zero when the grab was not near the body's own geometry, which
+    /// makes the origin itself the thing that snaps.
+    fn grab_source_offset(&self, id: NodeId, view: &crate::view::View, cursor: egui::Pos2) -> Vec3 {
+        let Some(frame) = self.evaluated.node_frames.get(&id) else { return Vec3::ZERO };
+        let world_origin = frame.point(self.scene.node(id).position);
+        let mut best: Option<(Vec3, f32)> = None;
+        for &n in &self.drag_subtree(id) {
+            let Some(mesh) = self.evaluated.node_meshes.get(&n) else { continue };
+            let features = crate::snap::features_of(mesh);
+            if let Some((feature, distance)) = crate::snap::nearest_on_screen(
+                &features,
+                |p| view.project(p).map(|(screen, _)| screen),
+                cursor,
+                crate::snap::CATCH_PIXELS,
+            ) {
+                if best.is_none_or(|(_, d)| distance < d) {
+                    best = Some((feature.point, distance));
+                }
+            }
+        }
+        best.map(|(point, _)| point - world_origin).unwrap_or(Vec3::ZERO)
+    }
+
+    /// Snap the dragged node so its grabbed feature lands on the nearest feature
+    /// of another body under the pointer (issue 68). Returns the world point it
+    /// snapped onto, or `None` when nothing was in reach, in which case the grid
+    /// drag stands.
+    fn apply_geometry_snap(&mut self, id: NodeId, view: &crate::view::View, cursor: egui::Pos2) -> Option<Vec3> {
+        let frame = *self.evaluated.node_frames.get(&id)?;
+        let world_origin = frame.point(self.scene.node(id).position);
+        let source = world_origin + self.snap_source;
+        let exclude = self.drag_subtree(id);
+        let (target, _) = self.nearest_feature_excluding(view, cursor, &exclude)?;
+        // Translate the whole body so its source feature meets the target, then
+        // express the new origin back in the parent's frame the position is in.
+        let new_origin = world_origin + (target.point - source);
+        let new_position = frame.inverse().point(new_origin);
+        if let Some(node) = self.scene.get_mut(id) {
+            node.position = new_position;
+        }
+        Some(target.point)
     }
 
     /// Record a measure click, and say what the span reads once both ends are
@@ -1336,18 +1418,34 @@ impl App {
                     self.fields.clear();
                     self.status = Status::Info("Drag cancelled".into());
                 }
+                self.snap_indicator = None;
             }
             gizmo::DragPhase::Finish => {
                 self.drag = None;
                 self.history.close();
                 self.fields.clear();
+                self.snap_indicator = None;
             }
             gizmo::DragPhase::Continue => {
                 let snap = self.move_snap();
-                let (Some(drag), Some(cursor)) = (self.drag.as_mut(), cursor) else { return };
+                let Some(cursor) = cursor else { return };
                 let rotate_snap = self.settings.rotate_snap_deg;
                 let unit = self.scene.settings.unit;
-                drag.update(&mut self.scene, view, cursor, mods, snap, rotate_snap, unit);
+                let handle = match self.drag.as_mut() {
+                    Some(drag) => {
+                        drag.update(&mut self.scene, view, cursor, mods, snap, rotate_snap, unit);
+                        drag.handle
+                    }
+                    None => return,
+                };
+                // Geometry snapping (issue 68) rides on top of the grid drag, and
+                // only for a move: it overrides the position so the grabbed
+                // feature lands on a body under the pointer.
+                if self.snap_requested && matches!(handle, Handle::MoveAxis(_) | Handle::MovePlane(_)) {
+                    self.snap_indicator = self.apply_geometry_snap(id, view, cursor);
+                } else {
+                    self.snap_indicator = None;
+                }
                 // The property editor tracks the handle live, and the preview follows.
                 self.fields.clear();
                 self.touch();
@@ -1365,6 +1463,10 @@ impl App {
                     None,
                 );
                 self.drag = Drag::begin(&self.scene, gizmo, id, handle, view, cursor);
+                // Remember which of the dragged body's own features the grab was
+                // near, so geometry snapping moves that feature onto a target.
+                self.snap_source = self.grab_source_offset(id, view, cursor);
+                self.snap_indicator = None;
             }
             gizmo::DragPhase::Idle => {}
         }
@@ -3546,5 +3648,81 @@ mod tests {
         app.run(Command::ModeRotate);
         assert!(!app.measure.active, "the measure tool held the pointer after a transform tool was chosen");
         assert!(app.measure.points.is_empty(), "its span was left hanging in the scene");
+    }
+
+    #[test]
+    fn geometry_snapping_is_asked_for_by_the_mode_and_the_held_key() {
+        // Issue 68's three modes, resolved through the same call the viewport
+        // makes -- the key-down closure standing in for the live keyboard.
+        let mut app = headless_app();
+        app.settings.geometry_snap = SnapMode::Never;
+        assert!(!app.geometry_snap_wanted(|_| true), "never should snap for no key");
+        app.settings.geometry_snap = SnapMode::Always;
+        assert!(app.geometry_snap_wanted(|_| false), "always should snap with no key held");
+
+        app.settings.geometry_snap = SnapMode::WhileHeld;
+        let key = crate::ui::key_from_name(&app.keymap.binding(Command::SnapToGeometry).unwrap().key).unwrap();
+        assert!(!app.geometry_snap_wanted(|_| false), "held mode with nothing down must not snap");
+        assert!(app.geometry_snap_wanted(|k| k == key), "held mode with the snap key down must snap");
+    }
+
+    #[test]
+    fn a_move_drag_snaps_a_body_onto_another_bodys_vertex() {
+        // Two boxes; drag the near one toward a corner of the far one with
+        // geometry snapping asked for, and it lands exactly on that corner rather
+        // than on the grid (issue 68).
+        let mut app = app_in(temp_config_dir("snap-drag"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
+        app.select_only(a);
+        app.history.clear();
+        app.reevaluate_for_test();
+
+        // A real corner of B, taken from its evaluated world mesh.
+        let (lo, hi) = app.evaluated.node_meshes[&b].bounds().unwrap();
+        let corner = Vec3::new(lo.x, lo.y, hi.z);
+        assert!(crate::snap::features_of(&app.evaluated.node_meshes[&b])
+            .iter()
+            .any(|f| f.kind == crate::snap::FeatureKind::Vertex && (f.point - corner).length() < 1e-6));
+
+        app.settings.geometry_snap = SnapMode::Always;
+        app.snap_requested = true;
+        drag_gesture(&mut app, a, Handle::MoveAxis(0), corner, 3);
+
+        // A's origin caught the corner: 43 is not a multiple of the 1mm step, so
+        // a grid-only drag could not have produced it.
+        assert!(
+            (app.scene.node(a).position - corner).length() < 1e-6,
+            "the drag did not snap to the corner: at {:?}, corner {:?}",
+            app.scene.node(a).position,
+            corner
+        );
+    }
+
+    #[test]
+    fn a_move_drag_without_snapping_asked_for_keeps_to_the_grid() {
+        // The same drag with snapping off stays on the grid step and does not
+        // jump onto the corner.
+        let mut app = app_in(temp_config_dir("snap-off"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
+        app.select_only(a);
+        app.history.clear();
+        app.reevaluate_for_test();
+        let (lo, _) = app.evaluated.node_meshes[&b].bounds().unwrap();
+        let corner = Vec3::new(lo.x, lo.y, lo.z);
+
+        app.settings.geometry_snap = SnapMode::Never;
+        app.snap_requested = false;
+        drag_gesture(&mut app, a, Handle::MoveAxis(0), corner, 3);
+        assert!(
+            (app.scene.node(a).position - corner).length() > 1.0,
+            "the drag snapped to the corner with snapping off: {:?}",
+            app.scene.node(a).position
+        );
     }
 }

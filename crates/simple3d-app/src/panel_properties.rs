@@ -285,6 +285,30 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
         });
+        // When a drag snaps to another body's vertices, edge midpoints and face
+        // centres rather than only to the grid step (issue 68). The hint names
+        // the current hold key so the "while held" mode is not a mystery.
+        let snap_key = app.keymap.shortcut_text(simple3d_core::keymap::Command::SnapToGeometry);
+        field_row(
+            ui,
+            "Snap to geometry",
+            "Snap a drag to the vertices, edge midpoints and face centres of other bodies.",
+            |ui| {
+                egui::ComboBox::from_id_salt("geometry-snap")
+                    .selected_text(theme::value(app.settings.geometry_snap.label()))
+                    .width(fits(ui, 170.0))
+                    .show_ui(ui, |ui| {
+                        for option in simple3d_core::config::SnapMode::ALL {
+                            let text = if option == simple3d_core::config::SnapMode::WhileHeld {
+                                format!("{} ({snap_key})", option.label())
+                            } else {
+                                option.label().to_string()
+                            };
+                            ui.selectable_value(&mut app.settings.geometry_snap, option, text);
+                        }
+                    });
+            },
+        );
         // The 3D cursor, as three numbers. Shift+right-click in the viewport
         // puts it roughly where it is wanted; this is where it is given the
         // exact place (issue 42).

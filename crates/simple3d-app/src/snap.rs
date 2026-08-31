@@ -39,6 +39,11 @@ impl FeatureKind {
     }
 }
 
+/// How near the pointer a feature has to project to be caught, in screen pixels.
+/// One radius for the measure tool and for geometry snapping, so a feature feels
+/// the same to reach for whichever is doing the reaching.
+pub const CATCH_PIXELS: f32 = 12.0;
+
 /// One catchable point on a body, in world space.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Feature {

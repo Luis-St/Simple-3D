@@ -72,6 +72,7 @@ pub enum Command {
     ModeScale,
     ToggleHandleFrame,
     MeasureTool,
+    SnapToGeometry,
     NudgeLeft,
     NudgeRight,
     NudgeUp,
@@ -150,6 +151,7 @@ impl Command {
         Command::ModeScale,
         Command::ToggleHandleFrame,
         Command::MeasureTool,
+        Command::SnapToGeometry,
         Command::NudgeLeft,
         Command::NudgeRight,
         Command::NudgeUp,
@@ -207,6 +209,7 @@ impl Command {
             ModeScale => "Manipulator: scale",
             ToggleHandleFrame => "Handle frame: object / world",
             MeasureTool => "Measure tool",
+            SnapToGeometry => "Snap to geometry (hold)",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
             NudgeUp => "Nudge up",
@@ -225,7 +228,7 @@ impl Command {
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
-            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | NudgeLeft
+            ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | SnapToGeometry | NudgeLeft
             | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
@@ -515,6 +518,9 @@ impl Keymap {
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
         set(ToggleHandleFrame, Chord::key("X"));
+        // Held during a drag to snap to geometry; V for vertex, and free in
+        // every preset.
+        set(SnapToGeometry, Chord::key("V"));
 
         let nav = match preset {
             Preset::Default => {
