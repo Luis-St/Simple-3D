@@ -158,8 +158,11 @@ impl App {
         self.camera_move = None;
         self.cube_spin = None;
         // A measurement is about the model that was on screen, so it does not
-        // travel to the next one.
-        self.measure.clear();
+        // travel to the next one -- and neither does the tool holding the
+        // pointer. Clearing only the span left the crosshair armed over a
+        // document the user had just switched to, ready to eat their first
+        // click, which is not what putting the tool away means.
+        self.measure = crate::app::Measure::default();
         self.fields.clear();
         self.export_preview = None;
 

@@ -110,7 +110,9 @@ impl Mods {
         }
     }
 
-    fn snap(self, value: f64, base: f64) -> f64 {
+    /// Round a dragged distance to the step in force -- also used by the
+    /// pattern spacing handle (issue 67), so it snaps like every other drag.
+    pub(crate) fn snap(self, value: f64, base: f64) -> f64 {
         match self.increment(base) {
             Some(step) => (value / step).round() * step,
             None => value,

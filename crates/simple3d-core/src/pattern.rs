@@ -124,9 +124,51 @@ pub const PARAMS: &[ParamSpec] = &[
     axis("spiral_axis", ("kind", SPIRAL)),
 ];
 
+/// The most copies one pattern will ever lay down.
+///
+/// Each count is clamped to 512 on its own, but a grid *multiplies* three of
+/// them: 512 on every axis is 134 million copies, which is tens of gigabytes of
+/// transforms before a single triangle is placed. The per-axis clamp cannot see
+/// that, so the total is capped here as well -- generously enough for any run a
+/// person lays out by hand, and low enough that a mistyped grid is a redrawn
+/// preview rather than an out-of-memory kill.
+pub const MAX_INSTANCES: usize = 4096;
+
 /// A fresh pattern's parameters.
 pub fn default_params() -> Params {
     PARAMS.iter().map(|p| (p.key.to_string(), p.default)).collect()
+}
+
+/// A fresh pattern's parameters, with every distance scaled to the shapes the
+/// pattern is being wrapped around (issue 67).
+///
+/// A fixed default cannot be right for both a 2 mm pin and a 200 mm plate: the
+/// stock 20 mm step is exactly the width of the default box, which lays the
+/// copies down face to face -- one welded, non-manifold lump rather than three
+/// boxes. Deriving the numbers from what is actually being repeated puts a
+/// visible gap between the copies whatever their size, and gives a ring or a
+/// helix a radius its own contents fit around.
+pub fn params_for_size(size: Vec3) -> Params {
+    let mut params = default_params();
+    // Half the shape again, so a copy clears the one before it by half its own
+    // width -- the spacing someone laying parts out by eye tends to reach for.
+    let step = |extent: f64| ParamValue::Length(if extent > 1e-9 { extent * 1.5 } else { 20.0 });
+    let across = size.x.max(size.y);
+    let radius = if across > 1e-9 { across * 1.5 } else { 20.0 };
+    for (key, value) in [
+        ("step_x", step(size.x)),
+        ("grid_step_x", step(size.x)),
+        ("grid_step_y", step(size.y)),
+        ("grid_step_z", step(size.z)),
+        ("circ_radius", ParamValue::Length(radius)),
+        ("helix_radius", ParamValue::Length(radius)),
+        ("helix_rise", step(size.z)),
+        ("spiral_radius", ParamValue::Length(radius)),
+        ("spiral_growth", step(size.x)),
+    ] {
+        params.insert(key.to_string(), value);
+    }
+    params
 }
 
 /// Fill in anything a stored map is missing and drop anything it does not know,
@@ -198,14 +240,42 @@ fn radial_axis(axis: usize) -> usize {
 /// mesh of its children. Always at least one -- the original -- so a pattern
 /// with a count of one, or of nonsense, still shows what it holds.
 pub fn instances(params: &Params) -> Vec<Instance> {
-    match params.int("kind") {
+    let mut out = match params.int("kind") {
         GRID => grid(params),
         CIRCULAR => circular(params),
         MIRROR => mirror(params),
         HELIX => helix(params),
         SPIRAL => spiral(params),
         _ => linear(params),
-    }
+    };
+    // The cap is applied here rather than in each kind so no kind can forget it,
+    // and by truncation rather than by refusing: the pattern still shows what it
+    // makes, just not more of it than anything can draw. `instance_count` says
+    // whether this bit, so the editor can tell the user.
+    out.truncate(MAX_INSTANCES);
+    out
+}
+
+/// How many copies a pattern asks for and how many it will actually lay down.
+/// The two differ only where [`MAX_INSTANCES`] has cut in, which is what the
+/// property editor says out loud rather than silently drawing fewer.
+pub fn instance_count(params: &Params) -> (usize, usize) {
+    let wanted = match params.int("kind") {
+        GRID => {
+            let (nx, ny, nz) = (
+                params.int("grid_x").max(1) as usize,
+                params.int("grid_y").max(1) as usize,
+                params.int("grid_z").max(1) as usize,
+            );
+            nx.saturating_mul(ny).saturating_mul(nz)
+        }
+        CIRCULAR => params.int("circ_count").max(1) as usize,
+        MIRROR => 2,
+        HELIX => params.int("helix_count").max(1) as usize,
+        SPIRAL => params.int("spiral_count").max(1) as usize,
+        _ => params.int("count").max(1) as usize,
+    };
+    (wanted, wanted.min(MAX_INSTANCES))
 }
 
 fn linear(params: &Params) -> Vec<Instance> {
@@ -217,10 +287,16 @@ fn linear(params: &Params) -> Vec<Instance> {
 fn grid(params: &Params) -> Vec<Instance> {
     let (nx, ny, nz) = (params.int("grid_x").max(1), params.int("grid_y").max(1), params.int("grid_z").max(1));
     let step = Vec3::new(params.num("grid_step_x"), params.num("grid_step_y"), params.num("grid_step_z"));
+    // Stop at the cap *while building* rather than by truncating afterwards: the
+    // three counts multiply, so a full 512 x 512 x 512 would have to be
+    // allocated -- 14 GB of transforms -- before anything could trim it.
     let mut out = Vec::new();
-    for k in 0..nz {
+    'fill: for k in 0..nz {
         for j in 0..ny {
             for i in 0..nx {
+                if out.len() >= MAX_INSTANCES {
+                    break 'fill;
+                }
                 let offset = Vec3::new(step.x * i as f64, step.y * j as f64, step.z * k as f64);
                 out.push(Instance::plain(Xform::from_translation(offset)));
             }

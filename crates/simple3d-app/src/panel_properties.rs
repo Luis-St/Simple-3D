@@ -580,9 +580,9 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         if !simple3d_core::pattern::param_visible(param, &params) {
             continue;
         }
-        param_field(app, ui, &targets, id, param, unit);
+        param_field(app, ui, &targets, id, param, unit, "Set pattern");
     }
-    let copies = simple3d_core::pattern::instances(&params).len();
+    let (wanted, copies) = simple3d_core::pattern::instance_count(&params);
     let children = app.scene.node(id).children.len();
     let note = if children == 0 {
         "Put shapes under this pattern in the outliner -- or add one with it selected -- and it repeats them."
@@ -591,6 +591,17 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         format!("{copies} copies of {children} shape{}.", if children == 1 { "" } else { "s" })
     };
     ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+    // Said out loud rather than silently drawing fewer: a grid multiplies its
+    // three counts, so it is easy to ask for a hundred million copies without
+    // meaning to, and a pattern that quietly stopped short would just look wrong.
+    if wanted > copies {
+        ui.add(
+            egui::Label::new(theme::hint(format!(
+                "Capped at {copies} -- {wanted} copies were asked for, which is more than can be drawn."
+            )))
+            .selectable(false),
+        );
+    }
 }
 
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
@@ -699,7 +710,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
         if !spec.param_visible(param, &params) {
             continue;
         }
-        param_field(app, ui, targets, id, param, unit);
+        param_field(app, ui, targets, id, param, unit, "Set measurement");
     }
 
     if spec.segmented {
@@ -745,6 +756,11 @@ fn param_field(
     id: NodeId,
     param: &simple3d_core::primitive::ParamSpec,
     unit: Unit,
+    // What the undo step is called. A primitive's choices really are
+    // measurements -- "outer diameter or wall thickness" -- but a pattern's are
+    // its kind and its axis, and filing those under "Set measurement" made the
+    // undo history describe something the user had not done.
+    edit_label: &str,
 ) {
     let value = param_value(app, id, param.key, param.default);
     match param.kind {
@@ -756,7 +772,7 @@ fn param_field(
                     for (index, option) in options.iter().enumerate() {
                         if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
                             chosen = index as u32;
-                            app.edit("Set measurement", None);
+                            app.edit(edit_label, None);
                             for target in targets {
                                 set_param(app, *target, param.key, ParamValue::Choice(chosen));
                                 sync_wall_mode(app, *target, param.key, chosen);

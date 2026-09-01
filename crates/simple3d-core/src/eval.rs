@@ -215,17 +215,41 @@ impl Evaluator {
                 if cancel.is_cancelled() {
                     return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
                 }
-                let mut out = Mesh::new();
+                let mut copies: Vec<Mesh> = Vec::new();
                 for instance in crate::pattern::instances(params) {
+                    // Checked per copy, not just before the loop: a pattern is
+                    // the one node whose cost is a number someone types, so a
+                    // count that turns out to be too large has to be abandonable
+                    // rather than run to the end.
+                    if cancel.is_cancelled() {
+                        return Arc::new(SubtreeResult {
+                            mesh: Arc::new(Mesh::new()),
+                            anchor_offset: Vec3::ZERO,
+                            errors,
+                        });
+                    }
                     let mut copy = apply(&instance.xform, &unit);
                     // A reflection reverses the winding, so its faces point the
                     // wrong way until they are flipped back.
                     if instance.mirrored {
                         copy.flip_winding();
                     }
-                    out.append(&copy);
+                    copies.push(copy);
                 }
-                out
+                // The copies are *unioned*, not concatenated. A pattern stands in
+                // for manual duplicates, so it has to produce what those would:
+                // duplicates dropped in a union group meet the kernel as separate
+                // operands and come out one clean solid, and copies that merely
+                // touch -- which is what a step equal to the shape's own width
+                // gives -- must do the same. Concatenating them instead welded
+                // the contact into an edge shared by four triangles, and the
+                // enclosing group then reported the whole scene non-manifold.
+                //
+                // This costs nothing for the copies that stand clear of each
+                // other, which is the ordinary case and the one a helix makes
+                // many of: `union_all` rejects non-overlapping operands on their
+                // bounding boxes and never enters the BSP kernel for them.
+                combine(GroupOp::Union, &copies, id, &node.name, &mut errors)
             }
         };
 
@@ -1174,6 +1198,88 @@ mod tests {
         // The whole repeated mesh is pickable under the pattern's own id, so a
         // click on any copy reaches the pattern.
         assert!(out.node_meshes.contains_key(&pat), "the pattern has no pickable mesh");
+    }
+
+    #[test]
+    fn a_pattern_whose_copies_touch_is_still_one_solid() {
+        // Regression, issue 67: the stock step was 20mm and the stock box is
+        // 20mm wide, so the very first thing the pattern tool produced was three
+        // copies face to face. Concatenated, that welds into an edge shared by
+        // four triangles and the enclosing group reported "Union produced
+        // non-manifold geometry: edge (13,12) used 2 times, expected 1" -- the
+        // whole scene red on the feature's first use. Unioning the copies gives
+        // what the manual duplicates a pattern replaces would have given.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        scene.add_primitive("box", pat, 0).unwrap();
+        {
+            let p = scene.get_mut(pat).unwrap().params_mut().unwrap();
+            p.insert("kind".into(), ParamValue::Choice(0));
+            p.insert("count".into(), ParamValue::Count(3));
+            p.insert("step_x".into(), ParamValue::Length(20.0)); // exactly the box's width
+        }
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        assert!(out.errors.is_empty(), "a touching pattern reported {:?}", out.errors);
+        assert!(out.mesh.manifold_issue().is_none(), "the touching copies did not fuse into one solid");
+        // Fused end to end, so it spans three boxes and no interior walls are left.
+        let (lo, hi) = out.mesh.bounds().unwrap();
+        assert!((hi.x - lo.x - 60.0).abs() < 1e-6, "{:?}", hi - lo);
+    }
+
+    #[test]
+    fn a_pattern_of_copies_that_stand_clear_stays_a_concatenation() {
+        // The other half of the bargain: copies with a gap between them must not
+        // pay for the boolean kernel, so the result is still exactly the copies.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        scene.add_primitive("box", pat, 0).unwrap();
+        let one_box = {
+            let mut solo = Scene::new();
+            let r = solo.root();
+            solo.add_primitive("box", r, 0).unwrap();
+            Evaluator::new().evaluate(&solo, &Cancel::new()).mesh.triangle_count()
+        };
+        {
+            let p = scene.get_mut(pat).unwrap().params_mut().unwrap();
+            p.insert("count".into(), ParamValue::Count(4));
+            p.insert("step_x".into(), ParamValue::Length(50.0));
+        }
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        assert!(out.errors.is_empty());
+        assert_eq!(out.mesh.triangle_count(), one_box * 4, "the disjoint copies went through the kernel");
+    }
+
+    #[test]
+    fn a_grid_pattern_cannot_be_asked_for_more_copies_than_anything_can_draw() {
+        // Issue 67: each count clamps to 512 on its own, but a grid multiplies
+        // three of them -- 512^3 is 134 million transforms, ~14 GB, reachable by
+        // typing three numbers. The cap is what stands between that and an
+        // out-of-memory kill.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pat = scene.add_pattern(root, 0);
+        scene.add_primitive("box", pat, 0).unwrap();
+        {
+            let p = scene.get_mut(pat).unwrap().params_mut().unwrap();
+            p.insert("kind".into(), ParamValue::Choice(1));
+            for key in ["grid_x", "grid_y", "grid_z"] {
+                p.insert(key.into(), ParamValue::Count(512));
+            }
+            // Spread out, so the cap is what limits the work and not the kernel.
+            for key in ["grid_step_x", "grid_step_y", "grid_step_z"] {
+                p.insert(key.into(), ParamValue::Length(40.0));
+            }
+        }
+        let params = scene.node(pat).params().unwrap().clone();
+        let (wanted, made) = crate::pattern::instance_count(&params);
+        assert_eq!(wanted, 512 * 512 * 512, "the per-axis clamp still multiplies out");
+        assert_eq!(made, crate::pattern::MAX_INSTANCES);
+        assert_eq!(crate::pattern::instances(&params).len(), crate::pattern::MAX_INSTANCES);
+        // And it really evaluates, rather than taking the machine down with it.
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        assert!(out.mesh.triangle_count() > 0);
     }
 
     #[test]

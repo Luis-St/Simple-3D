@@ -158,6 +158,13 @@ impl Measurement {
     }
 }
 
+/// One body's snap features, shared out of the cache without copying them.
+type Features = std::rc::Rc<Vec<crate::snap::Feature>>;
+/// What the cache holds per node: which mesh the features were found on --
+/// identified by the address of its `Arc`, which changes on re-evaluation and
+/// nowhere else -- and the features themselves.
+type CachedFeatures = (usize, Features);
+
 pub struct App {
     pub scene: Scene,
     pub history: History,
@@ -257,13 +264,15 @@ pub struct App {
     /// the viewport from the snap-mode setting and the held key and read while a
     /// move drag runs.
     pub(crate) snap_requested: bool,
-    /// While a move drag runs, the world-space offset from the dragged node's
-    /// origin to the feature the drag grabbed near, so that same feature is what
-    /// lands on a target. Zero when the grab was not near the body's own geometry.
-    snap_source: Vec3,
     /// The geometry feature the current drag is snapped onto, for the viewport to
     /// mark. `None` when nothing is snapped this frame.
     pub snap_indicator: Option<Vec3>,
+    /// Every feature of the body the current drag is carrying, as offsets from
+    /// its origin; gathered on `Begin`. See `App::drag_feature_offsets`.
+    snap_sources: Vec<Vec3>,
+    /// Each body's snap features, kept between frames and keyed on the identity
+    /// of the mesh they were found on. See `App::features_of`.
+    snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedFeatures>>,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.
     pub pending_delete: Option<Vec<NodeId>>,
@@ -415,8 +424,9 @@ impl App {
             cursor: None,
             measure: Measure::default(),
             snap_requested: false,
-            snap_source: Vec3::ZERO,
+            snap_sources: Vec::new(),
             snap_indicator: None,
+            snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
             pending_delete: None,
             camera_move: None,
             cube_spin: None,
@@ -939,7 +949,7 @@ impl App {
             if !self.scene.is_shown(id) || exclude.contains(&id) {
                 continue;
             }
-            let features = crate::snap::features_of(mesh);
+            let features = self.features_of(id, mesh);
             let hit = crate::snap::nearest_on_screen(
                 &features,
                 |p| view.project(p).map(|(screen, _)| screen),
@@ -955,6 +965,28 @@ impl App {
         best
     }
 
+    /// One body's snap features, remembered between frames.
+    ///
+    /// Finding them welds the mesh, builds two hash maps over its edges, runs a
+    /// union-find across its coplanar triangles and sorts the result -- 6.5 ms
+    /// for a 16k-triangle body in a release build. Every visible body was paying
+    /// that on *every frame* of a snapped drag and of a measure hover, which is
+    /// most of a frame's budget spent recomputing something that only changes
+    /// when the mesh does. The evaluated meshes are shared `Arc`s, so the
+    /// pointer is exactly the "has this changed" key: a re-evaluation makes a new
+    /// allocation and misses, and anything else hits.
+    fn features_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Features {
+        let key = std::sync::Arc::as_ptr(mesh) as usize;
+        if let Some((cached_key, features)) = self.snap_features.borrow().get(&id) {
+            if *cached_key == key {
+                return features.clone();
+            }
+        }
+        let features = std::rc::Rc::new(crate::snap::features_of(mesh));
+        self.snap_features.borrow_mut().insert(id, (key, features.clone()));
+        features
+    }
+
     fn nearest_feature(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(crate::snap::Feature, f32)> {
         self.nearest_feature_excluding(view, cursor, &[])
     }
@@ -962,15 +994,19 @@ impl App {
     /// Whether geometry snapping is being asked for right now (issue 68): always,
     /// never, or only while the snap key is held. `key_down` answers whether a
     /// toolkit key is currently pressed, which only the viewport can see.
-    pub fn geometry_snap_wanted(&self, key_down: impl Fn(egui::Key) -> bool) -> bool {
+    pub fn geometry_snap_wanted(&self, key_down: impl Fn(egui::Key) -> bool, mods: egui::Modifiers) -> bool {
         match self.settings.geometry_snap {
             SnapMode::Never => false,
             SnapMode::Always => true,
-            SnapMode::WhileHeld => self
-                .keymap
-                .binding(Command::SnapToGeometry)
-                .and_then(|chord| crate::ui::key_from_name(&chord.key))
-                .is_some_and(key_down),
+            SnapMode::WhileHeld => self.keymap.binding(Command::SnapToGeometry).is_some_and(|chord| {
+                // The chord's modifiers count too. Matching on the key name alone
+                // meant a hold rebound to Ctrl+V also fired on a bare V -- and on
+                // Ctrl+V, which is Paste.
+                crate::ui::key_from_name(&chord.key).is_some_and(&key_down)
+                    && mods.command == chord.ctrl
+                    && mods.shift == chord.shift
+                    && mods.alt == chord.alt
+            }),
         }
     }
 
@@ -980,44 +1016,97 @@ impl App {
         std::iter::once(id).chain(self.scene.descendants(id)).collect()
     }
 
-    /// Where, relative to the dragged node's origin, the feature the drag grabbed
-    /// near sits -- so that same feature is what snaps onto a target rather than
-    /// the origin. Zero when the grab was not near the body's own geometry, which
-    /// makes the origin itself the thing that snaps.
-    fn grab_source_offset(&self, id: NodeId, view: &crate::view::View, cursor: egui::Pos2) -> Vec3 {
-        let Some(frame) = self.evaluated.node_frames.get(&id) else { return Vec3::ZERO };
+    /// Every feature of the body a drag is carrying, as an offset from that
+    /// node's origin. Taken once, when the handle is grabbed.
+    ///
+    /// Which feature should meet the target used to be decided here too, by
+    /// looking for one within the catch radius of the cursor. A drag always
+    /// starts on a manipulator handle, and those sit a fixed 78 screen pixels out
+    /// along an axis -- never on the body's own geometry except by coincidence --
+    /// so the answer was almost always "none", and it was the node's *origin*
+    /// that landed on the target. Two boxes snapped together interpenetrated by
+    /// half, which is not what "snap this corner to that corner" means.
+    ///
+    /// They are kept as *offsets*, and gathered before the body has moved,
+    /// because `Evaluated` lags a drag: the meshes still describe where the body
+    /// was at the last evaluation while `Node::position` is already live. An
+    /// offset from the origin is the same either way, being a fact about the
+    /// shape rather than about where it currently sits.
+    fn drag_feature_offsets(&self, id: NodeId) -> Vec<Vec3> {
+        let Some(frame) = self.evaluated.node_frames.get(&id) else { return Vec::new() };
         let world_origin = frame.point(self.scene.node(id).position);
-        let mut best: Option<(Vec3, f32)> = None;
-        for &n in &self.drag_subtree(id) {
+        let mut offsets = Vec::new();
+        for n in self.drag_subtree(id) {
             let Some(mesh) = self.evaluated.node_meshes.get(&n) else { continue };
-            let features = crate::snap::features_of(mesh);
-            if let Some((feature, distance)) = crate::snap::nearest_on_screen(
-                &features,
-                |p| view.project(p).map(|(screen, _)| screen),
-                cursor,
-                crate::snap::CATCH_PIXELS,
-            ) {
-                if best.is_none_or(|(_, d)| distance < d) {
-                    best = Some((feature.point, distance));
-                }
-            }
+            offsets.extend(self.features_of(n, mesh).iter().map(|f| f.point - world_origin));
         }
-        best.map(|(point, _)| point - world_origin).unwrap_or(Vec3::ZERO)
+        offsets
     }
 
-    /// Snap the dragged node so its grabbed feature lands on the nearest feature
-    /// of another body under the pointer (issue 68). Returns the world point it
-    /// snapped onto, or `None` when nothing was in reach, in which case the grid
-    /// drag stands.
-    fn apply_geometry_snap(&mut self, id: NodeId, view: &crate::view::View, cursor: egui::Pos2) -> Option<Vec3> {
+    /// Snap the dragged node so one of its own features lands on the nearest
+    /// feature of another body under the pointer (issue 68). Returns the world
+    /// point it snapped onto, or `None` when nothing was in reach, in which case
+    /// the grid drag stands.
+    ///
+    /// `handle` is what the drag is being steered by, and the snap stays inside
+    /// it: an axis handle only ever moves along its axis and a plane handle only
+    /// within its plane. Writing the full three-dimensional correction turned an
+    /// X-axis drag into a free move -- the body jumped in Y and Z as well, which
+    /// is the one thing choosing an axis handle says it must not do.
+    fn apply_geometry_snap(
+        &mut self,
+        id: NodeId,
+        gizmo: &Gizmo,
+        handle: Handle,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+    ) -> Option<Vec3> {
         let frame = *self.evaluated.node_frames.get(&id)?;
         let world_origin = frame.point(self.scene.node(id).position);
-        let source = world_origin + self.snap_source;
         let exclude = self.drag_subtree(id);
         let (target, _) = self.nearest_feature_excluding(view, cursor, &exclude)?;
-        // Translate the whole body so its source feature meets the target, then
-        // express the new origin back in the parent's frame the position is in.
-        let new_origin = world_origin + (target.point - source);
+        // Only the components the handle actually governs survive, measured in
+        // the handle's own frame rather than the world's so a rotated body's
+        // local axes are respected the same way the drag itself respects them.
+        let constrain = |wanted: Vec3| {
+            let mut correction = Vec3::ZERO;
+            for axis in handle.axes() {
+                let dir = gizmo.axes[axis];
+                correction = correction + dir * wanted.dot(dir);
+            }
+            correction
+        };
+        // The feature of the moving body that ends up closest to the target once
+        // the handle's constraint has had its say -- so the corner that can
+        // actually reach it is the one that meets it. An empty group offers no
+        // offsets, and then it is the origin that snaps, which still beats
+        // refusing to snap at all.
+        let mut best: Option<(Vec3, f64, f64)> = None;
+        for offset in std::iter::once(Vec3::ZERO).chain(self.snap_sources.iter().copied()) {
+            let correction = constrain(target.point - (world_origin + offset));
+            // How far the feature still misses the target after the constrained
+            // move: exactly zero when it can reach, and the shortest achievable
+            // gap when the handle will not let it all the way there.
+            let miss = (world_origin + offset + correction - target.point).length();
+            // Several features often reach equally well -- on an X drag towards a
+            // corner, the box's left face can meet it just as exactly as its
+            // right, by flying the whole body past the target and landing on top
+            // of it. Between equals, the one that moves the body least is the one
+            // that was meant.
+            let travel = correction.length();
+            const TIE: f64 = 1e-6;
+            let better = match best {
+                None => true,
+                Some((_, best_miss, best_travel)) => {
+                    miss < best_miss - TIE || ((miss - best_miss).abs() <= TIE && travel < best_travel)
+                }
+            };
+            if better {
+                best = Some((correction, miss, travel));
+            }
+        }
+        let (correction, _, _) = best?;
+        let new_origin = world_origin + correction;
         let new_position = frame.inverse().point(new_origin);
         if let Some(node) = self.scene.get_mut(id) {
             node.position = new_position;
@@ -1031,9 +1120,13 @@ impl App {
         self.measure.add(point);
         if let Some((a, b)) = self.measure.span() {
             let m = Measurement::between(a.at, b.at);
+            // With the unit: this line sits in the same bar as "20 x 20 x 20 mm"
+            // and "Grid 10 mm", and a bare number among them says nothing at all
+            // in a drawing whose unit is centimetres.
             self.status = Status::Info(format!(
-                "Distance {}  \u{00B7}  incline {}\u{00B0}",
+                "Distance {} {}  \u{00B7}  incline {}\u{00B0}",
                 simple3d_core::unit::format_length(m.distance, self.unit()),
+                self.unit().suffix(),
                 simple3d_core::unit::format_angle(m.inclination_deg),
             ));
         } else {
@@ -1192,27 +1285,67 @@ impl App {
         }
     }
 
-    /// The parameter keys a pattern's viewport spacing handle drives -- its
-    /// count along the first axis and the step between copies there -- or `None`
-    /// for a kind with no straight run to lay out by dragging (issue 67).
-    pub fn pattern_spacing_keys(&self, id: NodeId) -> Option<(&'static str, &'static str)> {
+    /// The parameter keys a pattern's viewport spacing handle drives: its count,
+    /// and the step components that make up the run between copies -- one per
+    /// axis for a linear pattern, whose run can point anywhere, and the single
+    /// column step for a grid, whose first run is along its own X. `None` for a
+    /// kind with no straight run to lay out by dragging (issue 67).
+    pub fn pattern_spacing_keys(&self, id: NodeId) -> Option<(&'static str, &'static [&'static str])> {
         let node = self.scene.get(id)?;
         if !node.is_pattern() {
             return None;
         }
         match node.params()?.get("kind").copied().map(|v| v.as_u32()).unwrap_or(0) {
-            0 => Some(("count", "step_x")),       // Linear
-            1 => Some(("grid_x", "grid_step_x")), // Grid, along its columns
+            0 => Some(("count", &["step_x", "step_y", "step_z"])), // Linear
+            1 => Some(("grid_x", &["grid_step_x"])),               // Grid, along its columns
             _ => None,
         }
     }
 
-    /// Set a pattern's primary step from a drag, coalesced into one undo step so
-    /// the whole drag is a single "spacing" edit.
-    pub fn set_pattern_step(&mut self, id: NodeId, step_key: &str, step: f64) {
+    /// The run a pattern's copies step along, in the node's own frame: the step
+    /// components the handle drives, read back as a vector.
+    pub fn pattern_step_vector(&self, id: NodeId) -> Option<Vec3> {
+        use simple3d_core::primitive::ParamsExt;
+        let (_, keys) = self.pattern_spacing_keys(id)?;
+        let params = self.scene.get(id)?.params()?;
+        let mut step = Vec3::ZERO;
+        for (axis, key) in keys.iter().enumerate() {
+            match axis {
+                0 => step.x = params.num(key),
+                1 => step.y = params.num(key),
+                _ => step.z = params.num(key),
+            }
+        }
+        Some(step)
+    }
+
+    /// Set a pattern's step from a drag, coalesced into one undo step so the
+    /// whole drag is a single "spacing" edit.
+    ///
+    /// The whole run is scaled together, so dragging the handle of a pattern that
+    /// steps diagonally lengthens the diagonal rather than straightening it onto
+    /// X. The length is rounded to the document's move step, because every other
+    /// drag in the viewport is -- a handle that alone produced 7.0359 mm under a
+    /// 1 mm step was the odd one out.
+    pub fn set_pattern_step(&mut self, id: NodeId, along: f64, mods: gizmo::Mods) {
+        let Some((_, keys)) = self.pattern_spacing_keys(id) else { return };
+        let Some(step) = self.pattern_step_vector(id) else { return };
+        let length = step.length();
+        // The direction to lengthen along: the run's own, or the first axis when
+        // there is no run yet to take a direction from.
+        let dir = if length > 1e-9 { step * (1.0 / length) } else { Vec3::new(1.0, 0.0, 0.0) };
+        let wanted = mods.snap(along.max(0.0), self.move_snap());
         self.edit("Pattern spacing", Some(&format!("pattern-step:{id}")));
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            params.insert(step_key.to_string(), simple3d_core::primitive::ParamValue::Length(step.max(0.0)));
+            let scaled = dir * wanted;
+            for (axis, key) in keys.iter().enumerate() {
+                let value = match axis {
+                    0 => scaled.x,
+                    1 => scaled.y,
+                    _ => scaled.z,
+                };
+                params.insert((*key).to_string(), simple3d_core::primitive::ParamValue::Length(value));
+            }
         }
         self.touch();
     }
@@ -1231,9 +1364,19 @@ impl App {
             // new node, then make that node a pattern rather than a union.
             let group = self.scene.group_selection(&self.selection.clone());
             if let Some(group) = group {
+                // Measured *before* the node becomes a pattern. Asking afterwards
+                // measures the repetition rather than the thing being repeated --
+                // three 20 mm boxes 20 mm apart read as 60 mm wide, and the
+                // spacing derived from that came out three times too large.
+                let size = simple3d_core::eval::subtree_bounds(&self.scene, group)
+                    .map(|(lo, hi)| hi - lo)
+                    .unwrap_or(Vec3::ZERO);
                 if let Some(node) = self.scene.get_mut(group) {
+                    // The stock 20 mm step is exactly the width of the stock box,
+                    // so a pattern made from one laid its copies down touching --
+                    // see `pattern::params_for_size`.
                     node.body =
-                        simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::default_params() };
+                        simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::params_for_size(size) };
                     node.name = "Pattern".to_string();
                 }
             }
@@ -1388,13 +1531,18 @@ impl App {
     }
 
     /// Add a group or a primitive *where the tree is pointing*: inside `at` when
-    /// it is a group, beside it otherwise. What the outliner's own Add menu
-    /// uses, so a shape made from a row lands on that row rather than at the
+    /// it can hold children, beside it otherwise. What the outliner's own Add
+    /// menu uses, so a shape made from a row lands on that row rather than at the
     /// document's insertion point (issue 44).
     pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
         self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
         let (parent, index) = match self.scene.get(at) {
-            Some(node) if node.is_group() => (at, self.scene.node(at).children.len()),
+            // A pattern holds children exactly as a group does (issue 67), so
+            // Add from a pattern's own row has to go *into* it. Asking
+            // `is_group` here put the shape beside the pattern instead, which
+            // made the row menu disagree with both the drag-and-drop rule and
+            // the document-level Add, and both of those already say "into".
+            Some(node) if node.can_hold_children() => (at, self.scene.node(at).children.len()),
             Some(node) => match node.parent {
                 Some(parent) => {
                     let after = self.scene.node(parent).children.iter().position(|&c| c == at).map_or(0, |i| i + 1);
@@ -1496,10 +1644,28 @@ impl App {
                     None => return,
                 };
                 // Geometry snapping (issue 68) rides on top of the grid drag, and
-                // only for a move: it overrides the position so the grabbed
-                // feature lands on a body under the pointer.
+                // only for a move: it overrides the position so one of the moved
+                // body's own features lands on a body under the pointer.
                 if self.snap_requested && matches!(handle, Handle::MoveAxis(_) | Handle::MovePlane(_)) {
-                    self.snap_indicator = self.apply_geometry_snap(id, view, cursor);
+                    self.snap_indicator = self.apply_geometry_snap(id, gizmo, handle, view, cursor);
+                    // The readout beside the cursor is written by the grid drag
+                    // and describes the move the snap has just overridden -- it
+                    // read "X +32mm" while the body had actually gone to
+                    // (53, -10, 10). Restate it from what really happened.
+                    if self.snap_indicator.is_some() {
+                        let unit = self.scene.settings.unit;
+                        let moved =
+                            self.scene.node(id).position - self.drag.as_ref().map_or(Vec3::ZERO, |d| d.start_position);
+                        if let Some(drag) = self.drag.as_mut() {
+                            drag.readout = format!(
+                                "snap {}, {}, {} {}",
+                                simple3d_core::unit::format_length(moved.x, unit),
+                                simple3d_core::unit::format_length(moved.y, unit),
+                                simple3d_core::unit::format_length(moved.z, unit),
+                                unit.suffix()
+                            );
+                        }
+                    }
                 } else {
                     self.snap_indicator = None;
                 }
@@ -1520,9 +1686,9 @@ impl App {
                     None,
                 );
                 self.drag = Drag::begin(&self.scene, gizmo, id, handle, view, cursor);
-                // Remember which of the dragged body's own features the grab was
-                // near, so geometry snapping moves that feature onto a target.
-                self.snap_source = self.grab_source_offset(id, view, cursor);
+                // Before anything has moved, while the evaluated meshes and the
+                // live positions still agree.
+                self.snap_sources = self.drag_feature_offsets(id);
                 self.snap_indicator = None;
             }
             gizmo::DragPhase::Idle => {}
@@ -3742,12 +3908,14 @@ mod tests {
     #[test]
     fn a_linear_patterns_spacing_is_laid_out_by_a_handle_that_follows_the_kind() {
         use simple3d_core::primitive::ParamValue;
+        let free = gizmo::Mods { free: true, ..Default::default() };
         let mut app = headless_app();
         app.run(Command::Pattern);
         let pat = app.primary().unwrap();
-        // Linear by default: the viewport handle drives its count and step.
-        assert_eq!(app.pattern_spacing_keys(pat), Some(("count", "step_x")));
-        app.set_pattern_step(pat, "step_x", 42.0);
+        // Linear by default: the viewport handle drives its count and the three
+        // components of its run.
+        assert_eq!(app.pattern_spacing_keys(pat), Some(("count", &["step_x", "step_y", "step_z"][..])));
+        app.set_pattern_step(pat, 42.0, free);
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(42.0)));
         app.reevaluate_for_test();
         draw_one_frame(&mut app);
@@ -3757,24 +3925,131 @@ mod tests {
         assert_eq!(app.pattern_spacing_keys(pat), None);
 
         // Negative drags cannot push the step below zero.
-        app.set_pattern_step(pat, "step_x", -5.0);
+        app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(0));
+        app.set_pattern_step(pat, -5.0, free);
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(0.0)));
+    }
+
+    #[test]
+    fn adding_from_a_patterns_own_row_puts_the_shape_inside_it() {
+        // Issue 67: the outliner's row menu asked `is_group`, so Add from a
+        // pattern's row dropped the shape beside the pattern -- disagreeing with
+        // the drag-and-drop rule and with the document-level Add, both of which
+        // already put it in.
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        let before = app.scene.node(pat).children.len();
+        let root_before = app.scene.node(app.scene.root()).children.len();
+
+        app.add_node_at(pat, Some("box"), GroupOp::Union);
+        assert_eq!(app.scene.node(pat).children.len(), before + 1, "the shape did not go into the pattern");
+        assert_eq!(app.scene.node(app.scene.root()).children.len(), root_before, "it landed beside the pattern");
+
+        // And the document-level Add agrees, as it already did.
+        assert_eq!(app.scene.insertion_point(Some(pat)).0, pat);
+    }
+
+    #[test]
+    fn the_spacing_handle_lengthens_a_diagonal_run_without_straightening_it() {
+        // The handle drives the whole run, not just its X component: a pattern
+        // stepping diagonally must stay diagonal when it is dragged longer, and
+        // the handle must stay at the last copy rather than off along X.
+        use simple3d_core::primitive::ParamValue;
+        let free = gizmo::Mods { free: true, ..Default::default() };
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        {
+            let params = app.scene.get_mut(pat).unwrap().params_mut().unwrap();
+            params.insert("step_x".into(), ParamValue::Length(30.0));
+            params.insert("step_y".into(), ParamValue::Length(40.0));
+        }
+        assert!((app.pattern_step_vector(pat).unwrap().length() - 50.0).abs() < 1e-9, "a 3-4-5 run");
+
+        app.set_pattern_step(pat, 100.0, free);
+        let step = app.pattern_step_vector(pat).unwrap();
+        assert!((step.length() - 100.0).abs() < 1e-6, "the run was not doubled: {step:?}");
+        assert!((step - Vec3::new(60.0, 80.0, 0.0)).length() < 1e-6, "the run was straightened onto X: {step:?}");
+    }
+
+    #[test]
+    fn a_dragged_spacing_lands_on_the_documents_step() {
+        // Every other viewport drag rounds to the move step; this one used to
+        // write whatever the ray happened to hit, so laying a pattern out by eye
+        // gave "7.0359 mm" under a 1 mm step.
+        use simple3d_core::primitive::ParamValue;
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        app.scene.settings.snap_step = 1.0;
+        app.set_pattern_step(pat, 7.0359, gizmo::Mods::default());
+        assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(7.0)));
+        // Shift is the coarse step everywhere else, and here too.
+        app.set_pattern_step(pat, 24.0, gizmo::Mods { coarse: true, ..Default::default() });
+        assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(20.0)));
+    }
+
+    #[test]
+    fn the_pattern_tool_spaces_its_copies_clear_of_the_shapes_it_wraps() {
+        // Regression, issue 67: the stock 20 mm step is exactly the stock box's
+        // width, so the tool's own output was three copies face to face -- and
+        // the scene went red on the feature's very first use. The spacing now
+        // comes from what is being wrapped, whatever size that is.
+        for (w, d, h) in [(20.0, 20.0, 20.0), (4.0, 4.0, 4.0), (120.0, 60.0, 8.0)] {
+            let mut app = headless_app();
+            let root = app.scene.root();
+            let id = app.scene.add_primitive("box", root, 0).unwrap();
+            {
+                let params = app.scene.get_mut(id).unwrap().params_mut().unwrap();
+                params.insert("width".into(), simple3d_core::primitive::ParamValue::Length(w));
+                params.insert("depth".into(), simple3d_core::primitive::ParamValue::Length(d));
+                params.insert("height".into(), simple3d_core::primitive::ParamValue::Length(h));
+            }
+            app.select_only(id);
+            app.run(Command::Pattern);
+            let pat = app.primary().unwrap();
+            let step = app.pattern_step_vector(pat).unwrap();
+            assert!(step.x > w, "a {w}mm shape got a {}mm step, so its copies touch or overlap", step.x);
+            // Scaled to the shape itself, not to what the pattern makes of it:
+            // measuring the node *after* it became a pattern measured three
+            // copies rather than one and inflated every distance threefold.
+            assert!(
+                (step.x - w * 1.5).abs() < 1e-6,
+                "a {w}mm shape got a {}mm step; the spacing was taken from the repetition, not the shape",
+                step.x
+            );
+            app.reevaluate_for_test();
+            assert!(app.evaluated.errors.is_empty(), "{w}x{d}x{h}: {:?}", app.evaluated.errors);
+        }
     }
 
     #[test]
     fn geometry_snapping_is_asked_for_by_the_mode_and_the_held_key() {
         // Issue 68's three modes, resolved through the same call the viewport
         // makes -- the key-down closure standing in for the live keyboard.
+        let none = egui::Modifiers::NONE;
         let mut app = headless_app();
         app.settings.geometry_snap = SnapMode::Never;
-        assert!(!app.geometry_snap_wanted(|_| true), "never should snap for no key");
+        assert!(!app.geometry_snap_wanted(|_| true, none), "never should snap for no key");
         app.settings.geometry_snap = SnapMode::Always;
-        assert!(app.geometry_snap_wanted(|_| false), "always should snap with no key held");
+        assert!(app.geometry_snap_wanted(|_| false, none), "always should snap with no key held");
 
         app.settings.geometry_snap = SnapMode::WhileHeld;
         let key = crate::ui::key_from_name(&app.keymap.binding(Command::SnapToGeometry).unwrap().key).unwrap();
-        assert!(!app.geometry_snap_wanted(|_| false), "held mode with nothing down must not snap");
-        assert!(app.geometry_snap_wanted(|k| k == key), "held mode with the snap key down must snap");
+        assert!(!app.geometry_snap_wanted(|_| false, none), "held mode with nothing down must not snap");
+        assert!(app.geometry_snap_wanted(|k| k == key, none), "held mode with the snap key down must snap");
+
+        // The chord's modifiers count. A hold rebound to Ctrl+V must not fire on
+        // a bare V -- and the unmodified binding must not fire on Ctrl+V, which
+        // is Paste.
+        assert!(
+            !app.geometry_snap_wanted(|k| k == key, egui::Modifiers::COMMAND),
+            "the bare binding fired with Ctrl down"
+        );
+        app.keymap.set(Command::SnapToGeometry, Chord::ctrl("V"), true).unwrap();
+        assert!(!app.geometry_snap_wanted(|k| k == key, none), "a Ctrl+V hold fired on a bare V");
+        assert!(app.geometry_snap_wanted(|k| k == key, egui::Modifiers::COMMAND));
     }
 
     #[test]
@@ -3802,14 +4077,51 @@ mod tests {
         app.snap_requested = true;
         drag_gesture(&mut app, a, Handle::MoveAxis(0), corner, 3);
 
-        // A's origin caught the corner: 43 is not a multiple of the 1mm step, so
-        // a grid-only drag could not have produced it.
+        // A *corner of A* caught the corner of B -- not A's origin. Snapping used
+        // to move the origin onto the target, which left two boxes overlapping by
+        // half rather than meeting at a corner.
+        app.reevaluate_for_test();
+        let landed = crate::snap::features_of(&app.evaluated.node_meshes[&a])
+            .iter()
+            .any(|f| f.kind == crate::snap::FeatureKind::Vertex && (f.point - corner).length() < 1e-6);
         assert!(
-            (app.scene.node(a).position - corner).length() < 1e-6,
-            "the drag did not snap to the corner: at {:?}, corner {:?}",
-            app.scene.node(a).position,
-            corner
+            landed,
+            "no corner of the dragged box met the target corner {corner:?}; it sits at {:?}",
+            app.scene.node(a).position
         );
+        // 43 is not a multiple of the 1mm step, so a grid-only drag could not
+        // have produced this.
+        assert!((app.scene.node(a).position.x - 23.0).abs() < 1e-6, "{:?}", app.scene.node(a).position);
+
+        // And an axis handle stayed on its axis. The whole point of grabbing the
+        // X arrow is that Y and Z do not move; the snap used to overwrite all
+        // three and slide the body off to (53, -10, 10).
+        let after = app.scene.node(a).position;
+        assert!(after.y.abs() < 1e-9 && after.z.abs() < 1e-9, "an X-axis drag moved in Y or Z: {after:?}");
+    }
+
+    #[test]
+    fn a_snapped_plane_drag_stays_in_its_plane() {
+        // The same constraint for the other move handle: a plane handle may move
+        // in its two axes and must leave the third alone.
+        let mut app = app_in(temp_config_dir("snap-plane"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 37.0, 25.0);
+        app.select_only(a);
+        app.history.clear();
+        app.reevaluate_for_test();
+        let (lo, hi) = app.evaluated.node_meshes[&b].bounds().unwrap();
+        let corner = Vec3::new(lo.x, lo.y, hi.z);
+
+        app.settings.geometry_snap = SnapMode::Always;
+        app.snap_requested = true;
+        // MovePlane(2): free in X and Y, pinned in Z.
+        drag_gesture(&mut app, a, Handle::MovePlane(2), corner, 3);
+        let after = app.scene.node(a).position;
+        assert!(after.z.abs() < 1e-9, "a Z-plane drag moved in Z: {after:?}");
+        assert!(after.x.abs() > 1e-6 && after.y.abs() > 1e-6, "the drag did not snap at all: {after:?}");
     }
 
     #[test]

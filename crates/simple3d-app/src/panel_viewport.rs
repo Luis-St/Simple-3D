@@ -273,7 +273,7 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     // from the setting and, for the hold mode, the live key state. Read here on
     // every frame so a change of mode -- or the key going down mid-drag -- takes
     // effect at once.
-    app.snap_requested = app.geometry_snap_wanted(|k| ui.input(|i| i.key_down(k)));
+    app.snap_requested = app.geometry_snap_wanted(|k| ui.input(|i| i.key_down(k)), ui.input(|i| i.modifiers));
     let Some(id) = app.primary() else {
         app.drag = None;
         app.hover_handle = None;
@@ -331,35 +331,37 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     owned
 }
 
-/// Where a pattern's spacing handle sits in the world, and along which axis it
-/// slides: at the last copy of its first run, out along that run's direction.
+/// Where a pattern's spacing handle sits in the world, and along which direction
+/// it slides: at the last copy of its first run, out along that run.
 /// `None` when the selected node is not a pattern with a run to lay out.
-fn pattern_spacing_handle(app: &App, view: &View) -> Option<(Vec3, Vec3, &'static str, u32)> {
+///
+/// The run is the pattern's whole step vector, not just its X component. Placing
+/// the handle along the first axis alone left it hanging off in space as soon as
+/// a linear pattern stepped diagonally -- the doc said "at the last copy" and it
+/// visibly was not. A run with no length yet has no direction of its own, so it
+/// borrows the first axis, which is where a fresh pattern steps anyway.
+fn pattern_spacing_handle(app: &App, _view: &View) -> Option<(Vec3, Vec3, Vec3, u32)> {
     use simple3d_core::primitive::ParamsExt;
     let id = app.primary()?;
-    let (count_key, step_key) = app.pattern_spacing_keys(id)?;
-    let params = app.scene.node(id).params()?;
-    let count = params.int(count_key).max(1);
+    let (count_key, _) = app.pattern_spacing_keys(id)?;
+    let count = app.scene.node(id).params()?.int(count_key).max(1);
     if count < 2 {
         return None; // one copy has no spacing to drag
     }
     let gizmo = app.gizmo_for(id)?;
-    let (origin, axis) = (gizmo.origin, gizmo.axes[0]);
-    let handle = origin + axis * (params.num(step_key) * (count - 1) as f64);
-    let _ = view;
-    Some((handle, origin, step_key, count))
+    let step = app.pattern_step_vector(id)?;
+    let run = gizmo.axes[0] * step.x + gizmo.axes[1] * step.y + gizmo.axes[2] * step.z;
+    let direction = if run.length() > 1e-9 { run * (1.0 / run.length()) } else { gizmo.axes[0] };
+    let handle = gizmo.origin + run * (count - 1) as f64;
+    Some((handle, gizmo.origin, direction, count))
 }
 
 /// Drag the spacing handle to set a pattern's step so the last copy follows the
 /// pointer. Returns whether it owns the pointer this frame.
 fn pattern_spacing_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
-    let Some((handle, origin, step_key, count)) = pattern_spacing_handle(app, view) else { return false };
+    let Some((handle, origin, direction, count)) = pattern_spacing_handle(app, view) else { return false };
     let Some(id) = app.primary() else { return false };
     let Some((screen, _)) = view.project(handle) else { return false };
-    let axis = match app.gizmo_for(id) {
-        Some(gizmo) => gizmo.axes[0],
-        None => return false,
-    };
     let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(16.0));
     let response = ui.interact(rect, ui.id().with((id, "pattern-spacing")), egui::Sense::drag());
     if response.hovered() || response.dragged() {
@@ -367,8 +369,8 @@ fn pattern_spacing_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bo
     }
     if response.dragged() {
         if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
-            if let Some(along) = view.ray_axis(cursor, origin, axis) {
-                app.set_pattern_step(id, step_key, along / (count - 1) as f64);
+            if let Some(along) = view.ray_axis(cursor, origin, direction) {
+                app.set_pattern_step(id, along / (count - 1) as f64, mods_from(ui));
             }
         }
     }

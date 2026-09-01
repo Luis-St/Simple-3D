@@ -660,6 +660,7 @@ pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> 
 /// reading the row you are already looking at.
 fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: bool) {
     let is_group = app.scene.node(id).is_group();
+    let is_pattern = app.scene.node(id).is_pattern();
     use simple3d_core::keymap::Command;
 
     /// One command in the menu. What was picked is collected rather than run on
@@ -723,7 +724,13 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
             }
         })
         .response
-        .on_hover_text(if is_group { "Into this group" } else { "Beside this node" });
+        .on_hover_text(if is_pattern {
+            "Into this pattern, to be repeated"
+        } else if is_group {
+            "Into this group"
+        } else {
+            "Beside this node"
+        });
         ui.separator();
         item(ui, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
         item(ui, keymap, &mut chosen, Command::Duplicate, !is_root);
@@ -733,6 +740,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         item(ui, keymap, &mut chosen, Command::Paste, have_clipboard);
         ui.separator();
         item(ui, keymap, &mut chosen, Command::Group, !is_root);
+        item(ui, keymap, &mut chosen, Command::Pattern, !is_root);
         // Disabled where the move has nowhere to go, rather than enabled and
         // silent: a node that is already first among its siblings used to
         // answer a click with a status line that had faded by the time anyone

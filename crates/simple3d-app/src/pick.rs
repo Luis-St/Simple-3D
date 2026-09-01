@@ -105,13 +105,29 @@ pub fn ray_box(origin: Vec3, dir: Vec3, lo: Vec3, hi: Vec3) -> Option<f64> {
 /// anything under a hidden group: a hidden node is not part of the model, so a
 /// click passes through it to whatever is actually there.
 pub fn pick(scene: &Scene, evaluated: &Evaluated, origin: Vec3, dir: Vec3) -> Option<NodeId> {
+    // Two meshes can answer at exactly the same distance: a pattern puts its
+    // whole repeated result under its own id while the child it repeats keeps
+    // its mesh too, so over the original copy the surfaces are the same
+    // triangles. Whichever the map happened to reach first used to win, which
+    // made the answer depend on node ids -- a pattern made by wrapping a shape
+    // selected the child over the original copy and the pattern over every
+    // other, while one filled after the fact answered "pattern" everywhere. The
+    // enclosing node wins the tie, so a click anywhere on a pattern's output
+    // means the same thing.
+    const SAME_HIT: f64 = 1e-9;
     let mut best: Option<(f64, NodeId)> = None;
     for (&id, mesh) in &evaluated.node_meshes {
         if !scene.contains(id) || !scene.is_shown(id) {
             continue;
         }
         if let Some(t) = ray_mesh(mesh, origin, dir) {
-            if best.is_none_or(|(bt, _)| t < bt) {
+            let wins = match best {
+                None => true,
+                Some((bt, best_id)) => {
+                    t < bt - SAME_HIT || ((t - bt).abs() <= SAME_HIT && scene.is_ancestor_of(id, best_id))
+                }
+            };
+            if wins {
                 best = Some((t, id));
             }
         }
@@ -254,5 +270,47 @@ mod tests {
         // At the group's original position there is nothing any more.
         assert_eq!(pick(&scene, &out, Vec3::new(0.0, -300.0, 0.0), Vec3::new(0.0, 1.0, 0.0)), None);
         assert_eq!(pick(&scene, &out, Vec3::new(0.0, -300.0, 60.0), Vec3::new(0.0, 1.0, 0.0)), Some(id));
+    }
+
+    #[test]
+    fn a_click_anywhere_on_a_pattern_selects_the_pattern_however_it_was_built() {
+        // Issue 67: over the original copy a pattern's own mesh and the mesh of
+        // the child it repeats are the same triangles at the same distance. The
+        // tie used to fall to the lower node id, so the answer depended on the
+        // order the two nodes happened to be made in: wrapping a shape (child
+        // first) answered "child" on the original and "pattern" on every copy,
+        // while filling an empty pattern (pattern first) answered "pattern" even
+        // over the child. Both orders must now agree.
+        for wrap in [false, true] {
+            let mut scene = Scene::new();
+            let root = scene.root();
+            let (pat, child) = if wrap {
+                let c = boxed(&mut scene, root, Vec3::ZERO);
+                let p = scene.add_pattern(root, 1);
+                scene.reparent(c, p, 0).unwrap();
+                (p, c)
+            } else {
+                let p = scene.add_pattern(root, 0);
+                let c = boxed(&mut scene, p, Vec3::ZERO);
+                (p, c)
+            };
+            {
+                let params = scene.get_mut(pat).unwrap().params_mut().unwrap();
+                params.insert("count".into(), ParamValue::Count(3));
+                params.insert("step_x".into(), ParamValue::Length(50.0));
+            }
+            let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+            let down = Vec3::new(0.0, 0.0, -1.0);
+            assert_eq!(
+                pick(&scene, &out, Vec3::new(0.0, 0.0, 100.0), down),
+                Some(pat),
+                "wrap={wrap}: the original copy picked something other than the pattern (child is {child:?})"
+            );
+            assert_eq!(
+                pick(&scene, &out, Vec3::new(50.0, 0.0, 100.0), down),
+                Some(pat),
+                "wrap={wrap}: a repeated copy did not pick the pattern"
+            );
+        }
     }
 }

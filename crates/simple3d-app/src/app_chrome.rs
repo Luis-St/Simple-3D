@@ -240,6 +240,10 @@ impl App {
             self.command_item(ui, Command::Delete, has_selection);
             ui.separator();
             self.command_item(ui, Command::Group, has_selection);
+            // Beside Group, which is the command it is a variant of. It works
+            // with nothing selected too -- an empty pattern to fill later -- so
+            // unlike Group it is never disabled.
+            self.command_item(ui, Command::Pattern, true);
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
             self.command_item(ui, Command::MoveUp, self.can_reorder(-1));
