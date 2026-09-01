@@ -1344,44 +1344,12 @@ fn push_plane_marks(steps: &mut Vec<Step>, view: &View, items: &[Item<'_>], pale
                     item.renderable.mesh.positions[tri[1] as usize],
                     item.renderable.mesh.positions[tri[2] as usize],
                 ];
-                if let Some((a, b)) = plane_crossing(world, axis) {
+                if let Some((a, b)) = crate::snap::plane_crossing(world, axis) {
                     steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
                 }
             }
         }
     }
-}
-
-/// Where the plane through the origin perpendicular to `axis` crosses one
-/// triangle, as the segment it cuts. `None` when the triangle is wholly on one
-/// side, which is nearly all of them, so this is the cheap case.
-fn plane_crossing(world: [Vec3; 3], axis: usize) -> Option<(Vec3, Vec3)> {
-    let component = |p: Vec3| match axis {
-        0 => p.x,
-        1 => p.y,
-        _ => p.z,
-    };
-    let d = [component(world[0]), component(world[1]), component(world[2])];
-    if (d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0) {
-        return None;
-    }
-    // A triangle lying *in* the plane has no crossing line of its own -- its
-    // three edges are the mark, and its neighbours draw them.
-    if d[0] == 0.0 && d[1] == 0.0 && d[2] == 0.0 {
-        return None;
-    }
-    let mut hits: Vec<Vec3> = Vec::new();
-    for i in 0..3 {
-        let j = (i + 1) % 3;
-        if d[i] == 0.0 {
-            hits.push(world[i]);
-        }
-        if (d[i] < 0.0 && d[j] > 0.0) || (d[i] > 0.0 && d[j] < 0.0) {
-            let t = d[i] / (d[i] - d[j]);
-            hits.push(world[i] + (world[j] - world[i]) * t);
-        }
-    }
-    (hits.len() >= 2).then(|| (hits[0], hits[1]))
 }
 
 #[cfg(test)]
@@ -1763,19 +1731,6 @@ mod tests {
         let marks = mark_colours(&req.palette);
         assert!(pixels_of(&frame, marks[0]) > 0, "the X plane's mark should be drawn");
         assert_eq!(pixels_of(&frame, marks[2]), 0, "the Z plane's mark should be off with its axis");
-    }
-
-    #[test]
-    fn a_plane_cuts_a_triangle_in_at_most_one_segment() {
-        let above = [Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 2.0), Vec3::new(0.0, 1.0, 3.0)];
-        assert!(plane_crossing(above, 2).is_none());
-        let crossing = [Vec3::new(0.0, 0.0, -1.0), Vec3::new(2.0, 0.0, 1.0), Vec3::new(0.0, 2.0, 1.0)];
-        let (a, b) = plane_crossing(crossing, 2).expect("this triangle straddles z = 0");
-        assert!(a.z.abs() < 1e-9 && b.z.abs() < 1e-9, "the cut has to lie in the plane: {a:?} {b:?}");
-        // A triangle lying in the plane is left to its neighbours: its own
-        // edges are the mark, and it has no interior crossing.
-        let flat = [Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
-        assert!(plane_crossing(flat, 2).is_none());
     }
 
     #[test]

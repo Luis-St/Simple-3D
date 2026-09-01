@@ -174,13 +174,24 @@ impl Measurement {
     }
 }
 
-/// One body's snap features, shared out of the cache without copying them.
-type Features = std::rc::Rc<Vec<crate::snap::Feature>>;
-/// What the cache holds per node: which mesh the features were found on --
+/// Everything one body offers a snap or a measurement: the notable points on it,
+/// and the lines the principal planes leave across its surface -- the marks the
+/// renderer draws on the solid, which are as catchable as any other line in the
+/// picture.
+#[derive(Default)]
+pub struct BodySnaps {
+    pub features: Vec<crate::snap::Feature>,
+    pub marks: Vec<(Vec3, Vec3)>,
+}
+
+/// One body's snap targets, shared out of the cache without copying them.
+type Snaps = std::rc::Rc<BodySnaps>;
+/// What the cache holds per node: which mesh the targets were found on --
 /// identified by the address of its `Arc`, which changes on re-evaluation and
-/// nowhere else -- together with which axes were shown, since the axis crossings
-/// are part of the list (issue 78), and the features themselves.
-type CachedFeatures = ((usize, u8), Features);
+/// nowhere else -- together with what the settings were showing, since the axis
+/// crossings (issue 78) and the plane marks are part of the answer, and the
+/// targets themselves.
+type CachedSnaps = ((usize, u8), Snaps);
 
 pub struct App {
     pub scene: Scene,
@@ -288,8 +299,8 @@ pub struct App {
     /// its origin; gathered on `Begin`. See `App::drag_feature_offsets`.
     snap_sources: Vec<Vec3>,
     /// Each body's snap features, kept between frames and keyed on the identity
-    /// of the mesh they were found on. See `App::features_of`.
-    snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedFeatures>>,
+    /// of the mesh they were found on. See `App::snaps_of`.
+    snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedSnaps>>,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.
     pub pending_delete: Option<Vec<NodeId>>,
@@ -945,26 +956,24 @@ impl App {
     }
 
     /// Where a measure click lands: the nearest snap feature of any shown body if
-    /// one is within reach on screen, otherwise a point along the nearest edge,
-    /// otherwise the point on the surface under the pointer, otherwise the ground
-    /// plane. `None` only when the pointer is on empty sky, where there is
-    /// nothing to measure to.
+    /// one is within reach on screen, otherwise a point along the nearest line --
+    /// an edge, a plane mark, an axis -- otherwise the point on the surface under
+    /// the pointer, otherwise the ground plane. `None` only when the pointer is
+    /// on empty sky, where there is nothing to measure to.
     ///
     /// The order is what makes placement predictable (issue 78): the exact
     /// points -- corners, midpoints, axis crossings -- win whenever one is in
-    /// reach, and an edge catches the pointer only where none of them does, so
+    /// reach, and a line catches the pointer only where none of them does, so
     /// aiming at a corner never lands part-way along the edge beside it.
     pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
-        // An axis is only there to be caught where it is *drawn*: the line is cut
-        // out of the material it runs through and hidden behind whatever is in
-        // front of it, so a stretch the model covers is not a place to measure
-        // from. Without this the catch followed the axis straight through a body,
-        // which is the one thing the line on screen never does. A body's own
-        // features are not filtered this way -- a corner around the back is still
-        // a corner, and reaching for one is deliberate.
-        let shown = |feature: &crate::snap::Feature| {
-            feature.kind != crate::snap::FeatureKind::AxisCrossing || self.in_clear_view(view, feature.point)
-        };
+        // Only what is on screen can be caught. A feature the model covers is not
+        // being pointed at: the corner is around the back of the solid, or the
+        // edge is its far bottom one, and neither is drawn -- but both project
+        // into the middle of the face in front of them, where a pointer aimed at
+        // that face snapped to them out of nowhere. So the same question the axes
+        // have always been asked, "does the picture show this?", is asked of
+        // every feature.
+        let shown = |feature: &crate::snap::Feature| self.shows(view, feature.point);
         if let Some((feature, _)) = self.nearest_feature_where(view, cursor, &[], shown) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
         }
@@ -991,8 +1000,15 @@ impl App {
         self.nearest_feature_where(view, cursor, exclude, |_| true)
     }
 
-    /// The same, for a caller that will not take every kind of feature -- the
-    /// measure tool, which drops an axis crossing the model is covering.
+    /// The same, for a caller that will not take every feature -- the measure
+    /// tool, which takes only the ones the picture shows.
+    ///
+    /// The candidates within reach are ranked by screen distance and offered
+    /// outward from the cursor, so the first one accepted is the nearest
+    /// acceptable one. Ranking rather than filtering is what makes that cheap:
+    /// "does the frame show this?" costs a ray cast through the scene, and asking
+    /// it of the feature under the pointer is one cast where asking it of every
+    /// feature of every body is hundreds.
     pub fn nearest_feature_where(
         &self,
         view: &crate::view::View,
@@ -1000,26 +1016,18 @@ impl App {
         exclude: &[NodeId],
         accept: impl Fn(&crate::snap::Feature) -> bool,
     ) -> Option<(crate::snap::Feature, f32)> {
-        let mut best: Option<(crate::snap::Feature, f32)> = None;
+        let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
+        let mut near: Vec<(crate::snap::Feature, f32)> = Vec::new();
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) || exclude.contains(&id) {
                 continue;
             }
-            let features = self.features_of(id, mesh);
-            let wanted: Vec<crate::snap::Feature> = features.iter().copied().filter(&accept).collect();
-            let hit = crate::snap::nearest_on_screen(
-                &wanted,
-                |p| view.project(p).map(|(screen, _)| screen),
-                cursor,
-                crate::snap::CATCH_PIXELS,
-            );
-            if let Some((feature, distance)) = hit {
-                if best.is_none_or(|(_, d)| distance < d) {
-                    best = Some((*feature, distance));
-                }
-            }
+            let snaps = self.snaps_of(id, mesh);
+            let found = crate::snap::near_on_screen(&snaps.features, project, cursor, crate::snap::CATCH_PIXELS);
+            near.extend(found.into_iter().map(|(feature, distance)| (*feature, distance)));
         }
-        best
+        near.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        near.into_iter().find(|(feature, _)| accept(feature))
     }
 
     /// Whether a point can be seen from where the camera is: nothing solid
@@ -1052,74 +1060,114 @@ impl App {
     /// when the mesh does. The evaluated meshes are shared `Arc`s, so the
     /// pointer is exactly the "has this changed" key: a re-evaluation makes a new
     /// allocation and misses, and anything else hits.
-    fn features_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Features {
+    fn snaps_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Snaps {
         let axes = self.scene.settings.axes_visible;
-        let mask = (axes[0] as u8) | (axes[1] as u8) << 1 | (axes[2] as u8) << 2;
+        let marked = self.plane_marks_drawn();
+        let mask = (axes[0] as u8) | (axes[1] as u8) << 1 | (axes[2] as u8) << 2 | (marked as u8) << 3;
         let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
-        if let Some((cached_key, features)) = self.snap_features.borrow().get(&id) {
+        if let Some((cached_key, snaps)) = self.snap_features.borrow().get(&id) {
             if *cached_key == key {
-                return features.clone();
+                return snaps.clone();
             }
         }
-        let mut found = crate::snap::features_of(mesh);
+        let mut features = crate::snap::features_of(mesh);
         // Where the world axes run through the body, offered as corners and as
         // the edge between them (issue 78).
-        found.extend(crate::snap::axis_features(mesh, axes));
-        let features = std::rc::Rc::new(found);
-        self.snap_features.borrow_mut().insert(id, (key, features.clone()));
-        features
+        features.extend(crate::snap::axis_features(mesh, axes));
+        // And the lines the principal planes leave across it, which are drawn on
+        // the surface and so can be caught along their length.
+        let marks = if marked { crate::snap::plane_mark_lines(mesh, axes) } else { Vec::new() };
+        let snaps = std::rc::Rc::new(BodySnaps { features, marks });
+        self.snap_features.borrow_mut().insert(id, (key, snaps.clone()));
+        snaps
     }
 
-    /// The point on the nearest *line* -- a body's edge, or a world axis -- for a
-    /// pointer that is near one but not near any of the notable points on it
-    /// (issue 78).
+    /// Whether the plane marks are on screen: the switch for them, and a display
+    /// mode with a surface for them to sit on. They are not drawn in wireframe,
+    /// so there is nothing there to catch either.
+    fn plane_marks_drawn(&self) -> bool {
+        self.scene.settings.plane_marks && self.settings.display_mode != DisplayMode::Wireframe
+    }
+
+    /// Whether the picture shows this point, or material stands in front of it.
+    ///
+    /// What the measure tool takes is what the frame shows -- a corner on the far
+    /// side of a solid is not a corner anybody is pointing at, however near the
+    /// pointer its projection lands. Wireframe fills nothing, so nothing there
+    /// covers anything: the far side of a body is drawn exactly like the near
+    /// side, which is the point of that mode, and every feature of it is as
+    /// catchable as the line that shows it.
+    fn shows(&self, view: &crate::view::View, at: Vec3) -> bool {
+        self.settings.display_mode == DisplayMode::Wireframe || self.in_clear_view(view, at)
+    }
+
+    /// The point on the nearest *line* -- a body's edge, the mark a principal
+    /// plane leaves across it, or a world axis -- for a pointer that is near one
+    /// but not near any of the notable points on it (issue 78).
     ///
     /// Edges come from the same feature list, which carries each edge's two ends
     /// beside its midpoint, so they need no second pass over the geometry. The
     /// axes are lines in their own right: a point on one is as real a place to
     /// measure from as a corner is, and offering only the handful of places
     /// where an axis meets something left the rest of it -- most of it -- with
-    /// nothing to catch.
+    /// nothing to catch. The plane marks are the same argument on the surface:
+    /// where the axis itself runs through the material and is not drawn, the
+    /// mark is what the picture puts there, and it is what a pointer over the
+    /// body is aiming at.
     pub fn nearest_line_point(
         &self,
         view: &crate::view::View,
         cursor: egui::Pos2,
     ) -> Option<(Vec3, crate::snap::FeatureKind, f32)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut best: Option<(Vec3, crate::snap::FeatureKind, f32)> = None;
+        let mut near: Vec<(Vec3, crate::snap::FeatureKind, f32)> = Vec::new();
         let mut consider = |a: Vec3, b: Vec3, kind: crate::snap::FeatureKind| {
             if let Some((at, distance)) = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
             {
-                if best.is_none_or(|(_, _, d)| distance < d) {
-                    best = Some((at, kind, distance));
-                }
+                near.push((at, kind, distance));
             }
         };
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) {
                 continue;
             }
-            for feature in self.features_of(id, mesh).iter() {
+            let snaps = self.snaps_of(id, mesh);
+            for feature in &snaps.features {
                 if let Some((a, b)) = feature.span {
                     consider(a, b, crate::snap::FeatureKind::Edge);
                 }
+            }
+            // The marks the principal planes leave on the surface. They are
+            // lines on the body, drawn in the colour of the axis whose plane
+            // made them, and a measurement along one -- how far along this face
+            // is the plane through zero -- is exactly what they are read for.
+            for &(a, b) in &snaps.marks {
+                consider(a, b, crate::snap::FeatureKind::PlaneMark);
             }
         }
         // As far as the axes are actually drawn, so nothing is caught out where
         // there is no line to see.
         let reach = crate::render::grid_radius(view);
         for (a, b) in crate::snap::axis_lines(self.scene.settings.axes_visible, reach) {
-            let hit = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS);
-            // Only where the line is really on screen: the stretch inside a body
-            // is cut out of the drawing, and the stretch behind one is covered by
-            // it, so neither is a place to measure from.
-            if let Some((at, distance)) = hit.filter(|(at, _)| self.in_clear_view(view, *at)) {
-                if best.is_none_or(|(_, _, d)| distance < d) {
-                    best = Some((at, crate::snap::FeatureKind::Axis, distance));
-                }
-            }
+            consider(a, b, crate::snap::FeatureKind::Axis);
         }
-        best
+        // Nearest first, and the nearest one the picture actually shows wins.
+        //
+        // Every one of these is a line that stops where the drawing stops. An
+        // axis is cut out of the material it runs through and covered by whatever
+        // is in front of it; an edge on the far side of a solid, and a plane mark
+        // on the back of one, are behind that solid however near the pointer
+        // their projection lands. Catching them anyway is what made the tool jump
+        // to lines inside the object, which is the one thing no line on screen
+        // does.
+        near.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
+        near.into_iter().find(|&(at, kind, _)| match kind {
+            // The axis keeps its own question in every display mode: wireframe
+            // fills nothing and hides nothing, but the stretch inside a body is
+            // still cut out of the line there.
+            crate::snap::FeatureKind::Axis => self.in_clear_view(view, at),
+            _ => self.shows(view, at),
+        })
     }
 
     /// Whether geometry snapping is being asked for right now (issue 68): always,
@@ -1175,7 +1223,7 @@ impl App {
         let mut offsets = Vec::new();
         for n in self.drag_subtree(id) {
             let Some(mesh) = self.evaluated.node_meshes.get(&n) else { continue };
-            offsets.extend(self.features_of(n, mesh).iter().map(|f| f.point - world_origin));
+            offsets.extend(self.snaps_of(n, mesh).features.iter().map(|f| f.point - world_origin));
         }
         offsets
     }
@@ -4142,6 +4190,135 @@ mod tests {
             !matches!(hidden.kind, Some(crate::snap::FeatureKind::Axis | crate::snap::FeatureKind::AxisCrossing)),
             "an axis behind the body was caught through it: {hidden:?}"
         );
+    }
+
+    #[test]
+    fn a_measure_click_never_catches_what_the_body_hides() {
+        // The bug the screencast showed: aimed anywhere at the top face of a
+        // box, the tool jumped to corners and edges on the far side of it. They
+        // are nowhere near the pointer in the model, but a solid projects its own
+        // back over its front, so their projections land in the middle of the
+        // face being pointed at -- and nothing there is drawn, which is what made
+        // the catch look random.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        for id in app.scene.descendants(root) {
+            app.scene.remove(id);
+        }
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        // Looking well down on the box, so its underside projects across its top.
+        app.scene.camera.pitch = 45.0;
+        app.reevaluate_for_test();
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+
+        // The far bottom corner is one of them, and it used to be what a pointer
+        // three quarters of the way across the top face caught.
+        let buried = Vec3::new(lo.x, hi.y, lo.z);
+        assert!(!app.in_clear_view(&view, buried), "this corner is not hidden in this view; pick another");
+
+        // Every point of the top face, and nothing caught anywhere on it is a
+        // thing the frame does not show.
+        for row in 1..8 {
+            for column in 1..8 {
+                let at = Vec3::new(
+                    lo.x + (hi.x - lo.x) * row as f64 / 8.0,
+                    lo.y + (hi.y - lo.y) * column as f64 / 8.0,
+                    hi.z,
+                );
+                let (screen, _) = view.project(at).unwrap();
+                let caught = app.measure_point_at(&view, screen).expect("the top face is under the cursor");
+                assert!(
+                    (caught.at - buried).length() > 1e-6,
+                    "aiming at {at:?} on the top face caught the corner buried behind it"
+                );
+                assert!(
+                    app.in_clear_view(&view, caught.at),
+                    "aiming at {at:?} caught {caught:?}, which the body hides"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wireframe_hides_nothing_and_so_withholds_nothing() {
+        // The far side of a body is drawn in wireframe exactly like the near
+        // side -- that is the point of the mode -- so a corner around the back is
+        // a corner on screen there, and catching it is aiming at what is drawn
+        // rather than at what is not.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        for id in app.scene.descendants(root) {
+            app.scene.remove(id);
+        }
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        app.scene.camera.pitch = 45.0;
+        app.reevaluate_for_test();
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+
+        let buried = Vec3::new(lo.x, hi.y, lo.z);
+        let (screen, _) = view.project(buried).unwrap();
+        assert!(!app.in_clear_view(&view, buried));
+        let shaded = app.measure_point_at(&view, screen).unwrap();
+        assert!((shaded.at - buried).length() > 1e-6, "a shaded body handed out the corner behind it");
+
+        app.settings.display_mode = DisplayMode::Wireframe;
+        let wire = app.measure_point_at(&view, screen).expect("the corner is under the cursor");
+        assert_eq!(wire.kind, Some(crate::snap::FeatureKind::Vertex), "caught {wire:?}");
+        assert!((wire.at - buried).length() < 1e-6, "caught {:?}, not the corner {buried:?}", wire.at);
+    }
+
+    #[test]
+    fn a_measure_click_catches_the_mark_a_principal_plane_leaves_on_a_body() {
+        // The line the renderer draws across the solid where a plane through the
+        // origin cuts it is a line on screen like any other, and "how far along
+        // this face is zero" is the measurement it exists to be read for. Until
+        // now nothing was there to catch, and the pointer fell through it.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        for id in app.scene.descendants(root) {
+            app.scene.remove(id);
+        }
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        // Off the origin on both of the ground's axes, so the mark on the top
+        // face runs nowhere near that face's centre and only the mark can answer.
+        app.scene.get_mut(id).unwrap().position = Vec3::new(5.0, 5.0, 0.0);
+        app.reevaluate_for_test();
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (_, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+
+        // On the top face, on the line the x = 0 plane leaves across it, and well
+        // clear of every corner, edge and centre of that face.
+        let on_mark = Vec3::new(0.0, 10.0, hi.z);
+        let (screen, _) = view.project(on_mark).unwrap();
+        let caught = app.measure_point_at(&view, screen).expect("the top face is under the cursor");
+        assert_eq!(caught.kind, Some(crate::snap::FeatureKind::PlaneMark), "caught {caught:?}");
+        // Caught *on* the plane, not merely near it: that exactness is the whole
+        // use of the mark.
+        assert!(caught.at.x.abs() < 1e-6, "{:?} is off the x = 0 plane", caught.at);
+        assert!((caught.at - on_mark).length() < 0.3, "caught {:?}, not the point pointed at", caught.at);
+
+        // A little to the side of the mark there is no line to catch, and the
+        // click lands on whatever is really there instead.
+        let beside = app.measure_point_at(&view, screen + egui::vec2(30.0, 0.0)).unwrap();
+        assert_ne!(beside.kind, Some(crate::snap::FeatureKind::PlaneMark), "the catch reached far past the mark");
+
+        // The mark follows the switch of the axis its plane is named by, and the
+        // switch for the marks themselves. Neither drawn nor caught.
+        app.scene.settings.axes_visible[0] = false;
+        let hidden = app.measure_point_at(&view, screen).unwrap();
+        assert_ne!(hidden.kind, Some(crate::snap::FeatureKind::PlaneMark), "a mark of a hidden plane was caught");
+        app.scene.settings.axes_visible[0] = true;
+        app.scene.settings.plane_marks = false;
+        let off = app.measure_point_at(&view, screen).unwrap();
+        assert_ne!(off.kind, Some(crate::snap::FeatureKind::PlaneMark), "a mark that is switched off was caught");
+
+        // And there is no surface for one in wireframe, where none is drawn.
+        app.scene.settings.plane_marks = true;
+        app.settings.display_mode = DisplayMode::Wireframe;
+        let wire = app.measure_point_at(&view, screen).unwrap();
+        assert_ne!(wire.kind, Some(crate::snap::FeatureKind::PlaneMark), "a mark was caught where none is drawn");
     }
 
     #[test]

@@ -36,6 +36,14 @@ pub enum FeatureKind {
     /// the same way rather than only at the handful of places where they meet
     /// something.
     Axis,
+    /// Anywhere along the line a principal plane leaves on a body's surface.
+    ///
+    /// The renderer draws, on the solid itself, where each plane through the
+    /// origin cuts it -- the mark that says how much of the shape is below the
+    /// build plate, or which side of zero a face is on. It is a line on the
+    /// object, in the colour of the axis its plane is named by, and every other
+    /// line in the picture can be caught, so this one is too.
+    PlaneMark,
     /// Where a world axis passes through a body's surface. The axes run through
     /// the model whether or not any geometry corner is there, and a corner of the
     /// model on an axis is exactly the place a measurement usually wants, so the
@@ -52,6 +60,7 @@ impl FeatureKind {
             FeatureKind::FaceCentre => "face centre",
             FeatureKind::Edge => "edge",
             FeatureKind::Axis => "axis",
+            FeatureKind::PlaneMark => "plane mark",
             FeatureKind::AxisCrossing => "axis crossing",
         }
     }
@@ -248,6 +257,65 @@ pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
     out
 }
 
+/// The lines the principal planes leave on one body's surface: the marks the
+/// renderer draws on the solid itself, where each plane through the origin cuts
+/// it, as segments in world space.
+///
+/// A mark is a chain of short segments, one per triangle the plane crosses --
+/// exactly what is drawn, and exactly what a nearest-point search wants, since
+/// the nearest point on a chain is the nearest point on one of its links. So
+/// nothing joins them up.
+///
+/// `axes` says which of the three planes are marked: each follows the switch of
+/// the axis it is perpendicular to, the same rule the drawing uses, so a plane
+/// whose mark is not on screen is not caught either.
+pub fn plane_mark_lines(mesh: &Mesh, axes: [bool; 3]) -> Vec<(Vec3, Vec3)> {
+    let mut out = Vec::new();
+    for (axis, &shown) in axes.iter().enumerate() {
+        if !shown {
+            continue;
+        }
+        for tri in &mesh.indices {
+            let world =
+                [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
+            if let Some(segment) = plane_crossing(world, axis) {
+                out.push(segment);
+            }
+        }
+    }
+    out
+}
+
+/// Where the plane through the origin perpendicular to `axis` crosses one
+/// triangle, as the segment it cuts. `None` when the triangle is wholly on one
+/// side, which is nearly all of them, so this is the cheap case.
+///
+/// The renderer draws the marks and the measure tool catches them, and neither
+/// may see a line the other does not, so both ask this.
+pub fn plane_crossing(world: [Vec3; 3], axis: usize) -> Option<(Vec3, Vec3)> {
+    let d = [component(world[0], axis), component(world[1], axis), component(world[2], axis)];
+    if (d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0) {
+        return None;
+    }
+    // A triangle lying *in* the plane has no crossing line of its own -- its
+    // three edges are the mark, and its neighbours draw them.
+    if d[0] == 0.0 && d[1] == 0.0 && d[2] == 0.0 {
+        return None;
+    }
+    let mut hits: Vec<Vec3> = Vec::new();
+    for i in 0..3 {
+        let j = (i + 1) % 3;
+        if d[i] == 0.0 {
+            hits.push(world[i]);
+        }
+        if (d[i] < 0.0 && d[j] > 0.0) || (d[i] > 0.0 && d[j] < 0.0) {
+            let t = d[i] / (d[i] - d[j]);
+            hits.push(world[i] + (world[j] - world[i]) * t);
+        }
+    }
+    (hits.len() >= 2).then(|| (hits[0], hits[1]))
+}
+
 fn component(v: Vec3, axis: usize) -> f64 {
     match axis {
         0 => v.x,
@@ -341,31 +409,33 @@ pub fn nearest_on_edge(
     Some((a + (b - a) * t as f64, distance))
 }
 
-/// The feature nearest the cursor on screen, within `max_pixels`, together with
-/// how far away it landed.
+/// Every feature within `max_pixels` of the cursor on screen, with how far away
+/// each landed, in the order the list holds them.
 ///
 /// The match is by screen distance, not world distance: what a user means by
 /// "that corner" is the one under the pointer, and two corners far apart in the
 /// model can sit close together in the frame. `project` returns `None` for a
 /// point that does not land on screen, which is skipped.
-pub fn nearest_on_screen(
+///
+/// All of them, rather than only the nearest, because a caller that will not
+/// take every feature -- the measure tool, which takes only what the picture
+/// shows -- has to work outward from the cursor until one is acceptable. Asking
+/// that question of every feature instead costs a ray cast each.
+pub fn near_on_screen(
     features: &[Feature],
     project: impl Fn(Vec3) -> Option<egui::Pos2>,
     cursor: egui::Pos2,
     max_pixels: f32,
-) -> Option<(&Feature, f32)> {
-    let mut best: Option<(&Feature, f32)> = None;
+) -> Vec<(&Feature, f32)> {
+    let mut out = Vec::new();
     for feature in features {
         let Some(screen) = project(feature.point) else { continue };
         let distance = (screen - cursor).length();
-        if distance > max_pixels {
-            continue;
-        }
-        if best.is_none_or(|(_, d)| distance < d) {
-            best = Some((feature, distance));
+        if distance <= max_pixels {
+            out.push((feature, distance));
         }
     }
-    best
+    out
 }
 
 #[cfg(test)]
@@ -416,22 +486,27 @@ mod tests {
     }
 
     #[test]
-    fn the_nearest_feature_on_screen_is_the_one_under_the_cursor_within_reach() {
+    fn the_features_on_screen_are_the_ones_under_the_cursor_within_reach() {
         let features = vec![
             Feature::point(Vec3::new(0.0, 0.0, 0.0), FeatureKind::Vertex),
             Feature::point(Vec3::new(100.0, 0.0, 0.0), FeatureKind::Vertex),
+            Feature::point(Vec3::new(6.0, 0.0, 0.0), FeatureKind::FaceCentre),
         ];
         // A trivial orthographic-ish projection: X and Y straight to screen.
         let project = |p: Vec3| Some(egui::pos2(p.x as f32, p.y as f32));
 
+        // Both of the two in reach come back, each with how far off it is, so a
+        // caller that will not take the nearest can work outward from it.
         let cursor = egui::pos2(3.0, 2.0);
-        let (found, distance) = nearest_on_screen(&features, project, cursor, 10.0).unwrap();
-        assert_eq!(found.point, Vec3::ZERO);
+        let found = near_on_screen(&features, project, cursor, 10.0);
+        assert_eq!(found.len(), 2, "the far corner was within reach: {found:?}");
+        let (nearest, distance) = found.iter().copied().min_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+        assert_eq!(nearest.point, Vec3::ZERO);
         assert!((distance - (3.0f32 * 3.0 + 2.0 * 2.0).sqrt()).abs() < 1e-4);
 
         // Nothing within reach returns nothing, which is how a drag knows to fall
         // back to the grid.
-        assert!(nearest_on_screen(&features, project, egui::pos2(50.0, 50.0), 10.0).is_none());
+        assert!(near_on_screen(&features, project, egui::pos2(50.0, 50.0), 10.0).is_empty());
     }
 
     #[test]
@@ -497,6 +572,52 @@ mod tests {
         // material, where the line is cut out of the drawing, so there is
         // nothing there to catch.
         assert_eq!(features.len(), crossings.len(), "the stretch inside the body was offered as a snap target");
+    }
+
+    #[test]
+    fn a_plane_cuts_a_triangle_in_at_most_one_segment() {
+        let above = [Vec3::new(0.0, 0.0, 1.0), Vec3::new(1.0, 0.0, 2.0), Vec3::new(0.0, 1.0, 3.0)];
+        assert!(plane_crossing(above, 2).is_none());
+        let crossing = [Vec3::new(0.0, 0.0, -1.0), Vec3::new(2.0, 0.0, 1.0), Vec3::new(0.0, 2.0, 1.0)];
+        let (a, b) = plane_crossing(crossing, 2).expect("this triangle straddles z = 0");
+        assert!(a.z.abs() < 1e-9 && b.z.abs() < 1e-9, "the cut has to lie in the plane: {a:?} {b:?}");
+        // A triangle lying in the plane is left to its neighbours: its own
+        // edges are the mark, and it has no interior crossing.
+        let flat = [Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0)];
+        assert!(plane_crossing(flat, 2).is_none());
+    }
+
+    #[test]
+    fn a_body_the_principal_planes_cut_carries_their_marks_as_lines() {
+        // The mark is what the renderer draws on the solid, so what can be
+        // caught is what is on screen: a segment per triangle the plane cuts,
+        // every one of them lying in that plane.
+        let mesh = primitives::box_mesh(20.0, 10.0, 6.0);
+        for axis in 0..3 {
+            let mut axes = [false; 3];
+            axes[axis] = true;
+            let lines = plane_mark_lines(&mesh, axes);
+            assert!(!lines.is_empty(), "the plane perpendicular to axis {axis} cuts this box and marked nothing");
+            for (a, b) in &lines {
+                assert!(
+                    component(*a, axis).abs() < 1e-9 && component(*b, axis).abs() < 1e-9,
+                    "a mark off its own plane: {a:?} {b:?}"
+                );
+                assert!((*a - *b).length() > 1e-9, "a mark of no length");
+            }
+        }
+        // All three at once is all three marks, and none of them without a plane
+        // switched on.
+        assert_eq!(
+            plane_mark_lines(&mesh, [true; 3]).len(),
+            (0..3).map(|axis| plane_mark_lines(&mesh, [axis == 0, axis == 1, axis == 2]).len()).sum::<usize>()
+        );
+        assert!(plane_mark_lines(&mesh, [false; 3]).is_empty());
+
+        // A body no plane reaches has no mark on it, rather than a line hanging
+        // in the air beside it.
+        let away = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 100.0, 100.0));
+        assert!(plane_mark_lines(&away, [true; 3]).is_empty());
     }
 
     #[test]
