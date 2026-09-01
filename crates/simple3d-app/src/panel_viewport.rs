@@ -390,6 +390,14 @@ fn measure_interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Response,
         }
         return;
     }
+    // A right-click takes the last placed end back off, so a point put down in
+    // the wrong place is undone where it was made rather than by reaching for
+    // the panel. A right *drag* still orbits: only a click that never became one
+    // is this gesture.
+    if response.clicked_by(egui::PointerButton::Secondary) {
+        app.measure_unplace();
+        return;
+    }
     if response.clicked_by(egui::PointerButton::Primary) {
         if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
             if let Some(point) = app.measure_point_at(view, cursor) {

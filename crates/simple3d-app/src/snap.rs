@@ -31,6 +31,11 @@ pub enum FeatureKind {
     /// feature the list carries -- it is what catching an edge *between* its
     /// ends reports (issue 78), so a measurement can start part-way along one.
     Edge,
+    /// Anywhere along a world axis. The axes are lines, and a point on one is
+    /// as real a place to measure from as a point on an edge, so they are caught
+    /// the same way rather than only at the handful of places where they meet
+    /// something.
+    Axis,
     /// Where a world axis passes through a body's surface. The axes run through
     /// the model whether or not any geometry corner is there, and a corner of the
     /// model on an axis is exactly the place a measurement usually wants, so the
@@ -46,6 +51,7 @@ impl FeatureKind {
             FeatureKind::EdgeMidpoint => "edge midpoint",
             FeatureKind::FaceCentre => "face centre",
             FeatureKind::Edge => "edge",
+            FeatureKind::Axis => "axis",
             FeatureKind::AxisCrossing => "axis crossing",
         }
     }
@@ -292,6 +298,26 @@ fn line_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f
     Some(e2.dot(q) * inv)
 }
 
+/// The three world axes as segments long enough to cover the frame, for the
+/// visible ones only.
+///
+/// An axis is a line, and a measurement along one -- "how far out along X is
+/// this" -- wants to start anywhere on it, not only where it happens to meet a
+/// body. `reach` is how far the axes are drawn from the origin, so nothing is
+/// caught out where there is no line to see.
+pub fn axis_lines(axes: [bool; 3], reach: f64) -> Vec<(Vec3, Vec3)> {
+    let mut out = Vec::new();
+    for (axis, &shown) in axes.iter().enumerate() {
+        if !shown {
+            continue;
+        }
+        let mut dir = Vec3::ZERO;
+        set_component(&mut dir, axis, reach);
+        out.push((dir * -1.0, dir));
+    }
+    out
+}
+
 /// The nearest point on the segment `a`..`b` to `cursor`, measured on screen,
 /// and how far away that landed (issue 78).
 ///
@@ -491,6 +517,22 @@ mod tests {
         for expected in [20.0, 10.0, 6.0] {
             assert!(lengths.iter().any(|l| (l - expected).abs() < 1e-6), "no run of {expected}: {lengths:?}");
         }
+    }
+
+    #[test]
+    fn the_shown_axes_are_offered_as_lines_to_catch() {
+        let lines = axis_lines([true, true, true], 500.0);
+        assert_eq!(lines.len(), 3);
+        for (i, (a, b)) in lines.iter().enumerate() {
+            // Each runs through the origin, both ways, along one axis only.
+            assert!(((*a + *b) * 0.5).length() < 1e-9, "axis {i} is not centred on the origin");
+            assert!((a.length() - 500.0).abs() < 1e-9 && (b.length() - 500.0).abs() < 1e-9);
+        }
+        assert_eq!(
+            axis_lines([false, true, false], 10.0),
+            vec![(Vec3::new(0.0, -10.0, 0.0), Vec3::new(0.0, 10.0, 0.0))]
+        );
+        assert!(axis_lines([false; 3], 10.0).is_empty());
     }
 
     #[test]

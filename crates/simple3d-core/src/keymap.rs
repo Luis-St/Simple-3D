@@ -240,16 +240,23 @@ impl Command {
 /// A key plus modifiers. Serialised as the text the interface shows -- `Ctrl+S`,
 /// `Shift+ArrowUp` -- so an exported keymap is readable and hand-editable.
 ///
-/// `key` may be empty, and then the chord *is* the modifiers: `Ctrl` on its own
-/// is a binding (issue 77). A modifier is a key like any other -- the one thing
-/// a hold-to-snap binding actually wants -- so refusing to store one only meant
-/// nobody could bind what they were already reaching for. The recorder decides
-/// which of the two a press was: a modifier released with nothing pressed under
-/// it is a chord of its own, a modifier held while another key goes down is the
-/// combination it has always been.
+/// `keys` may hold any number of them, including none.
+///
+/// None at all makes the chord the modifiers themselves: `Ctrl` on its own is a
+/// binding (issue 77). A modifier is a key like any other -- the one thing a
+/// hold-to-snap binding actually wants -- so refusing to store one only meant
+/// nobody could bind what they were already reaching for.
+///
+/// Several makes it a combination of ordinary keys: `Q+W+E` is a binding
+/// too, and no key is only ever a *base* for one. What makes both work is the
+/// same rule, and it is the one a hand already performs: whatever is held down
+/// together is the chord, and it is complete when the hand comes off it.
+///
+/// The keys are kept sorted, so a chord is the *set* that was held and `Q+W`
+/// cannot be bound separately from `W+Q` -- one press cannot mean two things.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Chord {
-    pub key: String,
+    pub keys: Vec<String>,
     pub ctrl: bool,
     pub shift: bool,
     pub alt: bool,
@@ -257,20 +264,36 @@ pub struct Chord {
 
 impl Chord {
     pub fn key(key: &str) -> Chord {
-        Chord { key: key.to_string(), ctrl: false, shift: false, alt: false }
+        Chord { keys: vec![key.to_string()], ctrl: false, shift: false, alt: false }
+    }
+
+    /// A combination of ordinary keys, in any order: the set is what counts.
+    pub fn combo<I: IntoIterator<Item = S>, S: AsRef<str>>(keys: I) -> Chord {
+        let mut chord = Chord {
+            keys: keys.into_iter().map(|k| k.as_ref().to_string()).collect(),
+            ..Chord::modifiers(false, false, false)
+        };
+        chord.normalise();
+        chord
     }
 
     /// A chord that is nothing but modifiers, such as the default hold for
     /// geometry snapping.
     pub fn modifiers(ctrl: bool, shift: bool, alt: bool) -> Chord {
-        Chord { key: String::new(), ctrl, shift, alt }
+        Chord { keys: Vec::new(), ctrl, shift, alt }
     }
 
     /// Whether this chord is modifiers alone. Such a chord can never be produced
     /// by a key event, so everything that resolves a key press has to skip it,
     /// and everything that reads a held state has to accept it.
     pub fn is_modifier_only(&self) -> bool {
-        self.key.is_empty()
+        self.keys.is_empty()
+    }
+
+    /// Sorted and deduplicated, which is what makes a chord a set.
+    fn normalise(&mut self) {
+        self.keys.sort();
+        self.keys.dedup();
     }
 
     pub fn ctrl(key: &str) -> Chord {
@@ -287,6 +310,13 @@ impl Chord {
 
     pub fn alt(key: &str) -> Chord {
         Chord { alt: true, ..Chord::key(key) }
+    }
+
+    /// Whether every key of this chord is in `held`, and its modifiers are
+    /// exactly the ones down. What both a hold ("is the snap key down?") and a
+    /// press ("did this complete a combination?") ask.
+    pub fn satisfied_by(&self, held: impl Fn(&str) -> bool, ctrl: bool, shift: bool, alt: bool) -> bool {
+        self.ctrl == ctrl && self.shift == shift && self.alt == alt && self.keys.iter().all(|k| held(k))
     }
 }
 
@@ -305,9 +335,7 @@ impl fmt::Display for Chord {
         if self.shift {
             parts.push("Shift");
         }
-        if !self.key.is_empty() {
-            parts.push(&self.key);
-        }
+        parts.extend(self.keys.iter().map(String::as_str));
         write!(f, "{}", parts.join("+"))
     }
 }
@@ -316,21 +344,22 @@ impl FromStr for Chord {
     type Err = String;
 
     fn from_str(text: &str) -> Result<Chord, String> {
-        let mut chord = Chord::key("");
+        let mut chord = Chord::modifiers(false, false, false);
         for part in text.split('+') {
             match part.trim() {
                 "" => return Err(format!("empty key in binding {text:?}")),
                 "Ctrl" | "Control" | "Cmd" | "Command" => chord.ctrl = true,
                 "Alt" | "Option" => chord.alt = true,
                 "Shift" => chord.shift = true,
-                key => chord.key = key.to_string(),
+                key => chord.keys.push(key.to_string()),
             }
         }
         // Modifiers alone are a binding of their own (issue 77); a chord with
         // neither a key nor a modifier is not.
-        if chord.key.is_empty() && !(chord.ctrl || chord.shift || chord.alt) {
+        if chord.keys.is_empty() && !(chord.ctrl || chord.shift || chord.alt) {
             return Err(format!("no key in binding {text:?}"));
         }
+        chord.normalise();
         Ok(chord)
     }
 }
@@ -630,6 +659,32 @@ impl Keymap {
         self.bindings.iter().find(|(_, c)| *c == chord).map(|(k, _)| *k)
     }
 
+    /// What a key press fires, given everything held down at that moment.
+    ///
+    /// The longest chord fully satisfied wins, so with Q and W already down,
+    /// pressing E fires `Q+W+E` rather than whatever `E` alone is bound to. Only
+    /// a chord containing the key just pressed is considered: a combination
+    /// fires on the press that completes it, not again on every key afterwards.
+    ///
+    /// A key that is *part* of a longer combination still fires its own binding
+    /// on its own press -- nothing can know a longer one is coming -- so a
+    /// combination is worth building out of keys that are otherwise free.
+    pub fn command_for_press(
+        &self,
+        pressed: &str,
+        held: impl Fn(&str) -> bool,
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+    ) -> Option<Command> {
+        self.bindings
+            .iter()
+            .filter(|(_, chord)| chord.keys.iter().any(|k| k == pressed))
+            .filter(|(_, chord)| chord.satisfied_by(&held, ctrl, shift, alt))
+            .max_by_key(|(_, chord)| chord.keys.len())
+            .map(|(command, _)| *command)
+    }
+
     /// Which command already holds `chord`, ignoring `command` itself. The
     /// keymap editor names it rather than silently overwriting.
     pub fn conflict(&self, command: Command, chord: &Chord) -> Option<Command> {
@@ -878,7 +933,8 @@ mod tests {
             Chord::ctrl("S"),
             Chord::ctrl_shift("Z"),
             Chord::shift("Up"),
-            Chord { key: "F5".into(), ctrl: true, shift: true, alt: true },
+            Chord { keys: vec!["F5".into()], ctrl: true, shift: true, alt: true },
+            Chord::combo(["Q", "W", "E"]),
         ] {
             assert_eq!(Chord::from_str(&chord.to_string()).unwrap(), chord);
         }
@@ -997,6 +1053,45 @@ mod tests {
         assert!(text.contains("\"snap_to_geometry\": \"Ctrl\""), "{text}");
         assert!(text.contains("\"toggle_bounding_box\": \"Alt+Shift\""), "{text}");
         assert_eq!(Keymap::from_text(&text).unwrap(), map);
+    }
+
+    #[test]
+    fn a_combination_of_ordinary_keys_is_a_chord_too() {
+        // Any key can be the base of a combination, not only Ctrl, Shift and
+        // Alt: Q+W+E is a binding.
+        let mut map = Keymap::default();
+        let combo = Chord::combo(["Q", "W", "E"]);
+        assert_eq!(combo.to_string(), "E+Q+W", "the keys are a set, written in one settled order");
+        assert_eq!(Chord::from_str("Q+W+E").unwrap(), combo, "the order they are written in must not matter");
+        map.set(Command::FrameAll, combo.clone(), true).unwrap();
+
+        let down = |name: &str| ["Q", "W", "E"].contains(&name);
+        assert_eq!(map.command_for_press("E", down, false, false, false), Some(Command::FrameAll));
+        // The press that completes it is the one that fires. Q and W are in the
+        // chord too, but pressing them again with everything already down is not
+        // a second completion of a different binding.
+        assert_eq!(map.command_for_press("Q", down, false, false, false), Some(Command::FrameAll));
+        // A key of the combination pressed on its own does not fire it -- it
+        // fires whatever that key is bound to by itself, which here is the
+        // preset's own rotate.
+        assert_eq!(map.command_for_press("E", |name| name == "E", false, false, false), Some(Command::ModeRotate));
+        // Nor does the combination fire with a modifier held that it does not
+        // carry: Ctrl+E is Export, and stays Export with Q and W down.
+        assert_eq!(map.command_for_press("E", down, true, false, false), Some(Command::Export));
+    }
+
+    #[test]
+    fn the_longest_binding_the_held_keys_satisfy_is_the_one_that_fires() {
+        // With Q and W down, pressing E fires Q+W+E rather than whatever E alone
+        // is bound to -- otherwise a combination could never be built out of
+        // keys that are already in use.
+        let mut map = Keymap::default();
+        map.set(Command::FrameSelection, Chord::key("E"), true).unwrap();
+        map.set(Command::FrameAll, Chord::combo(["Q", "W", "E"]), true).unwrap();
+
+        let all_down = |name: &str| ["Q", "W", "E"].contains(&name);
+        assert_eq!(map.command_for_press("E", all_down, false, false, false), Some(Command::FrameAll));
+        assert_eq!(map.command_for_press("E", |name| name == "E", false, false, false), Some(Command::FrameSelection));
     }
 
     #[test]

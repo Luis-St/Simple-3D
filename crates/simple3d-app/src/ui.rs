@@ -460,81 +460,79 @@ pub fn key_from_name(name: &str) -> Option<egui::Key> {
     egui::Key::ALL.iter().copied().find(|k| k.name() == name)
 }
 
-pub fn chord_from_egui(key: egui::Key, modifiers: egui::Modifiers) -> Chord {
-    Chord {
-        key: key.name().to_string(),
-        // `Modifiers::command` is Ctrl on Windows and Linux and Cmd on macOS, so
-        // a keymap saved on one platform loads sensibly on the other.
-        ctrl: modifiers.command,
-        shift: modifiers.shift,
-        alt: modifiers.alt,
-    }
-}
-
-/// The chord modifiers alone make, for a press that never reached a key.
-pub fn modifier_chord(modifiers: egui::Modifiers) -> Chord {
-    Chord::modifiers(modifiers.command, modifiers.shift, modifiers.alt)
-}
-
-/// Watches a modifier being held so a modifier on its own can be a binding
-/// (issue 77).
+/// Watches what is being held so that whatever a hand holds down together can be
+/// a binding: a modifier on its own (issue 77), an ordinary combination like
+/// `Q+W+E`, or the two mixed.
 ///
 /// The toolkit never reports Ctrl, Shift or Alt as key events -- they only ever
 /// arrive as the modifier state of some *other* key -- so a modifier press has
-/// to be recognised from that state changing, and it can only be told apart from
-/// the start of a combination in hindsight. So the rule is the one the issue
-/// asks for: a modifier goes down and something else follows it, and the two are
-/// a combination; a modifier goes down and comes back up with nothing under it,
-/// and the modifier itself was the input.
+/// to be recognised from that state changing. Ordinary keys have the same
+/// problem in reverse: a press cannot be told from the start of a combination
+/// until the hand comes off. So one rule covers both, and it is the one a hand
+/// already performs: everything held down together is the chord, and the chord
+/// is complete when the last of it is released.
 ///
-/// The widest set held during one press is what fires, so pressing Ctrl, adding
-/// Shift and letting both go is `Ctrl+Shift` rather than whichever happened to
+/// The widest set held during one press is what comes out, so pressing Q, adding
+/// W and E and letting all three go is `Q+W+E` rather than whichever happened to
 /// be released last.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ModifierHold {
-    held: Option<egui::Modifiers>,
-    /// Something else happened while they were down, so this press is part of a
-    /// combination and is not a binding of its own.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ChordHold {
+    held: Option<Chord>,
+    /// The pointer was used while this was down, so the hold is part of a mouse
+    /// gesture and not a binding of its own.
     interrupted: bool,
 }
 
-impl ModifierHold {
-    /// Feed one frame's state. Returns the modifier-only chord if this frame
-    /// completed one: the modifiers are all up again and nothing was pressed
-    /// while they were down.
+impl ChordHold {
+    /// Feed one frame's state. Returns the chord if this frame completed one:
+    /// everything is up again and the pointer was not used along the way.
     ///
-    /// `interrupted` is whatever else the frame saw -- a key event, a mouse
-    /// button -- which turns the hold into the beginning of a combination.
-    pub fn update(&mut self, modifiers: egui::Modifiers, interrupted: bool) -> Option<Chord> {
-        let down = modifiers.command || modifiers.shift || modifiers.alt;
-        if down {
-            let widest = match self.held {
-                Some(held) => egui::Modifiers {
-                    command: held.command || modifiers.command,
-                    ctrl: held.ctrl || modifiers.ctrl,
-                    mac_cmd: held.mac_cmd || modifiers.mac_cmd,
-                    shift: held.shift || modifiers.shift,
-                    alt: held.alt || modifiers.alt,
-                },
-                None => modifiers,
-            };
-            self.held = Some(widest);
-            self.interrupted |= interrupted;
-            return None;
+    /// `keys_down` is every ordinary key currently held, and `interrupted` is a
+    /// mouse button being used -- Ctrl+click picks a second object and must not
+    /// also fire what Ctrl alone is bound to.
+    pub fn update<'a>(
+        &mut self,
+        modifiers: egui::Modifiers,
+        keys_down: impl IntoIterator<Item = &'a str>,
+        interrupted: bool,
+    ) -> Option<Chord> {
+        let mut now = Chord {
+            keys: keys_down.into_iter().map(str::to_string).collect(),
+            ctrl: modifiers.command,
+            shift: modifiers.shift,
+            alt: modifiers.alt,
+        };
+        if now.keys.is_empty() && !(now.ctrl || now.shift || now.alt) {
+            let released = self.held.take();
+            let clean = !self.interrupted;
+            self.interrupted = false;
+            return released.filter(|_| clean);
         }
-        let released = self.held.take();
-        let clean = !self.interrupted;
-        self.interrupted = false;
-        // A key pressed in the same frame the modifiers came up is that key's
-        // own press, not the modifier's.
-        released.filter(|_| clean && !interrupted).map(modifier_chord)
+        if let Some(held) = &self.held {
+            now.keys.extend(held.keys.iter().cloned());
+            now.ctrl |= held.ctrl;
+            now.shift |= held.shift;
+            now.alt |= held.alt;
+        }
+        now.keys.sort();
+        now.keys.dedup();
+        self.held = Some(now);
+        self.interrupted |= interrupted;
+        None
     }
 
     /// Forget a hold in progress: the keyboard has gone somewhere else -- a
     /// dialog, a text field -- and the release will never be seen here.
     pub fn reset(&mut self) {
-        *self = ModifierHold::default();
+        *self = ChordHold::default();
     }
+}
+
+/// Every ordinary key held down right now, by the name the keymap stores.
+pub fn keys_down(input: &egui::InputState) -> Vec<String> {
+    let mut names: Vec<String> = input.keys_down.iter().map(|k| k.name().to_string()).collect();
+    names.sort();
+    names
 }
 
 /// A short description of a bounding box, for the overlay that answers "will
@@ -704,16 +702,21 @@ mod tests {
 
     #[test]
     fn an_egui_key_press_resolves_to_its_command() {
+        // The names the toolkit gives its keys are the names the keymap stores,
+        // which is what lets a press be looked up at all.
         let keymap = Keymap::default();
-        let chord = chord_from_egui(egui::Key::S, egui::Modifiers::COMMAND);
-        assert_eq!(keymap.command_for(&chord), Some(Command::Save));
-        let chord = chord_from_egui(egui::Key::S, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT);
-        assert_eq!(keymap.command_for(&chord), Some(Command::SaveAs));
-        let chord = chord_from_egui(egui::Key::Delete, egui::Modifiers::NONE);
-        assert_eq!(keymap.command_for(&chord), Some(Command::Delete));
-        let chord = chord_from_egui(egui::Key::ArrowUp, egui::Modifiers::NONE);
-        assert_eq!(keymap.command_for(&chord), Some(Command::NudgeUp));
+        let press = |key: egui::Key, modifiers: egui::Modifiers| {
+            let name = key.name();
+            keymap.command_for_press(name, |k| k == name, modifiers.command, modifiers.shift, modifiers.alt)
+        };
+        assert_eq!(press(egui::Key::S, egui::Modifiers::COMMAND), Some(Command::Save));
+        assert_eq!(press(egui::Key::S, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT), Some(Command::SaveAs));
+        assert_eq!(press(egui::Key::Delete, egui::Modifiers::NONE), Some(Command::Delete));
+        assert_eq!(press(egui::Key::ArrowUp, egui::Modifiers::NONE), Some(Command::NudgeUp));
     }
+
+    /// A frame with nothing held: the state a hold is completed by.
+    const UP: [&str; 0] = [];
 
     #[test]
     fn a_modifier_released_on_its_own_records_as_a_chord() {
@@ -721,48 +724,59 @@ mod tests {
         // press is recognised from the state going down and coming back up with
         // nothing under it.
         let ctrl = egui::Modifiers::COMMAND;
-        let mut hold = ModifierHold::default();
-        assert_eq!(hold.update(ctrl, false), None, "the press alone is not yet a chord");
-        assert_eq!(hold.update(ctrl, false), None, "still held");
-        assert_eq!(hold.update(egui::Modifiers::NONE, false), Some(Chord::modifiers(true, false, false)));
+        let none = egui::Modifiers::NONE;
+        let mut hold = ChordHold::default();
+        assert_eq!(hold.update(ctrl, UP, false), None, "the press alone is not yet a chord");
+        assert_eq!(hold.update(ctrl, UP, false), None, "still held");
+        assert_eq!(hold.update(none, UP, false), Some(Chord::modifiers(true, false, false)));
         // The hold is spent: an idle frame afterwards fires nothing.
-        assert_eq!(hold.update(egui::Modifiers::NONE, false), None);
+        assert_eq!(hold.update(none, UP, false), None);
     }
 
     #[test]
-    fn a_modifier_held_under_another_key_is_a_combination_not_a_chord() {
-        // The whole point of the rule: Ctrl+S must stay Save, and releasing Ctrl
-        // afterwards must not also fire whatever Ctrl alone is bound to.
+    fn a_modifier_held_under_another_key_records_as_the_combination() {
+        // Ctrl+S has to come out as Ctrl+S, not as Ctrl and then S.
         let ctrl = egui::Modifiers::COMMAND;
-        let mut hold = ModifierHold::default();
-        hold.update(ctrl, false);
-        hold.update(ctrl, true);
-        assert_eq!(hold.update(egui::Modifiers::NONE, false), None, "the combination fired the modifier as well");
-
-        // A key pressed in the same frame the modifier comes up belongs to that
-        // key, not to the modifier.
-        let mut hold = ModifierHold::default();
-        hold.update(ctrl, false);
-        assert_eq!(hold.update(egui::Modifiers::NONE, true), None);
+        let none = egui::Modifiers::NONE;
+        let mut hold = ChordHold::default();
+        hold.update(ctrl, UP, false);
+        hold.update(ctrl, ["S"], false);
+        assert_eq!(hold.update(none, UP, false), Some(Chord::ctrl("S")));
     }
 
     #[test]
-    fn the_widest_set_held_is_what_fires() {
-        // Ctrl, then Shift added, then both let go: Ctrl+Shift, not whichever
-        // was released last.
-        let mut hold = ModifierHold::default();
-        hold.update(egui::Modifiers::COMMAND, false);
-        hold.update(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, false);
-        hold.update(egui::Modifiers::SHIFT, false);
-        assert_eq!(hold.update(egui::Modifiers::NONE, false), Some(Chord::modifiers(true, true, false)));
+    fn several_ordinary_keys_held_together_are_one_chord() {
+        // Q, then W, then E, all let go: one binding, whatever order they came
+        // off in. The keys are a set, so the same three in another order are the
+        // same chord and cannot be bound twice.
+        let none = egui::Modifiers::NONE;
+        let mut hold = ChordHold::default();
+        hold.update(none, ["Q"], false);
+        hold.update(none, ["Q", "W"], false);
+        hold.update(none, ["Q", "W", "E"], false);
+        hold.update(none, ["W", "E"], false);
+        let chord = hold.update(none, UP, false).expect("the release completes the chord");
+        assert_eq!(chord, Chord::combo(["E", "Q", "W"]));
+        assert_eq!(chord.to_string(), "E+Q+W");
+        assert_eq!(chord, Chord::combo(["W", "E", "Q"]), "the order keys were pressed in made a different chord");
+    }
+
+    #[test]
+    fn a_hold_over_a_mouse_gesture_is_the_gesture_not_a_chord() {
+        // Ctrl+click picks a second object, and must not also fire whatever Ctrl
+        // alone is bound to.
+        let mut hold = ChordHold::default();
+        hold.update(egui::Modifiers::COMMAND, UP, false);
+        hold.update(egui::Modifiers::COMMAND, UP, true);
+        assert_eq!(hold.update(egui::Modifiers::NONE, UP, false), None, "a Ctrl+click fired the Ctrl binding");
     }
 
     #[test]
     fn a_hold_the_keyboard_left_mid_way_is_forgotten() {
-        let mut hold = ModifierHold::default();
-        hold.update(egui::Modifiers::ALT, false);
+        let mut hold = ChordHold::default();
+        hold.update(egui::Modifiers::ALT, UP, false);
         hold.reset();
-        assert_eq!(hold.update(egui::Modifiers::NONE, false), None, "a dropped hold fired on the release");
+        assert_eq!(hold.update(egui::Modifiers::NONE, UP, false), None, "a dropped hold fired on the release");
     }
 
     #[test]
@@ -780,10 +794,10 @@ mod tests {
                     continue;
                 }
                 assert!(
-                    names.contains(&chord.key.as_str()),
+                    chord.keys.iter().all(|k| names.contains(&k.as_str())),
                     "{preset:?}: {:?} is bound to {:?}, which is not a key that exists",
                     command,
-                    chord.key
+                    chord.keys
                 );
             }
         }

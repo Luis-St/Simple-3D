@@ -345,8 +345,8 @@ pub struct App {
     /// toolkit reports no key event for one, so the hold is watched frame by
     /// frame -- once for firing shortcuts, once for the keymap editor's
     /// recorder, which never run at the same time but must not share a state.
-    pub shortcut_mods: ui::ModifierHold,
-    pub record_mods: ui::ModifierHold,
+    pub shortcut_mods: ui::ChordHold,
+    pub record_mods: ui::ChordHold,
 
     /// Where settings and the keymap are read from and written back to. Held
     /// rather than looked up at each call site so a test can point an `App` at a
@@ -472,8 +472,8 @@ impl App {
             library: Vec::new(),
             keymap_search: String::new(),
             recording: None,
-            shortcut_mods: ui::ModifierHold::default(),
-            record_mods: ui::ModifierHold::default(),
+            shortcut_mods: ui::ChordHold::default(),
+            record_mods: ui::ChordHold::default(),
             keymap_conflict: None,
             config_dir,
             last_status: Status::Idle,
@@ -958,8 +958,8 @@ impl App {
         if let Some((feature, _)) = self.nearest_feature(view, cursor) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
         }
-        if let Some((at, _)) = self.nearest_edge_point(view, cursor) {
-            return Some(MeasurePoint { at, kind: Some(crate::snap::FeatureKind::Edge) });
+        if let Some((at, kind, _)) = self.nearest_line_point(view, cursor) {
+            return Some(MeasurePoint { at, kind: Some(kind) });
         }
         let (origin, dir) = view.ray(cursor);
         if let Some(t) = crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
@@ -1031,32 +1031,46 @@ impl App {
         self.nearest_feature_excluding(view, cursor, &[])
     }
 
-    /// The point on the nearest edge of a shown body, for a pointer that is near
-    /// an edge but not near any of the notable points on it (issue 78).
+    /// The point on the nearest *line* -- a body's edge, or a world axis -- for a
+    /// pointer that is near one but not near any of the notable points on it
+    /// (issue 78).
     ///
     /// Edges come from the same feature list, which carries each edge's two ends
-    /// beside its midpoint, so this needs no second pass over the geometry.
-    pub fn nearest_edge_point(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(Vec3, f32)> {
-        let mut best: Option<(Vec3, f32)> = None;
+    /// beside its midpoint, so they need no second pass over the geometry. The
+    /// axes are lines in their own right: a point on one is as real a place to
+    /// measure from as a corner is, and offering only the handful of places
+    /// where an axis meets something left the rest of it -- most of it -- with
+    /// nothing to catch.
+    pub fn nearest_line_point(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+    ) -> Option<(Vec3, crate::snap::FeatureKind, f32)> {
+        let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
+        let mut best: Option<(Vec3, crate::snap::FeatureKind, f32)> = None;
+        let mut consider = |a: Vec3, b: Vec3, kind: crate::snap::FeatureKind| {
+            if let Some((at, distance)) = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
+            {
+                if best.is_none_or(|(_, _, d)| distance < d) {
+                    best = Some((at, kind, distance));
+                }
+            }
+        };
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) {
                 continue;
             }
             for feature in self.features_of(id, mesh).iter() {
-                let Some((a, b)) = feature.span else { continue };
-                let hit = crate::snap::nearest_on_edge(
-                    a,
-                    b,
-                    |p| view.project(p).map(|(screen, _)| screen),
-                    cursor,
-                    crate::snap::CATCH_PIXELS,
-                );
-                if let Some((at, distance)) = hit {
-                    if best.is_none_or(|(_, d)| distance < d) {
-                        best = Some((at, distance));
-                    }
+                if let Some((a, b)) = feature.span {
+                    consider(a, b, crate::snap::FeatureKind::Edge);
                 }
             }
+        }
+        // As far as the axes are actually drawn, so nothing is caught out where
+        // there is no line to see.
+        let reach = crate::render::grid_radius(view);
+        for (a, b) in crate::snap::axis_lines(self.scene.settings.axes_visible, reach) {
+            consider(a, b, crate::snap::FeatureKind::Axis);
         }
         best
     }
@@ -1075,9 +1089,13 @@ impl App {
                 //
                 // A chord that is modifiers alone -- Ctrl, the default since
                 // issue 77 -- has no key to ask about, and the modifier state is
-                // the whole of it.
-                let key_held = chord.is_modifier_only() || crate::ui::key_from_name(&chord.key).is_some_and(&key_down);
-                key_held && mods.command == chord.ctrl && mods.shift == chord.shift && mods.alt == chord.alt
+                // the whole of it. One of several keys wants all of them down.
+                chord.satisfied_by(
+                    |name| crate::ui::key_from_name(name).is_some_and(&key_down),
+                    mods.command,
+                    mods.shift,
+                    mods.alt,
+                )
             }),
         }
     }
@@ -1184,6 +1202,22 @@ impl App {
             node.position = new_position;
         }
         Some(target.point)
+    }
+
+    /// Take the last placed end back off, leaving the one before it in place: a
+    /// right-click in the viewport, for a point put down in the wrong place.
+    ///
+    /// Unset rather than moved: an end that is gone is placed again by the next
+    /// click, which is what "reset to unset" has to mean for a tool whose next
+    /// click always places the next end.
+    pub fn measure_unplace(&mut self) {
+        match self.measure.points.pop() {
+            Some(_) if self.measure.points.is_empty() => {
+                self.status = Status::Info("Measure: the start is unset again".into())
+            }
+            Some(_) => self.status = Status::Info("Measure: click the second feature".into()),
+            None => self.status = Status::Info("Measure: nothing placed to take back".into()),
+        }
     }
 
     /// Record a measure click, and say what the span reads once both ends are
@@ -3985,6 +4019,37 @@ mod tests {
     }
 
     #[test]
+    fn a_measure_click_catches_a_world_axis_anywhere_along_it() {
+        // The follow-up to issue 78: the crossings alone left most of an axis
+        // with nothing to catch, so the axes are caught as lines -- anywhere
+        // along them, the way an edge is.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        app.scene.add_primitive("box", root, 0).unwrap();
+        app.reevaluate_for_test();
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+
+        // Well clear of the box, where no feature of any body is in reach.
+        let on_axis = Vec3::new(30.0, 0.0, 0.0);
+        let (screen, _) = view.project(on_axis).unwrap();
+        let point = app.measure_point_at(&view, screen).expect("a point under the cursor");
+        assert_eq!(point.kind, Some(crate::snap::FeatureKind::Axis), "caught {:?}", point.kind);
+        assert!((point.at - on_axis).length() < 0.2, "caught {:?}, not the point on the axis", point.at);
+        // It really is *on* the axis, not merely near it.
+        assert!(point.at.y.abs() < 1e-6 && point.at.z.abs() < 1e-6, "{:?} is off the X axis", point.at);
+
+        // A little to the side of the line there is nothing to catch, and the
+        // click falls through to the ground.
+        let beside = app.measure_point_at(&view, screen + egui::vec2(0.0, 40.0)).unwrap();
+        assert_eq!(beside.kind, None, "the catch reached far past the axis");
+
+        // An axis that is not shown is not a line to catch either.
+        app.scene.settings.axes_visible[0] = false;
+        let hidden = app.measure_point_at(&view, screen).unwrap();
+        assert_ne!(hidden.kind, Some(crate::snap::FeatureKind::Axis), "a hidden axis was still snapped to");
+    }
+
+    #[test]
     fn either_end_of_a_span_can_be_typed_rather_than_clicked() {
         // Issue 78: the property panel's start and end fields write here.
         let mut measure = Measure::default();
@@ -4007,6 +4072,27 @@ mod tests {
         assert_eq!(measure.points[0].kind, None);
         let distance = Measurement::between(measure.points[0].at, measure.points[1].at).distance;
         assert!((distance - 29.0_f64.sqrt()).abs() < 1e-9, "the span reads {distance} from the typed ends");
+    }
+
+    #[test]
+    fn a_placed_end_can_be_taken_back_off_one_at_a_time() {
+        // A right-click in the viewport undoes the last placement, back to
+        // nothing placed at all.
+        let mut app = headless_app();
+        app.toggle_measure();
+        app.measure_click(MeasurePoint { at: Vec3::ZERO, kind: None });
+        app.measure_click(MeasurePoint { at: Vec3::new(10.0, 0.0, 0.0), kind: None });
+        assert!(app.measure.span().is_some());
+
+        app.measure_unplace();
+        assert_eq!(app.measure.points.len(), 1, "the end did not come off");
+        assert!(app.measure.span().is_none());
+        app.measure_unplace();
+        assert!(app.measure.points.is_empty(), "the start did not come off");
+        // And with nothing placed it is harmless.
+        app.measure_unplace();
+        assert!(app.measure.points.is_empty());
+        assert!(app.measure.active, "taking a point back also put the tool away");
     }
 
     #[test]

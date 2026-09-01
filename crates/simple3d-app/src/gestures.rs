@@ -529,6 +529,15 @@ fn replace_field(harness: &mut Harness<'_, App>, at: egui::Pos2, what: &str) {
     text(harness, what);
 }
 
+/// Press or release one key and leave it in that state, which is what a
+/// combination of several keys needs: `key` sends a press and a release
+/// together, so nothing is ever down at the same time as anything else.
+fn hold_key(harness: &mut Harness<'_, App>, key: egui::Key, pressed: bool) {
+    let modifiers = harness.input().modifiers;
+    event(harness, egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
+    harness.step();
+}
+
 fn key(harness: &mut Harness<'_, App>, key: egui::Key) {
     let modifiers = harness.input().modifiers;
     event(harness, egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
@@ -1013,6 +1022,33 @@ fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
 }
 
 #[test]
+fn several_keys_held_together_fire_the_combination_they_make() {
+    // Any key can be the base of a combination, not only a modifier: Q+W+E is a
+    // binding, and it fires on the press that completes it.
+    let mut harness = harness("combination-binding");
+    harness
+        .state_mut()
+        .keymap
+        .set(simple3d_core::keymap::Command::ToggleGrid, simple3d_core::keymap::Chord::combo(["Q", "W", "E"]), true)
+        .unwrap();
+    let before = harness.state().scene.settings.grid_visible;
+
+    // Held down one after another, the way a hand performs it. `keys_down` is
+    // raw-input state, so each key stays down until it is let go.
+    hold_key(&mut harness, egui::Key::Q, true);
+    hold_key(&mut harness, egui::Key::W, true);
+    assert_eq!(harness.state().scene.settings.grid_visible, before, "an incomplete combination fired");
+    hold_key(&mut harness, egui::Key::E, true);
+    assert_ne!(harness.state().scene.settings.grid_visible, before, "the completing press did not fire it");
+
+    let after = harness.state().scene.settings.grid_visible;
+    for key in [egui::Key::Q, egui::Key::W, egui::Key::E] {
+        hold_key(&mut harness, key, false);
+    }
+    assert_eq!(harness.state().scene.settings.grid_visible, after, "letting go fired it a second time");
+}
+
+#[test]
 fn a_modifier_held_over_a_click_is_the_click_not_a_binding() {
     // Ctrl+click adds to the selection, and must not also fire whatever Ctrl
     // alone is bound to when the hand comes off the key.
@@ -1061,6 +1097,33 @@ fn the_measure_section_is_there_only_while_the_tool_is_out() {
     harness.step();
     assert!(!harness.state().measure.active, "the section's own button did not put the tool away");
     assert!(harness.query_by_label("Put the tool away").is_none(), "the section outlived the tool");
+}
+
+#[test]
+fn a_right_click_in_the_viewport_takes_the_last_measure_point_back() {
+    let mut harness = harness("measure-unplace");
+    harness.state_mut().run(simple3d_core::keymap::Command::MeasureTool);
+    harness.step();
+
+    // Place both ends by clicking the viewport, the way the tool is used.
+    let centre = harness.state().viewport_rect.center();
+    let (a, b) = (centre - egui::vec2(60.0, 30.0), centre + egui::vec2(60.0, 30.0));
+    press(&mut harness, a);
+    release(&mut harness, a);
+    press(&mut harness, b);
+    release(&mut harness, b);
+    assert_eq!(harness.state().measure.points.len(), 2, "the two clicks did not place two ends");
+
+    // A right-click takes the last one off, and the next takes the other.
+    button(&mut harness, b, egui::PointerButton::Secondary, true);
+    button(&mut harness, b, egui::PointerButton::Secondary, false);
+    harness.step();
+    assert_eq!(harness.state().measure.points.len(), 1, "the right-click did not take the end back");
+    button(&mut harness, b, egui::PointerButton::Secondary, true);
+    button(&mut harness, b, egui::PointerButton::Secondary, false);
+    harness.step();
+    assert!(harness.state().measure.points.is_empty(), "the start is still placed");
+    assert!(harness.state().measure.active, "the tool was put away by a right-click");
 }
 
 #[test]

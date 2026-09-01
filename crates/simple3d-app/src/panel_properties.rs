@@ -527,8 +527,8 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
         None => {
             ui.add(
                 egui::Label::new(theme::hint(
-                    "Click two features in the viewport. The pointer catches corners, edges, face centres and \
-                     where the axes cross a body.",
+                    "Click two features in the viewport. The pointer catches corners, edges, face centres and the \
+                     axes themselves; right-click takes the last one back.",
                 ))
                 .selectable(false),
             );

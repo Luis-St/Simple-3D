@@ -7,7 +7,7 @@ use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
 use simple3d_core::config::{self, DisplayMode, Panel, RenderEngine, Side};
-use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
+use simple3d_core::keymap::{Area, Chord, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
 use simple3d_core::scene::{ExportBody, GroupOp, NodeId, Scene, Visibility};
 use simple3d_core::unit::{format_number, Unit};
@@ -91,7 +91,7 @@ impl App {
             self.shortcut_mods.reset();
             return;
         }
-        let (events, modifiers, pointer) = ctx.input(|input| {
+        let (events, modifiers, held, pointer) = ctx.input(|input| {
             let events: Vec<(egui::Key, egui::Modifiers)> = input
                 .events
                 .iter()
@@ -100,20 +100,29 @@ impl App {
                     _ => None,
                 })
                 .collect();
-            (events, input.modifiers, input.pointer.any_down() || input.pointer.any_pressed())
+            let pointer = input.pointer.any_down() || input.pointer.any_pressed();
+            (events, input.modifiers, ui::keys_down(input), pointer)
         });
-        let interrupted = !events.is_empty() || pointer;
+        // A press fires the longest binding everything held down satisfies, so a
+        // combination of ordinary keys -- Q+W+E -- fires on the key that
+        // completes it rather than every key in it firing its own binding.
         for (key, modifiers) in events {
-            let chord = ui::chord_from_egui(key, modifiers);
-            if let Some(command) = self.keymap.command_for(&chord) {
+            let pressed = key.name();
+            let down = |name: &str| name == pressed || held.iter().any(|k| k == name);
+            let command =
+                self.keymap.command_for_press(pressed, down, modifiers.command, modifiers.shift, modifiers.alt);
+            if let Some(command) = command {
                 self.run(command);
             }
         }
         // A modifier held on its own, and let go of with nothing pressed under
-        // it, is a binding in its own right (issue 77). A mouse button counts as
-        // something pressed under it too: Ctrl+click picks a second object, and
-        // must not also fire whatever Ctrl alone is bound to.
-        if let Some(chord) = self.shortcut_mods.update(modifiers, interrupted) {
+        // it, is a binding in its own right (issue 77) -- and only that case is
+        // taken here, because a chord with keys in it has already fired on the
+        // press that completed it. A mouse button counts as something pressed
+        // under it: Ctrl+click picks a second object, and must not also fire
+        // whatever Ctrl alone is bound to.
+        let completed = self.shortcut_mods.update(modifiers, held.iter().map(String::as_str), pointer);
+        if let Some(chord) = completed.filter(Chord::is_modifier_only) {
             if let Some(command) = self.keymap.command_for(&chord) {
                 self.run(command);
             }
@@ -1038,25 +1047,24 @@ impl App {
         // context: the dialog is a window of its own now, and the press that is
         // being bound is delivered to whichever window has the keyboard.
         if let Some(command) = self.recording {
-            let (pressed, modifiers) = ui.input(|input| {
-                let pressed: Option<(egui::Key, egui::Modifiers)> = input.events.iter().find_map(|event| match event {
-                    egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
-                    _ => None,
-                });
-                (pressed, input.modifiers)
+            let (escaped, modifiers, held) = ui.input(|input| {
+                let escaped = input
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }));
+                (escaped, input.modifiers, ui::keys_down(input))
             });
-            // A modifier let go of with no key under it records as itself; a
-            // modifier held while a key goes down records as the combination
-            // (issue 77).
-            let modifier_only = self.record_mods.update(modifiers, pressed.is_some());
-            let captured = match pressed {
-                Some((egui::Key::Escape, _)) => {
-                    self.recording = None;
-                    self.record_mods.reset();
-                    None
-                }
-                Some((key, modifiers)) => Some(ui::chord_from_egui(key, modifiers)),
-                None => modifier_only,
+            // Whatever is held down together is the binding, and it is taken
+            // when the hand comes off it: a modifier on its own, an ordinary key,
+            // Ctrl+S, or Q+W+E (issues 77 and the follow-up to it). Waiting for
+            // the release is what makes the last of those possible at all --
+            // taking the first key press could never see the two after it.
+            let captured = if escaped {
+                self.recording = None;
+                self.record_mods.reset();
+                None
+            } else {
+                self.record_mods.update(modifiers, held.iter().map(String::as_str), false)
             };
             if let Some(chord) = captured {
                 match self.keymap.set(command, chord.clone(), false) {
@@ -1222,10 +1230,11 @@ impl App {
                         label_cell(ui, command.label(), name_column);
                         let recording = self.recording == Some(command);
                         let text = if recording {
-                            // Modifiers are keys too now (issue 77), so the
-                            // prompt says so rather than leaving someone waiting
-                            // for a letter to be required.
-                            "press a key or modifier...".to_string()
+                            // Modifiers are keys too now (issue 77), and so is
+                            // any set of keys held together, so the prompt says
+                            // what it takes rather than leaving someone waiting
+                            // for a single letter to be required.
+                            "hold the keys, then let go...".to_string()
                         } else {
                             let shown = self.keymap.shortcut_text(command);
                             if shown.is_empty() {
