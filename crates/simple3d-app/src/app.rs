@@ -955,7 +955,17 @@ impl App {
     /// reach, and an edge catches the pointer only where none of them does, so
     /// aiming at a corner never lands part-way along the edge beside it.
     pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
-        if let Some((feature, _)) = self.nearest_feature(view, cursor) {
+        // An axis is only there to be caught where it is *drawn*: the line is cut
+        // out of the material it runs through and hidden behind whatever is in
+        // front of it, so a stretch the model covers is not a place to measure
+        // from. Without this the catch followed the axis straight through a body,
+        // which is the one thing the line on screen never does. A body's own
+        // features are not filtered this way -- a corner around the back is still
+        // a corner, and reaching for one is deliberate.
+        let shown = |feature: &crate::snap::Feature| {
+            feature.kind != crate::snap::FeatureKind::AxisCrossing || self.in_clear_view(view, feature.point)
+        };
+        if let Some((feature, _)) = self.nearest_feature_where(view, cursor, &[], shown) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
         }
         if let Some((at, kind, _)) = self.nearest_line_point(view, cursor) {
@@ -978,14 +988,27 @@ impl App {
         cursor: egui::Pos2,
         exclude: &[NodeId],
     ) -> Option<(crate::snap::Feature, f32)> {
+        self.nearest_feature_where(view, cursor, exclude, |_| true)
+    }
+
+    /// The same, for a caller that will not take every kind of feature -- the
+    /// measure tool, which drops an axis crossing the model is covering.
+    pub fn nearest_feature_where(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+        exclude: &[NodeId],
+        accept: impl Fn(&crate::snap::Feature) -> bool,
+    ) -> Option<(crate::snap::Feature, f32)> {
         let mut best: Option<(crate::snap::Feature, f32)> = None;
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) || exclude.contains(&id) {
                 continue;
             }
             let features = self.features_of(id, mesh);
+            let wanted: Vec<crate::snap::Feature> = features.iter().copied().filter(&accept).collect();
             let hit = crate::snap::nearest_on_screen(
-                &features,
+                &wanted,
                 |p| view.project(p).map(|(screen, _)| screen),
                 cursor,
                 crate::snap::CATCH_PIXELS,
@@ -997,6 +1020,26 @@ impl App {
             }
         }
         best
+    }
+
+    /// Whether a point can be seen from where the camera is: nothing solid
+    /// between the eye and it.
+    ///
+    /// The evaluated mesh is exactly what the renderer draws as material, and
+    /// what it cuts the axis lines out of, so asking it is asking the same
+    /// question the picture answers. A point *inside* a body fails too, since
+    /// the body's own near surface is in front of it.
+    pub fn in_clear_view(&self, view: &crate::view::View, at: Vec3) -> bool {
+        let Some((screen, _)) = view.project(at) else { return false };
+        let (origin, dir) = view.ray(screen);
+        let reach = (at - origin).dot(dir);
+        match crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
+            // A point on a surface is its own hit, so the comparison has to
+            // leave room for one: a hundredth of a millimetre is far below
+            // anything a measurement cares about and far above the arithmetic.
+            Some(hit) => hit >= reach - 1e-2,
+            None => true,
+        }
     }
 
     /// One body's snap features, remembered between frames.
@@ -1025,10 +1068,6 @@ impl App {
         let features = std::rc::Rc::new(found);
         self.snap_features.borrow_mut().insert(id, (key, features.clone()));
         features
-    }
-
-    fn nearest_feature(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(crate::snap::Feature, f32)> {
-        self.nearest_feature_excluding(view, cursor, &[])
     }
 
     /// The point on the nearest *line* -- a body's edge, or a world axis -- for a
@@ -1070,7 +1109,15 @@ impl App {
         // there is no line to see.
         let reach = crate::render::grid_radius(view);
         for (a, b) in crate::snap::axis_lines(self.scene.settings.axes_visible, reach) {
-            consider(a, b, crate::snap::FeatureKind::Axis);
+            let hit = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS);
+            // Only where the line is really on screen: the stretch inside a body
+            // is cut out of the drawing, and the stretch behind one is covered by
+            // it, so neither is a place to measure from.
+            if let Some((at, distance)) = hit.filter(|(at, _)| self.in_clear_view(view, *at)) {
+                if best.is_none_or(|(_, _, d)| distance < d) {
+                    best = Some((at, crate::snap::FeatureKind::Axis, distance));
+                }
+            }
         }
         best
     }
@@ -4047,6 +4094,54 @@ mod tests {
         app.scene.settings.axes_visible[0] = false;
         let hidden = app.measure_point_at(&view, screen).unwrap();
         assert_ne!(hidden.kind, Some(crate::snap::FeatureKind::Axis), "a hidden axis was still snapped to");
+    }
+
+    #[test]
+    fn an_axis_is_only_caught_where_it_is_actually_drawn() {
+        // The line is cut out of the material it runs through and covered by
+        // whatever is in front of it, so the catch must stop at the surface
+        // rather than following the axis on through the body.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        app.reevaluate_for_test();
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+
+        // Dead centre of a body the axes run through: they are inside material
+        // here, where the renderer cuts the line out altogether, so there is no
+        // line to catch. Asked of the line pass directly, since a face centre
+        // happens to sit near this spot and would answer first.
+        let middle = (lo + hi) * 0.5;
+        let (screen, _) = view.project(middle).unwrap();
+        assert!(
+            app.nearest_line_point(&view, screen).is_none_or(|(_, kind, _)| kind != crate::snap::FeatureKind::Axis),
+            "the catch followed an axis into the middle of a body, where no line is drawn"
+        );
+        let inside = app.measure_point_at(&view, screen).expect("a point under the cursor");
+        assert!(
+            !matches!(inside.kind, Some(crate::snap::FeatureKind::Axis | crate::snap::FeatureKind::AxisCrossing)),
+            "an axis inside a body was caught: {inside:?}"
+        );
+
+        // The crossing the camera can see is still caught -- this is about what
+        // is covered, not about axes in general.
+        let near_top = Vec3::new(0.0, 0.0, hi.z);
+        assert!(app.in_clear_view(&view, near_top), "the top crossing is covered in this view; pick another point");
+        let (screen, _) = view.project(near_top).unwrap();
+        let seen = app.measure_point_at(&view, screen).unwrap();
+        assert!(seen.kind.is_some() && (seen.at - near_top).length() < 1e-6, "the visible crossing was lost: {seen:?}");
+
+        // The crossing on the underside is behind the body from here, and the
+        // line arriving at it is not drawn either.
+        let far = Vec3::new(0.0, 0.0, lo.z);
+        assert!(!app.in_clear_view(&view, far), "the far crossing is not covered in this view; pick another point");
+        let (screen, _) = view.project(far).unwrap();
+        let hidden = app.measure_point_at(&view, screen).unwrap();
+        assert!(
+            !matches!(hidden.kind, Some(crate::snap::FeatureKind::Axis | crate::snap::FeatureKind::AxisCrossing)),
+            "an axis behind the body was caught through it: {hidden:?}"
+        );
     }
 
     #[test]

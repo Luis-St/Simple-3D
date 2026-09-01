@@ -199,12 +199,15 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
 /// The origin axes run through the model, and the place a measurement usually
 /// wants -- where the axis leaves the body, where its centreline meets a face --
 /// is often not a corner of the mesh at all, so nothing was there to catch. Each
-/// crossing of the surface becomes a corner, and the run between an entry and
-/// the exit after it becomes an edge, so the axis inside a body can be caught
-/// anywhere along it exactly like a real edge.
+/// crossing of the surface becomes a corner.
+///
+/// Only the crossings, and not the run between them: that stretch is inside the
+/// material, where the renderer cuts the line out altogether, and a snap target
+/// on a line nobody can see is a jump with no cause. The line ends at the
+/// surface, and so does what can be caught on it.
 ///
 /// `axes` says which of X, Y and Z are shown: an axis the user has turned off is
-/// not on screen, and snapping to something invisible is a jump with no cause.
+/// not on screen either.
 pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
     let Some((lo, hi)) = mesh.bounds() else { return Vec::new() };
     let mut out = Vec::new();
@@ -240,19 +243,7 @@ pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
         // and a face the axis grazes reports a run of hits at one place.
         hits.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
 
-        let points: Vec<Vec3> = hits.iter().map(|&t| dir * t).collect();
-        out.extend(points.iter().map(|&p| Feature::point(p, FeatureKind::AxisCrossing)));
-        // Entry, exit, entry, exit: a closed surface is crossed an even number of
-        // times, and the odd pairs are the runs *outside* the body. An odd count
-        // means the mesh is not closed there, and then only the crossings
-        // themselves are trustworthy.
-        if points.len().is_multiple_of(2) {
-            for pair in points.chunks_exact(2) {
-                if (pair[1] - pair[0]).length() > 1e-9 {
-                    out.push(Feature::edge(pair[0], pair[1]));
-                }
-            }
-        }
+        out.extend(hits.iter().map(|&t| Feature::point(dir * t, FeatureKind::AxisCrossing)));
     }
     out
 }
@@ -502,21 +493,10 @@ mod tests {
             );
         }
 
-        // The run through the body is an edge, so it can be caught along its
-        // length like any other.
-        let runs: Vec<&Feature> = features.iter().filter(|f| f.kind == FeatureKind::EdgeMidpoint).collect();
-        assert_eq!(runs.len(), 3, "one run per axis");
-        assert!(runs.iter().all(|f| (f.point - Vec3::ZERO).length() < 1e-6), "a run's middle is not the origin");
-        let lengths: Vec<f64> = runs
-            .iter()
-            .map(|f| {
-                let (a, b) = f.span.unwrap();
-                (a - b).length()
-            })
-            .collect();
-        for expected in [20.0, 10.0, 6.0] {
-            assert!(lengths.iter().any(|l| (l - expected).abs() < 1e-6), "no run of {expected}: {lengths:?}");
-        }
+        // The crossings and nothing else: the run between them is inside the
+        // material, where the line is cut out of the drawing, so there is
+        // nothing there to catch.
+        assert_eq!(features.len(), crossings.len(), "the stretch inside the body was offered as a snap target");
     }
 
     #[test]
