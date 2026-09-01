@@ -567,11 +567,18 @@ fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) 
         mark(point.at, point.kind.is_some());
     }
 
-    // A live line from the first point to whatever the pointer is over, so the
-    // second click can be aimed. The hover point is snapped the same way a click
-    // is, and shows the same marker.
-    if app.measure.points.len() == 1 {
-        if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
+    // Where the *next* click would land, marked and named before it is made.
+    //
+    // This used to be drawn only once one end was down, which is exactly
+    // backwards: the first point is the one placed with nothing else on screen
+    // to judge it against, and it was placed blind (issue 78). The hover point is
+    // resolved by the same call a click makes, so what is shown is what would be
+    // taken -- including a point part-way along an edge, or where an axis crosses
+    // a body.
+    if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
+        // Only over the viewport itself: the pointer out over a dock is not
+        // aiming at anything in the scene.
+        if painter.clip_rect().contains(cursor) {
             if let Some(hover) = app.measure_point_at(view, cursor) {
                 mark(hover.at, hover.kind.is_some());
                 // Name the feature the pointer has caught, so a snap is legible
@@ -585,8 +592,13 @@ fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) 
                         colour,
                     );
                 }
-                if let (Some((a, _)), Some((b, _))) = (view.project(app.measure.points[0].at), view.project(hover.at)) {
-                    painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.6)));
+                // A live line from the first point, so the second click can be
+                // aimed.
+                if app.measure.points.len() == 1 {
+                    let ends = (view.project(app.measure.points[0].at), view.project(hover.at));
+                    if let (Some((a, _)), Some((b, _))) = ends {
+                        painter.line_segment([a, b], egui::Stroke::new(1.0_f32, colour.gamma_multiply(0.6)));
+                    }
                 }
             }
         }

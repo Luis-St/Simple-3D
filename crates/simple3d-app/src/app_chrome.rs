@@ -82,23 +82,38 @@ impl App {
     /// shortcut.
     pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if self.modal != Modal::None || self.recording.is_some() || self.rename.is_some() {
+            // The release that ends a modifier hold will be delivered somewhere
+            // else, so the hold in progress is not one this window can finish.
+            self.shortcut_mods.reset();
             return;
         }
         if ctx.wants_keyboard_input() {
+            self.shortcut_mods.reset();
             return;
         }
-        let events: Vec<(egui::Key, egui::Modifiers)> = ctx.input(|input| {
-            input
+        let (events, modifiers, pointer) = ctx.input(|input| {
+            let events: Vec<(egui::Key, egui::Modifiers)> = input
                 .events
                 .iter()
                 .filter_map(|event| match event {
                     egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
                     _ => None,
                 })
-                .collect()
+                .collect();
+            (events, input.modifiers, input.pointer.any_down() || input.pointer.any_pressed())
         });
+        let interrupted = !events.is_empty() || pointer;
         for (key, modifiers) in events {
             let chord = ui::chord_from_egui(key, modifiers);
+            if let Some(command) = self.keymap.command_for(&chord) {
+                self.run(command);
+            }
+        }
+        // A modifier held on its own, and let go of with nothing pressed under
+        // it, is a binding in its own right (issue 77). A mouse button counts as
+        // something pressed under it too: Ctrl+click picks a second object, and
+        // must not also fire whatever Ctrl alone is bound to.
+        if let Some(chord) = self.shortcut_mods.update(modifiers, interrupted) {
             if let Some(command) = self.keymap.command_for(&chord) {
                 self.run(command);
             }
@@ -1023,28 +1038,37 @@ impl App {
         // context: the dialog is a window of its own now, and the press that is
         // being bound is delivered to whichever window has the keyboard.
         if let Some(command) = self.recording {
-            let pressed: Option<(egui::Key, egui::Modifiers)> = ui.input(|input| {
-                input.events.iter().find_map(|event| match event {
+            let (pressed, modifiers) = ui.input(|input| {
+                let pressed: Option<(egui::Key, egui::Modifiers)> = input.events.iter().find_map(|event| match event {
                     egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
                     _ => None,
-                })
+                });
+                (pressed, input.modifiers)
             });
-            if let Some((key, modifiers)) = pressed {
-                if key == egui::Key::Escape {
+            // A modifier let go of with no key under it records as itself; a
+            // modifier held while a key goes down records as the combination
+            // (issue 77).
+            let modifier_only = self.record_mods.update(modifiers, pressed.is_some());
+            let captured = match pressed {
+                Some((egui::Key::Escape, _)) => {
                     self.recording = None;
-                } else {
-                    let chord = ui::chord_from_egui(key, modifiers);
-                    match self.keymap.set(command, chord.clone(), false) {
-                        Ok(()) => {
-                            self.recording = None;
-                            self.persist_keymap();
-                        }
-                        // Name the command currently holding it and offer to
-                        // reassign or cancel; never overwrite silently.
-                        Err(holder) => {
-                            self.keymap_conflict = Some((command, chord, holder));
-                            self.recording = None;
-                        }
+                    self.record_mods.reset();
+                    None
+                }
+                Some((key, modifiers)) => Some(ui::chord_from_egui(key, modifiers)),
+                None => modifier_only,
+            };
+            if let Some(chord) = captured {
+                match self.keymap.set(command, chord.clone(), false) {
+                    Ok(()) => {
+                        self.recording = None;
+                        self.persist_keymap();
+                    }
+                    // Name the command currently holding it and offer to
+                    // reassign or cancel; never overwrite silently.
+                    Err(holder) => {
+                        self.keymap_conflict = Some((command, chord, holder));
+                        self.recording = None;
                     }
                 }
             }
@@ -1198,7 +1222,10 @@ impl App {
                         label_cell(ui, command.label(), name_column);
                         let recording = self.recording == Some(command);
                         let text = if recording {
-                            "press a key...".to_string()
+                            // Modifiers are keys too now (issue 77), so the
+                            // prompt says so rather than leaving someone waiting
+                            // for a letter to be required.
+                            "press a key or modifier...".to_string()
                         } else {
                             let shown = self.keymap.shortcut_text(command);
                             if shown.is_empty() {
@@ -1210,6 +1237,9 @@ impl App {
                         let button = egui::vec2(binding_column, theme::metric::INPUT_ROW);
                         if ui.add(egui::Button::new(text).min_size(button)).clicked() {
                             self.recording = Some(command);
+                            // The click itself may have been made with a modifier
+                            // down; that hold is not the binding.
+                            self.record_mods.reset();
                         }
                         let reset = egui::vec2(reset_column, theme::metric::INPUT_ROW);
                         if ui.add(egui::Button::new("Reset").min_size(reset)).clicked() {

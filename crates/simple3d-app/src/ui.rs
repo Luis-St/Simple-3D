@@ -471,6 +471,72 @@ pub fn chord_from_egui(key: egui::Key, modifiers: egui::Modifiers) -> Chord {
     }
 }
 
+/// The chord modifiers alone make, for a press that never reached a key.
+pub fn modifier_chord(modifiers: egui::Modifiers) -> Chord {
+    Chord::modifiers(modifiers.command, modifiers.shift, modifiers.alt)
+}
+
+/// Watches a modifier being held so a modifier on its own can be a binding
+/// (issue 77).
+///
+/// The toolkit never reports Ctrl, Shift or Alt as key events -- they only ever
+/// arrive as the modifier state of some *other* key -- so a modifier press has
+/// to be recognised from that state changing, and it can only be told apart from
+/// the start of a combination in hindsight. So the rule is the one the issue
+/// asks for: a modifier goes down and something else follows it, and the two are
+/// a combination; a modifier goes down and comes back up with nothing under it,
+/// and the modifier itself was the input.
+///
+/// The widest set held during one press is what fires, so pressing Ctrl, adding
+/// Shift and letting both go is `Ctrl+Shift` rather than whichever happened to
+/// be released last.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ModifierHold {
+    held: Option<egui::Modifiers>,
+    /// Something else happened while they were down, so this press is part of a
+    /// combination and is not a binding of its own.
+    interrupted: bool,
+}
+
+impl ModifierHold {
+    /// Feed one frame's state. Returns the modifier-only chord if this frame
+    /// completed one: the modifiers are all up again and nothing was pressed
+    /// while they were down.
+    ///
+    /// `interrupted` is whatever else the frame saw -- a key event, a mouse
+    /// button -- which turns the hold into the beginning of a combination.
+    pub fn update(&mut self, modifiers: egui::Modifiers, interrupted: bool) -> Option<Chord> {
+        let down = modifiers.command || modifiers.shift || modifiers.alt;
+        if down {
+            let widest = match self.held {
+                Some(held) => egui::Modifiers {
+                    command: held.command || modifiers.command,
+                    ctrl: held.ctrl || modifiers.ctrl,
+                    mac_cmd: held.mac_cmd || modifiers.mac_cmd,
+                    shift: held.shift || modifiers.shift,
+                    alt: held.alt || modifiers.alt,
+                },
+                None => modifiers,
+            };
+            self.held = Some(widest);
+            self.interrupted |= interrupted;
+            return None;
+        }
+        let released = self.held.take();
+        let clean = !self.interrupted;
+        self.interrupted = false;
+        // A key pressed in the same frame the modifiers came up is that key's
+        // own press, not the modifier's.
+        released.filter(|_| clean && !interrupted).map(modifier_chord)
+    }
+
+    /// Forget a hold in progress: the keyboard has gone somewhere else -- a
+    /// dialog, a text field -- and the release will never be seen here.
+    pub fn reset(&mut self) {
+        *self = ModifierHold::default();
+    }
+}
+
 /// A short description of a bounding box, for the overlay that answers "will
 /// this fit" (spec section 6.1).
 pub fn describe_size(size: simple3d_geom::Vec3, unit: Unit) -> String {
@@ -650,6 +716,56 @@ mod tests {
     }
 
     #[test]
+    fn a_modifier_released_on_its_own_records_as_a_chord() {
+        // Issue 77: the toolkit reports no key event for Ctrl, so a modifier
+        // press is recognised from the state going down and coming back up with
+        // nothing under it.
+        let ctrl = egui::Modifiers::COMMAND;
+        let mut hold = ModifierHold::default();
+        assert_eq!(hold.update(ctrl, false), None, "the press alone is not yet a chord");
+        assert_eq!(hold.update(ctrl, false), None, "still held");
+        assert_eq!(hold.update(egui::Modifiers::NONE, false), Some(Chord::modifiers(true, false, false)));
+        // The hold is spent: an idle frame afterwards fires nothing.
+        assert_eq!(hold.update(egui::Modifiers::NONE, false), None);
+    }
+
+    #[test]
+    fn a_modifier_held_under_another_key_is_a_combination_not_a_chord() {
+        // The whole point of the rule: Ctrl+S must stay Save, and releasing Ctrl
+        // afterwards must not also fire whatever Ctrl alone is bound to.
+        let ctrl = egui::Modifiers::COMMAND;
+        let mut hold = ModifierHold::default();
+        hold.update(ctrl, false);
+        hold.update(ctrl, true);
+        assert_eq!(hold.update(egui::Modifiers::NONE, false), None, "the combination fired the modifier as well");
+
+        // A key pressed in the same frame the modifier comes up belongs to that
+        // key, not to the modifier.
+        let mut hold = ModifierHold::default();
+        hold.update(ctrl, false);
+        assert_eq!(hold.update(egui::Modifiers::NONE, true), None);
+    }
+
+    #[test]
+    fn the_widest_set_held_is_what_fires() {
+        // Ctrl, then Shift added, then both let go: Ctrl+Shift, not whichever
+        // was released last.
+        let mut hold = ModifierHold::default();
+        hold.update(egui::Modifiers::COMMAND, false);
+        hold.update(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, false);
+        hold.update(egui::Modifiers::SHIFT, false);
+        assert_eq!(hold.update(egui::Modifiers::NONE, false), Some(Chord::modifiers(true, true, false)));
+    }
+
+    #[test]
+    fn a_hold_the_keyboard_left_mid_way_is_forgotten() {
+        let mut hold = ModifierHold::default();
+        hold.update(egui::Modifiers::ALT, false);
+        hold.reset();
+        assert_eq!(hold.update(egui::Modifiers::NONE, false), None, "a dropped hold fired on the release");
+    }
+
+    #[test]
     fn every_default_binding_can_be_produced_by_a_real_key_press() {
         // A binding nobody can type would be a silent dead end, so check every
         // preset's key names against the toolkit's own key list.
@@ -658,6 +774,11 @@ mod tests {
             let keymap = Keymap::from_preset(preset);
             for command in Command::ALL {
                 let chord = keymap.binding(*command).unwrap();
+                // A chord that is modifiers alone names no key, and is typed by
+                // holding and releasing the modifier (issue 77).
+                if chord.is_modifier_only() {
+                    continue;
+                }
                 assert!(
                     names.contains(&chord.key.as_str()),
                     "{preset:?}: {:?} is bound to {:?}, which is not a key that exists",

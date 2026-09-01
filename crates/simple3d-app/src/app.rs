@@ -5,7 +5,7 @@
 use crate::gizmo::{self, Drag, Gizmo, Handle, Mode};
 use crate::panel_viewport;
 use crate::render::Renderable;
-use crate::ui::FieldBuffers;
+use crate::ui::{self, FieldBuffers};
 use crate::view::{frame_bounds, CameraMove, ViewPreset};
 use crate::worker::{EvalWorker, ExportJob};
 use simple3d_core::clipboard::{self, Clip};
@@ -120,6 +120,22 @@ impl Measure {
         self.points.clear();
     }
 
+    /// Move one end of the span, or place it if it is not down yet. What the
+    /// editable start and end fields in the property panel write to (issue 78).
+    ///
+    /// An end can only be placed once the one before it is: an end with no start
+    /// is not half a measurement, it is a point with nothing to measure to.
+    pub fn set_point(&mut self, index: usize, at: Vec3) {
+        // Typing a coordinate is placing the point exactly, so whatever feature
+        // it once caught is no longer what it is.
+        let placed = MeasurePoint { at, kind: None };
+        if index < self.points.len() {
+            self.points[index] = placed;
+        } else if index == self.points.len() && index < 2 {
+            self.points.push(placed);
+        }
+    }
+
     /// The finished span, once both ends are placed.
     pub fn span(&self) -> Option<(MeasurePoint, MeasurePoint)> {
         match self.points.as_slice() {
@@ -162,8 +178,9 @@ impl Measurement {
 type Features = std::rc::Rc<Vec<crate::snap::Feature>>;
 /// What the cache holds per node: which mesh the features were found on --
 /// identified by the address of its `Arc`, which changes on re-evaluation and
-/// nowhere else -- and the features themselves.
-type CachedFeatures = (usize, Features);
+/// nowhere else -- together with which axes were shown, since the axis crossings
+/// are part of the list (issue 78), and the features themselves.
+type CachedFeatures = ((usize, u8), Features);
 
 pub struct App {
     pub scene: Scene,
@@ -324,6 +341,12 @@ pub struct App {
     pub keymap_search: String,
     pub recording: Option<Command>,
     pub keymap_conflict: Option<(Command, Chord, Command)>,
+    /// A modifier held on its own is a binding of its own (issue 77), and the
+    /// toolkit reports no key event for one, so the hold is watched frame by
+    /// frame -- once for firing shortcuts, once for the keymap editor's
+    /// recorder, which never run at the same time but must not share a state.
+    pub shortcut_mods: ui::ModifierHold,
+    pub record_mods: ui::ModifierHold,
 
     /// Where settings and the keymap are read from and written back to. Held
     /// rather than looked up at each call site so a test can point an `App` at a
@@ -449,6 +472,8 @@ impl App {
             library: Vec::new(),
             keymap_search: String::new(),
             recording: None,
+            shortcut_mods: ui::ModifierHold::default(),
+            record_mods: ui::ModifierHold::default(),
             keymap_conflict: None,
             config_dir,
             last_status: Status::Idle,
@@ -920,12 +945,21 @@ impl App {
     }
 
     /// Where a measure click lands: the nearest snap feature of any shown body if
-    /// one is within reach on screen, otherwise the point on the surface under
-    /// the pointer, otherwise the ground plane. `None` only when the pointer is
-    /// on empty sky, where there is nothing to measure to.
+    /// one is within reach on screen, otherwise a point along the nearest edge,
+    /// otherwise the point on the surface under the pointer, otherwise the ground
+    /// plane. `None` only when the pointer is on empty sky, where there is
+    /// nothing to measure to.
+    ///
+    /// The order is what makes placement predictable (issue 78): the exact
+    /// points -- corners, midpoints, axis crossings -- win whenever one is in
+    /// reach, and an edge catches the pointer only where none of them does, so
+    /// aiming at a corner never lands part-way along the edge beside it.
     pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
         if let Some((feature, _)) = self.nearest_feature(view, cursor) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
+        }
+        if let Some((at, _)) = self.nearest_edge_point(view, cursor) {
+            return Some(MeasurePoint { at, kind: Some(crate::snap::FeatureKind::Edge) });
         }
         let (origin, dir) = view.ray(cursor);
         if let Some(t) = crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
@@ -976,19 +1010,55 @@ impl App {
     /// pointer is exactly the "has this changed" key: a re-evaluation makes a new
     /// allocation and misses, and anything else hits.
     fn features_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Features {
-        let key = std::sync::Arc::as_ptr(mesh) as usize;
+        let axes = self.scene.settings.axes_visible;
+        let mask = (axes[0] as u8) | (axes[1] as u8) << 1 | (axes[2] as u8) << 2;
+        let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
         if let Some((cached_key, features)) = self.snap_features.borrow().get(&id) {
             if *cached_key == key {
                 return features.clone();
             }
         }
-        let features = std::rc::Rc::new(crate::snap::features_of(mesh));
+        let mut found = crate::snap::features_of(mesh);
+        // Where the world axes run through the body, offered as corners and as
+        // the edge between them (issue 78).
+        found.extend(crate::snap::axis_features(mesh, axes));
+        let features = std::rc::Rc::new(found);
         self.snap_features.borrow_mut().insert(id, (key, features.clone()));
         features
     }
 
     fn nearest_feature(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(crate::snap::Feature, f32)> {
         self.nearest_feature_excluding(view, cursor, &[])
+    }
+
+    /// The point on the nearest edge of a shown body, for a pointer that is near
+    /// an edge but not near any of the notable points on it (issue 78).
+    ///
+    /// Edges come from the same feature list, which carries each edge's two ends
+    /// beside its midpoint, so this needs no second pass over the geometry.
+    pub fn nearest_edge_point(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(Vec3, f32)> {
+        let mut best: Option<(Vec3, f32)> = None;
+        for (&id, mesh) in &self.evaluated.node_meshes {
+            if !self.scene.is_shown(id) {
+                continue;
+            }
+            for feature in self.features_of(id, mesh).iter() {
+                let Some((a, b)) = feature.span else { continue };
+                let hit = crate::snap::nearest_on_edge(
+                    a,
+                    b,
+                    |p| view.project(p).map(|(screen, _)| screen),
+                    cursor,
+                    crate::snap::CATCH_PIXELS,
+                );
+                if let Some((at, distance)) = hit {
+                    if best.is_none_or(|(_, d)| distance < d) {
+                        best = Some((at, distance));
+                    }
+                }
+            }
+        }
+        best
     }
 
     /// Whether geometry snapping is being asked for right now (issue 68): always,
@@ -1002,10 +1072,12 @@ impl App {
                 // The chord's modifiers count too. Matching on the key name alone
                 // meant a hold rebound to Ctrl+V also fired on a bare V -- and on
                 // Ctrl+V, which is Paste.
-                crate::ui::key_from_name(&chord.key).is_some_and(&key_down)
-                    && mods.command == chord.ctrl
-                    && mods.shift == chord.shift
-                    && mods.alt == chord.alt
+                //
+                // A chord that is modifiers alone -- Ctrl, the default since
+                // issue 77 -- has no key to ask about, and the modifier state is
+                // the whole of it.
+                let key_held = chord.is_modifier_only() || crate::ui::key_from_name(&chord.key).is_some_and(&key_down);
+                key_held && mods.command == chord.ctrl && mods.shift == chord.shift && mods.alt == chord.alt
             }),
         }
     }
@@ -3850,6 +3922,94 @@ mod tests {
     }
 
     #[test]
+    fn a_measure_click_between_two_corners_catches_the_edge_itself() {
+        // Issue 78: aiming at the middle of nothing in particular, part-way along
+        // an edge, used to fall through to the surface hit under the pointer.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        app.reevaluate_for_test();
+
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+        // A third of the way along the top +Y edge: near no corner and not the
+        // midpoint either, so only the edge itself can answer.
+        let (a, b) = (Vec3::new(lo.x, hi.y, hi.z), Vec3::new(hi.x, hi.y, hi.z));
+        let along = a + (b - a) * (1.0 / 3.0);
+        let (screen, _) = view.project(along).unwrap();
+        let point = app.measure_point_at(&view, screen).expect("a point under the cursor");
+        assert_eq!(point.kind, Some(crate::snap::FeatureKind::Edge), "caught {:?}, not the edge", point.kind);
+        assert!((point.at - along).length() < 0.2, "caught {:?}, a third along is {:?}", point.at, along);
+
+        // A corner still wins where one is in reach, so aiming at a corner never
+        // lands part-way along the edge beside it.
+        let (screen, _) = view.project(b).unwrap();
+        let point = app.measure_point_at(&view, screen + egui::vec2(2.0, 2.0)).unwrap();
+        assert_eq!(point.kind, Some(crate::snap::FeatureKind::Vertex));
+    }
+
+    #[test]
+    fn a_measure_click_catches_where_an_axis_crosses_a_body() {
+        // Issue 78: the axes run through the model, and where one leaves a body
+        // is a place to measure from even though the mesh has no corner there.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let id = app.scene.add_primitive("box", root, 0).unwrap();
+        // Off to one side, so where the Z axis leaves the top face is nowhere
+        // near that face's own centre and only the crossing can answer.
+        app.scene.get_mut(id).unwrap().position = Vec3::new(6.0, 0.0, 0.0);
+        app.reevaluate_for_test();
+
+        let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+        let (_, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
+        let crossing = Vec3::new(0.0, 0.0, hi.z);
+        let (screen, _) = view.project(crossing).unwrap();
+        let point = app.measure_point_at(&view, screen).expect("a point under the cursor");
+        assert_eq!(
+            point.kind,
+            Some(crate::snap::FeatureKind::AxisCrossing),
+            "the Z axis leaving the top face was not catchable; caught {:?}",
+            point.kind
+        );
+        assert!((point.at - crossing).length() < 1e-6);
+
+        // With the Z axis turned off there is nothing on screen there to catch:
+        // whatever the click then lands on, it is not that crossing.
+        app.scene.settings.axes_visible[2] = false;
+        let point = app.measure_point_at(&view, screen).unwrap();
+        assert_ne!(
+            point.kind,
+            Some(crate::snap::FeatureKind::AxisCrossing),
+            "an axis that is not shown was still snapped to"
+        );
+    }
+
+    #[test]
+    fn either_end_of_a_span_can_be_typed_rather_than_clicked() {
+        // Issue 78: the property panel's start and end fields write here.
+        let mut measure = Measure::default();
+        // Nothing is placed yet, so the end cannot be: it would be a point with
+        // nothing to measure to.
+        measure.set_point(1, Vec3::new(5.0, 0.0, 0.0));
+        assert!(measure.points.is_empty());
+
+        measure.set_point(0, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(measure.points.len(), 1);
+        measure.set_point(1, Vec3::new(4.0, 2.0, 3.0));
+        let (a, b) = measure.span().expect("both ends are down");
+        assert_eq!(a.at, Vec3::new(1.0, 2.0, 3.0));
+        assert_eq!(b.at, Vec3::new(4.0, 2.0, 3.0));
+
+        // Typing a coordinate over an end that had caught a feature makes it an
+        // exact point rather than leaving it claiming a feature it has left.
+        measure.points[0].kind = Some(crate::snap::FeatureKind::Vertex);
+        measure.set_point(0, Vec3::ZERO);
+        assert_eq!(measure.points[0].kind, None);
+        let distance = Measurement::between(measure.points[0].at, measure.points[1].at).distance;
+        assert!((distance - 29.0_f64.sqrt()).abs() < 1e-9, "the span reads {distance} from the typed ends");
+    }
+
+    #[test]
     fn the_measure_overlay_draws_a_placed_span_without_panicking() {
         let mut app = headless_app();
         app.measure.active = true;
@@ -4036,13 +4196,23 @@ mod tests {
         assert!(app.geometry_snap_wanted(|_| false, none), "always should snap with no key held");
 
         app.settings.geometry_snap = SnapMode::WhileHeld;
-        let key = crate::ui::key_from_name(&app.keymap.binding(Command::SnapToGeometry).unwrap().key).unwrap();
+        // The default hold is Ctrl on its own (issue 77): no key to hold, the
+        // modifier state is the whole binding.
+        assert_eq!(app.keymap.binding(Command::SnapToGeometry), Some(&Chord::modifiers(true, false, false)));
+        assert!(!app.geometry_snap_wanted(|_| true, none), "held mode with no modifier down must not snap");
+        assert!(app.geometry_snap_wanted(|_| false, egui::Modifiers::COMMAND), "Ctrl held must snap");
+        assert!(
+            !app.geometry_snap_wanted(|_| false, egui::Modifiers::COMMAND | egui::Modifiers::SHIFT),
+            "Ctrl+Shift is not the Ctrl binding"
+        );
+
+        // Rebound to a key, the key has to be down and the modifiers have to
+        // match exactly. A hold on Ctrl+V must not fire on a bare V -- and the
+        // unmodified binding must not fire on Ctrl+V, which is Paste.
+        app.keymap.set(Command::SnapToGeometry, Chord::key("V"), true).unwrap();
+        let key = crate::ui::key_from_name("V").unwrap();
         assert!(!app.geometry_snap_wanted(|_| false, none), "held mode with nothing down must not snap");
         assert!(app.geometry_snap_wanted(|k| k == key, none), "held mode with the snap key down must snap");
-
-        // The chord's modifiers count. A hold rebound to Ctrl+V must not fire on
-        // a bare V -- and the unmodified binding must not fire on Ctrl+V, which
-        // is Paste.
         assert!(
             !app.geometry_snap_wanted(|k| k == key, egui::Modifiers::COMMAND),
             "the bare binding fired with Ctrl down"

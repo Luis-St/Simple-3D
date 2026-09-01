@@ -239,6 +239,14 @@ impl Command {
 
 /// A key plus modifiers. Serialised as the text the interface shows -- `Ctrl+S`,
 /// `Shift+ArrowUp` -- so an exported keymap is readable and hand-editable.
+///
+/// `key` may be empty, and then the chord *is* the modifiers: `Ctrl` on its own
+/// is a binding (issue 77). A modifier is a key like any other -- the one thing
+/// a hold-to-snap binding actually wants -- so refusing to store one only meant
+/// nobody could bind what they were already reaching for. The recorder decides
+/// which of the two a press was: a modifier released with nothing pressed under
+/// it is a chord of its own, a modifier held while another key goes down is the
+/// combination it has always been.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Chord {
     pub key: String,
@@ -250,6 +258,19 @@ pub struct Chord {
 impl Chord {
     pub fn key(key: &str) -> Chord {
         Chord { key: key.to_string(), ctrl: false, shift: false, alt: false }
+    }
+
+    /// A chord that is nothing but modifiers, such as the default hold for
+    /// geometry snapping.
+    pub fn modifiers(ctrl: bool, shift: bool, alt: bool) -> Chord {
+        Chord { key: String::new(), ctrl, shift, alt }
+    }
+
+    /// Whether this chord is modifiers alone. Such a chord can never be produced
+    /// by a key event, so everything that resolves a key press has to skip it,
+    /// and everything that reads a held state has to accept it.
+    pub fn is_modifier_only(&self) -> bool {
+        self.key.is_empty()
     }
 
     pub fn ctrl(key: &str) -> Chord {
@@ -271,16 +292,23 @@ impl Chord {
 
 impl fmt::Display for Chord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Joined rather than each modifier written with a trailing `+`, so a
+        // modifier-only chord reads as `Ctrl`, not as `Ctrl+` with nothing after
+        // it -- and still round-trips through `from_str`.
+        let mut parts: Vec<&str> = Vec::new();
         if self.ctrl {
-            write!(f, "Ctrl+")?;
+            parts.push("Ctrl");
         }
         if self.alt {
-            write!(f, "Alt+")?;
+            parts.push("Alt");
         }
         if self.shift {
-            write!(f, "Shift+")?;
+            parts.push("Shift");
         }
-        write!(f, "{}", self.key)
+        if !self.key.is_empty() {
+            parts.push(&self.key);
+        }
+        write!(f, "{}", parts.join("+"))
     }
 }
 
@@ -298,7 +326,9 @@ impl FromStr for Chord {
                 key => chord.key = key.to_string(),
             }
         }
-        if chord.key.is_empty() {
+        // Modifiers alone are a binding of their own (issue 77); a chord with
+        // neither a key nor a modifier is not.
+        if chord.key.is_empty() && !(chord.ctrl || chord.shift || chord.alt) {
             return Err(format!("no key in binding {text:?}"));
         }
         Ok(chord)
@@ -436,6 +466,19 @@ pub struct Keymap {
 /// honour, and quietly loading half of it is the worse answer.
 const RETIRED: [&str; 2] = ["toggle_projection", "toggle_ghosts"];
 
+/// Bindings an older build wrote as *its* default, which this build has moved.
+///
+/// A keymap file is written back on any change, so every map saved by an older
+/// build carries that build's whole default set whether or not the user ever
+/// chose any of it. Left alone, a changed default would reach only people with
+/// no keymap file -- which is nobody who has used the program. So a binding that
+/// is still exactly the old default is moved to the new one, and a binding the
+/// user has since changed is left alone, because that one they did choose.
+///
+/// Snap-to-geometry moved from V to Ctrl on its own when a modifier became
+/// bindable at all (issue 77).
+const MOVED_DEFAULTS: [(Command, &str, &str); 1] = [(Command::SnapToGeometry, "V", "Ctrl")];
+
 fn bindings_from_names<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<Command, Chord>, D::Error> {
     use serde::de::IntoDeserializer;
     let named: BTreeMap<String, Chord> = BTreeMap::deserialize(deserializer)?;
@@ -522,9 +565,11 @@ impl Keymap {
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
         set(ToggleHandleFrame, Chord::key("X"));
-        // Held during a drag to snap to geometry; V for vertex, and free in
-        // every preset.
-        set(SnapToGeometry, Chord::key("V"));
+        // Held during a drag to snap to geometry. Ctrl on its own (issue 77):
+        // it is the modifier a hand already rests on for a precise gesture, it
+        // needs no letter key to be free in any preset, and a chord that is
+        // modifiers alone can now be bound at all.
+        set(SnapToGeometry, Chord::modifiers(true, false, false));
 
         let nav = match preset {
             Preset::Default => {
@@ -661,6 +706,12 @@ impl Keymap {
     pub fn from_text(text: &str) -> Result<Keymap, String> {
         let mut map: Keymap = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let preset = Keymap::from_preset(map.preset);
+        for (command, was, now) in MOVED_DEFAULTS {
+            let (was, now) = (Chord::from_str(was)?, Chord::from_str(now)?);
+            if map.bindings.get(&command) == Some(&was) && map.conflict(command, &now).is_none() {
+                map.bindings.insert(command, now);
+            }
+        }
         for command in Command::ALL {
             if !map.bindings.contains_key(command) {
                 if let Some(chord) = preset.bindings.get(command) {
@@ -837,6 +888,35 @@ mod tests {
     }
 
     #[test]
+    fn a_default_that_has_moved_is_carried_over_but_a_chosen_binding_is_not() {
+        // Issue 77: snap-to-geometry moved from V to Ctrl. Every keymap file
+        // written before that carries "V" -- as the old default, not as anyone's
+        // choice -- so loading one has to move it, or the new default reaches
+        // only a user who has never saved a keymap.
+        let stored = r#"{
+          "preset": "default",
+          "bindings": { "snap_to_geometry": "V" },
+          "nav": { "orbit": { "button": "right" }, "pan": { "button": "right", "shift": true },
+                   "invert_zoom": false }
+        }"#;
+        let map = Keymap::from_text(stored).unwrap();
+        assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::modifiers(true, false, false)));
+
+        // A binding the user has since changed is theirs, and is left alone.
+        let chosen = stored.replace("\"V\"", "\"Shift+K\"");
+        let map = Keymap::from_text(&chosen).unwrap();
+        assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::shift("K")));
+
+        // And the move never takes a chord out from under another command.
+        let taken = stored
+            .replace("\"snap_to_geometry\": \"V\"", "\"snap_to_geometry\": \"V\", \"toggle_bounding_box\": \"Ctrl\"");
+        let map = Keymap::from_text(&taken).unwrap();
+        assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::key("V")));
+        assert_eq!(map.binding(Command::ToggleBoundingBox), Some(&Chord::modifiers(true, false, false)));
+        assert!(map.self_conflicts().is_empty());
+    }
+
+    #[test]
     fn an_imported_map_missing_a_command_falls_back_to_its_preset() {
         let mut map = Keymap::default();
         map.unbind(Command::FrameAll);
@@ -875,6 +955,48 @@ mod tests {
         assert_eq!(map.shortcut_text(Command::Save), "Ctrl+S");
         assert_eq!(map.shortcut_text(Command::SaveAs), "Ctrl+Shift+S");
         assert_eq!(map.shortcut_text(Command::Delete), "Delete");
+    }
+
+    #[test]
+    fn a_modifier_on_its_own_is_a_chord() {
+        // Issue 77: Ctrl, Shift and Alt used to be unbindable because a chord
+        // was required to carry a key as well.
+        let ctrl = Chord::modifiers(true, false, false);
+        assert!(ctrl.is_modifier_only());
+        assert_eq!(ctrl.to_string(), "Ctrl");
+        assert_eq!(Chord::from_str("Ctrl").unwrap(), ctrl);
+
+        let all = Chord::modifiers(true, true, true);
+        assert_eq!(all.to_string(), "Ctrl+Alt+Shift");
+        assert_eq!(Chord::from_str(&all.to_string()).unwrap(), all);
+
+        // A key chord is still not modifier-only, and nothing at all is still an
+        // error.
+        assert!(!Chord::ctrl("S").is_modifier_only());
+        assert!(Chord::from_str("").is_err());
+        assert!(Chord::from_str("Ctrl+").is_err());
+    }
+
+    #[test]
+    fn a_modifier_only_chord_is_a_binding_of_its_own_not_a_prefix() {
+        // Ctrl and Ctrl+S are different bindings: holding Ctrl to snap must not
+        // collide with Save, in either direction.
+        let map = Keymap::default();
+        assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::modifiers(true, false, false)));
+        assert_eq!(map.command_for(&Chord::ctrl("S")), Some(Command::Save));
+        assert_eq!(map.command_for(&Chord::modifiers(true, false, false)), Some(Command::SnapToGeometry));
+        assert!(map.self_conflicts().is_empty());
+        assert_eq!(map.shortcut_text(Command::SnapToGeometry), "Ctrl");
+    }
+
+    #[test]
+    fn a_keymap_holding_a_modifier_only_binding_round_trips() {
+        let mut map = Keymap::default();
+        map.set(Command::ToggleBoundingBox, Chord::modifiers(false, true, true), true).unwrap();
+        let text = map.to_text();
+        assert!(text.contains("\"snap_to_geometry\": \"Ctrl\""), "{text}");
+        assert!(text.contains("\"toggle_bounding_box\": \"Alt+Shift\""), "{text}");
+        assert_eq!(Keymap::from_text(&text).unwrap(), map);
     }
 
     #[test]

@@ -27,6 +27,16 @@ pub enum FeatureKind {
     Vertex,
     EdgeMidpoint,
     FaceCentre,
+    /// Anywhere along an edge, rather than one of its notable points. Not a
+    /// feature the list carries -- it is what catching an edge *between* its
+    /// ends reports (issue 78), so a measurement can start part-way along one.
+    Edge,
+    /// Where a world axis passes through a body's surface. The axes run through
+    /// the model whether or not any geometry corner is there, and a corner of the
+    /// model on an axis is exactly the place a measurement usually wants, so the
+    /// crossings are offered as corners and the run between two of them as an
+    /// edge (issue 78).
+    AxisCrossing,
 }
 
 impl FeatureKind {
@@ -35,6 +45,8 @@ impl FeatureKind {
             FeatureKind::Vertex => "vertex",
             FeatureKind::EdgeMidpoint => "edge midpoint",
             FeatureKind::FaceCentre => "face centre",
+            FeatureKind::Edge => "edge",
+            FeatureKind::AxisCrossing => "axis crossing",
         }
     }
 }
@@ -45,10 +57,27 @@ impl FeatureKind {
 pub const CATCH_PIXELS: f32 = 12.0;
 
 /// One catchable point on a body, in world space.
+///
+/// An edge feature also carries the edge it is the middle of, so a pointer that
+/// is near the edge but nowhere near its midpoint can still catch the edge --
+/// at the place along it that is actually being pointed at (issue 78).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Feature {
     pub point: Vec3,
     pub kind: FeatureKind,
+    pub span: Option<(Vec3, Vec3)>,
+}
+
+impl Feature {
+    /// A feature that is a point and nothing more.
+    pub fn point(point: Vec3, kind: FeatureKind) -> Feature {
+        Feature { point, kind, span: None }
+    }
+
+    /// An edge, reported at its midpoint and carrying its two ends.
+    pub fn edge(a: Vec3, b: Vec3) -> Feature {
+        Feature { point: (a + b) * 0.5, kind: FeatureKind::EdgeMidpoint, span: Some((a, b)) }
+    }
 }
 
 /// Every snap feature of one body's mesh: its vertices, its edge midpoints and
@@ -93,8 +122,7 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
         if interior(tris) {
             continue;
         }
-        let mid = (welded.positions[a as usize] + welded.positions[b as usize]) * 0.5;
-        features.push(Feature { point: mid, kind: FeatureKind::EdgeMidpoint });
+        features.push(Feature::edge(welded.positions[a as usize], welded.positions[b as usize]));
         corner_indices.push(a);
         corner_indices.push(b);
     }
@@ -102,10 +130,8 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     corner_indices.dedup();
     // Vertices before the edge midpoints already pushed: the whole list is
     // re-ordered vertices-first below, so the exact kind wins a screen-space tie.
-    let mut vertices: Vec<Feature> = corner_indices
-        .iter()
-        .map(|&i| Feature { point: welded.positions[i as usize], kind: FeatureKind::Vertex })
-        .collect();
+    let mut vertices: Vec<Feature> =
+        corner_indices.iter().map(|&i| Feature::point(welded.positions[i as usize], FeatureKind::Vertex)).collect();
 
     // Coplanar triangles joined into one face, so a box's two triangles per side
     // report one centre in the middle rather than two triangle centroids.
@@ -142,7 +168,7 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     let mut centres: Vec<Feature> = sums
         .values()
         .filter(|(_, area)| *area > 1e-9)
-        .map(|(sum, area)| Feature { point: *sum * (1.0 / area), kind: FeatureKind::FaceCentre })
+        .map(|(sum, area)| Feature::point(*sum * (1.0 / area), FeatureKind::FaceCentre))
         .collect();
 
     // Deterministic order within each kind, so two runs offer features in the
@@ -160,6 +186,142 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     out.append(&mut features);
     out.append(&mut centres);
     out
+}
+
+/// Where the world axes pass through one body, as features (issue 78).
+///
+/// The origin axes run through the model, and the place a measurement usually
+/// wants -- where the axis leaves the body, where its centreline meets a face --
+/// is often not a corner of the mesh at all, so nothing was there to catch. Each
+/// crossing of the surface becomes a corner, and the run between an entry and
+/// the exit after it becomes an edge, so the axis inside a body can be caught
+/// anywhere along it exactly like a real edge.
+///
+/// `axes` says which of X, Y and Z are shown: an axis the user has turned off is
+/// not on screen, and snapping to something invisible is a jump with no cause.
+pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
+    let Some((lo, hi)) = mesh.bounds() else { return Vec::new() };
+    let mut out = Vec::new();
+    for (axis, &shown) in axes.iter().enumerate() {
+        if !shown {
+            continue;
+        }
+        // The line is the axis itself, so it can only meet this body if the body
+        // straddles zero on the other two coordinates.
+        let others = [(axis + 1) % 3, (axis + 2) % 3];
+        let range = |i: usize| (component(lo, i), component(hi, i));
+        if others.iter().any(|&i| {
+            let (l, h) = range(i);
+            l > 1e-9 || h < -1e-9
+        }) {
+            continue;
+        }
+        let mut dir = Vec3::ZERO;
+        set_component(&mut dir, axis, 1.0);
+
+        // Every crossing along the whole line, in order, so entry and exit come
+        // out as a pair.
+        let mut hits: Vec<f64> = Vec::new();
+        for tri in &mesh.indices {
+            let (a, b, c) =
+                (mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]);
+            if let Some(t) = line_triangle(Vec3::ZERO, dir, a, b, c) {
+                hits.push(t);
+            }
+        }
+        hits.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // A triangulated surface reports the shared edge of two triangles twice,
+        // and a face the axis grazes reports a run of hits at one place.
+        hits.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+
+        let points: Vec<Vec3> = hits.iter().map(|&t| dir * t).collect();
+        out.extend(points.iter().map(|&p| Feature::point(p, FeatureKind::AxisCrossing)));
+        // Entry, exit, entry, exit: a closed surface is crossed an even number of
+        // times, and the odd pairs are the runs *outside* the body. An odd count
+        // means the mesh is not closed there, and then only the crossings
+        // themselves are trustworthy.
+        if points.len().is_multiple_of(2) {
+            for pair in points.chunks_exact(2) {
+                if (pair[1] - pair[0]).length() > 1e-9 {
+                    out.push(Feature::edge(pair[0], pair[1]));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn component(v: Vec3, axis: usize) -> f64 {
+    match axis {
+        0 => v.x,
+        1 => v.y,
+        _ => v.z,
+    }
+}
+
+fn set_component(v: &mut Vec3, axis: usize, value: f64) {
+    match axis {
+        0 => v.x = value,
+        1 => v.y = value,
+        _ => v.z = value,
+    }
+}
+
+/// Where an infinite line meets a triangle. The same intersection the picker
+/// uses, without its "ahead of the origin only" rule: an axis runs both ways
+/// from the origin and crosses bodies on both sides of it.
+fn line_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f64> {
+    let e1 = b - a;
+    let e2 = c - a;
+    let h = dir.cross(e2);
+    let det = e1.dot(h);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let s = origin - a;
+    let u = s.dot(h) * inv;
+    if !(-1e-9..=1.0 + 1e-9).contains(&u) {
+        return None;
+    }
+    let q = s.cross(e1);
+    let v = dir.dot(q) * inv;
+    if v < -1e-9 || u + v > 1.0 + 1e-9 {
+        return None;
+    }
+    Some(e2.dot(q) * inv)
+}
+
+/// The nearest point on the segment `a`..`b` to `cursor`, measured on screen,
+/// and how far away that landed (issue 78).
+///
+/// An edge is a line, not the three points on it the feature list carries, and
+/// "measure from here along this edge" is an ordinary thing to want. The whole
+/// segment is projected and the cursor is dropped onto it in screen space, so
+/// what is caught is the place actually being pointed at. `None` when either end
+/// falls off screen, where the projection cannot be trusted.
+pub fn nearest_on_edge(
+    a: Vec3,
+    b: Vec3,
+    project: impl Fn(Vec3) -> Option<egui::Pos2>,
+    cursor: egui::Pos2,
+    max_pixels: f32,
+) -> Option<(Vec3, f32)> {
+    let (sa, sb) = (project(a)?, project(b)?);
+    let along = sb - sa;
+    let length2 = along.length_sq();
+    if length2 < 1e-9 {
+        return None;
+    }
+    let t = ((cursor - sa).dot(along) / length2).clamp(0.0, 1.0);
+    let distance = (sa + along * t - cursor).length();
+    if distance > max_pixels {
+        return None;
+    }
+    // The screen parameter is used in the model: a perspective divide would put
+    // the point slightly off along the edge, but the viewport is orthographic
+    // (issue 26), where the two parameters are the same number.
+    Some((a + (b - a) * t as f64, distance))
 }
 
 /// The feature nearest the cursor on screen, within `max_pixels`, together with
@@ -239,8 +401,8 @@ mod tests {
     #[test]
     fn the_nearest_feature_on_screen_is_the_one_under_the_cursor_within_reach() {
         let features = vec![
-            Feature { point: Vec3::new(0.0, 0.0, 0.0), kind: FeatureKind::Vertex },
-            Feature { point: Vec3::new(100.0, 0.0, 0.0), kind: FeatureKind::Vertex },
+            Feature::point(Vec3::new(0.0, 0.0, 0.0), FeatureKind::Vertex),
+            Feature::point(Vec3::new(100.0, 0.0, 0.0), FeatureKind::Vertex),
         ];
         // A trivial orthographic-ish projection: X and Y straight to screen.
         let project = |p: Vec3| Some(egui::pos2(p.x as f32, p.y as f32));
@@ -253,5 +415,96 @@ mod tests {
         // Nothing within reach returns nothing, which is how a drag knows to fall
         // back to the grid.
         assert!(nearest_on_screen(&features, project, egui::pos2(50.0, 50.0), 10.0).is_none());
+    }
+
+    #[test]
+    fn an_edge_feature_carries_the_edge_it_is_the_middle_of() {
+        // Issue 78: catching an edge anywhere along it needs its two ends, not
+        // just the midpoint the feature reports.
+        let mesh = primitives::box_mesh(10.0, 10.0, 10.0);
+        let features = features_of(&mesh);
+        let edges: Vec<&Feature> = features.iter().filter(|f| f.kind == FeatureKind::EdgeMidpoint).collect();
+        assert_eq!(edges.len(), 12);
+        for edge in edges {
+            let (a, b) = edge.span.expect("an edge midpoint without its edge");
+            assert!(((a + b) * 0.5 - edge.point).length() < 1e-9, "the midpoint is not the middle of its span");
+            assert!((a - b).length() > 1.0, "a degenerate edge");
+        }
+        // The other kinds are points and nothing more.
+        assert!(features.iter().filter(|f| f.kind != FeatureKind::EdgeMidpoint).all(|f| f.span.is_none()));
+    }
+
+    #[test]
+    fn a_point_part_way_along_an_edge_is_caught_at_the_place_pointed_at() {
+        let project = |p: Vec3| Some(egui::pos2(p.x as f32, p.y as f32));
+        let (a, b) = (Vec3::new(0.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
+
+        // A quarter of the way along, three pixels off the line: the caught point
+        // is the one under the pointer, not either end and not the midpoint.
+        let (at, distance) = nearest_on_edge(a, b, project, egui::pos2(25.0, 3.0), 10.0).unwrap();
+        assert!((at - Vec3::new(25.0, 0.0, 0.0)).length() < 1e-6, "caught {at:?}");
+        assert!((distance - 3.0).abs() < 1e-4);
+
+        // Past an end it clamps to that end rather than running off the edge.
+        let (at, _) = nearest_on_edge(a, b, project, egui::pos2(-40.0, 0.0), 100.0).unwrap();
+        assert!((at - a).length() < 1e-6, "the catch ran off the end of the edge");
+
+        // Out of reach across the line catches nothing.
+        assert!(nearest_on_edge(a, b, project, egui::pos2(25.0, 40.0), 10.0).is_none());
+    }
+
+    #[test]
+    fn the_axes_cross_a_body_at_points_that_can_be_caught() {
+        // Issue 78: a box straddling the origin is crossed by all three axes, and
+        // each crossing is a corner with the run between a pair as an edge.
+        let mesh = primitives::box_mesh(20.0, 10.0, 6.0);
+        let features = axis_features(&mesh, [true, true, true]);
+
+        let crossings: Vec<&Feature> = features.iter().filter(|f| f.kind == FeatureKind::AxisCrossing).collect();
+        assert_eq!(crossings.len(), 6, "three axes in and out of the box: {crossings:?}");
+        for expected in [
+            Vec3::new(10.0, 0.0, 0.0),
+            Vec3::new(-10.0, 0.0, 0.0),
+            Vec3::new(0.0, 5.0, 0.0),
+            Vec3::new(0.0, -5.0, 0.0),
+            Vec3::new(0.0, 0.0, 3.0),
+            Vec3::new(0.0, 0.0, -3.0),
+        ] {
+            assert!(
+                crossings.iter().any(|f| (f.point - expected).length() < 1e-6),
+                "no crossing at {expected:?} among {crossings:?}"
+            );
+        }
+
+        // The run through the body is an edge, so it can be caught along its
+        // length like any other.
+        let runs: Vec<&Feature> = features.iter().filter(|f| f.kind == FeatureKind::EdgeMidpoint).collect();
+        assert_eq!(runs.len(), 3, "one run per axis");
+        assert!(runs.iter().all(|f| (f.point - Vec3::ZERO).length() < 1e-6), "a run's middle is not the origin");
+        let lengths: Vec<f64> = runs
+            .iter()
+            .map(|f| {
+                let (a, b) = f.span.unwrap();
+                (a - b).length()
+            })
+            .collect();
+        for expected in [20.0, 10.0, 6.0] {
+            assert!(lengths.iter().any(|l| (l - expected).abs() < 1e-6), "no run of {expected}: {lengths:?}");
+        }
+    }
+
+    #[test]
+    fn an_axis_that_is_turned_off_or_misses_the_body_offers_nothing() {
+        let mesh = primitives::box_mesh(20.0, 10.0, 6.0);
+        // Only Z is shown: only Z's two crossings and its one run.
+        let features = axis_features(&mesh, [false, false, true]);
+        assert_eq!(features.iter().filter(|f| f.kind == FeatureKind::AxisCrossing).count(), 2);
+        assert!(features.iter().all(|f| f.point.x.abs() < 1e-9 && f.point.y.abs() < 1e-9));
+        assert!(axis_features(&mesh, [false; 3]).is_empty());
+
+        // A body the axes miss entirely has no crossings, rather than points
+        // conjured somewhere near it.
+        let away = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 100.0, 100.0));
+        assert!(axis_features(&away, [true, true, true]).is_empty());
     }
 }

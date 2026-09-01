@@ -1,8 +1,9 @@
 //! The gestures a pointer has to perform, performed.
 //!
-//! Everything in here drives `App::ui` -- the same panels, in the same order,
-//! that the running window draws -- against a headless context, and replays real
-//! pointer events over it with `egui_kittest`. Nothing calls the arithmetic
+//! Everything in here drives `App::handle_shortcuts` and then `App::ui` -- the
+//! same keyboard pass and the same panels, in the same order, that the running
+//! window draws -- against a headless context, and replays real pointer events
+//! over it with `egui_kittest`. Nothing calls the arithmetic
 //! underneath a gesture directly; that is covered elsewhere (`dock::drop_index`,
 //! `ui::scrub_delta`, `view::cube_face_at`, `panel_properties::scrub_param`).
 //! What is covered *here* is the wiring in between, which those tests cannot
@@ -79,6 +80,10 @@ fn harness_stepping(name: &str, step_dt: f32, setup: impl FnOnce(&mut App)) -> H
                 crate::theme::apply(ctx);
                 themed = true;
             }
+            // The same order the running window draws in: the frame's keyboard
+            // is read before the panels are laid out, so a test can hold a key
+            // as well as move a pointer.
+            app.handle_shortcuts(ctx);
             app.ui(ctx);
         },
         app,
@@ -966,4 +971,122 @@ fn every_value_field_stays_inside_the_properties_panel_at_any_width() {
             "the dimension field at {width} px left no room for its unit: {dimension:?} against {position:?}"
         );
     }
+}
+
+// -- issue 77: a modifier on its own is a binding ------------------------------
+
+#[test]
+fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
+    // Issue 77: Ctrl, Shift and Alt could not be bound at all, because a chord
+    // needed a key beside them. Driven through the window because that is where
+    // the rule lives: the toolkit reports no key event for a modifier, so the
+    // press has to be read off the modifier state frame by frame.
+    let mut harness = harness("modifier-only-binding");
+    harness
+        .state_mut()
+        .keymap
+        .set(
+            simple3d_core::keymap::Command::ToggleGrid,
+            simple3d_core::keymap::Chord::modifiers(false, false, true),
+            true,
+        )
+        .unwrap();
+    let before = harness.state().scene.settings.grid_visible;
+
+    // Alt down for a couple of frames, then up with nothing pressed under it.
+    modifiers(&mut harness, egui::Modifiers::ALT);
+    harness.step();
+    harness.step();
+    assert_eq!(harness.state().scene.settings.grid_visible, before, "the binding fired while the key was still down");
+    modifiers(&mut harness, egui::Modifiers::NONE);
+    harness.step();
+    assert_ne!(harness.state().scene.settings.grid_visible, before, "releasing the modifier did not fire its binding");
+
+    // The same modifier held under another key is a combination, and firing that
+    // must not also fire the modifier's own binding on the way out.
+    let grid = harness.state().scene.settings.grid_visible;
+    modifiers(&mut harness, egui::Modifiers::ALT);
+    key(&mut harness, egui::Key::J);
+    modifiers(&mut harness, egui::Modifiers::NONE);
+    harness.step();
+    assert_eq!(harness.state().scene.settings.grid_visible, grid, "a combination fired the modifier binding as well");
+}
+
+#[test]
+fn a_modifier_held_over_a_click_is_the_click_not_a_binding() {
+    // Ctrl+click adds to the selection, and must not also fire whatever Ctrl
+    // alone is bound to when the hand comes off the key.
+    let mut harness = harness("modifier-only-click");
+    harness
+        .state_mut()
+        .keymap
+        .set(
+            simple3d_core::keymap::Command::ToggleGrid,
+            simple3d_core::keymap::Chord::modifiers(true, false, false),
+            true,
+        )
+        .unwrap();
+    let before = harness.state().scene.settings.grid_visible;
+
+    let viewport = harness.state().viewport_rect.center();
+    modifiers(&mut harness, egui::Modifiers::COMMAND);
+    press(&mut harness, viewport);
+    release(&mut harness, viewport);
+    modifiers(&mut harness, egui::Modifiers::NONE);
+    harness.step();
+    assert_eq!(harness.state().scene.settings.grid_visible, before, "a Ctrl+click also fired the Ctrl binding");
+}
+
+// -- issue 78: the measure tool's own section in the property panel ------------
+
+#[test]
+fn the_measure_section_is_there_only_while_the_tool_is_out() {
+    use egui_kittest::kittest::Queryable;
+
+    // Issue 78: the span belongs in the property panel as numbers that can be
+    // typed -- and nowhere at all once the tool is put away. The section is
+    // found by the one control only it has; a label the panel merely draws is
+    // not in the accessibility tree to ask about.
+    let mut harness = harness("measure-section");
+    assert!(harness.query_by_label("Put the tool away").is_none(), "the section was there with the tool put away");
+
+    harness.state_mut().run(simple3d_core::keymap::Command::MeasureTool);
+    harness.step();
+    harness.step();
+    assert!(harness.query_by_label("Put the tool away").is_some(), "the tool is out and its section is not");
+
+    // The section is wired to the tool, not just drawn beside it.
+    harness.get_by_label("Put the tool away").click();
+    harness.step();
+    harness.step();
+    assert!(!harness.state().measure.active, "the section's own button did not put the tool away");
+    assert!(harness.query_by_label("Put the tool away").is_none(), "the section outlived the tool");
+}
+
+#[test]
+fn the_measure_section_shows_the_span_and_takes_it_back() {
+    use egui_kittest::kittest::Queryable;
+
+    // The ends are editable fields, so they are spin buttons in the panel: three
+    // for the start and three for the end, and they read what the tool holds.
+    let mut harness = harness("measure-fields");
+    harness.state_mut().run(simple3d_core::keymap::Command::MeasureTool);
+    harness.state_mut().measure.set_point(0, Vec3::new(1.0, 2.0, 3.0));
+    harness.state_mut().measure.set_point(1, Vec3::new(11.0, 2.0, 3.0));
+    harness.step();
+    harness.step();
+
+    let shown: Vec<String> = harness
+        .get_all_by_role(egui::accesskit::Role::SpinButton)
+        .filter_map(|n| n.value().map(|v| v.to_string()))
+        .collect();
+    for expected in ["1", "2", "3", "11"] {
+        assert!(shown.iter().any(|v| v == expected), "no field reads {expected}: {shown:?}");
+    }
+
+    // Clearing from the panel takes the span away without putting the tool away.
+    harness.get_by_label("Clear the span").click();
+    harness.step();
+    assert!(harness.state().measure.points.is_empty(), "the panel's Clear left the span in place");
+    assert!(harness.state().measure.active, "clearing the span also put the tool away");
 }

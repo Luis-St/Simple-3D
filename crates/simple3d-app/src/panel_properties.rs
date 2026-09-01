@@ -190,6 +190,15 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         // Everything the panel edits, primary last -- the same order the
         // selection itself is in, so "the one being edited" is unambiguous.
         let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
+        // The measure tool's own section, and only while it is out (issue 78):
+        // the span it is holding is what the panel is for at that moment, and
+        // with the tool put away there is nothing for the section to say. It
+        // comes first because it is what the user is doing, and it is here rather
+        // than in either branch below because a measurement has nothing to do
+        // with what happens to be selected.
+        if app.measure.active {
+            section(ui, "Measure", |ui| measure(app, ui));
+        }
         let Some(primary) = app.primary() else {
             document(app, ui);
             return;
@@ -290,22 +299,27 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         // centres rather than only to the grid step (issue 68). The hint names
         // the current hold key so the "while held" mode is not a mystery.
         let snap_key = app.keymap.shortcut_text(simple3d_core::keymap::Command::SnapToGeometry);
+        // The hold names itself on the closed box too, not only in the open
+        // list: the mode a user is *in* is the one they need the key for, and
+        // "while a key is held" without saying which is a riddle.
+        let snap_label = |mode: simple3d_core::config::SnapMode| {
+            if mode == simple3d_core::config::SnapMode::WhileHeld && !snap_key.is_empty() {
+                format!("{} ({snap_key})", mode.label())
+            } else {
+                mode.label().to_string()
+            }
+        };
         field_row(
             ui,
             "Snap to geometry",
             "Snap a drag to the vertices, edge midpoints and face centres of other bodies.",
             |ui| {
                 egui::ComboBox::from_id_salt("geometry-snap")
-                    .selected_text(theme::value(app.settings.geometry_snap.label()))
-                    .width(fits(ui, 170.0))
+                    .selected_text(theme::value(snap_label(app.settings.geometry_snap)))
+                    .width(fits(ui, 190.0))
                     .show_ui(ui, |ui| {
                         for option in simple3d_core::config::SnapMode::ALL {
-                            let text = if option == simple3d_core::config::SnapMode::WhileHeld {
-                                format!("{} ({snap_key})", option.label())
-                            } else {
-                                option.label().to_string()
-                            };
-                            ui.selectable_value(&mut app.settings.geometry_snap, option, text);
+                            ui.selectable_value(&mut app.settings.geometry_snap, option, snap_label(option));
                         }
                     });
             },
@@ -426,6 +440,109 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
         {
             app.cursor = None;
             app.status = Status::Info("3D cursor back at the origin".into());
+        }
+    });
+}
+
+/// The measure tool's span as numbers: both ends as editable fields, and the
+/// distance, per-axis delta and angles between them (issues 69, 78).
+///
+/// The ends are editable because a measurement is often *between* named places
+/// rather than between two things there is geometry to point at -- and because
+/// having clicked one end approximately, correcting it by a tenth of a
+/// millimetre should not mean clicking again and hoping.
+fn measure(app: &mut App, ui: &mut egui::Ui) {
+    let unit = app.unit();
+    let placed = app.measure.points.len();
+    for (index, label) in [(0_usize, "Start"), (1, "End")] {
+        let point = app.measure.points.get(index).copied();
+        // An end can be typed only once the start is down; before that it would
+        // be a point with nothing to measure to.
+        let enabled = index <= placed;
+        let mut components = match point {
+            Some(p) => [p.at.x, p.at.y, p.at.z],
+            None => [0.0; 3],
+        };
+        let mut changed = false;
+        let hover = match point.and_then(|p| p.kind) {
+            Some(kind) => format!("Caught the {} of a body. Type here to place it exactly.", kind.label()),
+            None if point.is_some() => "Click in the viewport to move it, or type it exactly.".to_string(),
+            None => "Click in the viewport to place it, or type it here.".to_string(),
+        };
+        field_row(ui, label, &hover, |ui| {
+            let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            for value in components.iter_mut() {
+                let mut shown = unit.from_mm(*value);
+                let field =
+                    egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
+                let response =
+                    ui.add_enabled_ui(enabled, |ui| ui.add_sized(egui::vec2(each, theme::metric::INPUT_ROW), field));
+                if response.inner.changed() {
+                    *value = unit.to_mm(shown);
+                    changed = true;
+                }
+            }
+            ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
+        });
+        if changed {
+            app.measure.set_point(index, Vec3::new(components[0], components[1], components[2]));
+        }
+    }
+
+    match app.measure.span() {
+        Some((a, b)) => {
+            let m = crate::app::Measurement::between(a.at, b.at);
+            let suffix = unit.suffix();
+            field_row(ui, "Distance", "", |ui| {
+                ui.add(
+                    egui::Label::new(theme::numeric(format!("{} {suffix}", format_length(m.distance, unit))))
+                        .selectable(false)
+                        .wrap(),
+                );
+            });
+            field_row(ui, "\u{0394}", "The span, axis by axis", |ui| {
+                ui.add(
+                    egui::Label::new(theme::numeric(format!(
+                        "{}, {}, {} {suffix}",
+                        format_length(m.delta.x, unit),
+                        format_length(m.delta.y, unit),
+                        format_length(m.delta.z, unit)
+                    )))
+                    .selectable(false)
+                    .wrap(),
+                );
+            });
+            field_row(ui, "Angle", "Above the ground plane, and around it from +X towards +Y", |ui| {
+                ui.add(
+                    egui::Label::new(theme::numeric(format!(
+                        "{}\u{00B0} incline   {}\u{00B0} bearing",
+                        format_angle(m.inclination_deg),
+                        format_angle(m.bearing_deg)
+                    )))
+                    .selectable(false)
+                    .wrap(),
+                );
+            });
+        }
+        None => {
+            ui.add(
+                egui::Label::new(theme::hint(
+                    "Click two features in the viewport. The pointer catches corners, edges, face centres and \
+                     where the axes cross a body.",
+                ))
+                .selectable(false),
+            );
+        }
+    }
+    field_row(ui, "", "", |ui| {
+        // Named for what it clears: the panel has another Clear in it, and a
+        // button that only says "Clear" beside a set of numbers is a question.
+        if ui.add_enabled(placed > 0, egui::Button::new("Clear the span")).clicked() {
+            app.measure.clear();
+            app.status = Status::Info("Measurement cleared".into());
+        }
+        if ui.button("Put the tool away").clicked() {
+            app.toggle_measure();
         }
     });
 }
