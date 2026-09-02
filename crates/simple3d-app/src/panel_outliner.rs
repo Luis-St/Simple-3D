@@ -891,6 +891,10 @@ pub(crate) fn finish_drag(app: &mut App) {
     app.edit("Reparent", None);
     match app.scene.reparent_many(&carried, target.parent, target.index) {
         Ok(()) => {
+            // A pattern that has just gained its first child can now be measured,
+            // so its stock spacing is replaced by one the shapes stand clear at
+            // (issue 67).
+            app.size_fresh_patterns();
             // The load stays selected, in the order it landed in: a drag that
             // dropped the rest of the selection on arrival would make moving
             // several nodes twice in a row impossible.

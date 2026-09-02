@@ -582,6 +582,21 @@ impl Drag {
     ///
     /// Both then shift the node by half the change, in the direction of the face
     /// being dragged, so the opposite face stays exactly where it was.
+    /// Resize so the face this drag is pulling lands on `target` (issue 68).
+    ///
+    /// The same one-dimensional answer a face handle already gives, with the
+    /// cursor's place along the axis replaced by the snap target's: the face
+    /// moves outward by however far the target is from where the face began, and
+    /// nothing else about the body changes. Returns the extent it reached, or
+    /// `None` when this drag has no single face to place -- a corner moves three
+    /// at once, and there is no one face to put on a point.
+    pub fn resize_face_to(&mut self, scene: &mut Scene, target: Vec3, symmetric: bool) -> Option<f64> {
+        let Handle::ResizeFace(axis, positive) = self.handle else { return None };
+        let anchor = self.gizmo.own.point(self.gizmo.face_centre(axis, positive));
+        let outward = (target - anchor).dot(self.gizmo.axes[axis]) * if positive { 1.0 } else { -1.0 };
+        self.size_axis(scene, axis, outward, symmetric, positive)
+    }
+
     fn size_axis(&self, scene: &mut Scene, axis: usize, outward: f64, symmetric: bool, positive: bool) -> Option<f64> {
         let scaling = self.gizmo.mode == Mode::Scale;
         let start_extent = self.start_extent(axis);

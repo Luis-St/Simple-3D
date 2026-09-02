@@ -709,6 +709,19 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         format!("{copies} copies of {children} shape{}.", if children == 1 { "" } else { "s" })
     };
     ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+    // The numbers above are not the only way in: every one of them that places
+    // a copy has a handle in the viewport, on the copy it places (issue 67).
+    let grips = app.pattern_grips(id).len();
+    if grips > 0 {
+        ui.add(
+            egui::Label::new(theme::hint(format!(
+                "{grips} handle{} in the viewport lay{} this out by eye.",
+                if grips == 1 { "" } else { "s" },
+                if grips == 1 { "s" } else { "" }
+            )))
+            .selectable(false),
+        );
+    }
     // Said out loud rather than silently drawing fewer: a grid multiplies its
     // three counts, so it is easy to ask for a hundred million copies without
     // meaning to, and a pattern that quietly stopped short would just look wrong.

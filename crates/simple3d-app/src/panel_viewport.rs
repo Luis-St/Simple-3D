@@ -38,11 +38,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             } else {
                 place_cursor(app, ui, &response, &view);
                 let view = app.current_view();
-                // A pattern's spacing handle takes the pointer before the
-                // manipulator, so dragging it lays the copies out rather than
+                // A pattern's lay-out grips take the pointer before the
+                // manipulator, so dragging one lays the copies out rather than
                 // moving the whole pattern (issue 67).
-                let spacing_owned = pattern_spacing_interact(app, ui, &view);
-                let owned = spacing_owned || manipulate(app, ui, &response, &view);
+                let grips_owned = pattern_grips_interact(app, ui, &view);
+                let owned = grips_owned || manipulate(app, ui, &response, &view);
                 // Picking is *outside* the manipulator, because it has to work when
                 // there is no manipulator: with nothing selected there is no primary
                 // node and no gizmo, and while this lived inside `manipulate` the
@@ -331,50 +331,94 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
     owned
 }
 
-/// Where a pattern's spacing handle sits in the world, and along which direction
-/// it slides: at the last copy of its first run, out along that run.
-/// `None` when the selected node is not a pattern with a run to lay out.
+/// The lay-out grips of the selected pattern, if it is one (issue 67).
 ///
-/// The run is the pattern's whole step vector, not just its X component. Placing
-/// the handle along the first axis alone left it hanging off in space as soon as
-/// a linear pattern stepped diagonally -- the doc said "at the last copy" and it
-/// visibly was not. A run with no length yet has no direction of its own, so it
-/// borrows the first axis, which is where a fresh pattern steps anyway.
-fn pattern_spacing_handle(app: &App, _view: &View) -> Option<(Vec3, Vec3, Vec3, u32)> {
-    use simple3d_core::primitive::ParamsExt;
-    let id = app.primary()?;
-    let (count_key, _) = app.pattern_spacing_keys(id)?;
-    let count = app.scene.node(id).params()?.int(count_key).max(1);
-    if count < 2 {
-        return None; // one copy has no spacing to drag
+/// Every kind offers its own: the spacing and the number of copies along each
+/// straight run, the radius and the span of a ring, the radius, rise and length
+/// of a helix, the radii of a spiral. A mirror offers none -- it has neither a
+/// distance nor a count -- and neither does a pattern whose numbers put every
+/// grip on its own origin, where the move manipulator already is.
+fn pattern_grips(app: &App) -> Vec<crate::app::PatternGrip> {
+    match app.primary() {
+        Some(id) => app.pattern_grips(id),
+        None => Vec::new(),
     }
-    let gizmo = app.gizmo_for(id)?;
-    let step = app.pattern_step_vector(id)?;
-    let run = gizmo.axes[0] * step.x + gizmo.axes[1] * step.y + gizmo.axes[2] * step.z;
-    let direction = if run.length() > 1e-9 { run * (1.0 / run.length()) } else { gizmo.axes[0] };
-    let handle = gizmo.origin + run * (count - 1) as f64;
-    Some((handle, gizmo.origin, direction, count))
 }
 
-/// Drag the spacing handle to set a pattern's step so the last copy follows the
-/// pointer. Returns whether it owns the pointer this frame.
-fn pattern_spacing_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
-    let Some((handle, origin, direction, count)) = pattern_spacing_handle(app, view) else { return false };
+/// Drag a pattern's grips to lay it out by eye. Returns whether the pointer is
+/// theirs this frame.
+///
+/// Each grip is its own widget, keyed by its label rather than its position in
+/// the list: dragging the "Copies" grip *adds* copies, which can add a "Spacing"
+/// grip beside it, and an index would shift out from under the drag that caused
+/// it.
+fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
     let Some(id) = app.primary() else { return false };
-    let Some((screen, _)) = view.project(handle) else { return false };
-    let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(16.0));
-    let response = ui.interact(rect, ui.id().with((id, "pattern-spacing")), egui::Sense::drag());
-    if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-    }
-    if response.dragged() {
-        if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
-            if let Some(along) = view.ray_axis(cursor, origin, direction) {
-                app.set_pattern_step(id, along / (count - 1) as f64, mods_from(ui));
+    let mut owned = false;
+    for grip in pattern_grips(app) {
+        let Some((screen, _)) = view.project(grip.at) else { continue };
+        let rect = egui::Rect::from_center_size(screen, egui::Vec2::splat(16.0));
+        let response = ui
+            .interact(rect, ui.id().with((id, "pattern-grip", grip.label)), egui::Sense::drag())
+            .on_hover_text(grip.label);
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(if grip.turn.is_some() {
+                egui::CursorIcon::Grabbing
+            } else {
+                egui::CursorIcon::ResizeHorizontal
+            });
+        }
+        if response.dragged() {
+            if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
+                if let Some(value) = app.pattern_grip_value(&grip, view, cursor) {
+                    app.set_pattern_grip(id, grip.label, value, mods_from(ui));
+                }
             }
         }
+        owned |= response.dragged() || response.hovered();
     }
-    response.dragged() || response.hovered()
+    owned
+}
+
+/// Draw the selected pattern's lay-out grips: a leader line from the centre out
+/// to each one, and a diamond on the grip itself. A span grip is drawn as an arc
+/// round the ring it sets instead, since what it measures is the turn and not a
+/// distance.
+fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View) {
+    for grip in pattern_grips(app) {
+        let Some((at, _)) = view.project(grip.at) else { continue };
+        match grip.turn {
+            Some((axis, zero, radius)) => {
+                let tangent = axis.cross(zero);
+                let mut arc: Vec<egui::Pos2> = Vec::new();
+                // The whole way round to the grip, in one-degree steps, so the
+                // arc shows the span the copies actually fill.
+                let end = grip.at - grip.from;
+                let span = end.dot(tangent).atan2(end.dot(zero)).to_degrees();
+                let span = if span <= 0.0 { span + 360.0 } else { span };
+                let steps = (span.abs().ceil() as usize).max(1);
+                for i in 0..=steps {
+                    let a = (span * i as f64 / steps as f64).to_radians();
+                    let p = grip.from + zero * (radius * a.cos()) + tangent * (radius * a.sin());
+                    if let Some((screen, _)) = view.project(p) {
+                        arc.push(screen);
+                    }
+                }
+                painter.add(egui::Shape::line(arc, egui::Stroke::new(1.0_f32, token::ACCENT.gamma_multiply(0.6))));
+            }
+            None => {
+                if let Some((from, _)) = view.project(grip.from) {
+                    painter.line_segment([from, at], egui::Stroke::new(1.0_f32, token::ACCENT.gamma_multiply(0.6)));
+                }
+            }
+        }
+        let r = 6.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![at + egui::vec2(0.0, -r), at + egui::vec2(r, 0.0), at + egui::vec2(0.0, r), at + egui::vec2(-r, 0.0)],
+            token::ACCENT,
+            egui::Stroke::NONE,
+        ));
+    }
 }
 
 /// The measure tool's pointer handling: a click drops a point, snapped to the
@@ -474,19 +518,9 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
         }
     }
 
-    // A pattern's spacing handle: a diamond at the last copy of its first run,
-    // dragged to lay the copies out (issue 67).
-    if let Some((handle, origin, _, _)) = pattern_spacing_handle(app, view) {
-        if let (Some((a, _)), Some((b, _))) = (view.project(origin), view.project(handle)) {
-            painter.line_segment([a, b], egui::Stroke::new(1.0_f32, token::ACCENT.gamma_multiply(0.6)));
-            let r = 6.0;
-            painter.add(egui::Shape::convex_polygon(
-                vec![b + egui::vec2(0.0, -r), b + egui::vec2(r, 0.0), b + egui::vec2(0.0, r), b + egui::vec2(-r, 0.0)],
-                token::ACCENT,
-                egui::Stroke::NONE,
-            ));
-        }
-    }
+    // A pattern's lay-out grips: a diamond on each of the numbers that place its
+    // copies, dragged to lay them out by eye rather than by typing (issue 67).
+    draw_pattern_grips(app, &painter, view);
 
     if app.measure.active {
         draw_measure(app, ui, &painter, view);

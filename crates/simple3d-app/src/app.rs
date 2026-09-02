@@ -18,7 +18,7 @@ use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
 use simple3d_core::undo::History;
 use simple3d_core::unit::Unit;
 use simple3d_export::Format;
-use simple3d_geom::Vec3;
+use simple3d_geom::{Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -192,6 +192,32 @@ type Snaps = std::rc::Rc<BodySnaps>;
 /// crossings (issue 78) and the plane marks are part of the answer, and the
 /// targets themselves.
 type CachedSnaps = ((usize, u8), Snaps);
+
+/// One of a pattern's lay-out grips (issue 67), placed in the world.
+///
+/// [`simple3d_core::pattern::grips`] works in the pattern's own frame, which is
+/// where the copies are laid out; this is the same grip after the node's
+/// transform, ready to be projected, hit-tested and dragged.
+#[derive(Clone, Copy, Debug)]
+pub struct PatternGrip {
+    /// The grip's own name, which is what a drag holds on to across frames: an
+    /// index would shift under the drag itself, since adding a copy can add a
+    /// grip.
+    pub label: &'static str,
+    /// Where the grip sits, in world space.
+    pub at: Vec3,
+    /// The world line it slides along: a point on it, and a unit direction.
+    pub from: Vec3,
+    pub dir: Vec3,
+    /// How many world millimetres one millimetre of the pattern's own frame
+    /// covers along that line, so a scaled pattern still reads back the numbers
+    /// its property editor shows.
+    pub scale: f64,
+    /// For a span grip: the world axis it turns about, the world direction zero
+    /// degrees points in, and how far out the grip rides. `None` for a grip that
+    /// slides along a line.
+    pub turn: Option<(Vec3, Vec3, f64)>,
+}
 
 pub struct App {
     pub scene: Scene,
@@ -973,7 +999,7 @@ impl App {
         // that face snapped to them out of nowhere. So the same question the axes
         // have always been asked, "does the picture show this?", is asked of
         // every feature.
-        let shown = |feature: &crate::snap::Feature| self.shows(view, feature.point);
+        let shown = |feature: &crate::snap::Feature, _: &Mesh| self.shows(view, feature.point);
         if let Some((feature, _)) = self.nearest_feature_where(view, cursor, &[], shown) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
         }
@@ -991,13 +1017,43 @@ impl App {
     /// catch radius. Shared by the measure tool and by geometry snapping during a
     /// drag; `exclude` drops the bodies a drag is itself moving so it never snaps
     /// to the very thing it is carrying.
+    ///
+    /// Only the features the body actually turns towards the camera: a corner
+    /// round the back of a solid is not one anybody is aiming at, however near
+    /// the pointer its projection lands, and a drag that jumped onto one moved
+    /// the body for no reason the picture gave. The measure tool asks the same
+    /// question of the whole scene; a drag asks it of the target's own body
+    /// only, because the scene it would have to ask describes where the dragged
+    /// body *was* -- `Evaluated` lags a drag by a frame -- and the body being
+    /// carried would spend the whole gesture covering the very thing it is being
+    /// aimed at.
     pub fn nearest_feature_excluding(
         &self,
         view: &crate::view::View,
         cursor: egui::Pos2,
         exclude: &[NodeId],
     ) -> Option<(crate::snap::Feature, f32)> {
-        self.nearest_feature_where(view, cursor, exclude, |_| true)
+        self.nearest_feature_where(view, cursor, exclude, |feature, mesh| self.faces_the_camera(view, feature, mesh))
+    }
+
+    /// Whether a feature is on the side of its own body that the camera can see.
+    ///
+    /// Wireframe fills nothing and hides nothing, so there every feature is as
+    /// catchable as the line that shows it.
+    fn faces_the_camera(&self, view: &crate::view::View, feature: &crate::snap::Feature, mesh: &Mesh) -> bool {
+        if self.settings.display_mode == DisplayMode::Wireframe {
+            return true;
+        }
+        let Some((screen, _)) = view.project(feature.point) else { return false };
+        let (origin, dir) = view.ray(screen);
+        let reach = (feature.point - origin).dot(dir);
+        match crate::pick::ray_mesh(mesh, origin, dir) {
+            // A point on the surface is its own hit, so the comparison leaves
+            // room for one -- the same hundredth of a millimetre `in_clear_view`
+            // allows, far below anything a placement cares about.
+            Some(hit) => hit >= reach - 1e-2,
+            None => true,
+        }
     }
 
     /// The same, for a caller that will not take every feature -- the measure
@@ -1014,20 +1070,22 @@ impl App {
         view: &crate::view::View,
         cursor: egui::Pos2,
         exclude: &[NodeId],
-        accept: impl Fn(&crate::snap::Feature) -> bool,
+        accept: impl Fn(&crate::snap::Feature, &Mesh) -> bool,
     ) -> Option<(crate::snap::Feature, f32)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut near: Vec<(crate::snap::Feature, f32)> = Vec::new();
+        let mut near: Vec<(crate::snap::Feature, f32, NodeId)> = Vec::new();
         for (&id, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(id) || exclude.contains(&id) {
                 continue;
             }
             let snaps = self.snaps_of(id, mesh);
             let found = crate::snap::near_on_screen(&snaps.features, project, cursor, crate::snap::CATCH_PIXELS);
-            near.extend(found.into_iter().map(|(feature, distance)| (*feature, distance)));
+            near.extend(found.into_iter().map(|(feature, distance)| (*feature, distance, id)));
         }
         near.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-        near.into_iter().find(|(feature, _)| accept(feature))
+        near.into_iter()
+            .find(|(feature, _, id)| self.evaluated.node_meshes.get(id).is_some_and(|mesh| accept(feature, mesh)))
+            .map(|(feature, distance, _)| (feature, distance))
     }
 
     /// Whether a point can be seen from where the camera is: nothing solid
@@ -1228,6 +1286,31 @@ impl App {
         offsets
     }
 
+    /// Snap a resize so the face being pulled lands on the nearest feature of
+    /// another body under the pointer (issue 68). Returns the world point it
+    /// caught, or `None` when nothing was in reach, in which case the grid
+    /// resize stands.
+    ///
+    /// A resize is a drag, and it snapped only to the grid step. Pulling a plate
+    /// out until it meets the block beside it is the same gesture as sliding it
+    /// there, and it wants the same answer. Only a *face* handle: a corner moves
+    /// three faces at once, and there is no one face to put on a point.
+    fn apply_resize_snap(
+        &mut self,
+        id: NodeId,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+        mods: gizmo::Mods,
+    ) -> Option<(Vec3, f64)> {
+        let exclude = self.drag_subtree(id);
+        let (target, _) = self.nearest_feature_excluding(view, cursor, &exclude)?;
+        // Taken out and put back so the drag can write the scene the app owns.
+        let mut drag = self.drag.take()?;
+        let applied = drag.resize_face_to(&mut self.scene, target.point, mods.symmetric);
+        self.drag = Some(drag);
+        applied.map(|extent| (target.point, extent))
+    }
+
     /// Snap the dragged node so one of its own features lands on the nearest
     /// feature of another body under the pointer (issue 68). Returns the world
     /// point it snapped onto, or `None` when nothing was in reach, in which case
@@ -1377,6 +1460,8 @@ impl App {
             self.status = Status::Warning("Nothing could be pasted".into());
             return;
         }
+        // A pattern pasted into can now be measured (issue 67).
+        self.size_fresh_patterns();
         // Left selected, so a nudge or a drag can follow immediately.
         self.selection = created;
         self.on_selection_changed();
@@ -1486,69 +1571,137 @@ impl App {
         }
     }
 
-    /// The parameter keys a pattern's viewport spacing handle drives: its count,
-    /// and the step components that make up the run between copies -- one per
-    /// axis for a linear pattern, whose run can point anywhere, and the single
-    /// column step for a grid, whose first run is along its own X. `None` for a
-    /// kind with no straight run to lay out by dragging (issue 67).
-    pub fn pattern_spacing_keys(&self, id: NodeId) -> Option<(&'static str, &'static [&'static str])> {
-        let node = self.scene.get(id)?;
-        if !node.is_pattern() {
-            return None;
-        }
-        match node.params()?.get("kind").copied().map(|v| v.as_u32()).unwrap_or(0) {
-            0 => Some(("count", &["step_x", "step_y", "step_z"])), // Linear
-            1 => Some(("grid_x", &["grid_step_x"])),               // Grid, along its columns
-            _ => None,
-        }
-    }
-
-    /// The run a pattern's copies step along, in the node's own frame: the step
-    /// components the handle drives, read back as a vector.
-    pub fn pattern_step_vector(&self, id: NodeId) -> Option<Vec3> {
-        use simple3d_core::primitive::ParamsExt;
-        let (_, keys) = self.pattern_spacing_keys(id)?;
-        let params = self.scene.get(id)?.params()?;
-        let mut step = Vec3::ZERO;
-        for (axis, key) in keys.iter().enumerate() {
-            match axis {
-                0 => step.x = params.num(key),
-                1 => step.y = params.num(key),
-                _ => step.z = params.num(key),
-            }
-        }
-        Some(step)
-    }
-
-    /// Set a pattern's step from a drag, coalesced into one undo step so the
-    /// whole drag is a single "spacing" edit.
+    /// Every lay-out grip the pattern `id` offers, in world space (issue 67).
     ///
-    /// The whole run is scaled together, so dragging the handle of a pattern that
-    /// steps diagonally lengthens the diagonal rather than straightening it onto
-    /// X. The length is rounded to the document's move step, because every other
-    /// drag in the viewport is -- a handle that alone produced 7.0359 mm under a
-    /// 1 mm step was the odd one out.
-    pub fn set_pattern_step(&mut self, id: NodeId, along: f64, mods: gizmo::Mods) {
-        let Some((_, keys)) = self.pattern_spacing_keys(id) else { return };
-        let Some(step) = self.pattern_step_vector(id) else { return };
-        let length = step.length();
-        // The direction to lengthen along: the run's own, or the first axis when
-        // there is no run yet to take a direction from.
-        let dir = if length > 1e-9 { step * (1.0 / length) } else { Vec3::new(1.0, 0.0, 0.0) };
-        let wanted = mods.snap(along.max(0.0), self.move_snap());
-        self.edit("Pattern spacing", Some(&format!("pattern-step:{id}")));
-        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            let scaled = dir * wanted;
-            for (axis, key) in keys.iter().enumerate() {
-                let value = match axis {
-                    0 => scaled.x,
-                    1 => scaled.y,
-                    _ => scaled.z,
+    /// Empty for anything that is not a pattern, and for a mirror, which has no
+    /// distance and no count to lay out. The pattern's own frame is what places
+    /// them -- not the handle frame, which the user may have switched to world:
+    /// a grip marks a copy the pattern actually makes, and those turn with the
+    /// node.
+    pub fn pattern_grips(&self, id: NodeId) -> Vec<PatternGrip> {
+        let Some(node) = self.scene.get(id) else { return Vec::new() };
+        if !node.is_pattern() {
+            return Vec::new();
+        }
+        let Some(params) = node.params() else { return Vec::new() };
+        let Some(gizmo) = self.gizmo_for(id) else { return Vec::new() };
+        let own = gizmo.own;
+        simple3d_core::pattern::grips(params)
+            .into_iter()
+            .map(|grip| {
+                let along = own.vector(grip.dir);
+                let scale = along.length().max(1e-9);
+                let turn = match grip.drive {
+                    simple3d_core::pattern::Drive::Angle { axis, .. } => {
+                        let radial = simple3d_core::pattern::radial_axis(axis);
+                        let mut zero = Vec3::ZERO;
+                        match radial {
+                            0 => zero.x = 1.0,
+                            1 => zero.y = 1.0,
+                            _ => zero.z = 1.0,
+                        }
+                        Some((along * (1.0 / scale), own.vector(zero).normalized(), grip.radius))
+                    }
+                    _ => None,
                 };
-                params.insert((*key).to_string(), simple3d_core::primitive::ParamValue::Length(value));
+                PatternGrip {
+                    label: grip.label,
+                    at: own.point(grip.at),
+                    from: own.point(grip.from),
+                    dir: along * (1.0 / scale),
+                    scale,
+                    turn,
+                }
+            })
+            .collect()
+    }
+
+    /// What the pointer is asking a grip for: a distance along its line, or --
+    /// for a span grip -- the angle it has been carried round to.
+    ///
+    /// Both come back in the pattern's own units, which is what its parameters
+    /// are written in, so a scaled pattern is read back at its own numbers
+    /// rather than the world's.
+    pub fn pattern_grip_value(&self, grip: &PatternGrip, view: &crate::view::View, cursor: egui::Pos2) -> Option<f64> {
+        match grip.turn {
+            Some((axis, zero, _)) => {
+                let at = view.ray_plane(cursor, grip.from, axis)?;
+                let radial = at - grip.from;
+                let tangent = axis.cross(zero);
+                let degrees = radial.dot(tangent).atan2(radial.dot(zero)).to_degrees();
+                // Round the back of the circle a span reads as the whole turn
+                // rather than as nothing: dragging past 359 degrees means "all
+                // the way", which is the number a full ring wants.
+                Some(if degrees < 0.0 { degrees + 360.0 } else { degrees })
             }
+            None => Some(view.ray_axis(cursor, grip.from, grip.dir)? / grip.scale),
+        }
+    }
+
+    /// Write what a grip was dragged to, coalesced into one undo step so the
+    /// whole drag is a single edit.
+    ///
+    /// The value is rounded the way every other viewport drag is -- to the
+    /// document's move step for a distance, to the rotation snap for a span --
+    /// because a handle that alone produced "7.0359 mm" under a 1 mm step was
+    /// the odd one out. A count rounds to whole copies on its own.
+    pub fn set_pattern_grip(&mut self, id: NodeId, label: &str, value: f64, mods: gizmo::Mods) {
+        let Some(params) = self.scene.get(id).and_then(|n| n.params()) else { return };
+        let Some(grip) = simple3d_core::pattern::grip(params, label) else { return };
+        let wanted = match grip.drive {
+            simple3d_core::pattern::Drive::Length { .. } => mods.snap(value, self.move_snap()),
+            simple3d_core::pattern::Drive::Angle { .. } => mods.snap(value, self.settings.rotate_snap_deg),
+            simple3d_core::pattern::Drive::Count { .. } => value,
+        };
+        self.edit("Pattern layout", Some(&format!("pattern-grip:{id}:{label}")));
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            simple3d_core::pattern::apply_grip(params, &grip, wanted);
         }
         self.touch();
+    }
+
+    /// Size a fresh pattern's spacing to what it holds, the moment it first
+    /// holds something (issue 67).
+    ///
+    /// The pattern *tool* measures the shapes it wraps, so making a pattern of a
+    /// 20 mm box gives a 30 mm step. A pattern made with nothing selected has
+    /// nothing to measure yet and keeps the stock numbers, so a 20 mm shape
+    /// dropped into it afterwards was repeated at exactly its own width and the
+    /// copies came out as one welded bar instead of three boxes standing clear.
+    ///
+    /// Only while the numbers are still untouched -- exactly the defaults a bare
+    /// pattern is born with -- so nothing typed into the property editor, and
+    /// nothing laid out with a grip, is ever overwritten under the user.
+    ///
+    /// The children are measured, not the pattern: asking the pattern measures
+    /// the repetition rather than the thing being repeated, and the spacing
+    /// derived from that comes out a whole run too large.
+    pub(crate) fn size_fresh_patterns(&mut self) {
+        let defaults = simple3d_core::pattern::default_params();
+        let fresh: Vec<NodeId> = self
+            .scene
+            .depth_first()
+            .into_iter()
+            .filter(|&id| {
+                let node = self.scene.node(id);
+                node.is_pattern() && !node.children.is_empty() && node.params() == Some(&defaults)
+            })
+            .collect();
+        for id in fresh {
+            let mut bounds: Option<(Vec3, Vec3)> = None;
+            for child in self.scene.node(id).children.clone() {
+                let Some((lo, hi)) = simple3d_core::eval::subtree_bounds(&self.scene, child) else { continue };
+                bounds = Some(match bounds {
+                    Some((l, h)) => (l.min(lo), h.max(hi)),
+                    None => (lo, hi),
+                });
+            }
+            let Some((lo, hi)) = bounds else { continue };
+            if let Some(node) = self.scene.get_mut(id) {
+                node.body =
+                    simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::params_for_size(hi - lo) };
+            }
+        }
     }
 
     /// The pattern creation tool (issue 67): wrap the selection in a pattern
@@ -1762,6 +1915,8 @@ impl App {
             self.status = Status::Warning("That shape is not in the palette".into());
             return;
         };
+        // A pattern that has just gained its first child can now be measured.
+        self.size_fresh_patterns();
         self.collapsed.remove(&parent);
         self.select_only(id);
         self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
@@ -1844,10 +1999,28 @@ impl App {
                     }
                     None => return,
                 };
-                // Geometry snapping (issue 68) rides on top of the grid drag, and
-                // only for a move: it overrides the position so one of the moved
-                // body's own features lands on a body under the pointer.
-                if self.snap_requested && matches!(handle, Handle::MoveAxis(_) | Handle::MovePlane(_)) {
+                // Geometry snapping (issue 68) rides on top of the grid drag: a
+                // move puts one of the carried body's own features on a body
+                // under the pointer, and a face resize puts the face it is
+                // pulling there. A rotation and a corner resize keep the grid --
+                // an angle has no feature to land on, and a corner has no single
+                // face to place.
+                if self.snap_requested && matches!(handle, Handle::ResizeFace(..)) {
+                    let caught = self.apply_resize_snap(id, view, cursor, mods);
+                    self.snap_indicator = caught.map(|(at, _)| at);
+                    // The readout the grid resize wrote describes the extent the
+                    // cursor asked for, which the snap has just overridden.
+                    if let (Some((_, extent)), Handle::ResizeFace(axis, _)) = (caught, handle) {
+                        let unit = self.scene.settings.unit;
+                        if let Some(drag) = self.drag.as_mut() {
+                            drag.readout = format!(
+                                "snap {} {}",
+                                gizmo::axis_name(axis),
+                                simple3d_core::unit::format_length(extent, unit)
+                            );
+                        }
+                    }
+                } else if self.snap_requested && matches!(handle, Handle::MoveAxis(_) | Handle::MovePlane(_)) {
                     self.snap_indicator = self.apply_geometry_snap(id, gizmo, handle, view, cursor);
                     // The readout beside the cursor is written by the grid drag
                     // and describes the move the snap has just overridden -- it
@@ -4423,6 +4596,18 @@ mod tests {
         assert!(app.scene.node(app.primary().unwrap()).is_pattern());
     }
 
+    /// The step vector a linear pattern is currently laid out along.
+    fn linear_run(app: &App, pat: NodeId) -> Vec3 {
+        use simple3d_core::primitive::ParamsExt;
+        let params = app.scene.node(pat).params().unwrap();
+        Vec3::new(params.num("step_x"), params.num("step_y"), params.num("step_z"))
+    }
+
+    /// The labels of the grips a pattern offers right now.
+    fn grip_labels(app: &App, pat: NodeId) -> Vec<&'static str> {
+        app.pattern_grips(pat).into_iter().map(|g| g.label).collect()
+    }
+
     #[test]
     fn a_linear_patterns_spacing_is_laid_out_by_a_handle_that_follows_the_kind() {
         use simple3d_core::primitive::ParamValue;
@@ -4430,22 +4615,111 @@ mod tests {
         let mut app = headless_app();
         app.run(Command::Pattern);
         let pat = app.primary().unwrap();
-        // Linear by default: the viewport handle drives its count and the three
-        // components of its run.
-        assert_eq!(app.pattern_spacing_keys(pat), Some(("count", &["step_x", "step_y", "step_z"][..])));
-        app.set_pattern_step(pat, 42.0, free);
+        // A grip is placed in the node's own world frame, which comes from the
+        // last evaluation, so a pattern has to have been evaluated once before it
+        // offers any.
+        app.reevaluate_for_test();
+        // Linear by default: a grip for the spacing between copies, and one for
+        // how many there are.
+        assert_eq!(grip_labels(&app, pat), vec!["Spacing", "Copies"]);
+        app.set_pattern_grip(pat, "Spacing", 84.0, free);
+        // The spacing grip sits at the *last* copy, so the distance it is dragged
+        // to is divided across the gaps: 84 over two gaps is a 42 mm step.
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(42.0)));
         app.reevaluate_for_test();
         draw_one_frame(&mut app);
 
-        // A kind with no straight run -- a mirror -- offers no spacing handle.
+        // A kind with nothing to lay out -- a mirror, which is a plane and two
+        // copies -- offers no grips at all.
         app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(3));
-        assert_eq!(app.pattern_spacing_keys(pat), None);
+        assert!(grip_labels(&app, pat).is_empty());
 
         // Negative drags cannot push the step below zero.
         app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(0));
-        app.set_pattern_step(pat, -5.0, free);
+        app.set_pattern_grip(pat, "Spacing", -5.0, free);
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(0.0)));
+    }
+
+    #[test]
+    fn every_kind_that_places_copies_offers_grips_to_place_them_with() {
+        // Issue 67: the pattern was to have "a creation tool of its own for
+        // laying one out rather than only a list of numbers in the property
+        // editor". Only the linear and grid kinds ever had a viewport handle;
+        // the four others -- circular and mirror among the three the issue names,
+        // and the helix and spiral it asks for besides -- had none at all.
+        use simple3d_core::primitive::ParamValue;
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        app.reevaluate_for_test();
+        let wanted: [(u32, &[&str]); 6] = [
+            (0, &["Spacing", "Copies"]),
+            (1, &["Column spacing", "Columns", "Row spacing", "Rows", "Layers"]),
+            (2, &["Radius", "Span"]),
+            (3, &[]),
+            (4, &["Radius", "Rise", "Copies", "Turn per copy"]),
+            (5, &["Start radius", "Radius per copy", "Copies", "Turn per copy"]),
+        ];
+        for (kind, labels) in wanted {
+            app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(kind));
+            assert_eq!(grip_labels(&app, pat), labels.to_vec(), "kind {kind}");
+            app.reevaluate_for_test();
+            draw_one_frame(&mut app);
+        }
+    }
+
+    #[test]
+    fn dragging_the_copies_grip_lays_out_how_many_there_are() {
+        // The other half of laying a pattern out by eye: the count follows the
+        // pointer, at the spacing already set, instead of being typed.
+        use simple3d_core::primitive::ParamsExt;
+        let free = gizmo::Mods { free: true, ..Default::default() };
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        app.reevaluate_for_test();
+        let step = linear_run(&app, pat).length();
+        assert!(step > 1e-9);
+
+        // The grip is one step past the last copy, so dragging it to five steps
+        // out asks for five copies.
+        app.set_pattern_grip(pat, "Copies", step * 5.0, free);
+        assert_eq!(app.scene.node(pat).params().unwrap().int("count"), 5);
+        // A part-step lands on the nearer whole copy rather than on a fraction.
+        app.set_pattern_grip(pat, "Copies", step * 2.4, free);
+        assert_eq!(app.scene.node(pat).params().unwrap().int("count"), 2);
+        // Dragged back past the origin it stops at one copy -- the original --
+        // rather than at none or at a negative count.
+        app.set_pattern_grip(pat, "Copies", -step * 4.0, free);
+        assert_eq!(app.scene.node(pat).params().unwrap().int("count"), 1);
+        // And the whole drag is one undo step, however many frames it took.
+        app.reevaluate_for_test();
+        draw_one_frame(&mut app);
+    }
+
+    #[test]
+    fn a_rings_span_is_laid_out_by_carrying_its_grip_round() {
+        // A ring has no outward run to drag copies along, so what lays it out is
+        // its radius and the arc its copies fill.
+        use simple3d_core::primitive::{ParamValue, ParamsExt};
+        let free = gizmo::Mods { free: true, ..Default::default() };
+        let mut app = headless_app();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        app.scene.get_mut(pat).unwrap().params_mut().unwrap().insert("kind".into(), ParamValue::Choice(2));
+        app.reevaluate_for_test();
+
+        app.set_pattern_grip(pat, "Radius", 45.0, free);
+        assert!((app.scene.node(pat).params().unwrap().num("circ_radius") - 45.0).abs() < 1e-9);
+        app.set_pattern_grip(pat, "Span", 90.0, free);
+        assert!((app.scene.node(pat).params().unwrap().num("circ_span") - 90.0).abs() < 1e-9);
+        // The span grip rides outside the copies, so a full turn does not put it
+        // on top of the radius grip, where neither could be picked out.
+        let grips = app.pattern_grips(pat);
+        let radius = grips.iter().find(|g| g.label == "Radius").unwrap().at;
+        let span = grips.iter().find(|g| g.label == "Span").unwrap().at;
+        app.set_pattern_grip(pat, "Span", 360.0, free);
+        assert!((radius - span).length() > 1.0, "the span grip sits on the radius grip");
     }
 
     #[test]
@@ -4483,10 +4757,13 @@ mod tests {
             params.insert("step_x".into(), ParamValue::Length(30.0));
             params.insert("step_y".into(), ParamValue::Length(40.0));
         }
-        assert!((app.pattern_step_vector(pat).unwrap().length() - 50.0).abs() < 1e-9, "a 3-4-5 run");
+        app.reevaluate_for_test();
+        assert!((linear_run(&app, pat).length() - 50.0).abs() < 1e-9, "a 3-4-5 run");
 
-        app.set_pattern_step(pat, 100.0, free);
-        let step = app.pattern_step_vector(pat).unwrap();
+        // Two gaps between three copies, so a grip dragged to 200 sets a run of
+        // 100.
+        app.set_pattern_grip(pat, "Spacing", 200.0, free);
+        let step = linear_run(&app, pat);
         assert!((step.length() - 100.0).abs() < 1e-6, "the run was not doubled: {step:?}");
         assert!((step - Vec3::new(60.0, 80.0, 0.0)).length() < 1e-6, "the run was straightened onto X: {step:?}");
     }
@@ -4500,12 +4777,44 @@ mod tests {
         let mut app = headless_app();
         app.run(Command::Pattern);
         let pat = app.primary().unwrap();
+        app.reevaluate_for_test();
         app.scene.settings.snap_step = 1.0;
-        app.set_pattern_step(pat, 7.0359, gizmo::Mods::default());
+        // Two gaps: the distance is rounded, and the step is what it divides to.
+        app.set_pattern_grip(pat, "Spacing", 14.0718, gizmo::Mods::default());
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(7.0)));
         // Shift is the coarse step everywhere else, and here too.
-        app.set_pattern_step(pat, 24.0, gizmo::Mods { coarse: true, ..Default::default() });
+        app.set_pattern_grip(pat, "Spacing", 44.0, gizmo::Mods { coarse: true, ..Default::default() });
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(20.0)));
+    }
+
+    #[test]
+    fn a_pattern_made_empty_is_measured_the_moment_it_gains_a_shape() {
+        // Issue 67, from the open list: the tool sizes the spacing to the shapes
+        // it wraps, but a pattern made with nothing selected has nothing to
+        // measure and kept the stock 20 mm step -- exactly the width of the stock
+        // box -- so a box dropped into it afterwards was repeated face to face.
+        use simple3d_core::primitive::ParamsExt;
+        let mut app = headless_app();
+        app.clear_selection();
+        app.run(Command::Pattern);
+        let pat = app.primary().unwrap();
+        assert!(app.scene.node(pat).children.is_empty(), "the tool made a pattern with something in it");
+        let stock = app.scene.node(pat).params().unwrap().num("step_x");
+
+        app.add_node_at(pat, Some("box"), GroupOp::Union);
+        let step = app.scene.node(pat).params().unwrap().num("step_x");
+        let width = simple3d_core::eval::subtree_bounds(&app.scene, app.scene.node(pat).children[0])
+            .map(|(lo, hi)| hi.x - lo.x)
+            .unwrap();
+        assert!(step > width, "a {width}mm shape is repeated at {step}mm, so its copies touch or overlap");
+        assert!((step - stock).abs() > 1e-9, "the spacing was left at the stock number");
+        app.reevaluate_for_test();
+        assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
+
+        // But numbers the user has settled are never overwritten: a second shape
+        // dropped in leaves the spacing exactly as it stands.
+        app.add_node_at(pat, Some("box"), GroupOp::Union);
+        assert!((app.scene.node(pat).params().unwrap().num("step_x") - step).abs() < 1e-9);
     }
 
     #[test]
@@ -4527,7 +4836,7 @@ mod tests {
             app.select_only(id);
             app.run(Command::Pattern);
             let pat = app.primary().unwrap();
-            let step = app.pattern_step_vector(pat).unwrap();
+            let step = linear_run(&app, pat);
             assert!(step.x > w, "a {w}mm shape got a {}mm step, so its copies touch or overlap", step.x);
             // Scaled to the shape itself, not to what the pattern makes of it:
             // measuring the node *after* it became a pattern measured three
@@ -4650,6 +4959,101 @@ mod tests {
         let after = app.scene.node(a).position;
         assert!(after.z.abs() < 1e-9, "a Z-plane drag moved in Z: {after:?}");
         assert!(after.x.abs() > 1e-6 && after.y.abs() > 1e-6, "the drag did not snap at all: {after:?}");
+    }
+
+    #[test]
+    fn a_face_resize_snaps_the_face_it_pulls_onto_another_body() {
+        // Issue 68 asked for snapping "during drags ... not only to the grid
+        // increment it currently snaps to". A resize is a drag, and it snapped
+        // only to the grid: pulling a plate out until it meets the block beside
+        // it is the same gesture as sliding it there and wants the same answer.
+        let mut app = app_in(temp_config_dir("snap-resize"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        // Half a millimetre off the grid, so the grid step alone cannot reach it
+        // and only a snap can put the two faces together.
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.5, 0.0, 0.0);
+        app.select_only(a);
+        app.run(Command::ModeResize);
+        app.history.clear();
+        app.reevaluate_for_test();
+
+        // A corner on B's near face, on the plane a plate pulled out along +X
+        // has to reach. A corner rather than the face centre behind it, because
+        // a snap takes only what the picture shows and that face is turned away
+        // from the camera -- the same rule the measure tool follows.
+        let (lo, hi) = app.evaluated.node_meshes[&b].bounds().unwrap();
+        let face = Vec3::new(lo.x, lo.y, hi.z);
+
+        app.settings.geometry_snap = SnapMode::Always;
+        app.snap_requested = true;
+        drag_gesture(&mut app, a, Handle::ResizeFace(0, true), face, 3);
+        app.reevaluate_for_test();
+
+        // A's +X face now sits exactly on B's -X face: the two bodies meet,
+        // rather than stopping a millimetre short or running into each other.
+        let (_, hi) = app.evaluated.node_meshes[&a].bounds().unwrap();
+        assert!((hi.x - lo.x).abs() < 1e-6, "the pulled face landed at {} rather than on {}", hi.x, lo.x);
+        // B's face is at 33.5, which a drag rounded to the 1 mm step can never
+        // land on: reaching it is the snap and nothing else.
+        assert!((hi.x - 33.5).abs() < 1e-6, "{hi:?}");
+    }
+
+    #[test]
+    fn a_resize_without_snapping_asked_for_keeps_to_the_grid() {
+        let mut app = app_in(temp_config_dir("snap-resize-off"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.5, 0.0, 0.0);
+        app.select_only(a);
+        app.run(Command::ModeResize);
+        app.history.clear();
+        app.reevaluate_for_test();
+        let (lo, _) = app.evaluated.node_meshes[&b].bounds().unwrap();
+
+        app.settings.geometry_snap = SnapMode::Never;
+        app.snap_requested = false;
+        drag_gesture(&mut app, a, Handle::ResizeFace(0, true), Vec3::new(lo.x, 0.0, 0.0), 3);
+        app.reevaluate_for_test();
+        let (_, hi) = app.evaluated.node_meshes[&a].bounds().unwrap();
+        assert!((hi.x - lo.x).abs() > 0.4, "the resize snapped to the face with snapping off: {hi:?}");
+    }
+
+    #[test]
+    fn a_snapped_drag_never_catches_a_feature_round_the_back_of_its_own_body() {
+        // The measure tool takes only what the picture shows; a drag did not,
+        // and a corner on the far side of a solid projects into the middle of
+        // the face in front of it. Aiming at that face made the body jump onto a
+        // corner nothing on screen had drawn.
+        let mut app = app_in(temp_config_dir("snap-hidden"));
+        let root = app.scene.root();
+        let a = app.scene.add_primitive("box", root, 0).unwrap();
+        let b = app.scene.add_primitive("box", root, 1).unwrap();
+        app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
+        app.select_only(a);
+        app.history.clear();
+        app.reevaluate_for_test();
+        let view = app.current_view();
+
+        // Every catchable feature of B, and the ones the picture actually shows.
+        let features = crate::snap::features_of(&app.evaluated.node_meshes[&b]);
+        let hidden: Vec<Vec3> =
+            features.iter().filter(|f| !app.in_clear_view(&view, f.point)).map(|f| f.point).collect();
+        assert!(!hidden.is_empty(), "this view shows every corner of the box, so there is nothing to hide");
+
+        // Pointing straight at a hidden corner catches something else, or
+        // nothing -- never the corner behind the solid.
+        for point in hidden {
+            let cursor = view.project(point).unwrap().0;
+            if let Some((caught, _)) = app.nearest_feature_excluding(&view, cursor, &[a]) {
+                assert!(
+                    (caught.point - point).length() > 1e-6,
+                    "a drag caught {point:?}, which is round the back of the body"
+                );
+            }
+        }
     }
 
     #[test]
