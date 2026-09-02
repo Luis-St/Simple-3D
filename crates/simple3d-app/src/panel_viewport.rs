@@ -362,10 +362,15 @@ fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool
             .interact(rect, ui.id().with((id, "pattern-grip", grip.label)), egui::Sense::drag())
             .on_hover_text(grip.label);
         if response.hovered() || response.dragged() {
-            ui.ctx().set_cursor_icon(if grip.turn.is_some() {
-                egui::CursorIcon::Grabbing
-            } else {
-                egui::CursorIcon::ResizeHorizontal
+            ui.ctx().set_cursor_icon(match grip.turn {
+                // A turn is not a push or a pull, and there is no cursor for
+                // "round": the hand says the grip is held and the arc under it
+                // says which way it goes.
+                Some(_) => egui::CursorIcon::Grabbing,
+                // Every other grip slides along a line, and the pointer says
+                // which line: an arrow across the screen for a run that lies
+                // across it, and up the screen for one that stands up.
+                None => slide_cursor(screen_direction(view, grip.at, grip.dir)),
             });
         }
         if response.dragged() {
@@ -378,6 +383,40 @@ fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool
         owned |= response.dragged() || response.hovered();
     }
     owned
+}
+
+/// Which way a world direction runs on screen, at `at`. A zero vector where the
+/// line does not project -- behind the eye, or edge on.
+fn screen_direction(view: &View, at: Vec3, dir: Vec3) -> egui::Vec2 {
+    // A millimetre along the line is enough to take its bearing and short
+    // enough that the answer is about the line at `at` rather than about where
+    // it ends up.
+    match (view.project(at), view.project(at + dir)) {
+        (Some((a, _)), Some((b, _))) => b - a,
+        _ => egui::Vec2::ZERO,
+    }
+}
+
+/// The resize cursor that matches a direction on screen, so a handle says which
+/// way it will move before it is grabbed rather than always claiming to slide
+/// left and right.
+///
+/// The four cursors cover the half-circle in 45-degree sectors, and a line has
+/// no sense of direction -- pushing and pulling along it are the same
+/// gesture -- so the bearing is folded into that half-circle first. Screen y
+/// grows downward, which is why "right and down" is the north-west/south-east
+/// diagonal rather than the other one.
+pub fn slide_cursor(along: egui::Vec2) -> egui::CursorIcon {
+    if along.length_sq() < 1e-6 {
+        return egui::CursorIcon::ResizeHorizontal;
+    }
+    let bearing = along.y.atan2(along.x).to_degrees().rem_euclid(180.0);
+    match bearing {
+        b if !(22.5..157.5).contains(&b) => egui::CursorIcon::ResizeHorizontal,
+        b if b < 67.5 => egui::CursorIcon::ResizeNwSe,
+        b if b < 112.5 => egui::CursorIcon::ResizeVertical,
+        _ => egui::CursorIcon::ResizeNeSw,
+    }
 }
 
 /// Draw the selected pattern's lay-out grips: a leader line from the centre out
@@ -1035,6 +1074,37 @@ fn draw_gizmo(app: &App, painter: &egui::Painter, ui: &egui::Ui, gizmo: &Gizmo, 
 mod tests {
     use super::*;
     use simple3d_core::keymap::{Drag as NavDrag, Keymap};
+
+    #[test]
+    fn a_sliding_handle_points_the_way_it_actually_slides() {
+        use egui::CursorIcon::*;
+        // Every grip used to claim it slid left and right, whichever way its own
+        // run ran -- a pattern stepping straight up the screen still asked for
+        // the horizontal arrow.
+        let cursor = |x: f32, y: f32| slide_cursor(egui::vec2(x, y));
+        assert_eq!(cursor(1.0, 0.0), ResizeHorizontal);
+        assert_eq!(cursor(0.0, 1.0), ResizeVertical);
+        // Screen y grows downward, so right-and-down is the "\\" diagonal and
+        // right-and-up is the "/" one.
+        assert_eq!(cursor(1.0, 1.0), ResizeNwSe);
+        assert_eq!(cursor(1.0, -1.0), ResizeNeSw);
+
+        // A line has no sense of direction: pushing and pulling along it are the
+        // same gesture, so the opposite bearing gives the same cursor.
+        for (x, y) in [(1.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, -1.0), (3.0, 1.0), (-1.0, 4.0)] {
+            assert_eq!(cursor(x, y), cursor(-x, -y), "({x}, {y}) and its opposite disagree");
+        }
+
+        // The sectors meet where they should: just off the axis is still the
+        // axis, and past the halfway line is the diagonal.
+        assert_eq!(cursor(10.0, 3.0), ResizeHorizontal, "17 degrees off flat is still flat");
+        assert_eq!(cursor(10.0, 6.0), ResizeNwSe, "31 degrees off flat is the diagonal");
+        assert_eq!(cursor(3.0, 10.0), ResizeVertical);
+
+        // A line that does not project -- edge on, or off the screen -- falls
+        // back rather than picking a direction out of nothing.
+        assert_eq!(cursor(0.0, 0.0), ResizeHorizontal);
+    }
 
     fn only(button: MouseButton) -> [bool; 3] {
         [button == MouseButton::Left, button == MouseButton::Middle, button == MouseButton::Right]

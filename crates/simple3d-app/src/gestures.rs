@@ -615,6 +615,142 @@ fn a_drag_over_the_outliner_marks_the_row_it_would_land_in_while_it_is_still_hel
 }
 
 #[test]
+fn a_pattern_grip_points_the_way_it_slides_before_it_is_grabbed() {
+    // The grips all asked for the left-right arrow, whichever way their own run
+    // ran. Hovered here through the real viewport, so what is checked is the
+    // cursor the window would actually show.
+    let mut harness = harness_configured("grip-cursor", |app| {
+        app.run(simple3d_core::keymap::Command::Pattern);
+    });
+    let pattern = harness.state().primary().expect("the tool leaves the pattern selected");
+    harness.step();
+
+    // Where the spacing grip is on screen, for a run along a given axis.
+    let cursor_over = |harness: &mut Harness<'_, App>, step: Vec3| {
+        {
+            let params = harness.state_mut().scene.get_mut(pattern).unwrap().params_mut().unwrap();
+            for (key, value) in [("step_x", step.x), ("step_y", step.y), ("step_z", step.z)] {
+                params.insert(key.into(), simple3d_core::primitive::ParamValue::Length(value));
+            }
+        }
+        // The grips are placed in the node's evaluated frame, so the pattern has
+        // to have been evaluated once with these numbers before it offers any.
+        let app = harness.state_mut();
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+        // The camera was framed on one shape; a run of copies reaches past it,
+        // and a grip off the top of the viewport is a grip nothing can hover.
+        app.frame_all();
+        harness.step();
+        let at = harness
+            .state()
+            .pattern_grips(pattern)
+            .into_iter()
+            .find(|g| g.label == "Spacing")
+            .expect("a run of three copies has a spacing grip")
+            .at;
+        let screen = harness.state().current_view().project(at).expect("the grip is on screen").0;
+        move_to(harness, screen);
+        // Settled over several frames: a widget reports the frame it was drawn
+        // in, so the first frame after the pointer moves is still the old one.
+        for _ in 0..3 {
+            harness.step();
+        }
+        harness.output().platform_output.cursor_icon
+    };
+
+    // A run straight up the world stands up on screen too, whatever the camera
+    // is doing about the horizontal.
+    assert_eq!(
+        cursor_over(&mut harness, Vec3::new(0.0, 0.0, 20.0)),
+        egui::CursorIcon::ResizeVertical,
+        "a pattern stepping upward asked for a sideways arrow"
+    );
+    // And a run along the ground does not: whichever of the other three it is,
+    // it is not the vertical one.
+    let flat = cursor_over(&mut harness, Vec3::new(20.0, 0.0, 0.0));
+    assert_ne!(flat, egui::CursorIcon::ResizeVertical, "a run along the ground asked for the upright arrow");
+    assert!(
+        matches!(
+            flat,
+            egui::CursorIcon::ResizeHorizontal | egui::CursorIcon::ResizeNwSe | egui::CursorIcon::ResizeNeSw
+        ),
+        "a grip that slides asked for {flat:?}"
+    );
+}
+
+#[test]
+fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() {
+    // The palette's tiles add a shape at the document's insertion point when
+    // they are clicked. Dragged, they carry the shape into the outliner and the
+    // drop says which row it belongs on -- the same gesture, the same slab on
+    // the pointer and the same drop indicator as dragging a row already there.
+    let mut harness = harness("palette-drag");
+    let root = harness.state().scene.root();
+    let plate = harness.state().primary().expect("the starter shape is selected");
+    let group = harness.state_mut().scene.add_group(simple3d_core::scene::GroupOp::Union, root, 1);
+    harness.state_mut().select_only(plate);
+    harness.step();
+    harness.step();
+    let before = harness.state().scene.node(group).children.len();
+
+    let tile = rect_of(&harness, crate::panel_primitives::tile_id("sphere")).center();
+    press(&mut harness, tile);
+    move_to(&mut harness, tile + egui::vec2(0.0, 6.0));
+    // Settled over several frames: a response reports the frame it was drawn
+    // in, so the press only becomes a drag a frame or two after the move.
+    for _ in 0..4 {
+        harness.step();
+    }
+    assert_eq!(
+        harness.state().outliner_drag,
+        Some(crate::app::Carried::Shape("sphere")),
+        "dragging a tile did not pick the shape up"
+    );
+
+    // Over the group, held for several frames, because a response reports the
+    // frame it was drawn in.
+    for _ in 0..3 {
+        let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
+        move_to(&mut harness, onto);
+        harness.step();
+    }
+    let target = harness.state().drop_target.expect("a shape from the palette marked no drop target");
+    assert_eq!(target.into, Some(group), "the group under the pointer was not marked as what would take the drop");
+
+    let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
+    release(&mut harness, onto);
+    harness.step();
+    let app = harness.state();
+    assert_eq!(app.scene.node(group).children.len(), before + 1, "the shape did not land in the group");
+    let landed = *app.scene.node(group).children.last().unwrap();
+    assert_eq!(app.scene.node(landed).spec().map(|s| s.type_id), Some("sphere"), "the wrong shape landed");
+    assert_eq!(app.primary(), Some(landed), "the dropped shape was not left selected");
+    assert!(app.outliner_drag.is_none() && app.drop_target.is_none(), "the drag outlived the drop");
+
+    // And it undoes in one step, like every other add.
+    harness.state_mut().run(simple3d_core::keymap::Command::Undo);
+    harness.step();
+    assert_eq!(harness.state().scene.node(group).children.len(), before);
+}
+
+#[test]
+fn a_tile_still_adds_its_shape_when_it_is_merely_clicked() {
+    // The tile answers to both gestures, and teaching it to drag must not have
+    // cost it the click it had before.
+    let mut harness = harness("palette-click");
+    let root = harness.state().scene.root();
+    let before = harness.state().scene.node(root).children.len();
+
+    let tile = rect_of(&harness, crate::panel_primitives::tile_id("sphere")).center();
+    press(&mut harness, tile);
+    release(&mut harness, tile);
+    harness.step();
+    let app = harness.state();
+    assert_eq!(app.scene.node(root).children.len(), before + 1, "a click on a tile added nothing");
+    assert!(app.outliner_drag.is_none(), "a click left a drag running");
+}
+
+#[test]
 fn the_rows_a_drag_carries_stay_where_they_are_while_it_is_held() {
     // Issue 46. Taking the carried rows out of the tree re-flowed everything
     // below them the instant the drag began, so the gap the drop line pointed

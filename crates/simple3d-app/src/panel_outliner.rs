@@ -6,7 +6,7 @@
 //! failure -- are drawn on every row rather than revealed on hover, because a
 //! mark you have to go looking for cannot be scanned.
 
-use crate::app::{App, DropTarget, Status};
+use crate::app::{App, Carried, DropTarget, Status};
 use crate::icon::{self, Glyph};
 use crate::theme::{self, metric, token};
 use simple3d_core::keymap::Keymap;
@@ -132,8 +132,13 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
     let dragging = app.outliner_drag;
     // The whole load, worked out once a frame: every row it holds leaves the
     // tree, the legality of a drop is judged against all of it, and the ghost
-    // says how much is on the pointer (issue 43).
-    let carried: Vec<NodeId> = dragging.map(|source| app.dragged_nodes(source)).unwrap_or_default();
+    // says how much is on the pointer (issue 43). A shape dragged out of the
+    // palette carries no rows at all -- it is not in the tree yet -- which is
+    // why "is a drag running" is asked of `dragging` and never of this.
+    let carried: Vec<NodeId> = match dragging {
+        Some(Carried::Rows(source)) => app.dragged_nodes(source),
+        _ => Vec::new(),
+    };
     app.drop_target = None;
     let ctx = ui.ctx().clone();
     let (area, restore) = theme::list_scroll_area(ui);
@@ -160,7 +165,7 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
             // and faded, the tree holds still, the shadow says where the load
             // came from and the slab on the pointer says it is held (issue 46).
             let shadowed = carried.iter().any(|&source| id == source || app.scene.is_ancestor_of(source, id));
-            row(app, ui, id, &carried, shadowed, width);
+            row(app, ui, id, &carried, dragging.is_some(), shadowed, width);
         }
         // Dropping in the empty space below the tree means "at the end of the
         // root", which is otherwise awkward to reach.
@@ -178,8 +183,8 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
         }
     });
 
-    if let Some(source) = dragging {
-        drag_ghost(app, &ctx, source, carried.len());
+    if let Some(load) = dragging {
+        drag_ghost(app, &ctx, load, carried.len());
     }
 
     // Finish the drag on release, wherever the pointer ended up.
@@ -235,22 +240,34 @@ fn push_visible(app: &App, id: NodeId, out: &mut Vec<NodeId>) {
 /// the two together say the whole thing: the shadow is where the load came
 /// from, the slab is what is held and how much of it, and the drop line is
 /// where it would land.
-fn drag_ghost(app: &App, ctx: &egui::Context, source: NodeId, carried: usize) {
+fn drag_ghost(app: &App, ctx: &egui::Context, load: Carried, carried: usize) {
     let Some(pointer) = ctx.input(|i| i.pointer.hover_pos()) else { return };
-    if !app.scene.contains(source) {
-        return;
-    }
-    let node = app.scene.node(source);
-    // A whole selection travels under one slab, named for how much of it there
-    // is: eight slabs stacked on the pointer would cover the drop indicator
-    // they exist to point at.
-    let name = if carried > 1 { format!("{carried} nodes") } else { node.name.clone() };
-    let glyph = if node.is_pattern() {
-        Glyph::Pattern
-    } else if node.is_group() {
-        Glyph::Bracket
-    } else {
-        Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
+    let (glyph, name) = match load {
+        Carried::Rows(source) => {
+            if !app.scene.contains(source) {
+                return;
+            }
+            let node = app.scene.node(source);
+            let glyph = if node.is_pattern() {
+                Glyph::Pattern
+            } else if node.is_group() {
+                Glyph::Bracket
+            } else {
+                Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
+            };
+            // A whole selection travels under one slab, named for how much of
+            // it there is: eight slabs stacked on the pointer would cover the
+            // drop indicator they exist to point at.
+            let name = if carried > 1 { format!("{carried} nodes") } else { node.name.clone() };
+            (glyph, name)
+        }
+        // A shape out of the palette wears the same slab, so the two drags read
+        // as the one gesture: the tile it came from is the picture on it, and
+        // the shape's own name is the text.
+        Carried::Shape(type_id) => (
+            Glyph::for_primitive(type_id),
+            simple3d_core::primitive::lookup(type_id).map(|spec| spec.label).unwrap_or(type_id).to_string(),
+        ),
     };
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("outliner-drag-ghost")));
     let galley = painter.layout_no_wrap(
@@ -356,7 +373,7 @@ pub fn row_id(id: NodeId) -> egui::Id {
 /// is on the pointer.
 const DRAG_SHADOW: f32 = 0.38;
 
-fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowed: bool, width: f32) {
+fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], dragging: bool, shadowed: bool, width: f32) {
     let depth = app.scene.depth(id);
     let node = app.scene.node(id);
     let name = node.name.clone();
@@ -578,7 +595,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
             app.rename = Some((id, name.clone()));
         }
         if response.drag_started() && !is_root {
-            app.outliner_drag = Some(id);
+            app.outliner_drag = Some(Carried::Rows(id));
         }
     }
 
@@ -595,7 +612,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], shadowe
     // pointer crossed a gap (issue 48).
     let half_gap = ui.spacing().item_spacing.y / 2.0;
     let band = rect.expand2(egui::vec2(0.0, half_gap));
-    if !carried.is_empty() && !shadowed && ui.rect_contains_pointer(band) {
+    if dragging && !shadowed && ui.rect_contains_pointer(band) {
         let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(band.center());
         let fraction = ((pointer.y - band.top()) / band.height().max(1.0)).clamp(0.0, 1.0);
         let root = app.scene.root();
@@ -898,8 +915,17 @@ fn hover_text(
 }
 
 pub(crate) fn finish_drag(app: &mut App) {
-    let Some(source) = app.outliner_drag.take() else { return };
+    let Some(load) = app.outliner_drag.take() else { return };
     let Some(target) = app.drop_target.take() else { return };
+    // A shape from the palette is added where the indicator said, rather than
+    // moved: there is nothing in the tree yet to move.
+    let source = match load {
+        Carried::Rows(source) => source,
+        Carried::Shape(type_id) => {
+            app.add_dropped_primitive(type_id, target.parent, target.index);
+            return;
+        }
+    };
     let carried: Vec<NodeId> = app.dragged_nodes(source).into_iter().filter(|id| app.scene.contains(*id)).collect();
     if carried.is_empty() {
         return;

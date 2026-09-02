@@ -411,8 +411,27 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
 /// the accent rather than tinting it, so which tool is in force is legible at a
 /// glance and not a shade of guesswork.
 pub fn button(ui: &mut egui::Ui, glyph: Glyph, size: f32, active: bool, enabled: bool) -> egui::Response {
-    let (rect, response) =
-        ui.allocate_exact_size(Vec2::splat(size), if enabled { egui::Sense::click() } else { egui::Sense::hover() });
+    let id = ui.next_auto_id();
+    button_sensing(ui, id, glyph, size, active, enabled, egui::Sense::click())
+}
+
+/// The same, for a button that is also a drag source -- the palette's tiles,
+/// which are clicked to add a shape and dragged to place one in the tree.
+///
+/// `sense` is only reached when the button is enabled: a disabled one senses
+/// hovering, so it can still say why it is dim. `id` names the widget, so a
+/// test can find the tile for a given shape rather than counting buttons.
+pub fn button_sensing(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    glyph: Glyph,
+    size: f32,
+    active: bool,
+    enabled: bool,
+    sense: egui::Sense,
+) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), egui::Sense::hover());
+    let response = ui.interact(rect, id, if enabled { sense } else { egui::Sense::hover() });
     let painter = ui.painter();
     let radius = egui::CornerRadius::same(3);
     let colour = if !enabled {

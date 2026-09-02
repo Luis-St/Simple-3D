@@ -4,7 +4,7 @@
 //! two gestures and a read. A grid of silhouettes is one gesture and a glance,
 //! which is what the five-second budget for an operation actually needs.
 
-use crate::app::App;
+use crate::app::{App, Carried};
 use crate::icon::{self, Glyph};
 use crate::theme::{self, token};
 use simple3d_core::primitive;
@@ -12,6 +12,16 @@ use simple3d_core::scene::GroupOp;
 
 /// Side of one palette tile.
 const TILE: f32 = 26.0;
+
+/// A palette tile answers to both gestures: a click adds the shape, a drag
+/// carries it into the tree.
+const DRAG_OR_CLICK: egui::Sense = egui::Sense::CLICK.union(egui::Sense::DRAG);
+
+/// A tile's own name, so the gesture that grabs it is found by the shape it
+/// offers rather than by where it happens to sit in the grid.
+pub fn tile_id(type_id: &str) -> egui::Id {
+    egui::Id::new(("palette-tile", type_id))
+}
 
 /// How many tiles fit across a palette `width` wide, never fewer than one.
 /// Eight is the design's row length; a narrower dock gets fewer rather than a
@@ -140,10 +150,25 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
             ui.add_space(theme::metric::PANEL_PAD - theme::metric::GAP);
             for spec in chunk {
                 let hint = crate::app::insertion_hint(app);
-                let response = icon::button(ui, Glyph::for_primitive(spec.type_id), TILE, false, true)
-                    .on_hover_text(format!("{}\n{hint}", spec.label));
+                // Clicked, the tile adds a shape where the document says. Dragged,
+                // it carries the shape into the outliner and the drop says which
+                // row it belongs on -- the same gesture, and the same slab on the
+                // pointer, as dragging a row that is already there.
+                let response = icon::button_sensing(
+                    ui,
+                    tile_id(spec.type_id),
+                    Glyph::for_primitive(spec.type_id),
+                    TILE,
+                    false,
+                    true,
+                    DRAG_OR_CLICK,
+                )
+                .on_hover_text(format!("{}\n{hint}\nOr drag it into the outliner", spec.label));
                 if response.clicked() {
                     app.add_node(Some(spec.type_id), GroupOp::Union);
+                }
+                if response.drag_started() {
+                    app.outliner_drag = Some(Carried::Shape(spec.type_id));
                 }
             }
         });

@@ -219,6 +219,22 @@ pub struct PatternGrip {
     pub turn: Option<(Vec3, Vec3, f64)>,
 }
 
+/// What a drag over the outliner is holding.
+///
+/// Rows already in the tree are moved by it; a shape from the palette is not in
+/// the scene at all until the drop lands, so the two are told apart here rather
+/// than by whether the load happens to be empty.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Carried {
+    /// The row that was grabbed. What travels with it is `dragged_nodes`: the
+    /// whole selection when the grabbed row is part of it, that row alone
+    /// otherwise.
+    Rows(NodeId),
+    /// A primitive type from the palette, dropped into the tree rather than
+    /// added at the document's insertion point.
+    Shape(&'static str),
+}
+
 pub struct App {
     pub scene: Scene,
     pub history: History,
@@ -305,7 +321,7 @@ pub struct App {
     /// than in widget state so it survives a relayout, and so selecting a node
     /// from the viewport can open the groups above it.
     pub collapsed: std::collections::HashSet<NodeId>,
-    pub outliner_drag: Option<NodeId>,
+    pub outliner_drag: Option<Carried>,
     pub drop_target: Option<DropTarget>,
 
     /// The 3D cursor: where a new shape lands. `None` means the origin, which
@@ -1937,6 +1953,29 @@ impl App {
         self.status = Status::Info("Added an empty pattern: put shapes into it and it repeats them".into());
     }
 
+    /// Add a shape dragged out of the palette, exactly where the drop indicator
+    /// said it would land.
+    ///
+    /// Where a shape *added* lands is a document setting -- at the view centre,
+    /// beside the selection, at the 3D cursor -- and this keeps to it: the drag
+    /// says which row of the tree the shape belongs on, not where in the world
+    /// it sits, and the two are separate questions.
+    pub fn add_dropped_primitive(&mut self, type_id: &str, parent: NodeId, index: usize) {
+        self.edit("Add", None);
+        let Some(id) = self.scene.add_primitive(type_id, parent, index) else {
+            self.history.discard_last();
+            self.status = Status::Warning("That shape is not in the palette".into());
+            return;
+        };
+        let at = self.insertion_point_world(self.near_face_x(&[id]).unwrap_or(0.0));
+        if let Some(node) = self.scene.get_mut(id) {
+            node.position = at;
+        }
+        self.collapsed.remove(&parent);
+        self.select_only(id);
+        self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
+    }
+
     pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
         self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
         let (parent, index) = self.insertion_from_row(at);
@@ -2678,6 +2717,15 @@ impl App {
         panel_viewport::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         self.modals(ctx);
+        // A load let go of somewhere no drop could take it is simply put down.
+        // The outliner ends a drag it can see the end of, but a shape picked up
+        // from the palette can be released over a window with no outliner in it
+        // at all -- and a drag left running would have shown a phantom slab the
+        // next time the tree was opened.
+        if ctx.input(|i| !i.pointer.any_down()) {
+            self.outliner_drag = None;
+            self.drop_target = None;
+        }
     }
 }
 
@@ -3927,7 +3975,7 @@ mod tests {
         // not what the gesture was about.
         assert_eq!(app.dragged_nodes(second), vec![second]);
 
-        app.outliner_drag = Some(third);
+        app.outliner_drag = Some(Carried::Rows(third));
         app.drop_target = Some(DropTarget { parent: group, index: 0, into: Some(group) });
         crate::panel_outliner::finish_drag(&mut app);
         assert_eq!(app.scene.node(group).children, vec![plate, third]);
@@ -3952,7 +4000,7 @@ mod tests {
         app.selection = vec![group, inner];
         assert_eq!(app.dragged_nodes(inner), vec![group], "the child was torn out of the group carrying it");
 
-        app.outliner_drag = Some(group);
+        app.outliner_drag = Some(Carried::Rows(group));
         app.drop_target = Some(DropTarget { parent: target, index: 0, into: Some(target) });
         crate::panel_outliner::finish_drag(&mut app);
         assert_eq!(app.scene.node(target).children, vec![group]);
