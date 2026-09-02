@@ -695,6 +695,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         let mut chosen: Option<Command> = None;
         let mut operation: Option<GroupOp> = None;
         let mut add: Option<(Option<&'static str>, GroupOp)> = None;
+        let mut add_pattern = false;
         let mut save_as_primitive = false;
         let mut paint: Option<Option<Colour>> = None;
         let keymap = &app.keymap;
@@ -710,6 +711,18 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
                     add = Some((None, op));
                     ui.close();
                 }
+            }
+            // The other container a node can be (issue 67). Empty, for shapes
+            // to be put into afterwards -- "Make a pattern of the selection",
+            // further down this same menu, is the one that wraps what is
+            // already there.
+            if ui
+                .button("Pattern")
+                .on_hover_text("An empty pattern, for shapes to be put into it and repeated")
+                .clicked()
+            {
+                add_pattern = true;
+                ui.close();
             }
             ui.separator();
             for category in simple3d_core::primitive::categories() {
@@ -833,6 +846,9 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         }
         if let Some((type_id, op)) = add {
             app.add_node_at(id, type_id, op);
+        }
+        if add_pattern {
+            app.add_pattern_at(id);
         }
         if let Some(colour) = paint {
             let targets: Vec<NodeId> = app.selection.to_vec();

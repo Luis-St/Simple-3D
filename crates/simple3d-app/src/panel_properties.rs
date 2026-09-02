@@ -896,21 +896,25 @@ fn param_field(
     let value = param_value(app, id, param.key, param.default);
     match param.kind {
         // Radio-style choices where a measurement is ambiguous.
+        // The options flow across the row and wrap when they run out of it,
+        // rather than each taking a line of its own. A pattern's kind is six
+        // choices and its axis is three, and stacked they pushed everything
+        // below them -- the numbers those choices govern -- off the bottom of
+        // the panel. Wrapped, a narrow panel still ends up with one per line,
+        // which is the layout this replaces, so nothing is lost at any width.
         ParamKind::Choice { options } => {
             field_row(ui, param.label, "", |ui| {
                 let mut chosen = value.as_u32();
-                ui.vertical(|ui| {
-                    for (index, option) in options.iter().enumerate() {
-                        if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
-                            chosen = index as u32;
-                            app.edit(edit_label, None);
-                            for target in targets {
-                                set_param(app, *target, param.key, ParamValue::Choice(chosen));
-                                sync_wall_mode(app, *target, param.key, chosen);
-                            }
+                for (index, option) in options.iter().enumerate() {
+                    if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
+                        chosen = index as u32;
+                        app.edit(edit_label, None);
+                        for target in targets {
+                            set_param(app, *target, param.key, ParamValue::Choice(chosen));
+                            sync_wall_mode(app, *target, param.key, chosen);
                         }
                     }
-                });
+                }
             });
         }
         ParamKind::Bool => {

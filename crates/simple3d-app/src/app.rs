@@ -1888,24 +1888,58 @@ impl App {
     /// it can hold children, beside it otherwise. What the outliner's own Add
     /// menu uses, so a shape made from a row lands on that row rather than at the
     /// document's insertion point (issue 44).
-    pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
-        self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
-        let (parent, index) = match self.scene.get(at) {
-            // A pattern holds children exactly as a group does (issue 67), so
-            // Add from a pattern's own row has to go *into* it. Asking
-            // `is_group` here put the shape beside the pattern instead, which
-            // made the row menu disagree with both the drag-and-drop rule and
-            // the document-level Add, and both of those already say "into".
+    /// Where a node added *from an outliner row* lands: inside the row when it
+    /// can hold children, beside it otherwise (issue 44).
+    ///
+    /// A pattern holds children exactly as a group does (issue 67), so Add from
+    /// a pattern's own row goes *into* it. Asking `is_group` here put the shape
+    /// beside the pattern instead, which made the row menu disagree with both
+    /// the drag-and-drop rule and the document-level Add, and both of those
+    /// already say "into".
+    fn insertion_from_row(&self, at: NodeId) -> (NodeId, usize) {
+        let end_of_root = (self.scene.root(), self.scene.node(self.scene.root()).children.len());
+        match self.scene.get(at) {
             Some(node) if node.can_hold_children() => (at, self.scene.node(at).children.len()),
             Some(node) => match node.parent {
                 Some(parent) => {
                     let after = self.scene.node(parent).children.iter().position(|&c| c == at).map_or(0, |i| i + 1);
                     (parent, after)
                 }
-                None => (self.scene.root(), self.scene.node(self.scene.root()).children.len()),
+                None => end_of_root,
             },
-            None => (self.scene.root(), self.scene.node(self.scene.root()).children.len()),
-        };
+            None => end_of_root,
+        }
+    }
+
+    /// Add an empty pattern, for shapes to be put under it afterwards
+    /// (issue 67).
+    ///
+    /// The "add a container" gesture, which is why it sits beside "Union group"
+    /// in both Add menus. `Command::Pattern` is the other half of the same
+    /// feature and does the opposite thing -- it wraps whatever is selected --
+    /// so this one always makes an empty pattern, whatever is selected.
+    pub fn add_pattern_at(&mut self, at: NodeId) {
+        let where_to = self.insertion_from_row(at);
+        self.add_empty_pattern(where_to);
+    }
+
+    /// The same, at the document's own insertion point rather than at a row.
+    pub fn add_pattern(&mut self) {
+        let where_to = self.scene.insertion_point(self.primary());
+        self.add_empty_pattern(where_to);
+    }
+
+    fn add_empty_pattern(&mut self, (parent, index): (NodeId, usize)) {
+        self.edit("Add pattern", None);
+        let id = self.scene.add_pattern(parent, index);
+        self.collapsed.remove(&parent);
+        self.select_only(id);
+        self.status = Status::Info("Added an empty pattern: put shapes into it and it repeats them".into());
+    }
+
+    pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
+        self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
+        let (parent, index) = self.insertion_from_row(at);
         let created = match type_id {
             Some(type_id) => self.scene.add_primitive(type_id, parent, index),
             None => Some(self.scene.add_group(op, parent, index)),
@@ -4785,6 +4819,40 @@ mod tests {
         // Shift is the coarse step everywhere else, and here too.
         app.set_pattern_grip(pat, "Spacing", 44.0, gizmo::Mods { coarse: true, ..Default::default() });
         assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(20.0)));
+    }
+
+    #[test]
+    fn an_empty_pattern_can_be_added_the_way_a_group_is() {
+        // Both Add menus offer a pattern beside the group operators (issue 67).
+        // It is the opposite gesture to Ctrl+Shift+P, which wraps the selection:
+        // this always makes an empty one to fill afterwards, whatever is
+        // selected.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        let root = app.scene.root();
+
+        // From a plain row: beside it, not inside it, and left selected.
+        app.add_pattern_at(plate);
+        let beside = app.primary().unwrap();
+        assert!(app.scene.node(beside).is_pattern());
+        assert!(app.scene.node(beside).children.is_empty(), "it wrapped the selection instead of being empty");
+        assert_eq!(app.scene.node(beside).parent, Some(root));
+
+        // From a pattern's own row: into it, the same rule Add already follows.
+        app.add_pattern_at(beside);
+        let inside = app.primary().unwrap();
+        assert_eq!(app.scene.node(inside).parent, Some(beside));
+
+        // And the menu bar's Add, which uses the document's insertion point.
+        app.select_only(plate);
+        app.add_pattern();
+        let added = app.primary().unwrap();
+        assert!(app.scene.node(added).is_pattern());
+        assert!(app.scene.node(added).children.is_empty());
+        // One undo step takes it back, and the plate is untouched by all of it.
+        app.run(Command::Undo);
+        assert!(!app.scene.contains(added));
+        assert!(app.scene.contains(plate));
     }
 
     #[test]

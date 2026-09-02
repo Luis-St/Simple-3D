@@ -290,6 +290,18 @@ impl App {
                     ui.close();
                 }
             }
+            // The other container a node can be (issue 67), beside the group
+            // operators it belongs with. Adding one is always "an empty one to
+            // fill"; wrapping the selection in a pattern is what Edit > Make a
+            // pattern of the selection does.
+            if ui
+                .button("Pattern")
+                .on_hover_text("An empty pattern, for shapes to be put into it and repeated")
+                .clicked()
+            {
+                self.add_pattern();
+                ui.close();
+            }
             ui.separator();
             for category in primitive::categories() {
                 ui.menu_button(category, |ui| {
