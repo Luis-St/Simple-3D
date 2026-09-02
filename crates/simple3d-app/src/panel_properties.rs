@@ -66,6 +66,40 @@ const MIN_AXIS_FIELD: f32 = 52.0;
 /// edge every row in it has to stay inside.
 const EDGE_PAD: f32 = 8.0;
 
+/// How a section renders the parameter rows it shares with every other
+/// section: what its edits are called in the undo history, and where a value's
+/// unit is written.
+#[derive(Clone, Copy)]
+struct RowStyle {
+    /// What the undo step is called. A primitive's choices really are
+    /// measurements -- "outer diameter or wall thickness" -- but a pattern's
+    /// are its kind and its axis, and filing those under "Set measurement" made
+    /// the undo history describe something the user had not done.
+    edit_label: &'static str,
+    unit: UnitPlace,
+}
+
+/// A shape's dimensions: the unit rides after the number it qualifies.
+const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", unit: UnitPlace::AfterField };
+/// A pattern's numbers: the unit goes in the name, so the count and the
+/// distances line up down one column.
+const PATTERN_ROW: RowStyle = RowStyle { edit_label: "Set pattern", unit: UnitPlace::InLabel };
+
+/// Where a value row writes its unit.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UnitPlace {
+    /// After the field, one size down and in the label colour. What the shape
+    /// editors use: there the row's name is the measurement and the unit
+    /// qualifies the number beside it.
+    AfterField,
+    /// In brackets on the end of the row's name, the way the transform rows
+    /// read. The fields on the section are then all one width, whether their
+    /// value carries a unit or not -- a pattern's copies count has no unit and
+    /// its steps do, and the two used to sit at different widths down the same
+    /// column.
+    InLabel,
+}
+
 /// How much room is left on the line a row is currently laying out on:
 /// from where the next control will start to the row's own right-hand edge.
 ///
@@ -698,7 +732,7 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         if !simple3d_core::pattern::param_visible(param, &params) {
             continue;
         }
-        param_field(app, ui, &targets, id, param, unit, "Set pattern");
+        param_field(app, ui, &targets, id, param, unit, PATTERN_ROW);
     }
     let (wanted, copies) = simple3d_core::pattern::instance_count(&params);
     let children = app.scene.node(id).children.len();
@@ -841,7 +875,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
         if !spec.param_visible(param, &params) {
             continue;
         }
-        param_field(app, ui, targets, id, param, unit, "Set measurement");
+        param_field(app, ui, targets, id, param, unit, DIMENSION_ROW);
     }
 
     if spec.segmented {
@@ -887,11 +921,7 @@ fn param_field(
     id: NodeId,
     param: &simple3d_core::primitive::ParamSpec,
     unit: Unit,
-    // What the undo step is called. A primitive's choices really are
-    // measurements -- "outer diameter or wall thickness" -- but a pattern's are
-    // its kind and its axis, and filing those under "Set measurement" made the
-    // undo history describe something the user had not done.
-    edit_label: &str,
+    style: RowStyle,
 ) {
     let value = param_value(app, id, param.key, param.default);
     match param.kind {
@@ -908,7 +938,7 @@ fn param_field(
                 for (index, option) in options.iter().enumerate() {
                     if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
                         chosen = index as u32;
-                        app.edit(edit_label, None);
+                        app.edit(style.edit_label, None);
                         for target in targets {
                             set_param(app, *target, param.key, ParamValue::Choice(chosen));
                             sync_wall_mode(app, *target, param.key, chosen);
@@ -929,7 +959,17 @@ fn param_field(
             });
         }
         kind => {
-            field_row(ui, param.label, "", |ui| {
+            // Worked out before the row is laid out, because where it goes is
+            // part of the row's name in one of the two placements.
+            let unit_text = match kind {
+                ParamKind::Length { .. } => unit.suffix(),
+                ParamKind::Angle { .. } => "deg",
+                _ => "",
+            };
+            let in_label = style.unit == UnitPlace::InLabel && !unit_text.is_empty();
+            let name = if in_label { format!("{} ({unit_text})", param.label) } else { param.label.to_string() };
+            let suffix = if in_label { "" } else { unit_text };
+            field_row(ui, &name, "", |ui| {
                 let step = ui::scrub_increment(kind, unit);
                 // A lock toggle where the type offers one: a sphere's three
                 // diameters, a cylinder's two.
@@ -947,14 +987,10 @@ fn param_field(
                         toggle_lock(app, id, param.lock_group, param.key);
                     }
                 }
-                // The unit rides at the right-hand end of the row, one size
-                // down and in the label colour, so it never competes with
-                // the number it qualifies.
-                let suffix = match kind {
-                    ParamKind::Length { .. } => unit.suffix(),
-                    ParamKind::Angle { .. } => "deg",
-                    _ => "",
-                };
+                // Where the unit rides after the field, room is left for it so
+                // it never competes with the number it qualifies; where it is in
+                // the name, there is nothing to leave room for and the field
+                // takes the whole column.
                 let field_width = (room_left(ui) - suffix_room(ui, suffix)).max(40.0);
                 let field_id = ui.id().with((id, param.key));
                 // With several nodes selected, a field shows the value they

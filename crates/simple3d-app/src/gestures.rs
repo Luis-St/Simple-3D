@@ -1153,3 +1153,78 @@ fn the_measure_section_shows_the_span_and_takes_it_back() {
     assert!(harness.state().measure.points.is_empty(), "the panel's Clear left the span in place");
     assert!(harness.state().measure.active, "clearing the span also put the tool away");
 }
+
+#[test]
+fn a_patterns_kind_is_clicked_from_a_row_and_its_fields_are_all_one_width() {
+    use egui_kittest::kittest::Queryable;
+
+    // Two layout changes to the pattern editor, both checked against the real
+    // panel because both are about where things are drawn.
+    //
+    // The kind and axis options flow across their row instead of taking a line
+    // each -- so the first thing to prove is that they are still *buttons* after
+    // being lifted out of the vertical layout they used to sit in.
+    //
+    // And the unit is in the row's name, in brackets, rather than after the
+    // field. That is what makes every field one width: a count carries no unit
+    // and a step does, and the two used to end at different places down the same
+    // column.
+    let mut harness = harness_configured("pattern-panel", |app| {
+        app.run(simple3d_core::keymap::Command::Pattern);
+    });
+    let pattern = harness.state().primary().expect("the tool leaves the pattern selected");
+    let kind = |harness: &Harness<'_, App>| harness.state().scene.node(pattern).params().unwrap().int("kind");
+    assert_eq!(kind(&harness), 0, "a fresh pattern is linear");
+
+    // Every kind is on the row, and clicking one chooses it.
+    for (index, name) in ["Linear", "Grid", "Circular", "Mirror", "Helix", "Spiral"].iter().enumerate() {
+        assert!(harness.query_by_label(name).is_some(), "{name} is not on the kind row");
+        harness.get_by_label(name).click();
+        harness.step();
+        harness.step();
+        assert_eq!(kind(&harness), index as u32, "clicking {name} did not choose it");
+    }
+
+    // A circular pattern is the case the width rule is about: Copies has no
+    // unit, Span is in degrees and Radius in millimetres, and all three fields
+    // have to start and end together.
+    harness.get_by_label("Circular").click();
+    harness.step();
+    harness.step();
+    //
+    // Checked across the kinds, not just this one: the longest names a pattern
+    // has are a spiral's, and "Radius per copy (mm)" is the one a bracketed unit
+    // could have pushed out of the label column and into the field beside it.
+    let mut fields: Vec<(&str, egui::Rect)> = Vec::new();
+    for (kind, names) in [
+        ("Circular", &["Copies", "Span", "Radius"][..]),
+        ("Spiral", &["Copies", "Angle per copy", "Start radius", "Radius per copy", "Rise per copy"][..]),
+    ] {
+        harness.get_by_label(kind).click();
+        harness.step();
+        harness.step();
+        for name in names {
+            fields.push((name, rect_of(&harness, crate::panel_properties::grip_id(name))));
+        }
+    }
+    for pair in fields.windows(2) {
+        let ((a_name, a), (b_name, b)) = (pair[0], pair[1]);
+        assert!(
+            (a.width() - b.width()).abs() < 0.5 && (a.right() - b.right()).abs() < 0.5,
+            "{a_name} and {b_name} are different sizes: {a:?} and {b:?}"
+        );
+    }
+
+    harness.get_by_label("Circular").click();
+    harness.step();
+    harness.step();
+
+    // And the axis options are buttons on their own row, the same as the kinds.
+    for (index, name) in ["X", "Y", "Z"].iter().enumerate() {
+        harness.get_by_label(name).click();
+        harness.step();
+        harness.step();
+        let axis = harness.state().scene.node(pattern).params().unwrap().int("circ_axis");
+        assert_eq!(axis, index as u32, "clicking axis {name} did not choose it");
+    }
+}
