@@ -302,6 +302,18 @@ impl App {
                 self.add_pattern();
                 ui.close();
             }
+            // The other half of the same feature: a rule the user writes
+            // themselves, rather than one of the six that ship with a name
+            // (issue 67). It wraps whatever is selected the way Edit > Make a
+            // pattern does, and then opens the tool on it.
+            if ui
+                .button("Custom pattern...")
+                .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
+                .clicked()
+            {
+                self.open_pattern_tool();
+                ui.close();
+            }
             ui.separator();
             for category in primitive::categories() {
                 ui.menu_button(category, |ui| {
@@ -658,6 +670,7 @@ impl App {
             Modal::ConfirmQuit => self.confirm_quit_window(ctx),
             Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
+            Modal::PatternKind => self.pattern_kind_window(ctx),
         }
     }
 
@@ -1444,6 +1457,22 @@ impl App {
         if ui::dialog_button(ui, "Cancel", true).clicked() {
             self.cancel_save_primitive();
         }
+    }
+
+    /// The custom pattern kind creation tool (issue 67).
+    fn pattern_kind_window(&mut self, ctx: &egui::Context) {
+        self.dialog(
+            ctx,
+            DialogSpec {
+                key: "dialog-pattern-kind",
+                title: "Custom pattern kind",
+                size: egui::vec2(820.0, 520.0),
+                resizable: true,
+                fit_height: false,
+            },
+            crate::pattern_tool::body,
+            crate::pattern_tool::actions,
+        );
     }
 
     fn confirm_close_tab_window(&mut self, ctx: &egui::Context) {

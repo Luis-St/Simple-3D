@@ -60,6 +60,8 @@ pub enum Modal {
     Error,
     /// Naming a group, or a whole project, to keep on the palette.
     SavePrimitive,
+    /// Building a custom pattern kind out of stages (issue 67).
+    PatternKind,
     /// Quitting with unsaved changes.
     ConfirmQuit,
     /// Closing a tab with unsaved changes (issue 61).
@@ -391,6 +393,17 @@ pub struct App {
     /// library lives in a directory.
     pub library: Vec<library::Entry>,
 
+    /// The pattern the custom-kind creation tool is building a rule for
+    /// (issue 67). The tool edits that node directly, so what it says and what
+    /// the viewport shows cannot disagree.
+    pub pattern_tool: Option<NodeId>,
+    /// The name the rule would be saved under, and the one the last applied kind
+    /// came by.
+    pub pattern_tool_name: String,
+    /// The saved kinds, read when the tool opens rather than every frame -- the
+    /// shelf is a directory and the dialog draws sixty times a second.
+    pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
+
     pub keymap_search: String,
     pub recording: Option<Command>,
     pub keymap_conflict: Option<(Command, Chord, Command)>,
@@ -523,6 +536,9 @@ impl App {
             primitive_clip: None,
             primitive_name: String::new(),
             library: Vec::new(),
+            pattern_tool: None,
+            pattern_tool_name: String::new(),
+            pattern_kinds: Vec::new(),
             keymap_search: String::new(),
             recording: None,
             shortcut_mods: ui::ChordHold::default(),
@@ -1724,7 +1740,7 @@ impl App {
     /// node that repeats it, or -- with nothing selected -- drop an empty pattern
     /// at the insertion point for shapes to be put under. Either way the pattern
     /// is selected, so the property editor is right there to lay it out.
-    fn make_pattern(&mut self) {
+    pub(crate) fn make_pattern(&mut self) {
         self.edit("Pattern", None);
         let created = if self.selection.is_empty() {
             let (parent, index) = self.scene.insertion_point(self.primary());
@@ -2837,6 +2853,7 @@ impl eframe::App for App {
 mod tests {
     use super::*;
     use simple3d_core::eval::{Cancel, Evaluator};
+    use simple3d_core::primitive::{ParamValue, ParamsExt};
     use simple3d_core::scene::Visibility;
 
     /// An `App` on a headless `egui::Context`, which needs no window and no
@@ -2896,6 +2913,85 @@ mod tests {
         let _ = ctx.run(input, |ctx| app.ui(ctx));
     }
 
+    /// Draw one frame with a given modifier state and key events, so a binding
+    /// that is nothing but a held modifier can be typed at the application the
+    /// way a hand types it (issue 76).
+    fn draw_frame_with(app: &mut App, modifiers: egui::Modifiers, events: Vec<egui::Event>) {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 880.0))),
+            modifiers,
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| app.ui(ctx));
+    }
+
+    /// Issue 76, through the application rather than through `ChordHold` alone:
+    /// the keymap editor records a modifier held on its own, the binding it
+    /// writes reads back as that modifier, and holding it afterwards is what
+    /// asks for a geometry snap.
+    ///
+    /// The recorder and the shortcut dispatcher watch the same hold from two
+    /// different places, and the editor's is fed by *its own window's* input --
+    /// which is exactly the seam a unit test of the hold cannot reach.
+    #[test]
+    fn a_modifier_alone_can_be_bound_in_the_editor_and_held_afterwards() {
+        let mut app = headless_app();
+        // Something with no modifier in it to begin with, so what is recorded
+        // cannot be what was already there.
+        app.keymap.set(Command::ToggleBoundingBox, Chord::key("B"), true).unwrap();
+        app.modal = Modal::Keymap;
+        app.recording = Some(Command::ToggleBoundingBox);
+
+        // Alt goes down, is held for a frame, and comes up with nothing under it.
+        draw_frame_with(&mut app, egui::Modifiers::ALT, Vec::new());
+        assert_eq!(app.recording, Some(Command::ToggleBoundingBox), "the press alone should not finish the binding");
+        draw_frame_with(&mut app, egui::Modifiers::ALT, Vec::new());
+        draw_frame_with(&mut app, egui::Modifiers::NONE, Vec::new());
+
+        assert_eq!(app.recording, None, "the release should have finished the recording");
+        assert_eq!(app.keymap.binding(Command::ToggleBoundingBox), Some(&Chord::modifiers(false, false, true)));
+        assert_eq!(app.keymap.shortcut_text(Command::ToggleBoundingBox), "Alt");
+        app.modal = Modal::None;
+
+        // And the other half: the default hold for geometry snapping is Ctrl on
+        // its own, and holding it is what turns snapping on.
+        app.keymap = Keymap::default();
+        app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
+        assert_eq!(app.keymap.binding(Command::SnapToGeometry), Some(&Chord::modifiers(true, false, false)));
+        assert!(!app.geometry_snap_wanted(|_| false, egui::Modifiers::NONE));
+        assert!(
+            app.geometry_snap_wanted(|_| false, egui::Modifiers::COMMAND),
+            "Ctrl on its own did not ask for a snap"
+        );
+    }
+
+    /// The other half of issue 76: an ordinary key held while another goes down
+    /// is a combination, and it fires on the key that completes it rather than
+    /// each key firing its own binding on the way.
+    #[test]
+    fn keys_held_together_bind_as_one_combination() {
+        let mut app = headless_app();
+        app.modal = Modal::Keymap;
+        app.recording = Some(Command::ToggleBoundingBox);
+        let down = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        // Q, then W on top of it, then both let go.
+        draw_frame_with(&mut app, egui::Modifiers::NONE, vec![down(egui::Key::Q)]);
+        draw_frame_with(&mut app, egui::Modifiers::NONE, vec![down(egui::Key::W)]);
+        draw_frame_with(&mut app, egui::Modifiers::NONE, Vec::new());
+        assert_eq!(app.recording, None, "the release should have finished the recording");
+        assert_eq!(app.keymap.shortcut_text(Command::ToggleBoundingBox), "Q+W");
+        app.modal = Modal::None;
+    }
+
     #[test]
     fn every_panel_draws_with_a_selection_and_with_none() {
         // The two states put different panels on screen: with nothing selected
@@ -2941,11 +3037,106 @@ mod tests {
             Modal::ConfirmQuit,
             Modal::ConfirmCloseTab,
             Modal::SavePrimitive,
+            Modal::PatternKind,
         ] {
             app.modal = modal;
             draw_one_frame(&mut app);
         }
         app.modal = Modal::None;
+    }
+
+    /// The custom pattern kind creation tool, end to end (issue 67): it makes a
+    /// pattern out of what is selected, builds a rule that no fixed kind can
+    /// say, keeps it under a name, and puts it back on a different pattern in a
+    /// different project.
+    #[test]
+    fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
+        let dir = temp_config_dir("pattern-kind");
+        let mut app = app_in(dir.clone());
+        let root = app.scene.root();
+        let shape = app.scene.add_primitive("box", root, 0).unwrap();
+        app.select_only(shape);
+
+        // Opening the tool with a shape selected wraps it, which is what makes
+        // this a creation tool rather than an editor of something already there.
+        app.open_pattern_tool();
+        let pattern = app.pattern_tool.expect("the tool should have a pattern to work on");
+        assert!(app.scene.node(pattern).is_pattern());
+        assert_eq!(app.scene.node(pattern).params().unwrap().int("kind"), simple3d_core::pattern::CUSTOM);
+        assert_eq!(app.modal, Modal::PatternKind);
+        draw_one_frame(&mut app);
+
+        // A row of three, turned four times about Z: two stages, and twelve
+        // copies that no single fixed kind lays out.
+        let mut stage = simple3d_core::pattern::stage(app.scene.node(pattern).params().unwrap(), 1);
+        stage.count = 4;
+        stage.turn = 90.0;
+        stage.step = simple3d_geom::Vec3::ZERO;
+        {
+            let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
+            params.insert("stages".to_string(), ParamValue::Count(2));
+            params.insert("stage1_count".to_string(), ParamValue::Count(3));
+            simple3d_core::pattern::set_stage(params, 1, stage);
+        }
+        let params = app.scene.node(pattern).params().unwrap().clone();
+        assert_eq!(simple3d_core::pattern::instance_count(&params).1, 12);
+        draw_one_frame(&mut app);
+
+        app.pattern_tool_name = "Turned row".to_string();
+        app.save_current_kind();
+        assert_eq!(app.pattern_kinds.iter().map(|e| e.name.clone()).collect::<Vec<_>>(), vec!["Turned row"]);
+
+        // A second, unrelated pattern in a fresh document takes the same rule.
+        let mut other = app_in(dir);
+        let root = other.scene.root();
+        let shape = other.scene.add_primitive("cylinder", root, 0).unwrap();
+        other.select_only(shape);
+        other.open_pattern_tool();
+        let saved = other.pattern_kinds.first().cloned().expect("the shelf should have the saved kind");
+        other.apply_saved_kind(&saved);
+        let applied = other.pattern_tool.and_then(|id| other.scene.node(id).params().cloned()).unwrap();
+        assert_eq!(applied.int("kind"), simple3d_core::pattern::CUSTOM);
+        assert_eq!(simple3d_core::pattern::instance_count(&applied).1, 12, "the saved rule did not come back");
+        assert_eq!(other.scene.node(other.pattern_tool.unwrap()).name, "Turned row");
+
+        // And it comes off the shelf again when it is deleted.
+        other.delete_saved_kind(&saved);
+        assert!(other.pattern_kinds.is_empty());
+    }
+
+    /// The rule the tool builds is an ordinary parameter edit, which is the
+    /// whole reason it was built out of parameters: undo covers it, and so does
+    /// saving and reloading the project.
+    #[test]
+    fn a_custom_rule_survives_undo_and_a_round_trip_through_the_project_file() {
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let shape = app.scene.add_primitive("box", root, 0).unwrap();
+        app.select_only(shape);
+        app.open_pattern_tool();
+        let pattern = app.pattern_tool.unwrap();
+
+        app.edit("Pattern stages", None);
+        {
+            let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
+            params.insert("stages".to_string(), ParamValue::Count(3));
+        }
+        assert_eq!(app.scene.node(pattern).params().unwrap().int("stages"), 3);
+        app.run(Command::Undo);
+        assert_eq!(app.scene.node(pattern).params().unwrap().int("stages"), 1, "undo did not reach the stage count");
+        app.run(Command::Redo);
+        assert_eq!(app.scene.node(pattern).params().unwrap().int("stages"), 3);
+
+        let text = simple3d_core::project::to_string(&app.scene);
+        let back = simple3d_core::project::from_str(&text).expect("the project should reload");
+        let reloaded = back
+            .depth_first()
+            .into_iter()
+            .find(|id| back.node(*id).is_pattern())
+            .and_then(|id| back.node(id).params().cloned())
+            .expect("the pattern should have survived the file");
+        assert_eq!(reloaded.int("kind"), simple3d_core::pattern::CUSTOM);
+        assert_eq!(reloaded.int("stages"), 3);
     }
 
     #[test]

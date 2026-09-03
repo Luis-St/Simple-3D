@@ -70,20 +70,30 @@ const EDGE_PAD: f32 = 8.0;
 /// section: what its edits are called in the undo history, and where a value's
 /// unit is written.
 #[derive(Clone, Copy)]
-struct RowStyle {
+pub(crate) struct RowStyle {
     /// What the undo step is called. A primitive's choices really are
     /// measurements -- "outer diameter or wall thickness" -- but a pattern's
     /// are its kind and its axis, and filing those under "Set measurement" made
     /// the undo history describe something the user had not done.
     edit_label: &'static str,
     unit: UnitPlace,
+    /// What tells this row's scrub gesture apart from the same parameter's row
+    /// somewhere else. A gesture is remembered by the value it drags rather
+    /// than by where the field sits, which is what lets a panel relay itself out
+    /// mid-drag -- but the creation tool shows a pattern's stage numbers while
+    /// the properties panel behind it is showing the very same ones, and two
+    /// widgets cannot answer to one name in one frame.
+    grip_scope: &'static str,
 }
 
 /// A shape's dimensions: the unit rides after the number it qualifies.
-const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", unit: UnitPlace::AfterField };
+const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", unit: UnitPlace::AfterField, grip_scope: "" };
 /// A pattern's numbers: the unit goes in the name, so the count and the
 /// distances line up down one column.
-const PATTERN_ROW: RowStyle = RowStyle { edit_label: "Set pattern", unit: UnitPlace::InLabel };
+pub(crate) const PATTERN_ROW: RowStyle =
+    RowStyle { edit_label: "Set pattern", unit: UnitPlace::InLabel, grip_scope: "" };
+/// The same rows, in the creation tool's own window (issue 67).
+pub(crate) const PATTERN_TOOL_ROW: RowStyle = RowStyle { grip_scope: "tool", ..PATTERN_ROW };
 
 /// Where a value row writes its unit.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -734,6 +744,26 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         }
         param_field(app, ui, &targets, id, param, unit, PATTERN_ROW);
     }
+    // The seventh kind is one the user writes themselves, and a rule built out
+    // of stages is not something to assemble from a column of numbered fields
+    // alone -- so the tool that builds it is one click away, wherever a pattern
+    // is selected (issue 67).
+    let mut open_tool = false;
+    field_row(ui, "", "", |ui| {
+        let label =
+            if params.int("kind") == simple3d_core::pattern::CUSTOM { "Edit kind..." } else { "Custom kind..." };
+        if ui
+            .button(label)
+            .on_hover_text("Build this pattern's rule out of stages, and keep it for other projects")
+            .clicked()
+        {
+            open_tool = true;
+        }
+    });
+    if open_tool {
+        app.open_pattern_tool();
+    }
+
     let (wanted, copies) = simple3d_core::pattern::instance_count(&params);
     let children = app.scene.node(id).children.len();
     let note = if children == 0 {
@@ -914,7 +944,7 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
 /// Render one parameter's row -- a choice, a checkbox or a number field --
 /// writing edits to every selected node. Shared by the primitive editor and the
 /// pattern editor (issue 67), which drive it from different parameter lists.
-fn param_field(
+pub(crate) fn param_field(
     app: &mut App,
     ui: &mut egui::Ui,
     targets: &[NodeId],
@@ -1001,10 +1031,15 @@ fn param_field(
                 // The field is the grip: dragging it changes the value
                 // without going near the keyboard, and clicking it opens it
                 // for typing.
+                let grip_name = if style.grip_scope.is_empty() {
+                    param.label.to_string()
+                } else {
+                    format!("{}:{}", style.grip_scope, param.label)
+                };
                 let outcome = ui
                     .scope(|ui| {
                         ui.set_width(field_width);
-                        value_field(app, ui, param.label, field_id, &shown, step)
+                        value_field(app, ui, &grip_name, field_id, &shown, step)
                     })
                     .inner;
                 if !suffix.is_empty() {

@@ -19,6 +19,7 @@ mod panel_primitives;
 mod panel_properties;
 mod panel_toolrail;
 mod panel_viewport;
+mod pattern_tool;
 mod pick;
 mod raster;
 mod render;

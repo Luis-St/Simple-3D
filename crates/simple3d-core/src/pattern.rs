@@ -19,7 +19,7 @@ use simple3d_geom::Vec3;
 
 /// The kinds of pattern, in the order they appear in the "kind" choice; the
 /// index into this list is the value the choice parameter holds.
-pub const KINDS: &[&str] = &["Linear", "Grid", "Circular", "Mirror", "Helix", "Spiral"];
+pub const KINDS: &[&str] = &["Linear", "Grid", "Circular", "Mirror", "Helix", "Spiral", "Custom"];
 
 const LINEAR: u32 = 0;
 const GRID: u32 = 1;
@@ -27,6 +27,8 @@ const CIRCULAR: u32 = 2;
 const MIRROR: u32 = 3;
 const HELIX: u32 = 4;
 const SPIRAL: u32 = 5;
+/// A rule the user built themselves, out of stages (issue 67).
+pub const CUSTOM: u32 = 6;
 
 const fn length(key: &'static str, label: &'static str, default: f64, when: (&'static str, u32)) -> ParamSpec {
     ParamSpec {
@@ -56,6 +58,17 @@ const fn angle(key: &'static str, label: &'static str, default: f64, when: (&'st
         label,
         kind: ParamKind::Angle { min: -360.0, max: 360.0 },
         default: ParamValue::Angle(default),
+        lock_group: 0,
+        shown_when: Some(when),
+    }
+}
+
+const fn flag(key: &'static str, label: &'static str, when: (&'static str, u32)) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Bool,
+        default: ParamValue::Bool(false),
         lock_group: 0,
         shown_when: Some(when),
     }
@@ -122,6 +135,47 @@ pub const PARAMS: &[ParamSpec] = &[
     length("spiral_growth", "Radius per copy", 5.0, ("kind", SPIRAL)),
     length("spiral_rise", "Rise per copy", 0.0, ("kind", SPIRAL)),
     axis("spiral_axis", ("kind", SPIRAL)),
+    // Custom: a rule the user builds themselves out of stages (issue 67). Each
+    // stage repeats whatever the stages before it made, so one stage is a run,
+    // two are a grid, and a run repeated round a turn is something none of the
+    // fixed kinds above can say at all.
+    count("stages", "Stages", 1, ("kind", CUSTOM)),
+    flag("stage1_mirror", "1 Mirror", ("kind", CUSTOM)),
+    axis("stage1_axis", ("kind", CUSTOM)),
+    count("stage1_count", "1 Copies", 3, ("kind", CUSTOM)),
+    length("stage1_step_x", "1 Step X", 20.0, ("kind", CUSTOM)),
+    length("stage1_step_y", "1 Step Y", 0.0, ("kind", CUSTOM)),
+    length("stage1_step_z", "1 Step Z", 0.0, ("kind", CUSTOM)),
+    angle("stage1_turn", "1 Turn per copy", 0.0, ("kind", CUSTOM)),
+    length("stage1_radius", "1 Radius", 0.0, ("kind", CUSTOM)),
+    length("stage1_growth", "1 Radius per copy", 0.0, ("kind", CUSTOM)),
+    flag("stage2_mirror", "2 Mirror", ("kind", CUSTOM)),
+    axis("stage2_axis", ("kind", CUSTOM)),
+    count("stage2_count", "2 Copies", 2, ("kind", CUSTOM)),
+    length("stage2_step_x", "2 Step X", 0.0, ("kind", CUSTOM)),
+    length("stage2_step_y", "2 Step Y", 20.0, ("kind", CUSTOM)),
+    length("stage2_step_z", "2 Step Z", 0.0, ("kind", CUSTOM)),
+    angle("stage2_turn", "2 Turn per copy", 0.0, ("kind", CUSTOM)),
+    length("stage2_radius", "2 Radius", 0.0, ("kind", CUSTOM)),
+    length("stage2_growth", "2 Radius per copy", 0.0, ("kind", CUSTOM)),
+    flag("stage3_mirror", "3 Mirror", ("kind", CUSTOM)),
+    axis("stage3_axis", ("kind", CUSTOM)),
+    count("stage3_count", "3 Copies", 2, ("kind", CUSTOM)),
+    length("stage3_step_x", "3 Step X", 0.0, ("kind", CUSTOM)),
+    length("stage3_step_y", "3 Step Y", 0.0, ("kind", CUSTOM)),
+    length("stage3_step_z", "3 Step Z", 20.0, ("kind", CUSTOM)),
+    angle("stage3_turn", "3 Turn per copy", 0.0, ("kind", CUSTOM)),
+    length("stage3_radius", "3 Radius", 0.0, ("kind", CUSTOM)),
+    length("stage3_growth", "3 Radius per copy", 0.0, ("kind", CUSTOM)),
+    flag("stage4_mirror", "4 Mirror", ("kind", CUSTOM)),
+    axis("stage4_axis", ("kind", CUSTOM)),
+    count("stage4_count", "4 Copies", 4, ("kind", CUSTOM)),
+    length("stage4_step_x", "4 Step X", 0.0, ("kind", CUSTOM)),
+    length("stage4_step_y", "4 Step Y", 0.0, ("kind", CUSTOM)),
+    length("stage4_step_z", "4 Step Z", 0.0, ("kind", CUSTOM)),
+    angle("stage4_turn", "4 Turn per copy", 90.0, ("kind", CUSTOM)),
+    length("stage4_radius", "4 Radius", 40.0, ("kind", CUSTOM)),
+    length("stage4_growth", "4 Radius per copy", 0.0, ("kind", CUSTOM)),
 ];
 
 /// The most copies one pattern will ever lay down.
@@ -133,6 +187,110 @@ pub const PARAMS: &[ParamSpec] = &[
 /// person lays out by hand, and low enough that a mistyped grid is a redrawn
 /// preview rather than an out-of-memory kill.
 pub const MAX_INSTANCES: usize = 4096;
+
+/// The most stages one custom kind is built from.
+///
+/// Four is what a rule anyone builds by hand actually needs -- three axes and a
+/// turn, which is already more than any of the fixed kinds says -- and a fixed
+/// number is what lets a stage's numbers be ordinary parameters with names of
+/// their own. That is not a detail: it is what makes the property editor render
+/// them, the project file carry them, the clipboard copy them and undo cover
+/// them, none of which needed a line of code here.
+pub const MAX_STAGES: usize = 4;
+
+/// The parameter names one stage owns, and the names its viewport handles go by.
+///
+/// A table rather than names built with `format!` at each use: the parameter
+/// keys and the grip labels have to be `'static` to be a [`ParamSpec`] and a
+/// [`Grip`], and having them in one place is what keeps the maths, the editor
+/// and the handles talking about the same stage.
+pub struct StageKeys {
+    pub label: &'static str,
+    pub mirror: &'static str,
+    pub axis: &'static str,
+    pub count: &'static str,
+    pub step: [&'static str; 3],
+    pub turn: &'static str,
+    pub radius: &'static str,
+    pub growth: &'static str,
+    grip_spacing: &'static str,
+    grip_copies: &'static str,
+    grip_radius: &'static str,
+}
+
+pub const STAGES: [StageKeys; MAX_STAGES] = [
+    StageKeys {
+        label: "Stage 1",
+        mirror: "stage1_mirror",
+        axis: "stage1_axis",
+        count: "stage1_count",
+        step: ["stage1_step_x", "stage1_step_y", "stage1_step_z"],
+        turn: "stage1_turn",
+        radius: "stage1_radius",
+        growth: "stage1_growth",
+        grip_spacing: "Stage 1 spacing",
+        grip_copies: "Stage 1 copies",
+        grip_radius: "Stage 1 radius",
+    },
+    StageKeys {
+        label: "Stage 2",
+        mirror: "stage2_mirror",
+        axis: "stage2_axis",
+        count: "stage2_count",
+        step: ["stage2_step_x", "stage2_step_y", "stage2_step_z"],
+        turn: "stage2_turn",
+        radius: "stage2_radius",
+        growth: "stage2_growth",
+        grip_spacing: "Stage 2 spacing",
+        grip_copies: "Stage 2 copies",
+        grip_radius: "Stage 2 radius",
+    },
+    StageKeys {
+        label: "Stage 3",
+        mirror: "stage3_mirror",
+        axis: "stage3_axis",
+        count: "stage3_count",
+        step: ["stage3_step_x", "stage3_step_y", "stage3_step_z"],
+        turn: "stage3_turn",
+        radius: "stage3_radius",
+        growth: "stage3_growth",
+        grip_spacing: "Stage 3 spacing",
+        grip_copies: "Stage 3 copies",
+        grip_radius: "Stage 3 radius",
+    },
+    StageKeys {
+        label: "Stage 4",
+        mirror: "stage4_mirror",
+        axis: "stage4_axis",
+        count: "stage4_count",
+        step: ["stage4_step_x", "stage4_step_y", "stage4_step_z"],
+        turn: "stage4_turn",
+        radius: "stage4_radius",
+        growth: "stage4_growth",
+        grip_spacing: "Stage 4 spacing",
+        grip_copies: "Stage 4 copies",
+        grip_radius: "Stage 4 radius",
+    },
+];
+
+/// Every parameter key a stage owns, in the order the editor shows them.
+pub fn stage_keys(stage: usize) -> Vec<&'static str> {
+    let k = &STAGES[stage.min(MAX_STAGES - 1)];
+    vec![k.mirror, k.axis, k.count, k.step[0], k.step[1], k.step[2], k.turn, k.radius, k.growth]
+}
+
+/// How many stages a custom rule is currently using.
+pub fn stage_count(params: &Params) -> usize {
+    params.int("stages").clamp(1, MAX_STAGES as u32) as usize
+}
+
+/// The stage a parameter key belongs to, zero-based -- `None` for every key
+/// that is not one of a stage's own.
+fn stage_of(key: &str) -> Option<usize> {
+    let digit = key.strip_prefix("stage")?.as_bytes().first().copied()?;
+    let index = digit.checked_sub(b'1')? as usize;
+    (index < MAX_STAGES).then_some(index)
+}
 
 /// A fresh pattern's parameters.
 pub fn default_params() -> Params {
@@ -165,6 +323,12 @@ pub fn params_for_size(size: Vec3) -> Params {
         ("helix_rise", step(size.z)),
         ("spiral_radius", ParamValue::Length(radius)),
         ("spiral_growth", step(size.x)),
+        // The custom stages get the same treatment: a rule built by hand starts
+        // from numbers that suit what it is repeating, not from a stock 20 mm.
+        ("stage1_step_x", step(size.x)),
+        ("stage2_step_y", step(size.y)),
+        ("stage3_step_z", step(size.z)),
+        ("stage4_radius", ParamValue::Length(radius * 2.0)),
     ] {
         params.insert(key.to_string(), value);
     }
@@ -188,12 +352,30 @@ pub fn migrate_params(stored: &Params) -> Params {
 }
 
 /// Whether a parameter should be shown, given the kind currently chosen. The
-/// same rule a primitive's choice-gated parameters follow.
+/// same rule a primitive's choice-gated parameters follow, plus the one thing a
+/// primitive never needs: a custom rule's stages are gated on *how many* stages
+/// there are, which is a comparison rather than the equality `shown_when` says.
 pub fn param_visible(spec: &ParamSpec, values: &Params) -> bool {
-    match spec.shown_when {
+    let gated = match spec.shown_when {
         None => true,
         Some((key, want)) => values.int(key) == want,
+    };
+    gated && stage_param_visible(spec.key, values)
+}
+
+/// Whether a stage's parameter applies: the stage has to be one of the ones in
+/// use, and a stage set to mirror is a plane and two copies -- none of the
+/// numbers that place a run mean anything for it.
+fn stage_param_visible(key: &str, values: &Params) -> bool {
+    let Some(stage) = stage_of(key) else { return true };
+    if stage >= stage_count(values) {
+        return false;
     }
+    let k = &STAGES[stage];
+    if key == k.mirror || key == k.axis {
+        return true;
+    }
+    !values.flag(k.mirror)
 }
 
 /// A single copy the pattern makes: where to put it, and whether it is a
@@ -246,6 +428,7 @@ pub fn instances(params: &Params) -> Vec<Instance> {
         MIRROR => mirror(params),
         HELIX => helix(params),
         SPIRAL => spiral(params),
+        CUSTOM => custom(params),
         _ => linear(params),
     };
     // The cap is applied here rather than in each kind so no kind can forget it,
@@ -273,6 +456,11 @@ pub fn instance_count(params: &Params) -> (usize, usize) {
         MIRROR => 2,
         HELIX => params.int("helix_count").max(1) as usize,
         SPIRAL => params.int("spiral_count").max(1) as usize,
+        // Every stage repeats what the ones before it made, so the copies
+        // multiply exactly as a grid's three counts do.
+        CUSTOM => (0..stage_count(params))
+            .map(|s| stage(params, s).copies())
+            .fold(1usize, |total, copies| total.saturating_mul(copies)),
         _ => params.int("count").max(1) as usize,
     };
     (wanted, wanted.min(MAX_INSTANCES))
@@ -366,6 +554,146 @@ fn spiral(params: &Params) -> Vec<Instance> {
     (0..count).map(|i| Instance::plain(turned(ax, r0 + dr * i as f64, step * i as f64, rise * i as f64))).collect()
 }
 
+// -- custom kinds (issue 67) -------------------------------------------------
+//
+// The six kinds above are the ones worth having a name for. A custom kind is
+// the rule underneath all of them, spelled out: a stack of *stages*, each one
+// repeating whatever the stages before it made. One stage stepping along X is a
+// linear pattern; a second stepping along Y makes it a grid; a stage that turns
+// about Z at a radius makes a ring, and a ring of rows is something no fixed
+// kind can say. Every kind above can be written as one or two stages, which is
+// the check that the model is the right one rather than a seventh special case.
+
+/// One stage of a custom rule: how many copies it makes, and what it does to
+/// each of them.
+///
+/// The transform of copy `i` is worked out from `i` directly rather than by
+/// composing the stage with itself `i` times. That is what makes a stage able to
+/// say "the radius grows 5 mm a copy" -- repeated composition would carry the
+/// growth round the turn with it and draw an involute instead of a spiral -- and
+/// it is the same arithmetic the fixed kinds do, so they come out identical.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stage {
+    pub count: u32,
+    /// Moved this far further along for each copy.
+    pub step: Vec3,
+    /// Turned this much further about `axis` for each copy.
+    pub turn: f64,
+    pub axis: usize,
+    /// How far out from the axis the first copy sits.
+    pub radius: f64,
+    /// How much further out each copy after it sits.
+    pub growth: f64,
+    /// The stage is a reflection across the plane through the origin whose
+    /// normal is `axis`: the original and its mirror image, and nothing else.
+    pub mirror: bool,
+}
+
+impl Stage {
+    /// The copies this stage makes, in the frame of whatever it is repeating.
+    pub fn instances(&self) -> Vec<Instance> {
+        if self.mirror {
+            let mut m = Xform::IDENTITY;
+            m.m[self.axis][self.axis] = -1.0;
+            return vec![Instance::plain(Xform::IDENTITY), Instance { xform: m, mirrored: true }];
+        }
+        (0..self.count.max(1))
+            .map(|i| {
+                let i = i as f64;
+                let placed = turned(self.axis, self.radius + self.growth * i, self.turn * i, 0.0);
+                Instance::plain(Xform::from_translation(self.step * i).compose(&placed))
+            })
+            .collect()
+    }
+
+    /// How many copies it makes. A mirror is always two.
+    pub fn copies(&self) -> usize {
+        if self.mirror {
+            2
+        } else {
+            self.count.max(1) as usize
+        }
+    }
+
+    /// Whether the stage does anything at all: one copy that does not move is a
+    /// stage the user has not filled in yet.
+    pub fn is_idle(&self) -> bool {
+        !self.mirror && self.count.max(1) == 1
+    }
+}
+
+/// Read one stage out of a pattern's parameters.
+pub fn stage(params: &Params, index: usize) -> Stage {
+    let k = &STAGES[index.min(MAX_STAGES - 1)];
+    Stage {
+        count: params.int(k.count).max(1),
+        step: Vec3::new(params.num(k.step[0]), params.num(k.step[1]), params.num(k.step[2])),
+        turn: params.num(k.turn),
+        axis: params.int(k.axis).min(2) as usize,
+        radius: params.num(k.radius),
+        growth: params.num(k.growth),
+        mirror: params.flag(k.mirror),
+    }
+}
+
+/// Write one stage back into a pattern's parameters.
+pub fn set_stage(params: &mut Params, index: usize, stage: Stage) {
+    let k = &STAGES[index.min(MAX_STAGES - 1)];
+    params.insert(k.count.to_string(), ParamValue::Count(stage.count.clamp(1, 512)));
+    for (axis, key) in k.step.iter().enumerate() {
+        let component = match axis {
+            0 => stage.step.x,
+            1 => stage.step.y,
+            _ => stage.step.z,
+        };
+        params.insert((*key).to_string(), ParamValue::Length(component));
+    }
+    params.insert(k.turn.to_string(), ParamValue::Angle(stage.turn.clamp(-360.0, 360.0)));
+    params.insert(k.axis.to_string(), ParamValue::Choice(stage.axis.min(2) as u32));
+    params.insert(k.radius.to_string(), ParamValue::Length(stage.radius));
+    params.insert(k.growth.to_string(), ParamValue::Length(stage.growth));
+    params.insert(k.mirror.to_string(), ParamValue::Bool(stage.mirror));
+}
+
+/// Every parameter a custom rule is made of, which is what a saved kind holds
+/// and what applying one writes.
+pub fn custom_keys() -> Vec<&'static str> {
+    let mut keys = vec!["stages"];
+    for index in 0..MAX_STAGES {
+        keys.extend(stage_keys(index));
+    }
+    keys
+}
+
+fn custom(params: &Params) -> Vec<Instance> {
+    // Start with the shape itself, and let each stage repeat everything that
+    // came before it. The outer transform is the later stage's, so "a row of
+    // five, turned four times round Z" turns the whole row rather than each
+    // copy where it stands.
+    let mut out = vec![Instance::plain(Xform::IDENTITY)];
+    for index in 0..stage_count(params) {
+        let stage = stage(params, index);
+        let mut next: Vec<Instance> = Vec::new();
+        'fill: for outer in stage.instances() {
+            for inner in &out {
+                // The cap is checked while building rather than by truncating
+                // afterwards, for the reason a grid checks it: four stages of
+                // 512 multiply to more transforms than there is memory for.
+                if next.len() >= MAX_INSTANCES {
+                    break 'fill;
+                }
+                next.push(Instance {
+                    xform: outer.xform.compose(&inner.xform),
+                    // A reflection of a reflection points outward again.
+                    mirrored: outer.mirrored != inner.mirrored,
+                });
+            }
+        }
+        out = next;
+    }
+    out
+}
+
 // -- laying a pattern out in the viewport (issue 67) -------------------------
 //
 // A pattern is a rule, and a rule is a handful of numbers -- but nobody lays a
@@ -448,6 +776,7 @@ pub fn grips(params: &Params) -> Vec<Grip> {
         MIRROR => Vec::new(),
         HELIX => helix_grips(params),
         SPIRAL => spiral_grips(params),
+        CUSTOM => custom_grips(params),
         _ => linear_grips(params),
     };
     out.retain(|g| g.at.length() > 1e-6);
@@ -639,6 +968,51 @@ fn helix_grips(params: &Params) -> Vec<Grip> {
     out
 }
 
+/// A custom rule's handles: the run and the radius of every stage in use.
+///
+/// One stage's numbers are laid out exactly as a linear pattern's are, because
+/// that is what a stage stepping along a line is. The turn is left as a number:
+/// a stage may step *and* turn at once, and a handle riding a curve that its own
+/// neighbour is also moving is one nobody can aim at.
+fn custom_grips(params: &Params) -> Vec<Grip> {
+    let mut out = Vec::new();
+    for (index, k) in STAGES.iter().enumerate().take(stage_count(params)) {
+        let stage = stage(params, index);
+        if stage.mirror {
+            // A mirror is a plane and two copies: no distance, nothing to drag.
+            continue;
+        }
+        let length = stage.step.length();
+        let dir = if length > 1e-9 { stage.step * (1.0 / length) } else { unit(0) };
+        if length > 1e-9 && stage.count >= 2 {
+            out.push(Grip::slide(
+                k.grip_spacing,
+                stage.step * (stage.count - 1) as f64,
+                dir,
+                Drive::Length { keys: &k.step, base: 0.0, per: (stage.count - 1) as f64, min: POSITIVE },
+            ));
+        }
+        if length > 1e-9 {
+            out.push(Grip::slide(
+                k.grip_copies,
+                dir * (length * stage.count as f64),
+                dir,
+                Drive::Count { key: k.count, base: 0.0, per: length },
+            ));
+        }
+        if stage.radius.abs() > 1e-9 {
+            let radial = unit(radial_axis(stage.axis));
+            out.push(Grip::slide(
+                k.grip_radius,
+                radial * stage.radius,
+                radial,
+                Drive::Length { keys: std::slice::from_ref(&k.radius), base: 0.0, per: 1.0, min: POSITIVE },
+            ));
+        }
+    }
+    out
+}
+
 fn spiral_grips(params: &Params) -> Vec<Grip> {
     let ax = params.int("spiral_axis").min(2) as usize;
     let count = params.int("spiral_count").max(1);
@@ -705,6 +1079,202 @@ mod tests {
             params.insert((*key).to_string(), *value);
         }
         params
+    }
+
+    /// A custom rule with one stage set to step along X is a linear pattern.
+    /// Not "close to one" -- the same transforms, copy for copy, which is what
+    /// says the stage model is the rule the fixed kinds are special cases of
+    /// rather than a seventh thing that happens to look similar (issue 67).
+    #[test]
+    fn one_custom_stage_says_exactly_what_a_linear_pattern_says() {
+        let linear = with(&[
+            ("kind", ParamValue::Choice(LINEAR)),
+            ("count", ParamValue::Count(4)),
+            ("step_x", ParamValue::Length(10.0)),
+        ]);
+        let custom = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stages", ParamValue::Count(1)),
+            ("stage1_count", ParamValue::Count(4)),
+            ("stage1_step_x", ParamValue::Length(10.0)),
+        ]);
+        assert_eq!(instances(&custom), instances(&linear));
+    }
+
+    /// Two stages stepping along two axes are a grid, in the same order.
+    #[test]
+    fn two_custom_stages_say_exactly_what_a_grid_says() {
+        let grid = with(&[
+            ("kind", ParamValue::Choice(GRID)),
+            ("grid_x", ParamValue::Count(3)),
+            ("grid_y", ParamValue::Count(2)),
+            ("grid_z", ParamValue::Count(1)),
+            ("grid_step_x", ParamValue::Length(10.0)),
+            ("grid_step_y", ParamValue::Length(5.0)),
+        ]);
+        let custom = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stages", ParamValue::Count(2)),
+            ("stage1_count", ParamValue::Count(3)),
+            ("stage1_step_x", ParamValue::Length(10.0)),
+            ("stage2_count", ParamValue::Count(2)),
+            ("stage2_step_y", ParamValue::Length(5.0)),
+        ]);
+        assert_eq!(instances(&custom), instances(&grid));
+    }
+
+    /// A stage that turns at a radius is a ring, and a stage that turns while
+    /// rising is a helix.
+    #[test]
+    fn a_turning_stage_says_what_a_ring_and_a_helix_say() {
+        let ring = with(&[
+            ("kind", ParamValue::Choice(CIRCULAR)),
+            ("circ_count", ParamValue::Count(6)),
+            ("circ_span", ParamValue::Angle(360.0)),
+            ("circ_radius", ParamValue::Length(25.0)),
+        ]);
+        let as_stage = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stage1_count", ParamValue::Count(6)),
+            ("stage1_turn", ParamValue::Angle(60.0)),
+            ("stage1_radius", ParamValue::Length(25.0)),
+            ("stage1_step_x", ParamValue::Length(0.0)),
+        ]);
+        assert_eq!(instances(&as_stage), instances(&ring));
+
+        let helix = with(&[
+            ("kind", ParamValue::Choice(HELIX)),
+            ("helix_count", ParamValue::Count(5)),
+            ("helix_angle", ParamValue::Angle(45.0)),
+            ("helix_rise", ParamValue::Length(4.0)),
+            ("helix_radius", ParamValue::Length(20.0)),
+        ]);
+        let as_stage = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stage1_count", ParamValue::Count(5)),
+            ("stage1_turn", ParamValue::Angle(45.0)),
+            ("stage1_radius", ParamValue::Length(20.0)),
+            ("stage1_step_x", ParamValue::Length(0.0)),
+            ("stage1_step_z", ParamValue::Length(4.0)),
+        ]);
+        assert_eq!(instances(&as_stage), instances(&helix));
+    }
+
+    /// A stage that grows its radius while it turns is a spiral.
+    #[test]
+    fn a_growing_stage_says_what_a_spiral_says() {
+        let spiral = with(&[
+            ("kind", ParamValue::Choice(SPIRAL)),
+            ("spiral_count", ParamValue::Count(7)),
+            ("spiral_angle", ParamValue::Angle(30.0)),
+            ("spiral_radius", ParamValue::Length(10.0)),
+            ("spiral_growth", ParamValue::Length(5.0)),
+            ("spiral_rise", ParamValue::Length(0.0)),
+        ]);
+        let as_stage = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stage1_count", ParamValue::Count(7)),
+            ("stage1_turn", ParamValue::Angle(30.0)),
+            ("stage1_radius", ParamValue::Length(10.0)),
+            ("stage1_growth", ParamValue::Length(5.0)),
+            ("stage1_step_x", ParamValue::Length(0.0)),
+        ]);
+        assert_eq!(instances(&as_stage), instances(&spiral));
+    }
+
+    /// A mirror stage is a mirror pattern, and mirroring twice points the faces
+    /// back outward rather than leaving them inside out.
+    #[test]
+    fn a_mirror_stage_reflects_and_two_of_them_cancel() {
+        let mirrored = with(&[("kind", ParamValue::Choice(MIRROR)), ("mirror_axis", ParamValue::Choice(0))]);
+        let as_stage = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stage1_mirror", ParamValue::Bool(true)),
+            ("stage1_axis", ParamValue::Choice(0)),
+        ]);
+        assert_eq!(instances(&as_stage), instances(&mirrored));
+
+        let twice = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stages", ParamValue::Count(2)),
+            ("stage1_mirror", ParamValue::Bool(true)),
+            ("stage1_axis", ParamValue::Choice(0)),
+            ("stage2_mirror", ParamValue::Bool(true)),
+            ("stage2_axis", ParamValue::Choice(1)),
+        ]);
+        let copies = instances(&twice);
+        assert_eq!(copies.len(), 4);
+        assert_eq!(copies.iter().filter(|c| c.mirrored).count(), 2, "a reflection of a reflection points out again");
+    }
+
+    /// The point of stages: a later one repeats what the earlier ones *made*.
+    /// A row of three, turned four times about Z, is four rows standing round a
+    /// centre -- not four copies of the first shape and three of nothing.
+    #[test]
+    fn a_later_stage_repeats_what_the_earlier_ones_made() {
+        let params = with(&[
+            ("kind", ParamValue::Choice(CUSTOM)),
+            ("stages", ParamValue::Count(2)),
+            ("stage1_count", ParamValue::Count(3)),
+            ("stage1_step_x", ParamValue::Length(10.0)),
+            ("stage2_count", ParamValue::Count(4)),
+            ("stage2_turn", ParamValue::Angle(90.0)),
+            ("stage2_step_x", ParamValue::Length(0.0)),
+        ]);
+        let copies = instances(&params);
+        assert_eq!(copies.len(), 12);
+        assert_eq!(instance_count(&params), (12, 12));
+        // The row runs out along X; a quarter turn about Z carries it onto Y,
+        // so the far end of the second row is 20 mm up the Y axis.
+        assert!(
+            copies.iter().any(|c| (c.xform.t - Vec3::new(0.0, 20.0, 0.0)).length() < 1e-9),
+            "the second stage turned the copies rather than the row"
+        );
+    }
+
+    /// Four stages of 512 multiply to more transforms than there is memory for,
+    /// so the cap has to bite while the copies are being built.
+    #[test]
+    fn a_custom_rule_cannot_ask_for_more_copies_than_anything_can_draw() {
+        let mut params = with(&[("kind", ParamValue::Choice(CUSTOM)), ("stages", ParamValue::Count(4))]);
+        for keys in &STAGES {
+            params.insert(keys.count.to_string(), ParamValue::Count(512));
+            params.insert(keys.step[0].to_string(), ParamValue::Length(1.0));
+        }
+        let (wanted, made) = instance_count(&params);
+        assert_eq!(wanted, 512usize.pow(4));
+        assert_eq!(made, MAX_INSTANCES);
+        assert_eq!(instances(&params).len(), MAX_INSTANCES);
+    }
+
+    /// Only the stages in use are shown, a mirror stage shows nothing but the
+    /// plane it reflects across, and no stage at all is shown for another kind.
+    #[test]
+    fn a_stages_fields_are_shown_only_while_that_stage_is_in_use() {
+        let shown = |params: &Params| -> Vec<&'static str> {
+            PARAMS.iter().filter(|p| param_visible(p, params)).map(|p| p.key).collect()
+        };
+        let linear = with(&[("kind", ParamValue::Choice(LINEAR))]);
+        assert!(shown(&linear).iter().all(|k| !k.starts_with("stage")));
+
+        let one = with(&[("kind", ParamValue::Choice(CUSTOM)), ("stages", ParamValue::Count(1))]);
+        assert!(shown(&one).contains(&"stage1_count"));
+        assert!(!shown(&one).contains(&"stage2_count"), "a stage that is not in use was still shown");
+
+        let mirrored = with(&[("kind", ParamValue::Choice(CUSTOM)), ("stage1_mirror", ParamValue::Bool(true))]);
+        assert!(shown(&mirrored).contains(&"stage1_axis"), "a mirror stage still chooses its plane");
+        assert!(!shown(&mirrored).contains(&"stage1_step_x"), "a mirror stage has no run to place");
+    }
+
+    /// Every key the stage table names has to be a parameter that exists, or a
+    /// handle would drive a number nothing shows and nothing saves.
+    #[test]
+    fn every_stage_key_is_a_parameter_of_its_own() {
+        let known: Vec<&'static str> = PARAMS.iter().map(|p| p.key).collect();
+        for key in custom_keys() {
+            assert!(known.contains(&key), "{key} is named by the stage table but is not a parameter");
+        }
+        assert_eq!(custom_keys().len(), 1 + MAX_STAGES * 9);
     }
 
     #[test]
