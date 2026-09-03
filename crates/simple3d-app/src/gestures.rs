@@ -512,6 +512,56 @@ fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_first_press()
     );
 }
 
+/// Issue 67: the tree's own Add menu offers the custom-kind tool, the way the
+/// menu bar's does.
+///
+/// The two Add menus are meant to hold the same things and differ only in where
+/// what they add lands, and they drifted: "Custom pattern..." went into the menu
+/// bar's only, so the tree -- which is where a container is most often added
+/// from -- offered "Pattern" and "Make a pattern of the selection" and no way at
+/// all to reach the tool that builds a rule. A feature nobody can find is a
+/// feature nobody has.
+#[test]
+fn the_tree_add_menu_offers_the_custom_pattern_tool() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = harness("outliner-add-custom-pattern");
+    let root = harness.state().scene.root();
+    let cube = harness.state_mut().scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    harness.step();
+
+    let row = rect_of(&harness, crate::panel_outliner::row_id(cube));
+    let at = row.center();
+    move_to(&mut harness, at);
+    button(&mut harness, at, egui::PointerButton::Secondary, true);
+    button(&mut harness, at, egui::PointerButton::Secondary, false);
+    harness.step();
+    harness.step();
+
+    // The menu bar has an "Add" of its own, and it is the one a plain lookup by
+    // label finds -- which is how this test first passed against the very code it
+    // was written to catch. The tree's is a submenu, so its label carries the
+    // arrow egui puts on one, and it is drawn well below the menu bar.
+    let add = harness
+        .query_all_by_label_contains("Add")
+        .find(|node| node.rect().center().y > 40.0)
+        .expect("the tree's context menu has no Add of its own");
+    add.click();
+    harness.step();
+    harness.step();
+    assert!(
+        harness.query_by_label("Custom pattern...").is_some(),
+        "the tree's Add menu has no way through to the custom pattern kind tool"
+    );
+
+    harness.get_by_label("Custom pattern...").click();
+    harness.step();
+    harness.step();
+    assert_eq!(harness.state().modal, crate::app::Modal::PatternKind, "the entry did not open the tool");
+    let opened = harness.state().pattern_tool.expect("the tool opened on nothing");
+    assert!(harness.state().scene.node(opened).is_pattern(), "the tool opened on something that is not a pattern");
+}
+
 // -- a value field: Enter takes it, Escape leaves it ---------------------------
 
 fn text(harness: &mut Harness<'_, App>, what: &str) {

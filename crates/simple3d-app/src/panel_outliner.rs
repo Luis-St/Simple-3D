@@ -713,6 +713,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         let mut operation: Option<GroupOp> = None;
         let mut add: Option<(Option<&'static str>, GroupOp)> = None;
         let mut add_pattern = false;
+        let mut add_custom_pattern = false;
         let mut save_as_primitive = false;
         let mut paint: Option<Option<Colour>> = None;
         let keymap = &app.keymap;
@@ -739,6 +740,18 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
                 .clicked()
             {
                 add_pattern = true;
+                ui.close();
+            }
+            // The tool that builds a repetition rule out of stages (issue 67).
+            // Beside "Pattern" here as well as in the menu bar: the tree's own
+            // Add menu is where a container gets added from, and a rule nobody
+            // can find is a rule nobody has.
+            if ui
+                .button("Custom pattern...")
+                .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
+                .clicked()
+            {
+                add_custom_pattern = true;
                 ui.close();
             }
             ui.separator();
@@ -866,6 +879,12 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         }
         if add_pattern {
             app.add_pattern_at(id);
+        }
+        // An empty pattern on this row, and the tool opened on it: adding leaves
+        // the new pattern selected, which is what the tool works on.
+        if add_custom_pattern {
+            app.add_pattern_at(id);
+            app.open_pattern_tool();
         }
         if let Some(colour) = paint {
             let targets: Vec<NodeId> = app.selection.to_vec();
