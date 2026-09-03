@@ -731,7 +731,7 @@ impl App {
         mut body: impl FnMut(&mut Self, &mut egui::Ui),
         mut actions: impl FnMut(&mut Self, &mut egui::Ui),
     ) {
-        let DialogSpec { key, title, size, resizable, fit_height } = spec;
+        let DialogSpec { key, title, size, resizable, fit_height, min_size } = spec;
         let id = egui::ViewportId::from_hash_of(key);
         let mut builder = egui::ViewportBuilder::default()
             .with_title(title)
@@ -744,6 +744,9 @@ impl App {
             .with_minimize_button(false)
             .with_maximize_button(resizable)
             .with_window_level(egui::WindowLevel::AlwaysOnTop);
+        if let Some(min) = min_size {
+            builder = builder.with_min_inner_size(min);
+        }
         // Placed once, when the dialog opens, and never again. This body runs
         // on every frame of the parent's, and a builder that asks for a
         // position each time is a window that is put back where it started
@@ -839,7 +842,14 @@ impl App {
         };
         self.dialog(
             ctx,
-            DialogSpec { key: "dialog-export", title: "Export", size, resizable: true, fit_height: false },
+            DialogSpec {
+                key: "dialog-export",
+                title: "Export",
+                size,
+                resizable: true,
+                fit_height: false,
+                min_size: None,
+            },
             Self::export_body,
             Self::export_actions,
         );
@@ -1088,6 +1098,7 @@ impl App {
                 size: egui::vec2(620.0, 660.0),
                 resizable: true,
                 fit_height: false,
+                min_size: None,
             },
             Self::keymap_body,
             Self::close_action,
@@ -1353,6 +1364,7 @@ impl App {
                 size: egui::vec2(460.0, 220.0),
                 resizable: false,
                 fit_height: true,
+                min_size: None,
             },
             Self::about_body,
             Self::close_action,
@@ -1390,6 +1402,7 @@ impl App {
                 size: egui::vec2(560.0, 360.0),
                 resizable: true,
                 fit_height: false,
+                min_size: None,
             },
             Self::error_body,
             Self::error_actions,
@@ -1437,6 +1450,7 @@ impl App {
                 size: egui::vec2(480.0, 200.0),
                 resizable: false,
                 fit_height: false,
+                min_size: None,
             },
             Self::save_primitive_body,
             Self::save_primitive_actions,
@@ -1497,6 +1511,11 @@ impl App {
                 size: egui::vec2(820.0, 520.0),
                 resizable: true,
                 fit_height: false,
+                // The tool gives its columns up one at a time as the window
+                // narrows and ends as a single column, but a stage still has a
+                // name and a field on every row and a button row still has two
+                // buttons in it. Below this there is no layout left to find.
+                min_size: Some(egui::vec2(320.0, 260.0)),
             },
             crate::pattern_tool::body,
             crate::pattern_tool::actions,
@@ -1512,6 +1531,7 @@ impl App {
                 size: egui::vec2(440.0, 150.0),
                 resizable: false,
                 fit_height: false,
+                min_size: None,
             },
             Self::confirm_close_tab_body,
             Self::confirm_close_tab_actions,
@@ -1551,6 +1571,7 @@ impl App {
                 size: egui::vec2(500.0, 150.0),
                 resizable: false,
                 fit_height: false,
+                min_size: None,
             },
             Self::confirm_quit_body,
             Self::confirm_quit_actions,
@@ -1617,6 +1638,10 @@ struct DialogSpec<'a> {
     resizable: bool,
     /// Take the height from the contents rather than from `size`.
     fit_height: bool,
+    /// The smallest the window may be dragged to, for a resizable one whose
+    /// contents stop making sense below a size. `None` leaves it to the window
+    /// manager, which is right for a dialog that is a sentence and two buttons.
+    min_size: Option<egui::Vec2>,
 }
 
 /// The buttons of a dialog, laid out the one way they are laid out everywhere:

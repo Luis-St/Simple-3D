@@ -133,26 +133,80 @@ impl App {
     }
 }
 
+/// The narrowest the shelf is worth drawing at: below this a saved kind's name
+/// is cut off, and a list of names nobody can read is not a shelf.
+const SHELF_MIN: f32 = 140.0;
+/// The narrowest the stages are worth drawing at. Their rows are the property
+/// panel's own, which stack a name above its field rather than beside it once
+/// the room runs out, so the numbers stay usable well below the width three
+/// columns need.
+const STAGES_MIN: f32 = 240.0;
+/// The smallest the picture can be and still show a helix as one.
+const PREVIEW_MIN: f32 = 150.0;
+
 /// The tool's contents: the shelf of saved kinds down the left, the stages down
 /// the middle, and what they currently lay out drawn beside them.
+///
+/// The window is resizable, so the three are shares of the room there is rather
+/// than three fixed widths. Made wider, it is the stages that grow, because that
+/// is where the typing happens. Made narrower, the columns are given up in the
+/// order they can be spared: the picture first -- the viewport behind this window
+/// is already showing the real thing, in three dimensions, and this is only the
+/// version that fits in front of the numbers -- and then the shelf's own column,
+/// which moves above the stages rather than disappearing.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
         return;
     };
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(170.0);
-            shelf(app, ui);
+    let room = ui.available_width();
+    // What one `ui.separator()` costs in a horizontal layout: the rule itself
+    // and the gap either side of it.
+    let rule = 6.0 + ui.spacing().item_spacing.x * 2.0;
+
+    if room >= SHELF_MIN + STAGES_MIN + PREVIEW_MIN + rule * 2.0 {
+        let shelf_width = (room * 0.20).clamp(SHELF_MIN, 230.0);
+        let picture = (room * 0.32).clamp(PREVIEW_MIN, 380.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(shelf_width);
+                shelf(app, ui);
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.set_width(room - shelf_width - picture - rule * 2.0);
+                stages(app, ui, id);
+            });
+            ui.separator();
+            ui.vertical(|ui| preview(app, ui));
         });
-        ui.separator();
+    } else if room >= SHELF_MIN + STAGES_MIN + rule {
+        let shelf_width = (room * 0.30).clamp(SHELF_MIN, 200.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(shelf_width);
+                shelf(app, ui);
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.set_width(room - shelf_width - rule);
+                stages(app, ui, id);
+            });
+        });
+    } else {
+        // One column. The shelf is a list of names and takes a slice off the top;
+        // the stages take everything else, since they are what the window is open
+        // for.
+        let shelf_height = (ui.available_height() * 0.3).clamp(56.0, 140.0);
         ui.vertical(|ui| {
-            ui.set_width(300.0);
+            ui.scope(|ui| {
+                ui.set_max_height(shelf_height);
+                shelf(app, ui);
+            });
+            ui.separator();
             stages(app, ui, id);
         });
-        ui.separator();
-        ui.vertical(|ui| preview(app, ui));
-    });
+    }
 }
 
 /// The saved kinds. Clicking one puts it on the pattern; the cross beside it
@@ -275,7 +329,9 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
     let copies = pattern::instances(&params);
     ui.add(egui::Label::new(theme::header_text("Lays out")).selectable(false));
     ui.add_space(4.0);
-    let side = ui.available_width().min(ui.available_height() - 24.0).clamp(160.0, 420.0);
+    // Square, and never wider than the column it is in: a lower bound above what
+    // the column actually has is a picture that hangs off the edge of it.
+    let side = ui.available_width().min(ui.available_height() - 24.0).clamp(120.0, 420.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 4.0, theme::token::SURFACE_0);
@@ -321,6 +377,16 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     if ui::dialog_button(ui, "Save kind", named).clicked() {
         app.save_current_kind();
     }
-    ui.add(egui::TextEdit::singleline(&mut app.pattern_tool_name).desired_width(180.0).hint_text("Bolt ring"));
-    ui.add(egui::Label::new("Name").selectable(false));
+    // What is left of the row once the two buttons have taken theirs, less the
+    // width of the word in front of the field. A fixed 180 was wider than a
+    // narrow window has to give, and the name field is the one thing here that
+    // can honestly be any width at all.
+    let field = (ui.available_width() - 52.0).clamp(60.0, 220.0);
+    ui.add(egui::TextEdit::singleline(&mut app.pattern_tool_name).desired_width(field).hint_text("Bolt ring"));
+    // The word in front of the field is the first thing to go when the row runs
+    // out: the field's own hint already says what belongs in it, and a label half
+    // off the edge of the window says less than no label at all.
+    if ui.available_width() >= 44.0 {
+        ui.add(egui::Label::new("Name").selectable(false));
+    }
 }

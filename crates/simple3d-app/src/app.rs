@@ -4962,6 +4962,61 @@ mod tests {
         assert!(app.scene.node(app.primary().unwrap()).is_pattern());
     }
 
+    /// Issue 67: the tool's window is resizable, so what is in it has to fit
+    /// whatever width the window is dragged to.
+    ///
+    /// Its three columns were three fixed widths -- 170 for the shelf, 300 for the
+    /// stages and whatever was left for the picture -- which is 640-odd pixels of
+    /// content whether or not the window has them. Dragged narrow, the picture was
+    /// squeezed to nothing and the rest ran off the right-hand edge. The columns
+    /// are shares of the room now, and give themselves up in order when there is
+    /// not enough of it.
+    ///
+    /// The check is that nothing is laid out wider than the room it was given, at
+    /// each of the widths where the layout changes its mind and either side of
+    /// them, and it covers the button row too: that row fills from the right, so
+    /// what overflows it runs off the *left* edge, which is where "Name" went.
+    ///
+    /// It stops at the window's own minimum size rather than going down to
+    /// nothing. Below that there is no layout to find -- two buttons and a field
+    /// are wider than that on their own -- which is why the window is not allowed
+    /// to be dragged there.
+    #[test]
+    fn the_pattern_tool_fits_whatever_width_its_window_is_given() {
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
+        app.reevaluate_for_test();
+
+        for width in [1400.0_f32, 900.0, 820.0, 640.0, 560.0, 470.0, 400.0, 360.0, 330.0, 320.0] {
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx);
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 520.0))),
+                ..Default::default()
+            };
+            let (mut room, mut used) = (0.0_f32, 0.0_f32);
+            let (mut row_room, mut row_used) = (0.0_f32, 0.0_f32);
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    room = ui.max_rect().width();
+                    crate::pattern_tool::body(&mut app, ui);
+                    used = ui.min_rect().width();
+                    ui.separator();
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        row_room = ui.max_rect().width();
+                        crate::pattern_tool::actions(&mut app, ui);
+                        row_used = ui.min_rect().width();
+                    });
+                });
+            });
+            // Half a pixel of slack: a rule and its spacing are rounded, and this
+            // is looking for columns that do not fit, not for rounding.
+            assert!(used <= room + 0.5, "at {room} px of room the tool laid out {used} px of content");
+            assert!(row_used <= row_room + 0.5, "at {row_room} px of room the button row took {row_used} px");
+        }
+    }
+
     /// The step vector a linear pattern is currently laid out along.
     fn linear_run(app: &App, pat: NodeId) -> Vec3 {
         use simple3d_core::primitive::ParamsExt;
