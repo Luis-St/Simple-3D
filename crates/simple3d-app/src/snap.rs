@@ -71,6 +71,16 @@ impl FeatureKind {
 /// the same to reach for whichever is doing the reaching.
 pub const CATCH_PIXELS: f32 = 12.0;
 
+/// How near a feature of the body being dragged has to come to a feature of
+/// another body for the drag to catch on it, in screen pixels.
+///
+/// Wider than [`CATCH_PIXELS`], and deliberately: that is a pointer reaching for
+/// one exact point, which is aimed and can be aimed finely. This is a whole body
+/// coming alongside another, judged by eye at whatever zoom the viewport happens
+/// to be at and steered by a handle the pointer is nowhere near -- twelve pixels
+/// of that is a gap a drag cannot be aimed into, and a snap nobody ever feels.
+pub const DRAG_CATCH_PIXELS: f32 = 22.0;
+
 /// One catchable point on a body, in world space.
 ///
 /// An edge feature also carries the edge it is the middle of, so a pointer that

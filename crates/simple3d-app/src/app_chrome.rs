@@ -6,7 +6,7 @@ use crate::gizmo::Mode;
 use crate::render::Renderable;
 use crate::theme;
 use crate::ui;
-use simple3d_core::config::{self, DisplayMode, Panel, RenderEngine, Side};
+use simple3d_core::config::{self, DisplayMode, Panel, RenderEngine, Side, SnapMode};
 use simple3d_core::keymap::{Area, Chord, Command, Keymap, MouseButton, Preset};
 use simple3d_core::primitive;
 use simple3d_core::scene::{ExportBody, GroupOp, NodeId, Scene, Visibility};
@@ -439,8 +439,36 @@ impl App {
                 ui.close();
             }
             ui.separator();
+            // Geometry snapping's mode (issue 68). It lived only in the document
+            // settings, which the property panel shows *with nothing selected* --
+            // and snapping needs something selected to have a manipulator at all,
+            // so the one control and the one state were mutually exclusive and
+            // the setting could not be found while doing the thing it governs.
+            // It belongs here beside the handle frame, which is the same kind of
+            // setting: how the manipulator behaves, not what the document holds.
+            let snap_key = self.keymap.shortcut_text(Command::SnapToGeometry);
+            ui.menu_button("Snap to geometry", |ui| {
+                for mode in SnapMode::ALL {
+                    let name = if mode == SnapMode::WhileHeld && !snap_key.is_empty() {
+                        format!("{} ({snap_key})", mode.label())
+                    } else {
+                        mode.label().to_string()
+                    };
+                    let text = format!("{} {name}", if self.settings.geometry_snap == mode { "*" } else { " " });
+                    if ui::menu_entry(ui, &text, true).on_hover_text(mode.description()).clicked() {
+                        self.settings.geometry_snap = mode;
+                        self.persist();
+                        self.status = Status::Info(format!("Snap to geometry: {name}"));
+                        ui.close();
+                    }
+                }
+            });
+            ui.separator();
             ui.label("Hold Alt to drag freely, Shift to snap coarsely,");
             ui.label("Ctrl to resize about the centre or keep proportions.");
+            if self.settings.geometry_snap == SnapMode::WhileHeld && !snap_key.is_empty() {
+                ui.label(format!("Hold {snap_key} to snap a drag onto another body."));
+            }
         });
     }
 

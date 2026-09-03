@@ -1278,6 +1278,72 @@ fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
     );
 }
 
+/// Issue 68, the whole point of it: two bodies brought face to face.
+///
+/// Placing a part against another is what geometry snapping is *for*, and it is
+/// the case the feature could not do. The target used to be whatever feature the
+/// *pointer* was over, and the manipulator handle is grabbed some seventy pixels
+/// out from the body -- so by the time the pointer reached the corner to meet,
+/// the body it was carrying had already been dragged on top of that corner. Two
+/// 20 mm boxes could be snapped into the same 20 mm of space, and into nothing
+/// else: the landing where their faces touch was never once offered.
+///
+/// The carried box starts at the origin and the target sits at 75, so the two
+/// stand 55 mm apart with a 20 mm box between them. Their faces meet when the
+/// carried box is at 55, which is the number this drag has to be able to reach.
+#[test]
+fn a_snapped_drag_can_put_two_boxes_face_to_face() {
+    let mut harness = harness_configured("snap-face-to-face", |app| {
+        app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
+        let root = app.scene.root();
+        for id in app.scene.node(root).children.clone() {
+            app.scene.remove(id);
+        }
+        let carried = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
+        let target = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+        app.scene.get_mut(target).unwrap().position = Vec3::new(75.0, 0.0, 0.0);
+        // A grid step that cannot land on 55 by itself, so a landing there is one
+        // the geometry chose.
+        app.scene.settings.snap_step = 10.0;
+        app.select_only(carried);
+    });
+    let carried = harness.state().primary().unwrap();
+    harness.state_mut().mode = crate::gizmo::Mode::Move;
+    harness.step();
+    harness.state_mut().evaluated =
+        Evaluator::new().evaluate(&harness.state().scene, &simple3d_core::eval::Cancel::new());
+    harness.state_mut().frame_all();
+    harness.step();
+
+    let view = harness.state().current_view();
+    let gizmo = harness.state().gizmo_for(carried).expect("a gizmo for the selected box");
+    let handle = crate::gizmo::Handle::MoveAxis(0);
+    let start = gizmo.handle_point(handle, &view);
+    let (at, _) = view.project(start).expect("the X arrow is off screen");
+
+    modifiers(&mut harness, egui::Modifiers::COMMAND);
+    press(&mut harness, at);
+    // Crossed the whole gap a millimetre at a time, keeping every place the drag
+    // snapped to. A person doing this by eye stops at the one they wanted; the
+    // test only has to prove it was offered at all.
+    let mut landings: Vec<f64> = Vec::new();
+    for step in 1..=90 {
+        let to = view.project(start + gizmo.axes[0] * step as f64).expect("the drag ran off screen").0;
+        move_to(&mut harness, to);
+        if harness.state().snap_indicator.is_some() {
+            landings.push(harness.state().scene.node(carried).position.x);
+        }
+    }
+    release(&mut harness, at);
+    modifiers(&mut harness, egui::Modifiers::NONE);
+    harness.step();
+
+    assert!(
+        landings.iter().any(|x| (x - 55.0).abs() < 1e-6),
+        "the drag never offered the landing where the two boxes touch; it snapped to {landings:?}"
+    );
+}
+
 // -- issue 78: the measure tool's own section in the property panel ------------
 
 #[test]

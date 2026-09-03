@@ -106,6 +106,17 @@ impl SnapMode {
             SnapMode::Never => "Never",
         }
     }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            SnapMode::WhileHeld => {
+                "Snap a drag onto another body's vertices, edge midpoints and face centres \
+                 while the snap key is held down."
+            }
+            SnapMode::Always => "Snap every drag onto whatever body feature the pointer is over.",
+            SnapMode::Never => "Snap drags to the document's step and nothing else.",
+        }
+    }
 }
 
 /// Which frame the manipulator handles work in (spec section 6.2).
