@@ -232,15 +232,29 @@ impl FieldBuffers {
     /// The field as it looks when it is not being typed into: the same box, the
     /// same right-aligned tabular figures, and the resize cursor that says it
     /// can be dragged.
+    ///
+    /// It answers to the pointer the way every other control in the application
+    /// does -- the fill lifts under it and goes to the accent while it is being
+    /// dragged -- because a box that never changes gives a drag no feedback at
+    /// all, and because taking the *text* colour from the pressed state while
+    /// keeping the resting fill wrote the number in near-black on dark grey for
+    /// the length of the gesture.
     fn value_box(&self, ui: &mut egui::Ui, grip: egui::Id, text: &str, rejected: bool) -> egui::Response {
         let height = crate::theme::metric::INPUT_ROW;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
         let response = ui.interact(rect, grip, egui::Sense::click_and_drag());
         let visuals = ui.style().interact(&response);
-        let (fill, stroke) = if rejected {
-            (crate::theme::token::DANGER.gamma_multiply(0.16), egui::Stroke::new(1.0_f32, crate::theme::token::DANGER))
+        let (fill, stroke, text_colour) = if rejected {
+            // The refused value is never written in the pressed state's colour:
+            // that one is chosen to sit on the accent, and on the danger tint it
+            // would hide the very number the user has to correct.
+            (
+                crate::theme::token::DANGER.gamma_multiply(0.16),
+                egui::Stroke::new(1.0_f32, crate::theme::token::DANGER),
+                crate::theme::token::TEXT_HI,
+            )
         } else {
-            (ui.visuals().extreme_bg_color, visuals.bg_stroke)
+            (visuals.weak_bg_fill, visuals.bg_stroke, visuals.text_color())
         };
         let painter = ui.painter();
         painter.rect(rect, visuals.corner_radius, fill, stroke, egui::StrokeKind::Inside);
@@ -249,11 +263,22 @@ impl FieldBuffers {
             egui::Align2::RIGHT_CENTER,
             text,
             egui::FontId::monospace(crate::theme::font::VALUE),
-            visuals.text_color(),
+            text_colour,
         );
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
+        // The box is painted rather than assembled out of egui's own widgets, so
+        // nothing would otherwise say what it is: to anything reading the
+        // interface it was an unnamed rectangle. It is the same control egui's
+        // `DragValue` is, so it says so, and reads out the value it is showing.
+        let enabled = ui.is_enabled();
+        let shown = text.to_string();
+        response.widget_info(|| egui::WidgetInfo {
+            enabled,
+            current_text_value: Some(shown.clone()),
+            ..egui::WidgetInfo::new(egui::WidgetType::DragValue)
+        });
         response
     }
 
@@ -387,6 +412,13 @@ pub struct Scrub {
     /// one, which is what makes a count follow the pointer at the same six
     /// pixels a step every other field does.
     pub carry: f64,
+    /// Whether this gesture has moved the value yet.
+    ///
+    /// The frame that reports `started` is the frame a field records its one
+    /// undo step on, so a gesture that has not moved anything must not report it:
+    /// the field scrubs on the horizontal axis alone, and a press dragged
+    /// straight down would otherwise leave a step behind that undoes nothing.
+    pub moved: bool,
 }
 
 /// One frame of a scrub on a value box: which field owns the gesture, and how
@@ -402,6 +434,7 @@ pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut S
         // Nothing is owed at the start of a gesture: a fraction left over from
         // the last one would be spent on this field's first frame.
         scrub.carry = 0.0;
+        scrub.moved = false;
     }
     if scrub.id != Some(id) {
         return None;
@@ -409,11 +442,22 @@ pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut S
     if !response.dragged() {
         scrub.id = None;
         scrub.carry = 0.0;
+        scrub.moved = false;
         return None;
     }
     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     let (fine, coarse) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
-    Some(Scrubbed { started: response.drag_started(), delta: scrub_delta(response.drag_delta().x, step, fine, coarse) })
+    // The value follows the pointer sideways and nothing else. Vertical movement
+    // is how a hand holds a horizontal drag steady, not a second axis to edit
+    // on -- and a field that answered to both could not be dragged along a row
+    // without wandering.
+    let delta = scrub_delta(response.drag_delta().x, step, fine, coarse);
+    if delta == 0.0 && !scrub.moved {
+        return None;
+    }
+    let started = !scrub.moved;
+    scrub.moved = true;
+    Some(Scrubbed { started, delta })
 }
 
 /// This frame's pointer movement as a change in the field's own units.

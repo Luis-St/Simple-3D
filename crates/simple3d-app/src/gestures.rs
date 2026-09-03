@@ -285,6 +285,44 @@ fn every_scrubbable_value_is_dragged_from_its_own_field() {
     }
 }
 
+#[test]
+fn a_setting_scrubs_on_one_axis_with_the_same_modifiers_as_a_dimension() {
+    // The document's own numbers -- the step, the grid, the segment default, the
+    // 3D cursor, the ends of the measure span -- were egui's `DragValue`, which
+    // is a different control: it counted vertical movement as a second axis to
+    // edit on and it had no coarse modifier. They come through the same field as
+    // every dimension now, and the step is the one that is on screen with a
+    // shape selected, so it is the one dragged here.
+    let mut harness = harness("scrub-setting");
+    let step = |harness: &Harness<'_, App>| harness.state().scene.settings.snap_step;
+    assert_eq!(step(&harness), 1.0);
+    let history = harness.state().history.undo_len();
+
+    // Straight down, which used to change the value and must now do nothing at
+    // all -- including leaving a step behind that undoes nothing.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Step"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(0.0, 60.0), 6);
+    assert_eq!(step(&harness), 1.0, "a drag straight down the field changed the step");
+    assert_eq!(harness.state().history.undo_len(), history, "a drag that changed nothing left an undo step");
+
+    // Sixty pixels to the right at six pixels a step is ten millimetres, and the
+    // whole drag is one thing to undo.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Step"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 6);
+    assert!((step(&harness) - 11.0).abs() < 1e-9, "the scrub gave {} rather than 11 mm", step(&harness));
+    assert_eq!(harness.state().history.undo_len(), history + 1, "a scrub across six frames left more than one step");
+    harness.state_mut().run(simple3d_core::keymap::Command::Undo);
+    assert_eq!(step(&harness), 1.0, "one undo did not take the whole scrub back");
+
+    // And the coarse modifier, which egui's control did not have: the same sixty
+    // pixels are worth ten times as much with Ctrl held.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Step"));
+    modifiers(&mut harness, egui::Modifiers::COMMAND);
+    drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 6);
+    modifiers(&mut harness, egui::Modifiers::NONE);
+    assert!((step(&harness) - 101.0).abs() < 1e-9, "a coarse scrub gave {} rather than 101 mm", step(&harness));
+}
+
 // -- picking and grabbing in the viewport -------------------------------------
 
 #[test]

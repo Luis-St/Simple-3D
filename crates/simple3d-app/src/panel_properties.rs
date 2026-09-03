@@ -66,6 +66,20 @@ const MIN_AXIS_FIELD: f32 = 52.0;
 /// edge every row in it has to stay inside.
 const EDGE_PAD: f32 = 8.0;
 
+/// The largest a document-wide distance -- the grid, the step -- may be set to,
+/// in millimetres. A kilometre is already far past anything this prints, and a
+/// field that can be dragged has to stop somewhere.
+const MAX_LENGTH: f64 = 1e6;
+
+/// The range a segment count may take, whether it is the document's default or
+/// one object's override: below three there is no curve to speak of, and above
+/// five hundred the triangles are smaller than anything that prints.
+const SEGMENTS: ParamKind = ParamKind::Count { min: 3, max: 512 };
+
+/// One component of a point in space -- the 3D cursor, an end of the measure
+/// span. A length with no floor, because half of space is behind the origin.
+const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
+
 /// How a section renders the parameter rows it shares with every other
 /// section: what its edits are called in the undo history, and where a value's
 /// unit is written.
@@ -224,6 +238,87 @@ fn value_field(app: &mut App, ui: &mut egui::Ui, name: &str, field_id: egui::Id,
     outcome
 }
 
+/// A number that is not a primitive's parameter -- the document's grid or step,
+/// a segment count, a component of the 3D cursor or of the measure span.
+///
+/// These were egui's own `DragValue`, which is a different control wearing the
+/// same theme: it drags on the vertical axis as well as the horizontal, it has
+/// no coarse modifier, it reads no units and no deltas, and it silently swallows
+/// what it cannot parse. One kind of number field in the panel means one set of
+/// answers to all of that, so they come through the same field as every
+/// dimension row.
+///
+/// `current` is in stored terms -- millimetres for a length, degrees for an
+/// angle -- and so is the value handed to `apply`. `apply` is also told whether
+/// this is the frame the gesture *began*, which is the frame that records the
+/// undo step: recording on every frame would spend a whole drag's worth of
+/// history on one edit.
+struct Scalar<'a> {
+    /// What the scrub gesture is remembered by, named after the value rather
+    /// than taken from the layout -- see [`grip_id`].
+    grip: &'a str,
+    /// What the text field it opens into is remembered by.
+    id: egui::Id,
+    /// What the number is, which decides how it is written, what a typed entry
+    /// may say, and where it is clamped.
+    kind: ParamKind,
+    /// What it holds now, in stored terms.
+    current: f64,
+    /// How much one step of the scrub is worth, in the unit the field shows.
+    step: f64,
+}
+
+fn scalar_field(app: &mut App, ui: &mut egui::Ui, field: Scalar<'_>, mut apply: impl FnMut(&mut App, f64, bool)) {
+    let Scalar { grip, id: field_id, kind, current, step } = field;
+    let unit = app.unit();
+    let shown = match kind {
+        ParamKind::Length { .. } => format_length(current, unit),
+        ParamKind::Angle { .. } => format_angle(current),
+        _ => format_number(current, 0),
+    };
+    let outcome = value_field(app, ui, grip, field_id, &shown, step);
+    if let Some(scrubbed) = outcome.scrubbed {
+        // A whole number is read back out of the model on every frame, so the
+        // fraction of a step each frame is worth has to be carried rather than
+        // rounded away -- see `scrub_param`, which carries it the same way.
+        let whole = matches!(kind, ParamKind::Count { .. });
+        let carried = if whole { app.scrub.carry } else { 0.0 };
+        let displayed = match kind {
+            ParamKind::Length { .. } => unit.from_mm(current),
+            _ => current,
+        };
+        let wanted = displayed + scrubbed.delta + carried;
+        let next = ui::param_number(ui::value_from_display(kind, unit, wanted));
+        if whole {
+            app.scrub.carry = (wanted - next).clamp(-1.0, 1.0);
+        }
+        apply(app, next, scrubbed.started);
+    }
+    if let Some(text) = outcome.committed {
+        match ui::commit_param(&text, kind, unit, current) {
+            Commit::Value(value) => {
+                app.fields.accept(field_id);
+                apply(app, ui::param_number(value), true);
+            }
+            Commit::Revert => {
+                app.fields.reject(field_id, text.clone());
+                app.status = Status::Info(format!("\"{text}\" is not a number this field can take"));
+            }
+        }
+    }
+}
+
+/// What a scrubbed scene setting does with the frame it is on: the first frame
+/// of the gesture takes the one undo snapshot the whole drag gets, and every
+/// frame after it only marks the scene for re-evaluation.
+fn edit_or_touch(app: &mut App, started: bool, label: &str, key: &str) {
+    if started {
+        app.edit(label, Some(key));
+    } else {
+        app.touch();
+    }
+}
+
 /// The panel's contents, without the dock around them, so the same panel can be
 /// drawn in either dock.
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
@@ -317,11 +412,18 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                 });
         });
         field_row(ui, "Grid", "", |ui| {
-            let mut spacing = unit.from_mm(app.scene.settings.grid_spacing);
-            if ui.add(egui::DragValue::new(&mut spacing).range(1e-6..=1e6).speed(0.1)).changed() {
-                app.edit("Grid spacing", Some("scene:grid"));
-                app.scene.settings.grid_spacing = unit.to_mm(spacing).max(1e-6);
-            }
+            let kind = ParamKind::Length { min: 1e-6 };
+            let spacing = app.scene.settings.grid_spacing;
+            let width = (room_left(ui) - suffix_room(ui, unit.suffix())).max(40.0);
+            let id = ui.id().with("doc-grid");
+            ui.scope(|ui| {
+                ui.set_width(width);
+                let field = Scalar { grip: "Grid", id, kind, current: spacing, step: ui::scrub_increment(kind, unit) };
+                scalar_field(app, ui, field, |app, mm, started| {
+                    edit_or_touch(app, started, "Grid spacing", "scene:grid");
+                    app.scene.settings.grid_spacing = mm.min(MAX_LENGTH);
+                });
+            });
             ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
         step_row(app, ui);
@@ -410,11 +512,17 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
             },
         );
         field_row(ui, "Segments", "", |ui| {
-            let mut segments = app.scene.settings.default_segments as f64;
-            if ui.add(egui::DragValue::new(&mut segments).range(3.0..=512.0).speed(0.5).max_decimals(0)).changed() {
-                app.edit("Default segments", Some("scene:segments"));
-                app.scene.settings.default_segments = segments.round() as u32;
-            }
+            let segments = app.scene.settings.default_segments as f64;
+            let width = room_left(ui).max(40.0);
+            let id = ui.id().with("doc-segments");
+            ui.scope(|ui| {
+                ui.set_width(width);
+                let field = Scalar { grip: "Segments", id, kind: SEGMENTS, current: segments, step: 1.0 };
+                scalar_field(app, ui, field, |app, count, started| {
+                    edit_or_touch(app, started, "Default segments", "scene:segments");
+                    app.scene.settings.default_segments = count as u32;
+                });
+            });
         });
         ui.add(
             egui::Label::new(theme::hint("Curves are circumscribed: a diameter of 50 measures 50 at its widest."))
@@ -447,8 +555,7 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
 fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
     let at = app.cursor.unwrap_or(Vec3::ZERO);
-    let mut components = [at.x, at.y, at.z];
-    let mut changed = false;
+    let step = unit.from_mm(app.move_snap()).max(1e-6);
     field_row(
         ui,
         "3D cursor",
@@ -459,23 +566,26 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
             // with the panel, and wrap onto a second line rather than shrinking
             // past being readable (issue 51).
             let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
-            for (axis, value) in components.iter_mut().enumerate() {
-                let mut shown = unit.from_mm(*value);
-                let field =
-                    egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
-                let response = ui.add_sized(egui::vec2(each, theme::metric::INPUT_ROW), field);
-                if response.changed() {
-                    *value = unit.to_mm(shown);
-                    changed = true;
-                }
-                let _ = axis;
+            for axis in 0..3 {
+                let field_id = ui.id().with(("cursor", axis));
+                // Named the way `axis_row` names its three, so one field cannot
+                // answer to another's gesture.
+                let grip = format!("3D cursor:{axis}");
+                ui.scope(|ui| {
+                    ui.set_width(each);
+                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                    // No undo step: the cursor is not part of the scene, so
+                    // there is no snapshot for one to restore.
+                    scalar_field(app, ui, field, |app, mm, _| {
+                        let mut p = app.cursor.unwrap_or(Vec3::ZERO);
+                        set_component(&mut p, axis, mm);
+                        app.cursor = Some(p);
+                    });
+                });
             }
             ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         },
     );
-    if changed {
-        app.cursor = Some(Vec3::new(components[0], components[1], components[2]));
-    }
     field_row(ui, "", "", |ui| {
         if ui
             .add_enabled(app.cursor.is_some(), egui::Button::new("Back to the origin"))
@@ -503,11 +613,8 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
         // An end can be typed only once the start is down; before that it would
         // be a point with nothing to measure to.
         let enabled = index <= placed;
-        let mut components = match point {
-            Some(p) => [p.at.x, p.at.y, p.at.z],
-            None => [0.0; 3],
-        };
-        let mut changed = false;
+        let at = point.map_or(Vec3::ZERO, |p| p.at);
+        let step = unit.from_mm(app.move_snap()).max(1e-6);
         let hover = match point.and_then(|p| p.kind) {
             Some(kind) => format!("Caught the {} of a body. Type here to place it exactly.", kind.label()),
             None if point.is_some() => "Click in the viewport to move it, or type it exactly.".to_string(),
@@ -515,22 +622,26 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
         };
         field_row(ui, label, &hover, |ui| {
             let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
-            for value in components.iter_mut() {
-                let mut shown = unit.from_mm(*value);
-                let field =
-                    egui::DragValue::new(&mut shown).speed(unit.from_mm(app.move_snap()).max(1e-6)).max_decimals(4);
-                let response =
-                    ui.add_enabled_ui(enabled, |ui| ui.add_sized(egui::vec2(each, theme::metric::INPUT_ROW), field));
-                if response.inner.changed() {
-                    *value = unit.to_mm(shown);
-                    changed = true;
-                }
+            for axis in 0..3 {
+                let field_id = ui.id().with(("measure", index, axis));
+                let grip = format!("{label}:{axis}");
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.scope(|ui| {
+                        ui.set_width(each);
+                        let field =
+                            Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                        // No undo step: the span belongs to the tool, not to the
+                        // scene, so there is no snapshot for one to restore.
+                        scalar_field(app, ui, field, |app, mm, _| {
+                            let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
+                            set_component(&mut p, axis, mm);
+                            app.measure.set_point(index, p);
+                        });
+                    });
+                });
             }
             ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
-        if changed {
-            app.measure.set_point(index, Vec3::new(components[0], components[1], components[2]));
-        }
     }
 
     match app.measure.span() {
@@ -923,15 +1034,26 @@ fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str
             let default = app.scene.settings.default_segments;
             match app.scene.node(id).segments {
                 Some(current) => {
-                    let mut value = current as f64;
-                    if ui.add(egui::DragValue::new(&mut value).range(3.0..=512.0).max_decimals(0)).changed() {
-                        app.edit("Segments", Some(&format!("segments:{id}")));
-                        for target in targets {
-                            if let Some(node) = app.scene.get_mut(*target) {
-                                node.segments = Some(value.round() as u32);
+                    let field_id = ui.id().with((id, "segments"));
+                    let width = room_left(ui).max(40.0);
+                    ui.scope(|ui| {
+                        ui.set_width(width);
+                        let field = Scalar {
+                            grip: "Object segments",
+                            id: field_id,
+                            kind: SEGMENTS,
+                            current: current as f64,
+                            step: 1.0,
+                        };
+                        scalar_field(app, ui, field, |app, count, started| {
+                            edit_or_touch(app, started, "Segments", &format!("segments:{id}"));
+                            for target in targets {
+                                if let Some(node) = app.scene.get_mut(*target) {
+                                    node.segments = Some(count as u32);
+                                }
                             }
-                        }
-                    }
+                        });
+                    });
                 }
                 None => {
                     ui.add(egui::Label::new(theme::hint(format!("{default} (scene default)"))).selectable(false));
@@ -1259,15 +1381,20 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 /// selected.
 pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
-    field_row(ui, "Step", "", |ui| {
-        let mut step = unit.from_mm(app.scene.settings.snap_step);
-        let response = ui
-            .add(egui::DragValue::new(&mut step).range(1e-6..=1e6).speed(0.05))
-            .on_hover_text("How far one nudge, and one snapped step of a move or resize drag, goes.");
-        if response.changed() {
-            app.edit("Step", Some("scene:step"));
-            app.scene.settings.snap_step = unit.to_mm(step).max(1e-6);
-        }
+    field_row(ui, "Step", "How far one nudge, and one snapped step of a move or resize drag, goes.", |ui| {
+        let kind = ParamKind::Length { min: 1e-6 };
+        let snap = app.scene.settings.snap_step;
+        let width = (room_left(ui) - suffix_room(ui, unit.suffix())).max(40.0);
+        let field_id = ui.id().with("doc-step");
+        ui.scope(|ui| {
+            ui.set_width(width);
+            let field =
+                Scalar { grip: "Step", id: field_id, kind, current: snap, step: ui::scrub_increment(kind, unit) };
+            scalar_field(app, ui, field, |app, mm, started| {
+                edit_or_touch(app, started, "Step", "scene:step");
+                app.scene.settings.snap_step = mm.min(MAX_LENGTH);
+            });
+        });
         ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
     });
 }
