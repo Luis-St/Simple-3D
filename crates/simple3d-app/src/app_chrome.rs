@@ -307,7 +307,7 @@ impl App {
             // (issue 67). It wraps whatever is selected the way Edit > Make a
             // pattern does, and then opens the tool on it.
             if ui
-                .button("Custom pattern...")
+                .button("Custom pattern")
                 .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
                 .clicked()
             {

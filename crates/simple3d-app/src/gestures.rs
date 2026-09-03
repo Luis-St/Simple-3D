@@ -516,7 +516,7 @@ fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_first_press()
 /// menu bar's does.
 ///
 /// The two Add menus are meant to hold the same things and differ only in where
-/// what they add lands, and they drifted: "Custom pattern..." went into the menu
+/// what they add lands, and they drifted: "Custom pattern" went into the menu
 /// bar's only, so the tree -- which is where a container is most often added
 /// from -- offered "Pattern" and "Make a pattern of the selection" and no way at
 /// all to reach the tool that builds a rule. A feature nobody can find is a
@@ -550,11 +550,11 @@ fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     harness.step();
     harness.step();
     assert!(
-        harness.query_by_label("Custom pattern...").is_some(),
+        harness.query_by_label("Custom pattern").is_some(),
         "the tree's Add menu has no way through to the custom pattern kind tool"
     );
 
-    harness.get_by_label("Custom pattern...").click();
+    harness.get_by_label("Custom pattern").click();
     harness.step();
     harness.step();
     assert_eq!(harness.state().modal, crate::app::Modal::PatternKind, "the entry did not open the tool");

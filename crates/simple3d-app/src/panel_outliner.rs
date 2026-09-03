@@ -747,7 +747,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
             // Add menu is where a container gets added from, and a rule nobody
             // can find is a rule nobody has.
             if ui
-                .button("Custom pattern...")
+                .button("Custom pattern")
                 .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
                 .clicked()
             {
