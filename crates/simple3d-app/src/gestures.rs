@@ -482,6 +482,91 @@ fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_origin() {
     assert!(harness.state().cursor.is_none(), "a click on nothing did not put the cursor back at the origin");
 }
 
+/// Clicking a value field puts the whole number under the caret, so what is typed
+/// next replaces it.
+///
+/// It opened with the caret at the end instead, so clicking a field that read 40
+/// and typing 12 gave 4012. On a count with a maximum it was worse and stranger:
+/// a pattern's Copies showing 7, clicked and typed "12" into, came out as 512 --
+/// 712, clamped to the most copies a pattern will lay down. The field is opened
+/// by a *click*, which is one gesture on the value as a whole and never a caret
+/// placed anywhere in particular, so the whole value is what it opens with.
+#[test]
+fn clicking_a_value_field_puts_the_whole_number_under_the_caret() {
+    use simple3d_core::primitive::ParamsExt;
+
+    let mut harness = harness("field-select-on-open");
+    let plate = harness.state().primary().expect("the starting scene has a plate selected");
+    let width =
+        |h: &Harness<'_, App>| h.state().scene.node(plate).params().expect("a plate has parameters").num("width");
+    assert_eq!(width(&harness), 40.0, "this test types over a 40, and the field does not hold one");
+
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Width (X)"));
+    press(&mut harness, field.center());
+    release(&mut harness, field.center());
+    // The frame after the click is the one that draws the text field and hands it
+    // the keyboard, which is also where the caret is put across the value.
+    harness.step();
+    text(&mut harness, "12");
+    key(&mut harness, egui::Key::Enter);
+    harness.step();
+
+    assert_eq!(width(&harness), 12.0, "typing 12 over a clicked field holding 40 gave {}", width(&harness));
+}
+
+/// A count follows the pointer at the rate every other field does.
+///
+/// A count is stored whole, and each frame of a scrub read the stored value back
+/// out of the model before adding that frame's movement to it -- so the fraction
+/// of a step a single frame is worth was rounded away sixty times a second
+/// rather than added up. A hand moving a pixel a frame rounded to nothing and the
+/// field never moved at all; a hand moving four rounded *up* every frame and the
+/// field ran away from the pointer, which is what made the pattern's numbers feel
+/// unlike every other number in the application. Sixty pixels of drag put twelve
+/// copies on a pattern that should have gained ten, and a slow drag across the
+/// same sixty put on none.
+///
+/// Both halves are the same claim, so the test is one comparison: one step is one
+/// copy and it is also one millimetre, so a count dragged a given distance has to
+/// change by what a length field dragged the same distance changes by. The
+/// pattern offers both on adjacent rows.
+#[test]
+fn a_count_field_follows_the_pointer_at_the_rate_every_other_field_does() {
+    for (pixels, frames) in [(12.0_f32, 12usize), (60.0, 6), (60.0, 40)] {
+        let mut harness = harness("count-scrub-rate");
+        harness.state_mut().run(simple3d_core::keymap::Command::Pattern);
+        harness.step();
+        harness.step();
+        let pattern = harness.state().primary().expect("the command leaves the new pattern selected");
+        let value = |h: &Harness<'_, App>, key: &str| {
+            use simple3d_core::primitive::ParamsExt;
+            h.state().scene.node(pattern).params().expect("a pattern carries parameters").num(key)
+        };
+        let (copies, step) = (value(&harness, "count"), value(&harness, "step_x"));
+
+        let count_field = rect_of(&harness, crate::panel_properties::grip_id("Copies"));
+        drag(&mut harness, count_field.center(), count_field.center() + egui::vec2(pixels, 0.0), frames);
+        let length_field = rect_of(&harness, crate::panel_properties::grip_id("Step X"));
+        drag(&mut harness, length_field.center(), length_field.center() + egui::vec2(pixels, 0.0), frames);
+
+        let gained = value(&harness, "count") - copies;
+        let moved = value(&harness, "step_x") - step;
+        assert!(gained > 0.0, "{pixels} px over {frames} frames did not move the count at all");
+        // Within half a step, which is all that can be left between them once
+        // the fraction is carried rather than dropped: the count is following the
+        // same accumulated pointer movement, and rounding it to a whole one is
+        // the only difference. Not rounded and compared exactly, because a drag
+        // that lands on a half is on the rounding boundary and the two sides of
+        // it disagree by a part in a hundred million million.
+        const HALF: f64 = 0.5 + 1e-6;
+        assert!(
+            (gained - moved).abs() <= HALF,
+            "{pixels} px over {frames} frames gained {gained} copies \
+             where the millimetre field on the next row moved {moved}"
+        );
+    }
+}
+
 // -- the outliner's context menu ----------------------------------------------
 
 #[test]

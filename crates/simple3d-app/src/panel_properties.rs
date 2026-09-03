@@ -1335,15 +1335,32 @@ fn scrub_param(
     if started {
         app.edit(&format!("Scrub {}", param.label), None);
     }
+    // A count is stored whole, and every frame reads the stored value back before
+    // adding this frame's movement to it -- so the fraction of a step each frame
+    // is worth was rounded away rather than added up, and the field either never
+    // moved or ran away from the pointer. The fraction is carried instead.
+    let whole = matches!(kind, ParamKind::Count { .. });
+    let carried = if whole { app.scrub.carry } else { 0.0 };
+    let mut owed = carried;
     for target in targets {
         let current = ui::param_number(param_value(app, *target, param.key, param.default));
         let shown = match kind {
             ParamKind::Length { .. } => unit.from_mm(current),
             _ => current,
         };
-        let next = ui::value_from_display(kind, unit, shown + delta);
+        let wanted = shown + delta + carried;
+        let next = ui::value_from_display(kind, unit, wanted);
         set_param(app, *target, param.key, next);
         apply_lock(app, *target, param.lock_group, param.key, next);
+        // Measured against what the field actually took rather than against the
+        // rounding alone, so a count sitting on its own limit does not build up a
+        // debt that has to be paid off before the drag can turn round.
+        if whole {
+            owed = (wanted - ui::param_number(next)).clamp(-1.0, 1.0);
+        }
+    }
+    if whole {
+        app.scrub.carry = owed;
     }
     app.touch();
     app.fields.clear();

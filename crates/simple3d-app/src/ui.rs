@@ -208,8 +208,10 @@ impl FieldBuffers {
         if typing {
             let committed = self.field(ui, id, current);
             if self.opening.remove(&id) {
-                // The text field exists now, so it can be given the keyboard.
+                // The text field exists now, so it can be given the keyboard --
+                // and the value in it can be put under the caret whole.
                 ui.memory_mut(|memory| memory.request_focus(id));
+                select_whole_value(ui, id, self.buffers.get(&id).map_or(current, String::as_str));
             } else if committed.is_some() || !ui.memory(|memory| memory.has_focus(id)) {
                 self.editing.remove(&id);
             }
@@ -343,6 +345,27 @@ impl FieldBuffers {
     }
 }
 
+/// Put the caret across the whole of a value field that has just been opened, so
+/// that what is typed next replaces the number rather than being added to the end
+/// of it.
+///
+/// Clicking a field that read 20 and typing 12 gave 2012, and on a count with a
+/// maximum it gave whatever the maximum was -- 7 and "12" came out as 512. That
+/// is not what clicking a number and typing means anywhere, and it is not what
+/// the field asks for either: it is opened by a *click*, one gesture on the value
+/// as a whole, and never by a caret placed anywhere in particular.
+///
+/// The state exists by now because the text field has already been drawn this
+/// frame; if it somehow has not, the field opens with the caret at the end, which
+/// is what it did before.
+fn select_whole_value(ui: &egui::Ui, id: egui::Id, text: &str) {
+    let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) else { return };
+    let whole =
+        egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
+    state.cursor.set_char_range(Some(whole));
+    egui::TextEdit::store_state(ui.ctx(), id, state);
+}
+
 /// A drag on a field's *label*, which scrubs the value.
 ///
 /// The whole gesture is one undo step: the snapshot is taken when the drag
@@ -353,6 +376,17 @@ impl FieldBuffers {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Scrub {
     pub id: Option<egui::Id>,
+    /// The part of the drag a whole-numbered field could not take yet.
+    ///
+    /// A count is stored as an integer and read back out of the model on every
+    /// frame, so the fraction of a copy each frame of the drag is worth was
+    /// rounded away sixty times a second rather than added up. A hand moving a
+    /// pixel a frame rounded to nothing and the field never moved at all; a hand
+    /// moving four rounded *up* on every frame and the field ran away from the
+    /// pointer. Kept here instead, and spent on the frame it comes to a whole
+    /// one, which is what makes a count follow the pointer at the same six
+    /// pixels a step every other field does.
+    pub carry: f64,
 }
 
 /// One frame of a scrub on a value box: which field owns the gesture, and how
@@ -365,12 +399,16 @@ pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut S
     let id = response.id;
     if response.drag_started() {
         scrub.id = Some(id);
+        // Nothing is owed at the start of a gesture: a fraction left over from
+        // the last one would be spent on this field's first frame.
+        scrub.carry = 0.0;
     }
     if scrub.id != Some(id) {
         return None;
     }
     if !response.dragged() {
         scrub.id = None;
+        scrub.carry = 0.0;
         return None;
     }
     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
