@@ -1002,22 +1002,27 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     }
     // The seventh kind is one the user writes themselves, and a rule built out
     // of stages is not something to assemble from a column of numbered fields
-    // alone -- so the tool that builds it is one click away, wherever a pattern
-    // is selected (issue 67).
-    let mut open_tool = false;
-    field_row(ui, "", "", |ui| {
-        let label =
-            if params.int("kind") == simple3d_core::pattern::CUSTOM { "Edit kind..." } else { "Custom kind..." };
-        if ui
-            .button(label)
-            .on_hover_text("Build this pattern's rule out of stages, and keep it for other projects")
-            .clicked()
-        {
-            open_tool = true;
+    // alone -- so where the kind *is* custom, the tool that builds it is one
+    // click away (issue 67).
+    //
+    // Only there. The button used to read "Custom kind..." under every other
+    // kind, and clicking it made the pattern custom as a side effect of opening
+    // a tool: a second way to choose a kind, sitting under the row that chooses
+    // the kind. Becoming custom is the Kind row's to say.
+    if custom {
+        let mut open_tool = false;
+        field_row(ui, "", "", |ui| {
+            if ui
+                .button("Edit kind")
+                .on_hover_text("Build this pattern's rule out of stages, and keep it for other projects")
+                .clicked()
+            {
+                open_tool = true;
+            }
+        });
+        if open_tool {
+            app.open_pattern_tool();
         }
-    });
-    if open_tool {
-        app.open_pattern_tool();
     }
 
     let (wanted, copies) = simple3d_core::pattern::instance_count(&params);

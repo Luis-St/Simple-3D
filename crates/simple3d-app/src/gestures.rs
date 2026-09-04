@@ -950,6 +950,11 @@ fn a_custom_pattern_offers_the_tool_in_place_of_its_stages() {
         harness.ctx.read_response(crate::panel_properties::grip_id("Copies")).is_some(),
         "a linear pattern lost the numbers that place it"
     );
+    // And it is offered no way into the tool. The button used to sit under every
+    // kind reading "Custom kind...", which made becoming custom something that
+    // happened on the way to opening a tool rather than a kind the user picked:
+    // the Kind row is where that is said.
+    assert!(harness.query_by_label("Edit kind").is_none(), "a linear pattern offers the custom kind's tool");
 
     let custom = simple3d_core::pattern::CUSTOM;
     harness
@@ -978,7 +983,7 @@ fn a_custom_pattern_offers_the_tool_in_place_of_its_stages() {
     );
     // What is left is the way in to the tool, the kind itself, and the line
     // saying what the pattern makes.
-    assert!(harness.query_by_label("Edit kind...").is_some(), "the way into the tool went with the stages");
+    assert!(harness.query_by_label("Edit kind").is_some(), "the way into the tool went with the stages");
     assert!(harness.query_by_label("Custom").is_some(), "the kind row went with the stages");
     assert!(
         harness.query_by_label_contains("Put shapes under this pattern").is_some(),
