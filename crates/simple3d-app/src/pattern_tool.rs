@@ -55,16 +55,27 @@ impl App {
         self.pattern_tool = Some(id);
         self.pattern_tool_name = self.scene.node(id).name.clone();
         self.refresh_pattern_kinds();
-        // The preview opens looking at the pattern from where the viewport is
-        // looking at the scene, backed off far enough to hold what the rule
-        // lays out. Same angle, so the picture in the window and the one behind
-        // it agree about which way round the shape is; its own camera from
-        // there, so turning one does not turn the other. The framing itself
-        // waits for the first frame, which is where the picture's own shape is
-        // known.
+        self.reset_pattern_preview();
+        self.modal = Modal::PatternKind;
+    }
+
+    /// Put the preview back the way it opens: looking at the pattern from where
+    /// the viewport is looking at the scene, backed off far enough to hold what
+    /// the rule lays out.
+    ///
+    /// Same angle, so the picture in the window and the one behind it agree
+    /// about which way round the shape is; its own camera from there, so
+    /// turning one does not turn the other. The framing itself waits for the
+    /// next frame, which is where the picture's own shape is known -- forgetting
+    /// what it was framed on is what asks for it, in `preview`.
+    ///
+    /// This is what the Frame button does, and it resets the angle and the zoom
+    /// with the rest. The *automatic* reframing, when a rule starts laying its
+    /// copies out somewhere else, deliberately does not -- see
+    /// `frame_pattern_preview`.
+    pub(crate) fn reset_pattern_preview(&mut self) {
         self.pattern_preview_camera = self.scene.camera;
         self.pattern_preview_bounds = None;
-        self.modal = Modal::PatternKind;
     }
 
     /// What the preview is looking at: the pattern, what the rule lays out while
@@ -120,7 +131,10 @@ impl App {
     /// actually drawn at, and remember what it was pointed at.
     ///
     /// Only the target and the distance move: which way round the pattern is
-    /// seen from is the user's, and framing must not undo an orbit.
+    /// seen from is the user's, and the *automatic* framing -- which happens
+    /// whenever a rule starts laying its copies out somewhere else -- must not
+    /// undo an orbit halfway through one. Asking for it by name, with the Frame
+    /// button, is a different thing: see `reset_pattern_preview`.
     pub(crate) fn frame_pattern_preview(&mut self, aspect: f64) {
         self.pattern_preview_bounds = self.pattern_preview_target();
         match self.pattern_preview_bounds {
@@ -491,10 +505,12 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
         };
         ui.add(egui::Label::new(theme::hint(note)).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("Frame").on_hover_text("Point the preview back at the pattern").clicked() {
-                // Forgetting what it was framed on is what asks for it again,
-                // below, where the picture's own shape is known.
-                app.pattern_preview_bounds = None;
+            if ui
+                .small_button("Frame")
+                .on_hover_text("Put the preview back: the viewport's angle, framed on the pattern")
+                .clicked()
+            {
+                app.reset_pattern_preview();
             }
         });
     });

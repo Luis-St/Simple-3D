@@ -685,6 +685,58 @@ fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     assert!(harness.state().scene.node(opened).is_pattern(), "the tool opened on something that is not a pattern");
 }
 
+/// The Frame button puts the preview back the way it opened -- the angle and
+/// the zoom with the rest, not just where the camera is pointed.
+///
+/// Asked for after the button was found to re-centre an orbited picture and
+/// leave it orbited, which is half a reset and reads as a button that half
+/// works. The automatic reframing, when a rule starts laying its copies out
+/// somewhere else, still leaves the angle alone: that one happens under the
+/// user's hands, and turning the picture mid-orbit is not what they asked for.
+///
+/// Driven through the button itself rather than through
+/// `App::reset_pattern_preview`, because what is being checked is the wiring:
+/// the dialog is `Embedded` against a headless context, so the tool is drawn
+/// where the harness can click it.
+#[test]
+fn the_pattern_tools_frame_button_puts_the_angle_and_the_zoom_back() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = harness("pattern-preview-frame");
+    harness.state_mut().open_pattern_tool();
+    harness.step();
+    harness.step();
+    assert_eq!(harness.state().modal, crate::app::Modal::PatternKind, "the tool did not open");
+
+    // The picture opens at the viewport's angle. Turn it away and pull it out,
+    // the way looking round a pattern does.
+    let opened = harness.state().pattern_preview_camera;
+    assert_eq!(opened.yaw, harness.state().scene.camera.yaw, "the preview did not open at the viewport's angle");
+    {
+        let camera = &mut harness.state_mut().pattern_preview_camera;
+        camera.yaw += 73.0;
+        camera.pitch += 21.0;
+        camera.distance *= 4.0;
+    }
+    harness.step();
+
+    harness.get_by_label("Frame").click();
+    harness.step();
+    harness.step();
+
+    let now = harness.state().pattern_preview_camera;
+    let viewport = harness.state().scene.camera;
+    assert_eq!(now.yaw, viewport.yaw, "Frame left the picture turned away from the viewport's angle");
+    assert_eq!(now.pitch, viewport.pitch, "Frame left the picture pitched away from the viewport's angle");
+    assert!(
+        (now.distance - opened.distance).abs() < 1e-6,
+        "Frame left the picture at {} rather than the {} it opened at",
+        now.distance,
+        opened.distance
+    );
+    assert_eq!(harness.state().scene.camera, viewport, "framing the preview moved the viewport behind it");
+}
+
 // -- a value field: Enter takes it, Escape leaves it ---------------------------
 
 fn text(harness: &mut Harness<'_, App>, what: &str) {
