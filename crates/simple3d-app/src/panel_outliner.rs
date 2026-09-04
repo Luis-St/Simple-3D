@@ -158,6 +158,19 @@ fn tree(app: &mut App, ui: &mut egui::Ui) {
         // badge stay in a column and the selection tint covers a whole row.
         let width = ids.iter().map(|&id| row_width(app, ui, id)).fold(ui.available_width(), f32::max);
         for &id in &ids {
+            // The list was taken before any of it was drawn, and a row can
+            // delete nodes while the loop is still running: its own context menu
+            // does, and a pattern is not a group, so deleting one asks nothing
+            // and goes at once -- taking its children with it. Those children
+            // are the very next entries here, and drawing one crashed the
+            // application on the row after the delete.
+            //
+            // Skipped rather than re-derived: the rows of a subtree that is
+            // already gone have nothing to draw, and the next frame's list is
+            // right without anything being rebuilt mid-frame.
+            if !app.scene.contains(id) {
+                continue;
+            }
             // What is being dragged stays in the tree, drawn as a shadow of
             // itself: taking the rows out re-flowed everything below them the
             // moment a drag started, so the gaps the drop line points at moved
