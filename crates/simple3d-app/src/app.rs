@@ -4843,12 +4843,20 @@ mod tests {
         let beside = app.measure_point_at(&view, screen + egui::vec2(30.0, 0.0)).unwrap();
         assert_ne!(beside.kind, Some(crate::snap::FeatureKind::PlaneMark), "the catch reached far past the mark");
 
-        // The mark follows the switch of the axis its plane is named by, and the
+        // The mark follows the switch of the axis it is *drawn as*, and the
         // switch for the marks themselves. Neither drawn nor caught.
+        //
+        // This one is left by the plane perpendicular to X, which is drawn in
+        // Y's green and answers to the Y box: X's and Y's marks are exchanged on
+        // purpose (`snap::MARK_AXIS`, issue 75).
         app.scene.settings.axes_visible[0] = false;
+        let other = app.measure_point_at(&view, screen).unwrap();
+        assert_eq!(other.kind, Some(crate::snap::FeatureKind::PlaneMark), "the wrong switch took this mark away");
+        app.scene.settings.axes_visible[0] = true;
+        app.scene.settings.axes_visible[1] = false;
         let hidden = app.measure_point_at(&view, screen).unwrap();
         assert_ne!(hidden.kind, Some(crate::snap::FeatureKind::PlaneMark), "a mark of a hidden plane was caught");
-        app.scene.settings.axes_visible[0] = true;
+        app.scene.settings.axes_visible[1] = true;
         app.scene.settings.plane_marks = false;
         let off = app.measure_point_at(&view, screen).unwrap();
         assert_ne!(off.kind, Some(crate::snap::FeatureKind::PlaneMark), "a mark that is switched off was caught");

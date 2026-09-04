@@ -276,15 +276,16 @@ pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
 /// the nearest point on a chain is the nearest point on one of its links. So
 /// nothing joins them up.
 ///
-/// `axes` says which of the three planes are marked: each follows the switch of
-/// the axis it is perpendicular to, the same rule the drawing uses, so a plane
+/// `axes` says which of the three switches are on; [`MARK_AXIS`] says which
+/// plane each of them marks. It is the same rule the drawing uses, so a plane
 /// whose mark is not on screen is not caught either.
 pub fn plane_mark_lines(mesh: &Mesh, axes: [bool; 3]) -> Vec<(Vec3, Vec3)> {
     let mut out = Vec::new();
-    for (axis, &shown) in axes.iter().enumerate() {
+    for (switch, &shown) in axes.iter().enumerate() {
         if !shown {
             continue;
         }
+        let axis = MARK_AXIS[switch];
         for tri in &mesh.indices {
             let world =
                 [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
@@ -295,6 +296,24 @@ pub fn plane_mark_lines(mesh: &Mesh, axes: [bool; 3]) -> Vec<(Vec3, Vec3)> {
     }
     out
 }
+
+/// Which axis a principal plane's mark is presented as, indexed either way:
+/// the plane perpendicular to `axis` is drawn as `MARK_AXIS[axis]`, and the
+/// switch for `axis` governs the plane perpendicular to `MARK_AXIS[axis]`. The
+/// table is its own inverse, which is what lets one constant answer both.
+///
+/// X and Y are exchanged. The mark left by the plane perpendicular to X is
+/// drawn in Y's green, and the one perpendicular to Y in X's red -- the opposite
+/// way round from the axis lines, which keep the usual X red / Y green. That was
+/// asked for: on a shape standing on the origin the conventional pairing reads
+/// as the wrong way round, and the mark on the surface is what is being read at
+/// that moment.
+///
+/// The switches have to follow the same exchange (issue 75). A mark is named by
+/// the colour it is drawn in -- that is all there is to go on when looking at
+/// one -- so a red mark that goes out when the *Y* box is unticked is worse than
+/// either pairing on its own.
+pub const MARK_AXIS: [usize; 3] = [1, 0, 2];
 
 /// Where the plane through the origin perpendicular to `axis` crosses one
 /// triangle, as the segment it cuts. `None` when the triangle is wholly on one
@@ -603,9 +622,12 @@ mod tests {
         // caught is what is on screen: a segment per triangle the plane cuts,
         // every one of them lying in that plane.
         let mesh = primitives::box_mesh(20.0, 10.0, 6.0);
-        for axis in 0..3 {
+        for switch in 0..3 {
             let mut axes = [false; 3];
-            axes[axis] = true;
+            axes[switch] = true;
+            // Which plane that switch governs -- X's and Y's are exchanged
+            // (issue 75), so this is not the switch's own axis for two of three.
+            let axis = MARK_AXIS[switch];
             let lines = plane_mark_lines(&mesh, axes);
             assert!(!lines.is_empty(), "the plane perpendicular to axis {axis} cuts this box and marked nothing");
             for (a, b) in &lines {

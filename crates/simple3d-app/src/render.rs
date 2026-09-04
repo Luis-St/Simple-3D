@@ -3,6 +3,7 @@
 //! axes, the selection highlight and translucent ghosts for hidden nodes.
 
 use crate::raster::{Frame, Image, Rgba, Vertex};
+use crate::snap::MARK_AXIS;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::{AxisStyle, Colour};
@@ -1311,16 +1312,11 @@ fn prepare_axes(view: &View, palette: &Palette, grid: &Grid, material: &AxisMate
 }
 
 /// The colour a principal plane's mark is drawn in, indexed by the axis that
-/// plane is perpendicular to.
-///
-/// X and Y are exchanged here, and only here: the mark left by the plane
-/// perpendicular to X is green and the one perpendicular to Y is red, the
-/// opposite way round from the axis lines, which keep the usual X red / Y green.
-/// Asked for -- on a shape standing on the origin the conventional pairing reads
-/// as the wrong way round, and the mark on the surface is what is being read at
-/// that moment. Z is the same blue in both.
+/// plane is perpendicular to: the colour of the axis the mark is *presented*
+/// as, which for X and Y is the other one (see [`crate::snap::MARK_AXIS`]).
 fn mark_colours(palette: &Palette) -> [Rgba; 3] {
-    [palette.axis_y, palette.axis_x, palette.axis_z]
+    let axes = [palette.axis_x, palette.axis_y, palette.axis_z];
+    [axes[MARK_AXIS[0]], axes[MARK_AXIS[1]], axes[MARK_AXIS[2]]]
 }
 
 /// Draw, on the surface of each solid, the line where a principal plane cuts
@@ -1331,11 +1327,15 @@ fn mark_colours(palette: &Palette) -> [Rgba; 3] {
 /// to read it is to orbit until the grid is edge-on. The mark is drawn on the
 /// surface itself, where the plane meets it, in the colour `mark_colours` gives
 /// for the axis the plane is perpendicular to.
+///
+/// A mark answers to the switch of the axis it is *drawn as* rather than to the
+/// one its plane is perpendicular to, because its colour is the only thing there
+/// is to recognise it by (issue 75).
 fn push_plane_marks(steps: &mut Vec<Step>, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
     let colours = mark_colours(palette);
     for item in items.iter().filter(|i| i.style == Style::Solid) {
         for (axis, colour) in colours.into_iter().enumerate() {
-            if !grid.axes[axis] {
+            if !grid.axes[MARK_AXIS[axis]] {
                 continue;
             }
             for tri in &item.renderable.mesh.indices {
@@ -1715,22 +1715,32 @@ mod tests {
     }
 
     #[test]
-    fn a_plane_mark_follows_the_switch_of_the_axis_that_names_it() {
-        // Each plane is named by the axis it is perpendicular to, so turning
-        // off the Z axis turns off the ground plane's mark with it.
+    fn a_plane_mark_follows_the_switch_of_the_axis_it_is_drawn_as() {
+        // Issue 75. A mark is recognised by its colour and by nothing else, and
+        // X's and Y's are exchanged on purpose, so the switch has to follow the
+        // exchange too: the X box shows and hides the mark drawn in X's red,
+        // whichever plane happens to leave it.
         let renderable = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
-        let mut req = request(vec![Item { renderable: &renderable, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid {
-            visible: false,
-            spacing: 10.0,
-            axes: [true, false, false],
-            style: AxisStyle::Grid,
-            plane_marks: true,
+        let pixels = |marked: bool, colour: Rgba| {
+            let mut req = request(vec![Item { renderable: &renderable, style: Style::Solid }], DisplayMode::Shaded);
+            req.grid = Grid {
+                visible: false,
+                spacing: 10.0,
+                axes: [true, false, false],
+                style: AxisStyle::Grid,
+                plane_marks: marked,
+            };
+            pixels_of(&render(&req), colour)
         };
-        let frame = render(&req);
-        let marks = mark_colours(&req.palette);
-        assert!(pixels_of(&frame, marks[0]) > 0, "the X plane's mark should be drawn");
-        assert_eq!(pixels_of(&frame, marks[2]), 0, "the Z plane's mark should be off with its axis");
+        // Measured as the difference the marks make, because the X axis line is
+        // drawn in the same red wherever the box does not hide it.
+        let palette = Palette::dark();
+        assert!(
+            pixels(true, palette.axis_x) > pixels(false, palette.axis_x),
+            "the X switch is on and no mark was drawn in X's colour"
+        );
+        assert_eq!(pixels(true, palette.axis_y), 0, "a mark the Y switch governs was drawn with Y turned off");
+        assert_eq!(pixels(true, palette.axis_z), 0, "a mark the Z switch governs was drawn with Z turned off");
     }
 
     #[test]
