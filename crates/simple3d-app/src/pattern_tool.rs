@@ -158,29 +158,30 @@ impl App {
     }
 }
 
-/// The width the stages column keeps, whatever the window is dragged to: a name
-/// column and a field beside it, which is all these rows are, and a field twice
-/// as wide holds no more of a number. Room the window gains goes to the picture
-/// instead, which is the half of the window that can use it.
-const STAGES_WIDTH: f32 = 360.0;
 /// The narrowest the stages are worth drawing at. Their rows are the property
 /// panel's own, which stack a name above its field rather than beside it once
 /// the room runs out, so the numbers stay usable well below the width two
-/// columns need. Only reached in a window too narrow for [`STAGES_WIDTH`].
+/// columns need.
 const STAGES_MIN: f32 = 240.0;
+/// The widest the divider will drag them. Past this a stage row is a name, a
+/// field and a stretch of nothing between the two, and the picture is paying
+/// for it.
+const STAGES_MAX: f32 = 560.0;
 /// The smallest the preview can be and still be a viewport rather than a stamp.
 const PREVIEW_MIN: f32 = 220.0;
 /// The longest side the preview's image is rasterized at, whatever size it is
 /// drawn at. See `paint_preview`.
 const PREVIEW_MAX_PX: f32 = 1280.0;
 
-/// The tool's contents: the rule down the left at a fixed width, and a viewport
-/// on what it lays out taking everything else.
+/// The tool's contents: the rule down the left, and a viewport on what it lays
+/// out taking everything else.
 ///
-/// Widening the window widens the picture and nothing else. The stages are a
-/// column of labelled fields with a natural width, and stretching them with the
-/// window put a hundred pixels of nothing between every name and its number;
-/// the viewport is the part of this window that is worth more the bigger it is.
+/// The divider between them is draggable, and the width it is dragged to is the
+/// width the stages keep -- through a resize of the window and through the next
+/// time the tool is opened, since it is kept with the dock widths. Widening the
+/// window therefore widens the picture and nothing else, which is the point: a
+/// stage row is a name and a number, and a hundred more pixels only push the
+/// two apart, while the viewport is worth more the bigger it is.
 ///
 /// Narrowed past what both need, the stages give width up before the picture
 /// disappears, and narrower still the picture is the column that goes: the
@@ -192,23 +193,31 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         return;
     };
     let room = ui.available_width();
-    // What one `ui.separator()` costs in a horizontal layout: the rule itself
-    // and the gap either side of it.
-    let rule = 6.0 + ui.spacing().item_spacing.x * 2.0;
-    let stages_width = STAGES_WIDTH.min(room - PREVIEW_MIN - rule);
+    // What the divider itself costs, so the widest the stages may be still
+    // leaves the picture its minimum.
+    let rule = ui.spacing().item_spacing.x * 2.0 + 6.0;
+    let widest = (room - PREVIEW_MIN - rule).min(STAGES_MAX);
 
-    if stages_width >= STAGES_MIN {
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(stages_width);
-                rule_column(app, ui, id);
-            });
-            ui.separator();
-            ui.vertical(|ui| preview(app, ui));
-        });
-    } else {
+    if widest < STAGES_MIN {
         rule_column(app, ui, id);
+        return;
     }
+    let wanted = app.settings.pattern_stages_width.clamp(STAGES_MIN, widest);
+    let mut width = wanted;
+    egui::SidePanel::left("pattern-stages-column")
+        .frame(egui::Frame::NONE)
+        .resizable(true)
+        .default_width(wanted)
+        // egui remembers a panel's width itself, so a window narrowed past what
+        // the remembered width leaves the picture has to be told the new
+        // ceiling -- otherwise the stages keep a width the window no longer has.
+        .width_range(STAGES_MIN..=widest)
+        .show_inside(ui, |ui| {
+            width = ui.available_width();
+            rule_column(app, ui, id);
+        });
+    app.settings.pattern_stages_width = width.clamp(STAGES_MIN, STAGES_MAX);
+    preview(app, ui);
 }
 
 /// The shelf and the stages, in that order down one column.

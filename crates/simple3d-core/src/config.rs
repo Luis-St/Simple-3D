@@ -339,6 +339,10 @@ pub struct AppSettings {
     pub window_maximized: bool,
     pub outliner_width: f32,
     pub properties_width: f32,
+    /// How wide the stages column of the custom pattern tool is, which its own
+    /// divider drags. Beside the dock widths for the same reason they are here:
+    /// it is how one person likes their window and not a property of any model.
+    pub pattern_stages_width: f32,
     /// Which panel is in which dock, and what is rolled up. Kept here beside the
     /// dock widths rather than in the project file: it is how one person likes
     /// their window, not a property of the model, and putting it in the document
@@ -406,6 +410,7 @@ impl Default for AppSettings {
             window_maximized: false,
             outliner_width: 260.0,
             properties_width: 320.0,
+            pattern_stages_width: 360.0,
             layout: Layout::default(),
             reduce_motion: false,
             embed_dialogs: false,
