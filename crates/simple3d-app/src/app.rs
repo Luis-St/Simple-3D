@@ -408,6 +408,10 @@ pub struct App {
     /// the window, and so it can be framed on the pattern rather than on
     /// whatever the scene happens to be showing.
     pub pattern_preview_camera: Camera,
+    /// The pattern's extent the preview was last pointed at. A rule that lays
+    /// out more, or further, is a different thing to look at, so the preview
+    /// frames itself on it again -- see `pattern_tool::preview`.
+    pub(crate) pattern_preview_bounds: Option<(Vec3, Vec3)>,
     /// The last image the preview drew, and what it was drawn from. The preview
     /// is a full render of the scene, so it is kept between frames exactly the
     /// way the viewport's own image is.
@@ -550,6 +554,7 @@ impl App {
             pattern_tool_name: String::new(),
             pattern_kinds: Vec::new(),
             pattern_preview_camera: Camera::default(),
+            pattern_preview_bounds: None,
             pattern_preview_texture: None,
             pattern_preview_key: u64::MAX,
             keymap_search: String::new(),
@@ -5077,6 +5082,70 @@ mod tests {
         }
     }
 
+    /// Reported: "the preview does not show what the stages do".
+    ///
+    /// It framed itself once, when the tool opened, and stayed pointed there.
+    /// Adding a stage lays the copies out further than the rule did when it was
+    /// opened, so what the new stage made was off the edges of the picture --
+    /// verified by eye against the running window, where three stages laid out
+    /// twelve copies and the preview showed a cropped clump of them.
+    ///
+    /// Asked as a question about the picture: project the pattern's own corners
+    /// through the preview's camera and check they land inside the preview's
+    /// rectangle. Counting drawn pixels would pass on the broken version -- most
+    /// of the copies were on screen; it is the ones that were not that mattered.
+    ///
+    /// On the code this was written against, the far corner of a three-stage
+    /// rule was drawn at x = 1266 with the picture ending at x = 1092.
+    #[test]
+    fn the_preview_frames_itself_on_what_the_stages_lay_out() {
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        let pattern = app.pattern_tool.expect("the tool opened on a pattern");
+        app.reevaluate_for_test();
+
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let draw = |app: &mut App| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1100.0, 700.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(app, ui));
+            });
+        };
+        // One frame with the rule as it opens: the preview points itself at it.
+        draw(&mut app);
+
+        // Now the rule lays out a great deal more, the way adding stages does.
+        if let Some(params) = app.scene.get_mut(pattern).and_then(|n| n.params_mut()) {
+            params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(3));
+        }
+        app.reevaluate_for_test();
+        draw(&mut app);
+
+        let rect = ctx.read_response(crate::pattern_tool::preview_id()).expect("the preview was not drawn").rect;
+        let (lo, hi) = app.evaluated.node_world_bounds[&pattern];
+        let view = crate::view::View::new(app.pattern_preview_camera, rect);
+        for corner in [
+            Vec3::new(lo.x, lo.y, lo.z),
+            Vec3::new(hi.x, lo.y, lo.z),
+            Vec3::new(lo.x, hi.y, lo.z),
+            Vec3::new(hi.x, hi.y, lo.z),
+            Vec3::new(lo.x, lo.y, hi.z),
+            Vec3::new(hi.x, lo.y, hi.z),
+            Vec3::new(lo.x, hi.y, hi.z),
+            Vec3::new(hi.x, hi.y, hi.z),
+        ] {
+            let (at, _) = view.project(corner).expect("a corner behind the preview's camera");
+            assert!(
+                rect.contains(at),
+                "the corner {corner:?} of what the stages lay out is drawn at {at:?}, outside the preview {rect:?}"
+            );
+        }
+    }
+
     /// Reported: "the divider auto shrinks over time".
     ///
     /// It did, by eight pixels a frame, until it hit its own minimum. egui
@@ -5118,7 +5187,7 @@ mod tests {
         app.open_pattern_tool();
         assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
         app.reevaluate_for_test();
-        app.frame_pattern_preview();
+        app.frame_pattern_preview(1.0);
 
         // It opens looking from where the viewport looks, so the picture in the
         // window and the one behind it agree about which way round the shape is.

@@ -59,21 +59,31 @@ impl App {
         // looking at the scene, backed off far enough to hold what the rule
         // lays out. Same angle, so the picture in the window and the one behind
         // it agree about which way round the shape is; its own camera from
-        // there, so turning one does not turn the other.
+        // there, so turning one does not turn the other. The framing itself
+        // waits for the first frame, which is where the picture's own shape is
+        // known.
         self.pattern_preview_camera = self.scene.camera;
-        self.frame_pattern_preview();
+        self.pattern_preview_bounds = None;
         self.modal = Modal::PatternKind;
     }
 
-    /// Point the preview camera at the pattern, or at the whole scene when the
+    /// What the preview is looking at: the pattern, or the whole scene while the
     /// pattern has no geometry of its own yet.
-    pub(crate) fn frame_pattern_preview(&mut self) {
-        let bounds = self
-            .pattern_tool
+    pub(crate) fn pattern_preview_target(&self) -> Option<(Vec3, Vec3)> {
+        self.pattern_tool
             .and_then(|id| self.evaluated.node_world_bounds.get(&id).copied())
-            .or_else(|| self.evaluated.mesh.bounds());
-        match bounds {
-            Some((lo, hi)) => crate::view::frame_bounds(&mut self.pattern_preview_camera, lo, hi, 1.0),
+            .or_else(|| self.evaluated.mesh.bounds())
+    }
+
+    /// Point the preview camera at the pattern, at the aspect the picture is
+    /// actually drawn at, and remember what it was pointed at.
+    ///
+    /// Only the target and the distance move: which way round the pattern is
+    /// seen from is the user's, and framing must not undo an orbit.
+    pub(crate) fn frame_pattern_preview(&mut self, aspect: f64) {
+        self.pattern_preview_bounds = self.pattern_preview_target();
+        match self.pattern_preview_bounds {
+            Some((lo, hi)) => crate::view::frame_bounds(&mut self.pattern_preview_camera, lo, hi, aspect),
             None => {
                 self.pattern_preview_camera.target = Vec3::ZERO;
                 self.pattern_preview_camera.distance = 160.0;
@@ -400,6 +410,13 @@ fn describe(stage: &pattern::Stage, unit: simple3d_core::unit::Unit) -> String {
     format!("{} copies, {}", stage.copies(), what.join(", "))
 }
 
+/// The id the preview's picture answers to. Named rather than taken from the
+/// layout, so a test can ask the context where the picture was drawn and check
+/// what is in it -- the same bargain every other grip in the application makes.
+pub(crate) fn preview_id() -> egui::Id {
+    egui::Id::new("pattern-preview")
+}
+
 /// What the rule lays out, as a viewport.
 ///
 /// It was a flat scatter of dots, one per copy, because a rule is a handful of
@@ -430,7 +447,9 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
         ui.add(egui::Label::new(theme::hint(note)).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("Frame").on_hover_text("Point the preview back at the pattern").clicked() {
-                app.frame_pattern_preview();
+                // Forgetting what it was framed on is what asks for it again,
+                // below, where the picture's own shape is known.
+                app.pattern_preview_bounds = None;
             }
         });
     });
@@ -442,7 +461,18 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
     if rect.width() < 32.0 || rect.height() < 32.0 {
         return;
     }
-    let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+    // A rule that lays out more, or further, is a different thing to look at, so
+    // the picture is framed on it again.
+    //
+    // Without this the camera was pointed once, when the tool opened, and stayed
+    // there: adding a stage grew the pattern out past the edges of the preview
+    // and what the new stage did was off the picture. Only the target and the
+    // distance move, so an orbit survives it.
+    if app.pattern_preview_bounds != app.pattern_preview_target() {
+        app.frame_pattern_preview((rect.width() / rect.height().max(1.0)) as f64);
+    }
+    ui.allocate_rect(rect, egui::Sense::hover());
+    let response = ui.interact(rect, preview_id(), egui::Sense::click_and_drag());
     paint_preview(app, ui, rect);
 
     // The same navigation bindings the viewport uses, read from the keymap on
