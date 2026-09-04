@@ -438,6 +438,44 @@ fn a_middle_drag_on_the_viewport_moves_the_camera_over_the_ground() {
     assert_eq!(orbited.target, turned.target, "orbiting moved the camera over the ground");
 }
 
+/// A turn of the wheel over the viewport, as the window gets it.
+fn wheel(harness: &mut Harness<'_, App>, at: egui::Pos2, delta: egui::Vec2) {
+    move_to(harness, at);
+    let modifiers = harness.input().modifiers;
+    event(harness, egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers });
+}
+
+/// The other half of issue 72: the wheel zooms about the pointer rather than
+/// about the middle of the frame, so what is under the cursor stays under it and
+/// the wheel alone carries the view across the grid. Driven through the real
+/// panel, wheel event and all, rather than by calling `apply_zoom`.
+#[test]
+fn a_scroll_over_the_viewport_zooms_about_the_pointer() {
+    let mut harness = harness("viewport-zoom");
+    let rect = harness.state().viewport_rect;
+    // Clear of the view cube in the corner, which takes the pointer first.
+    let at = rect.center() + egui::vec2(-150.0, 90.0);
+    let before = harness.state().scene.camera;
+    // The world point the cursor is over. Parallel projection, so any point
+    // along its ray is the same pixel and this needs nothing to be there.
+    let under = crate::view::View::new(before, rect).ray(at).0;
+
+    wheel(&mut harness, at, egui::vec2(0.0, 60.0));
+
+    let after = harness.state().scene.camera;
+    assert!(
+        after.distance < before.distance,
+        "scrolling up did not zoom in: {} -> {}",
+        before.distance,
+        after.distance
+    );
+    assert_eq!((after.yaw, after.pitch), (before.yaw, before.pitch), "the wheel turned the camera as well");
+    assert_ne!(after.target, before.target, "the zoom held the frame centre still instead of the pointer");
+
+    let landed = crate::view::View::new(after, rect).project(under).unwrap().0;
+    assert!((landed - at).length() < 1.0, "the point under the pointer slid from {at:?} to {landed:?}");
+}
+
 /// The pattern tool's preview is a viewport too, and it navigates on the very
 /// same bindings -- so it moves off the origin with the same drag (issue 72).
 #[test]

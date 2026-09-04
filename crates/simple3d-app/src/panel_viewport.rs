@@ -229,13 +229,52 @@ pub fn apply_gesture(camera: &mut Camera, gesture: Gesture, delta: egui::Vec2, v
 
 /// Apply a wheel scroll to the camera's distance, honouring the invert-zoom
 /// binding.
-pub fn apply_zoom(camera: &mut Camera, nav: &NavMap, scroll: f32) {
+///
+/// `anchor` is the panel the wheel turned over and where the pointer was in it.
+/// Given one, the zoom is about the pointer: whatever is under it stays under
+/// it, so zooming in on a corner of the model walks the view towards that
+/// corner instead of pulling the frame centre in and leaving the corner off the
+/// side. The other half of moving freely about the grid (issue 72), pan being
+/// the first. Pass `None` to zoom about the frame centre.
+///
+/// The projection is parallel, which is what makes this a two-line move rather
+/// than a raycast: every world point along the pointer's ray sits at the same
+/// offset from the target across the screen, so there is no depth to resolve
+/// and no reference plane to choose. Zooming with the pointer over empty sky
+/// works the same as zooming with it over the model.
+pub fn apply_zoom(camera: &mut Camera, nav: &NavMap, scroll: f32, anchor: Option<(egui::Rect, egui::Pos2)>) {
     if scroll.abs() <= 0.01 {
         return;
     }
+    let before = *camera;
     let direction = if nav.invert_zoom { -1.0 } else { 1.0 };
     let factor = (-scroll as f64 * direction * 0.0015).exp();
     camera.distance = (camera.distance * factor).clamp(0.05, 5.0e6);
+
+    let Some((rect, cursor)) = anchor else {
+        return;
+    };
+    // A panel with no area has no centre to measure the pointer from, and the
+    // arithmetic below would hand the camera a target of NaN it could never be
+    // steered back from.
+    if !(rect.width() > 0.0 && rect.height() > 0.0) {
+        return;
+    }
+    // The *realised* factor, not the asked-for one: at either end of the
+    // distance range the clamp holds the zoom still, and the view has to hold
+    // still with it rather than sliding sideways under a scroll that did
+    // nothing.
+    let factor = camera.distance / before.distance;
+    let view = View::new(before, rect);
+    let (right, up) = view.basis();
+    let scale = view.mm_per_pixel_at(before.target);
+    // Where the pointer is, as an offset from the target across the screen, in
+    // millimetres. Screen y grows downward.
+    let across = (cursor.x - view.centre.x) as f64 * scale;
+    let upward = (view.centre.y - cursor.y) as f64 * scale;
+    // That offset shrinks with the zoom, so the target moves the rest of the
+    // way in to leave the point on screen where it was.
+    camera.target = camera.target + (right * across + up * upward) * (1.0 - factor);
 }
 
 /// Orbit, pan and zoom, all on remappable bindings that take effect immediately
@@ -259,7 +298,9 @@ fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
     }
 
     if response.hovered() {
-        apply_zoom(&mut app.scene.camera, &nav, ui.input(|i| i.smooth_scroll_delta.y));
+        let (scroll, at) = ui.input(|i| (i.smooth_scroll_delta.y, i.pointer.hover_pos()));
+        let rect = app.viewport_rect;
+        apply_zoom(&mut app.scene.camera, &nav, scroll, at.map(|at| (rect, at)));
     }
 }
 
@@ -1174,11 +1215,11 @@ mod tests {
         let mut keymap = Keymap::default();
         keymap.nav.invert_zoom = false;
         let mut normal = Camera::default();
-        apply_zoom(&mut normal, &keymap.nav, 10.0);
+        apply_zoom(&mut normal, &keymap.nav, 10.0, None);
 
         keymap.nav.invert_zoom = true;
         let mut inverted = Camera::default();
-        apply_zoom(&mut inverted, &keymap.nav, 10.0);
+        apply_zoom(&mut inverted, &keymap.nav, 10.0, None);
 
         let start = Camera::default().distance;
         assert_ne!(normal.distance, start);
@@ -1190,7 +1231,67 @@ mod tests {
         );
         // Wheel noise below the threshold does nothing at all.
         let mut still = Camera::default();
-        apply_zoom(&mut still, &keymap.nav, 0.001);
+        apply_zoom(&mut still, &keymap.nav, 0.001, None);
         assert_eq!(still.distance, start);
+    }
+
+    /// The other half of moving freely about the grid (issue 72): the wheel
+    /// zooms about the pointer, so whatever is under it stays under it. Zooming
+    /// about the frame centre is what made the viewport read as bolted down --
+    /// a corner of the model you were closing in on slid off the side of the
+    /// frame, and it took a pan after every scroll to bring it back.
+    #[test]
+    fn zooming_keeps_whatever_is_under_the_pointer_under_it() {
+        let keymap = Keymap::default();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+        let start = Camera { yaw: -55.0, pitch: 28.0, distance: 300.0, ..Camera::default() };
+
+        for (yaw, pitch) in [(-55.0, 28.0), (-90.0, 0.0), (140.0, -35.0), (-90.0, 89.9)] {
+            let start = Camera { yaw, pitch, ..start };
+            for offset in [egui::vec2(-260.0, 150.0), egui::vec2(310.0, -210.0), egui::vec2(0.0, -320.0)] {
+                let cursor = rect.center() + offset;
+                // Any world point on the pointer's ray will do: the projection
+                // is parallel, so every point along it lands on the same pixel.
+                // The one this picks is on the plane through the eye, which is
+                // sky rather than ground for an offset above the horizon --
+                // exactly the case a raycast onto the ground would have had no
+                // answer for.
+                let (under, _) = View::new(start, rect).ray(cursor);
+                for scroll in [120.0, -120.0] {
+                    let mut camera = start;
+                    apply_zoom(&mut camera, &keymap.nav, scroll, Some((rect, cursor)));
+                    assert_ne!(camera.distance, start.distance, "the wheel did not zoom at all");
+                    let after = View::new(camera, rect).project(under).unwrap().0;
+                    assert!(
+                        (after - cursor).length() < 0.01,
+                        "the point under the pointer slid from {cursor:?} to {after:?} \
+                         (yaw {yaw}, pitch {pitch}, scroll {scroll})"
+                    );
+                }
+            }
+        }
+
+        // Without an anchor -- the pointer outside the panel, or a caller that
+        // has no panel to speak of -- it is the zoom it always was, about the
+        // frame centre.
+        let cursor = rect.center() + egui::vec2(-260.0, 150.0);
+        let mut centred = start;
+        apply_zoom(&mut centred, &keymap.nav, 120.0, None);
+        assert_ne!(centred.distance, start.distance);
+        assert_eq!(centred.target, start.target, "zooming with no pointer to zoom about moved the camera");
+
+        // At either end of the distance range the clamp holds the zoom still,
+        // and the view has to hold still with it rather than sliding sideways
+        // under a scroll that did nothing.
+        let mut pinned = Camera { distance: 0.05, ..start };
+        apply_zoom(&mut pinned, &keymap.nav, 120.0, Some((rect, cursor)));
+        assert_eq!(pinned.distance, 0.05, "the near end of the range stopped holding");
+        assert_eq!(pinned.target, start.target, "a zoom the clamp refused still moved the camera");
+
+        // And a panel with no area is not a place to zoom about: the camera
+        // keeps a target it can be steered from rather than being handed NaN.
+        let mut sized = start;
+        apply_zoom(&mut sized, &keymap.nav, 120.0, Some((egui::Rect::NOTHING, cursor)));
+        assert_eq!(sized.target, start.target, "an empty panel moved the camera to {:?}", sized.target);
     }
 }

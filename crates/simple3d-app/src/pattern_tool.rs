@@ -582,8 +582,8 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
         crate::panel_viewport::apply_gesture(&mut app.pattern_preview_camera, gesture, response.drag_delta(), &view);
     }
     if response.hovered() {
-        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-        crate::panel_viewport::apply_zoom(&mut app.pattern_preview_camera, &nav, scroll);
+        let (scroll, at) = ui.input(|i| (i.smooth_scroll_delta.y, i.pointer.hover_pos()));
+        crate::panel_viewport::apply_zoom(&mut app.pattern_preview_camera, &nav, scroll, at.map(|at| (rect, at)));
     }
     // No cursor of its own. The viewport this is a copy of leaves the pointer
     // alone while it is orbited, and a preview that swapped it for a hand said
