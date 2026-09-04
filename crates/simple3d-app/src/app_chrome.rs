@@ -668,7 +668,15 @@ impl App {
     pub(crate) fn selection_summary(&self) -> String {
         match self.selection.len() {
             0 => "Nothing selected".to_string(),
-            1 => self.scene.node(self.selection[0]).name.clone(),
+            // Asked of the scene rather than taken from the selection: an id the
+            // scene no longer holds is a panic from `Scene::node`, and this is
+            // drawn on every frame of the status bar -- so it would be the first
+            // thing to run after whatever left the id behind, and would take the
+            // window down before anything could prune it.
+            1 => match self.scene.get(self.selection[0]) {
+                Some(node) => node.name.clone(),
+                None => "Nothing selected".to_string(),
+            },
             n => format!("{n} selected"),
         }
     }

@@ -470,8 +470,19 @@ impl Scene {
         self.nodes.get_mut(&id)
     }
 
+    /// The node, or a panic. For the many callers that have already established
+    /// the id is live -- one walked out of the tree, one just created -- and
+    /// would only have `unwrap` to write instead.
+    ///
+    /// `#[track_caller]` because the panic is never about this line. An id that
+    /// outlived its node is a bug where the id was *kept*, and a report naming
+    /// `scene.rs` gives no way to tell which of the forty callers held it.
+    #[track_caller]
     pub fn node(&self, id: NodeId) -> &Node {
-        &self.nodes[&id]
+        match self.nodes.get(&id) {
+            Some(node) => node,
+            None => panic!("node {id} is not in the scene"),
+        }
     }
 
     pub fn ids(&self) -> impl Iterator<Item = NodeId> + '_ {
