@@ -80,19 +80,53 @@ const SEGMENTS: ParamKind = ParamKind::Count { min: 3, max: 512 };
 /// span. A length with no floor, because half of space is behind the origin.
 const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
 
-/// How wide one of the three fields on a point row is: a third of whatever the
-/// row has, out of the room the row actually has.
+/// The widest one of the three fields on a point row may be.
 ///
-/// They shrink with the panel and wrap onto a second line rather than shrinking
-/// past being readable (issue 51) -- that is the floor. The ceiling is what the
-/// numbers need: a place in space is signed and rarely round, where a dimension
-/// is usually a number somebody typed. The widest of them is a view centre at
-/// the far end of the camera's range, `-6248130.96`, and the ceiling is what
-/// leaves that one padding rather than running it edge to edge. Held at the old
-/// 56 points these were the only fields in the panel whose text touched both
-/// sides of the box, with a column of empty row beside them.
-fn point_field_width(ui: &egui::Ui) -> f32 {
-    (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 104.0)
+/// What the numbers need: a place in space is signed and rarely round, where a
+/// dimension is usually a number somebody typed. The widest of them is a view
+/// centre at the far end of the camera's range, `-6248130.96`, and this leaves
+/// that one padding rather than running it edge to edge. Held at the old 56
+/// points these were the only fields in the panel whose text touched both sides
+/// of the box, with a column of empty row beside them.
+const POINT_FIELD_MAX: f32 = 104.0;
+
+/// The three components of a point -- the 3D cursor, the view centre, an end of
+/// the measure span -- laid out across the row, and one to a line when the row
+/// is too narrow to hold three fields across it.
+///
+/// The narrow layout is `axis_row`'s, and for the same reason (issue 51): three
+/// fields plus their gaps need more than a third of the row each, so below the
+/// width where a number is still readable the only way to keep all three on the
+/// panel is to give each its own line. Each then carries the axis chip that says
+/// which one it is -- across the row their order says it, stacked it does not.
+///
+/// They were clamped to a floor of 44 points instead, which is not a layout:
+/// three fields of it and their gaps are wider than the panel that forced them
+/// there, so the third was drawn past the panel's edge and clipped. That is what
+/// was reported -- the 3D cursor and the view centre losing their Z field as the
+/// dock was dragged in, while the position and rotation rows above them stacked.
+fn point_fields(ui: &mut egui::Ui, name: &str, mut field: impl FnMut(&mut egui::Ui, usize)) {
+    // The panel's own edge decides how much there is to share out, the way it
+    // does on an axis row: a row wide enough to overflow must not take the
+    // others with it.
+    let each = (room_left(ui) / 3.0 - ui.spacing().item_spacing.x).min(POINT_FIELD_MAX);
+    if each < MIN_AXIS_FIELD {
+        ui.vertical(|ui| {
+            for axis in 0..3 {
+                ui.horizontal(|ui| {
+                    theme::axis_chip(ui, ui.id().with((name, axis)), axis);
+                    field(ui, axis);
+                });
+            }
+        });
+        return;
+    }
+    for axis in 0..3 {
+        ui.scope(|ui| {
+            ui.set_width(each);
+            field(ui, axis);
+        });
+    }
 }
 
 /// A view centre to a hundredth of a millimetre, at whatever magnitude.
@@ -595,24 +629,20 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
         "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
              Shift+right-click in the viewport puts it under the pointer.",
         |ui| {
-            let each = point_field_width(ui);
-            for axis in 0..3 {
+            point_fields(ui, "3D cursor", |ui, axis| {
                 let field_id = ui.id().with(("cursor", axis));
                 // Named the way `axis_row` names its three, so one field cannot
                 // answer to another's gesture.
                 let grip = format!("3D cursor:{axis}");
-                ui.scope(|ui| {
-                    ui.set_width(each);
-                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
-                    // No undo step: the cursor is not part of the scene, so
-                    // there is no snapshot for one to restore.
-                    scalar_field(app, ui, field, |app, mm, _| {
-                        let mut p = app.cursor.unwrap_or(Vec3::ZERO);
-                        set_component(&mut p, axis, mm);
-                        app.cursor = Some(p);
-                    });
+                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                // No undo step: the cursor is not part of the scene, so there is
+                // no snapshot for one to restore.
+                scalar_field(app, ui, field, |app, mm, _| {
+                    let mut p = app.cursor.unwrap_or(Vec3::ZERO);
+                    set_component(&mut p, axis, mm);
+                    app.cursor = Some(p);
                 });
-            }
+            });
         },
     );
     field_row(ui, "", "", |ui| {
@@ -649,33 +679,32 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
         "What the camera looks at: the point a pan carries about and an orbit turns around. \
              A new shape lands here when \u{201C}Add at\u{201D} is the view centre.",
         |ui| {
-            // Laid out like the 3D cursor's row above: they are the same kind of
-            // thing and read as a pair.
-            let each = point_field_width(ui);
+            // Laid out like the 3D cursor's row above, narrow row included: they
+            // are the same kind of thing and read as a pair.
+            //
             // Locked, they are a readout: still shown, still following the
-            // camera, but greyed and inert. A field that takes a number and
-            // then puts it back is worse than one that says it will not.
+            // camera, but greyed and inert. A field that takes a number and then
+            // puts it back is worse than one that says it will not.
             let locked = app.settings.lock_view_centre;
-            for axis in 0..3 {
+            point_fields(ui, "View centre", |ui, axis| {
                 let field_id = ui.id().with(("view-centre", axis));
                 let grip = format!("View centre:{axis}");
-                ui.scope(|ui| {
-                    ui.set_width(each);
-                    if locked {
-                        ui.disable();
-                    }
-                    let current = shown_view_centre(component(at, axis));
-                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current, step };
-                    // No undo step: where the camera looks is not part of the
-                    // scene the history holds, and neither pan nor orbit nor the
-                    // wheel records one either. Typing a view centre is the same
-                    // gesture by another route, so it cannot be the one thing
-                    // about the camera that Ctrl+Z takes back.
-                    scalar_field(app, ui, field, |app, mm, _| {
-                        set_component(&mut app.scene.camera.target, axis, mm);
-                    });
+                // The chip beside a stacked field keeps its colour: what is
+                // greyed is the number that cannot be typed into.
+                if locked {
+                    ui.disable();
+                }
+                let current = shown_view_centre(component(at, axis));
+                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current, step };
+                // No undo step: where the camera looks is not part of the scene
+                // the history holds, and neither pan nor orbit nor the wheel
+                // records one either. Typing a view centre is the same gesture by
+                // another route, so it cannot be the one thing about the camera
+                // that Ctrl+Z takes back.
+                scalar_field(app, ui, field, |app, mm, _| {
+                    set_component(&mut app.scene.camera.target, axis, mm);
                 });
-            }
+            });
         },
     );
     field_row(ui, "", "", |ui| {
@@ -731,25 +760,21 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
             None => "Click in the viewport to place it, or type it here.".to_string(),
         };
         field_row(ui, &named(label, unit.suffix()), &hover, |ui| {
-            let each = point_field_width(ui);
-            for axis in 0..3 {
+            point_fields(ui, label, |ui, axis| {
                 let field_id = ui.id().with(("measure", index, axis));
                 let grip = format!("{label}:{axis}");
-                ui.add_enabled_ui(enabled, |ui| {
-                    ui.scope(|ui| {
-                        ui.set_width(each);
-                        let field =
-                            Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
-                        // No undo step: the span belongs to the tool, not to the
-                        // scene, so there is no snapshot for one to restore.
-                        scalar_field(app, ui, field, |app, mm, _| {
-                            let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
-                            set_component(&mut p, axis, mm);
-                            app.measure.set_point(index, p);
-                        });
-                    });
+                if !enabled {
+                    ui.disable();
+                }
+                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                // No undo step: the span belongs to the tool, not to the scene,
+                // so there is no snapshot for one to restore.
+                scalar_field(app, ui, field, |app, mm, _| {
+                    let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
+                    set_component(&mut p, axis, mm);
+                    app.measure.set_point(index, p);
                 });
-            }
+            });
         });
     }
 

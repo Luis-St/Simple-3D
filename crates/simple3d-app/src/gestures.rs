@@ -1287,6 +1287,56 @@ fn a_narrow_properties_panel_stacks_its_rows_instead_of_overflowing() {
 }
 
 #[test]
+fn a_point_row_keeps_all_three_of_its_fields_on_the_panel() {
+    // Reported from the running application: dragging the dock in took the Z
+    // field of the 3D cursor and of the view centre off the panel edge, while
+    // the position and rotation rows above them broke onto three lines as they
+    // should. Issue 57 again, in the two rows that were written after it: the
+    // width for the three fields came from `available_width`, which in a wrapped
+    // row is the width a *new* line would have -- the whole row, label column
+    // included -- so each field was sized as though the label were not there and
+    // the second and third were drawn past the panel's edge. Held against the
+    // old code this test fails at the second field of a 230 px dock, which
+    // reached 1404.7 with the window edge at 1400.
+    //
+    // Checked across the dock's whole range (`width_range(200..=620)` in
+    // `dock`), because the failure was in the middle of it rather than at an end.
+    for width in [200.0_f32, 230.0, 260.0, 290.0, 320.0, 420.0, 620.0] {
+        // Nothing selected: the Document section, and with it the 3D cursor and
+        // the view centre, is what the panel shows in place of an object's own
+        // rows.
+        let mut harness = harness_configured("point-row-width", |app| {
+            app.settings.properties_width = width;
+            app.selection.clear();
+        });
+        harness.step();
+        let edge = harness.ctx.screen_rect().right();
+        for row in ["3D cursor", "View centre"] {
+            let fields: Vec<egui::Rect> = (0..3)
+                .map(|axis| rect_of(&harness, crate::panel_properties::grip_id(&format!("{row}:{axis}"))))
+                .collect();
+            for (axis, field) in fields.iter().enumerate() {
+                assert!(
+                    field.right() <= edge - 4.0,
+                    "at a panel {width} px wide, {row}:{axis} reaches {} with the window edge at {edge}",
+                    field.right()
+                );
+                assert!(
+                    field.left() >= 0.0 && field.width() >= 40.0,
+                    "at a panel {width} px wide, {row}:{axis} is {field:?}"
+                );
+            }
+            // And they are laid out as one thing or the other: three across on
+            // one line, or one to a line down the left. A row that is half of
+            // each is the shape the bug had.
+            let across = fields.windows(2).all(|p| (p[1].top() - p[0].top()).abs() < 1.0);
+            let stacked = fields.windows(2).all(|p| p[1].top() > p[0].top() && (p[1].left() - p[0].left()).abs() < 1.0);
+            assert!(across || stacked, "at a panel {width} px wide, {row} is neither across nor stacked: {fields:?}");
+        }
+    }
+}
+
+#[test]
 fn a_long_name_widens_the_outliner_rows_instead_of_wrapping() {
     // Issue 50. A row is a fixed 22 px, so a name broken over two lines is a
     // name with its second half cut off. The rows are made as wide as the
