@@ -576,6 +576,10 @@ impl App {
         app.export_scale = simple3d_core::unit::format_number(app.settings.last_export_scale, 4);
         app.export_bodies = simple3d_export::BodyMode::from_id(&app.settings.last_export_bodies).unwrap_or_default();
         app.refresh_library();
+        // And the saved pattern kinds, for the same reason: the property panel
+        // offers them on any custom pattern, which is a place the user reaches
+        // without ever opening the tool that keeps the shelf up to date.
+        app.refresh_pattern_kinds();
         match open {
             // Opening a project by passing its path on the command line, so file
             // associations work on both platforms (spec section 10).

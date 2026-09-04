@@ -184,6 +184,15 @@ impl App {
     /// Put a saved rule on the node the tool is working on.
     pub(crate) fn apply_saved_kind(&mut self, entry: &pattern_library::Entry) {
         let Some(id) = self.pattern_tool_target() else { return };
+        self.apply_saved_kind_to(id, entry);
+    }
+
+    /// The same, on a named pattern rather than the tool's own: the property
+    /// panel offers the shelf on any custom pattern, with no tool open.
+    pub(crate) fn apply_saved_kind_to(&mut self, id: NodeId, entry: &pattern_library::Entry) {
+        if !self.scene.get(id).is_some_and(|n| n.is_pattern()) {
+            return;
+        }
         let Some(kind) = pattern_library::load(&entry.path) else {
             self.status = Status::Warning(format!("\u{201C}{}\u{201D} could not be read", entry.name));
             return;

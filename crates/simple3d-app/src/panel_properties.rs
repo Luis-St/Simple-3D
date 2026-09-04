@@ -284,6 +284,13 @@ fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(
     });
 }
 
+/// The id the saved-kind box on a custom pattern answers to. Named for the same
+/// reason the pattern tool's cross is: a test asks where it was drawn rather
+/// than guessing at the id egui gave it.
+pub(crate) fn saved_kind_id() -> egui::Id {
+    egui::Id::new("pattern-saved-kind-box")
+}
+
 /// The id of a value field's scrub gesture, named after the value it scrubs
 /// rather than taken from where the field sits in the layout. A gesture in
 /// flight is remembered by this id (`App::scrub`), so a panel that relays itself
@@ -1011,7 +1018,41 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     // the kind. Becoming custom is the Kind row's to say.
     if custom {
         let mut open_tool = false;
-        field_row(ui, "", "", |ui| {
+        let mut apply = None;
+        field_row(ui, "Rule", "", |ui| {
+            // The shelf, where there is one. A kind saved from the tool is meant
+            // to be used again, and needing the tool open to reach one -- when
+            // reaching it is a single click on a name -- is the tool asking to
+            // be visited rather than used.
+            //
+            // Which one is on this pattern is read the way the tool reads it:
+            // applying a kind names the node after it, so a node whose name is a
+            // saved kind's is showing that kind. A rule edited afterwards keeps
+            // the name, which is why the box says what was picked rather than
+            // claiming the numbers still match it.
+            if !app.pattern_kinds.is_empty() {
+                let node_name = app.scene.node(id).name.clone();
+                let picked = app.pattern_kinds.iter().find(|entry| entry.name == node_name).cloned();
+                let shown = picked.as_ref().map_or("Pick one", |entry| entry.name.as_str()).to_string();
+                let shelf = egui::ComboBox::from_id_salt("pattern-saved-kind")
+                    .selected_text(theme::value(shown))
+                    .width(fits(ui, 150.0))
+                    .show_ui(ui, |ui| {
+                        for entry in &app.pattern_kinds {
+                            let chosen = picked.as_ref().is_some_and(|p| p.name == entry.name);
+                            if ui.selectable_label(chosen, &entry.name).clicked() && !chosen {
+                                apply = Some(entry.clone());
+                            }
+                        }
+                    });
+                // Named rather than found by where it sits: a combo box carries
+                // no label of its own in the accessibility tree -- only the name
+                // it happens to be showing, which is the thing under test -- so
+                // a test asks the context where it was drawn, the way it asks
+                // for a value field's grip. It senses nothing; the box itself
+                // answers the pointer.
+                ui.interact(shelf.response.rect, saved_kind_id(), egui::Sense::hover());
+            }
             if ui
                 .button("Edit kind")
                 .on_hover_text("Build this pattern's rule out of stages, and keep it for other projects")
@@ -1020,6 +1061,9 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                 open_tool = true;
             }
         });
+        if let Some(entry) = apply {
+            app.apply_saved_kind_to(id, &entry);
+        }
         if open_tool {
             app.open_pattern_tool();
         }
