@@ -508,6 +508,22 @@ const RETIRED: [&str; 2] = ["toggle_projection", "toggle_ghosts"];
 /// bindable at all (issue 77).
 const MOVED_DEFAULTS: [(Command, &str, &str); 1] = [(Command::SnapToGeometry, "V", "Ctrl")];
 
+/// The same rule for a navigation drag, which `MOVED_DEFAULTS` cannot carry
+/// because a drag is not a `Chord` and pan is not a `Command`.
+///
+/// `nav` is written back whole on any change, exactly as the bindings are, so a
+/// changed navigation default would otherwise reach nobody who has ever used the
+/// program. A pan binding that is still precisely the preset's old default is
+/// moved to its new one; one the user has since chosen for themselves is theirs.
+///
+/// Pan moved from Shift+right-drag to the middle button on its own (issue 72).
+fn moved_nav_pan(preset: Preset) -> Option<(Drag, Drag)> {
+    match preset {
+        Preset::Default => Some((Drag::with_shift(MouseButton::Right), Drag::new(MouseButton::Middle))),
+        Preset::MeshEditor | Preset::Cad => None,
+    }
+}
+
 fn bindings_from_names<'de, D: Deserializer<'de>>(deserializer: D) -> Result<BTreeMap<Command, Chord>, D::Error> {
     use serde::de::IntoDeserializer;
     let named: BTreeMap<String, Chord> = BTreeMap::deserialize(deserializer)?;
@@ -609,7 +625,17 @@ impl Keymap {
                 set(MeasureTool, Chord::key("M"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Right),
-                    pan: Drag::with_shift(MouseButton::Right),
+                    // The middle button on its own, and no modifier (issue 72).
+                    // Pan used to be Shift+right-drag: the only navigation that
+                    // asked for a modifier, and so the only one nobody found.
+                    // What is left when it is not found is orbit and zoom, both
+                    // of which turn about the camera's target and leave the
+                    // origin exactly where it started -- in the middle of the
+                    // frame, which is what "the viewport is locked to the
+                    // origin" is. The wheel is beside the button, so a hand
+                    // already on the mouse can move about the ground without
+                    // reaching for the keyboard at all.
+                    pan: Drag::new(MouseButton::Middle),
                     invert_zoom: false,
                 }
             }
@@ -765,6 +791,14 @@ impl Keymap {
             let (was, now) = (Chord::from_str(was)?, Chord::from_str(now)?);
             if map.bindings.get(&command) == Some(&was) && map.conflict(command, &now).is_none() {
                 map.bindings.insert(command, now);
+            }
+        }
+        if let Some((was, now)) = moved_nav_pan(map.preset) {
+            // Never onto the button the user's own orbit already uses: the two
+            // would then be the same gesture, and a keymap this build wrote for
+            // them is not the place to introduce a conflict.
+            if map.nav.pan == was && !map.nav.orbit.matches(now.button, now.ctrl, now.shift, now.alt) {
+                map.nav.pan = now;
             }
         }
         for command in Command::ALL {
@@ -970,6 +1004,54 @@ mod tests {
         assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::key("V")));
         assert_eq!(map.binding(Command::ToggleBoundingBox), Some(&Chord::modifiers(true, false, false)));
         assert!(map.self_conflicts().is_empty());
+    }
+
+    #[test]
+    fn the_default_preset_pans_on_the_middle_button_alone() {
+        // Issue 72. Pan was the one gesture behind a modifier, so orbit and zoom
+        // were the whole of the navigation anyone found -- and both of those
+        // hold the camera's target still, which is why a viewport that can pan
+        // perfectly well read as one bolted to the origin.
+        let nav = Keymap::default().nav;
+        assert_eq!(nav.pan, Drag::new(MouseButton::Middle), "pan is not the middle button on its own");
+        assert!(!nav.pan.ctrl && !nav.pan.shift && !nav.pan.alt, "pan still asks for a modifier");
+        assert!(
+            !nav.orbit.matches(nav.pan.button, nav.pan.ctrl, nav.pan.shift, nav.pan.alt),
+            "pan and orbit are the same drag"
+        );
+    }
+
+    #[test]
+    fn a_moved_navigation_default_is_carried_over_but_a_chosen_drag_is_not() {
+        // The same argument as the bindings above, for `nav`: the block is
+        // written back whole, so every map ever saved carries the old pan
+        // whether or not the user ever chose it (issue 72).
+        let stored = r#"{
+          "preset": "default",
+          "bindings": { "snap_to_geometry": "Ctrl" },
+          "nav": { "orbit": { "button": "right" }, "pan": { "button": "right", "shift": true },
+                   "invert_zoom": false }
+        }"#;
+        let map = Keymap::from_text(stored).unwrap();
+        assert_eq!(map.nav.pan, Drag::new(MouseButton::Middle), "the old default pan was not moved");
+        assert_eq!(map.nav.orbit, Drag::new(MouseButton::Right), "moving pan disturbed orbit");
+
+        // A pan the user chose is theirs, whatever it is.
+        let chosen = stored.replace(r#""pan": { "button": "right", "shift": true }"#, r#""pan": { "button": "left" }"#);
+        let map = Keymap::from_text(&chosen).unwrap();
+        assert_eq!(map.nav.pan, Drag::new(MouseButton::Left), "a chosen pan was overwritten");
+
+        // And it never lands on the button the user's own orbit already holds.
+        let taken = stored.replace(r#""orbit": { "button": "right" }"#, r#""orbit": { "button": "middle" }"#);
+        let map = Keymap::from_text(&taken).unwrap();
+        assert_eq!(map.nav.pan, Drag::with_shift(MouseButton::Right), "the move collided with orbit");
+
+        // The other presets never had that default, so nothing of theirs moves.
+        for preset in [Preset::MeshEditor, Preset::Cad] {
+            let text = Keymap::from_preset(preset).to_text();
+            let back = Keymap::from_text(&text).unwrap();
+            assert_eq!(back.nav, Keymap::from_preset(preset).nav, "{preset:?} lost its own navigation");
+        }
     }
 
     #[test]
