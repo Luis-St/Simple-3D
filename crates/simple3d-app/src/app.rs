@@ -14,7 +14,7 @@ use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::{Chord, Command, Keymap};
 use simple3d_core::library;
 use simple3d_core::project;
-use simple3d_core::scene::{Colour, GroupOp, NodeId, Scene};
+use simple3d_core::scene::{Camera, Colour, GroupOp, NodeId, Scene};
 use simple3d_core::undo::History;
 use simple3d_core::unit::Unit;
 use simple3d_export::Format;
@@ -403,6 +403,16 @@ pub struct App {
     /// The saved kinds, read when the tool opens rather than every frame -- the
     /// shelf is a directory and the dialog draws sixty times a second.
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
+    /// The camera the tool's preview looks through: its own, so turning the
+    /// pattern round to see what a rule made does not move the viewport behind
+    /// the window, and so it can be framed on the pattern rather than on
+    /// whatever the scene happens to be showing.
+    pub pattern_preview_camera: Camera,
+    /// The last image the preview drew, and what it was drawn from. The preview
+    /// is a full render of the scene, so it is kept between frames exactly the
+    /// way the viewport's own image is.
+    pub(crate) pattern_preview_texture: Option<egui::TextureHandle>,
+    pub(crate) pattern_preview_key: u64,
 
     pub keymap_search: String,
     pub recording: Option<Command>,
@@ -539,6 +549,9 @@ impl App {
             pattern_tool: None,
             pattern_tool_name: String::new(),
             pattern_kinds: Vec::new(),
+            pattern_preview_camera: Camera::default(),
+            pattern_preview_texture: None,
+            pattern_preview_key: u64::MAX,
             keymap_search: String::new(),
             recording: None,
             shortcut_mods: ui::ChordHold::default(),
@@ -5023,6 +5036,35 @@ mod tests {
             assert!(used <= room + 0.5, "at {room} px of room the tool laid out {used} px of content");
             assert!(row_used <= row_room + 0.5, "at {row_room} px of room the button row took {row_used} px");
         }
+    }
+
+    #[test]
+    fn the_pattern_tools_preview_turns_without_turning_the_viewport() {
+        // The preview is a viewport now rather than a scatter of dots, and the
+        // point of giving it a camera of its own is that turning the pattern
+        // round to look at what a rule made must not move the view behind the
+        // window -- which is where the shape is actually being modelled.
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
+        app.reevaluate_for_test();
+        app.frame_pattern_preview();
+
+        // It opens looking from where the viewport looks, so the picture in the
+        // window and the one behind it agree about which way round the shape is.
+        assert_eq!(app.pattern_preview_camera.yaw, app.scene.camera.yaw, "the preview opened at another angle");
+        assert_eq!(app.pattern_preview_camera.pitch, app.scene.camera.pitch);
+
+        let viewport_camera = app.scene.camera;
+        let view = crate::view::View::new(app.pattern_preview_camera, app.viewport_rect);
+        crate::panel_viewport::apply_gesture(
+            &mut app.pattern_preview_camera,
+            crate::panel_viewport::Gesture::Orbit,
+            egui::vec2(60.0, 0.0),
+            &view,
+        );
+        assert_ne!(app.pattern_preview_camera.yaw, viewport_camera.yaw, "the preview did not turn");
+        assert_eq!(app.scene.camera, viewport_camera, "turning the preview turned the viewport with it");
     }
 
     /// The step vector a linear pattern is currently laid out along.

@@ -1503,18 +1503,28 @@ impl App {
 
     /// The custom pattern kind creation tool (issue 67).
     fn pattern_kind_window(&mut self, ctx: &egui::Context) {
+        // Most of the parent window rather than a fixed 820 x 520, which was a
+        // window every user resized before doing anything else: half of this one
+        // is a viewport, and a viewport the size of a postage stamp is a picture
+        // of a pattern rather than a look at one. Bounded so it neither shrinks
+        // below the two columns nor runs off a small screen.
+        let parent = ctx.input(|i| i.viewport().outer_rect.map(|rect| rect.size()));
+        let size = match parent {
+            Some(size) => egui::vec2((size.x * 0.82).clamp(900.0, 1500.0), (size.y * 0.82).clamp(560.0, 980.0)),
+            None => egui::vec2(1100.0, 720.0),
+        };
         self.dialog(
             ctx,
             DialogSpec {
                 key: "dialog-pattern-kind",
                 title: "Custom pattern kind",
-                size: egui::vec2(820.0, 520.0),
+                size,
                 resizable: true,
                 fit_height: false,
-                // The tool gives its columns up one at a time as the window
-                // narrows and ends as a single column, but a stage still has a
-                // name and a field on every row and a button row still has two
-                // buttons in it. Below this there is no layout left to find.
+                // The tool gives the picture up as the window narrows and ends
+                // as a single column, but a stage still has a name and a field
+                // on every row and a button row still has two buttons in it.
+                // Below this there is no layout left to find.
                 min_size: Some(egui::vec2(320.0, 260.0)),
             },
             crate::pattern_tool::body,

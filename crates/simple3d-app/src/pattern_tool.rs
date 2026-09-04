@@ -16,6 +16,8 @@
 //! opened on a machine that has never seen the kind still lays out correctly.
 
 use crate::app::{App, Modal, Status};
+use crate::render::{self, Grid, Item, Palette, Style};
+use crate::view::View;
 use crate::{theme, ui};
 use simple3d_core::pattern;
 use simple3d_core::pattern_library;
@@ -53,7 +55,30 @@ impl App {
         self.pattern_tool = Some(id);
         self.pattern_tool_name = self.scene.node(id).name.clone();
         self.refresh_pattern_kinds();
+        // The preview opens looking at the pattern from where the viewport is
+        // looking at the scene, backed off far enough to hold what the rule
+        // lays out. Same angle, so the picture in the window and the one behind
+        // it agree about which way round the shape is; its own camera from
+        // there, so turning one does not turn the other.
+        self.pattern_preview_camera = self.scene.camera;
+        self.frame_pattern_preview();
         self.modal = Modal::PatternKind;
+    }
+
+    /// Point the preview camera at the pattern, or at the whole scene when the
+    /// pattern has no geometry of its own yet.
+    pub(crate) fn frame_pattern_preview(&mut self) {
+        let bounds = self
+            .pattern_tool
+            .and_then(|id| self.evaluated.node_world_bounds.get(&id).copied())
+            .or_else(|| self.evaluated.mesh.bounds());
+        match bounds {
+            Some((lo, hi)) => crate::view::frame_bounds(&mut self.pattern_preview_camera, lo, hi, 1.0),
+            None => {
+                self.pattern_preview_camera.target = Vec3::ZERO;
+                self.pattern_preview_camera.distance = 160.0;
+            }
+        }
     }
 
     /// Re-read the shelf. Done when the tool opens and after it is written to,
@@ -133,27 +158,24 @@ impl App {
     }
 }
 
-/// The narrowest the shelf is worth drawing at: below this a saved kind's name
-/// is cut off, and a list of names nobody can read is not a shelf.
-const SHELF_MIN: f32 = 140.0;
 /// The narrowest the stages are worth drawing at. Their rows are the property
 /// panel's own, which stack a name above its field rather than beside it once
-/// the room runs out, so the numbers stay usable well below the width three
+/// the room runs out, so the numbers stay usable well below the width two
 /// columns need.
 const STAGES_MIN: f32 = 240.0;
-/// The smallest the picture can be and still show a helix as one.
-const PREVIEW_MIN: f32 = 150.0;
+/// The smallest the preview can be and still be a viewport rather than a stamp.
+const PREVIEW_MIN: f32 = 220.0;
+/// The longest side the preview's image is rasterized at, whatever size it is
+/// drawn at. See `paint_preview`.
+const PREVIEW_MAX_PX: f32 = 1280.0;
 
-/// The tool's contents: the shelf of saved kinds down the left, the stages down
-/// the middle, and what they currently lay out drawn beside them.
+/// The tool's contents: the rule down the left, and a viewport on what it lays
+/// out beside it.
 ///
-/// The window is resizable, so the three are shares of the room there is rather
-/// than three fixed widths. Made wider, it is the stages that grow, because that
-/// is where the typing happens. Made narrower, the columns are given up in the
-/// order they can be spared: the picture first -- the viewport behind this window
-/// is already showing the real thing, in three dimensions, and this is only the
-/// version that fits in front of the numbers -- and then the shelf's own column,
-/// which moves above the stages rather than disappearing.
+/// The window is resizable, so the two are shares of the room there is rather
+/// than two fixed widths. Narrowed far enough the picture is the column that
+/// goes: the viewport behind this window is showing the same scene, and the
+/// numbers are what the window is open for.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
@@ -164,77 +186,75 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     // and the gap either side of it.
     let rule = 6.0 + ui.spacing().item_spacing.x * 2.0;
 
-    if room >= SHELF_MIN + STAGES_MIN + PREVIEW_MIN + rule * 2.0 {
-        let shelf_width = (room * 0.20).clamp(SHELF_MIN, 230.0);
-        let picture = (room * 0.32).clamp(PREVIEW_MIN, 380.0);
+    if room >= STAGES_MIN + PREVIEW_MIN + rule {
+        // The picture takes the larger share of a wide window: it is a viewport
+        // now, and the stages are a column of fields that gain nothing from
+        // being any wider than they need.
+        let picture = (room * 0.46).clamp(PREVIEW_MIN, 760.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(shelf_width);
-                shelf(app, ui);
-            });
-            ui.separator();
-            ui.vertical(|ui| {
-                ui.set_width(room - shelf_width - picture - rule * 2.0);
-                stages(app, ui, id);
+                ui.set_width(room - picture - rule);
+                rule_column(app, ui, id);
             });
             ui.separator();
             ui.vertical(|ui| preview(app, ui));
         });
-    } else if room >= SHELF_MIN + STAGES_MIN + rule {
-        let shelf_width = (room * 0.30).clamp(SHELF_MIN, 200.0);
-        ui.horizontal_top(|ui| {
-            ui.vertical(|ui| {
-                ui.set_width(shelf_width);
-                shelf(app, ui);
-            });
-            ui.separator();
-            ui.vertical(|ui| {
-                ui.set_width(room - shelf_width - rule);
-                stages(app, ui, id);
-            });
-        });
     } else {
-        // One column. The shelf is a list of names and takes a slice off the top;
-        // the stages take everything else, since they are what the window is open
-        // for.
-        let shelf_height = (ui.available_height() * 0.3).clamp(56.0, 140.0);
-        ui.vertical(|ui| {
-            ui.scope(|ui| {
-                ui.set_max_height(shelf_height);
-                shelf(app, ui);
-            });
-            ui.separator();
-            stages(app, ui, id);
-        });
+        rule_column(app, ui, id);
     }
 }
 
-/// The saved kinds. Clicking one puts it on the pattern; the cross beside it
-/// takes it off the shelf for good.
-fn shelf(app: &mut App, ui: &mut egui::Ui) {
-    ui.add(egui::Label::new(theme::header_text("Saved kinds")).selectable(false));
-    ui.add_space(4.0);
+/// The shelf and the stages, in that order down one column.
+fn rule_column(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    if shelf(app, ui) {
+        ui.separator();
+    }
+    stages(app, ui, id);
+}
+
+/// The saved kinds, as one row: pick one to put it on the pattern, and the
+/// cross beside it takes that one off the shelf for good.
+///
+/// It was a column of its own, which on an empty shelf was a paragraph of
+/// explanation taking a fifth of the window. Nothing saved, nothing drawn:
+/// the row appears with the first kind kept, and until then the button that
+/// keeps one is the only thing that needs to be there.
+///
+/// Returns whether it drew anything, so the caller knows whether to rule a line
+/// under it.
+fn shelf(app: &mut App, ui: &mut egui::Ui) -> bool {
     if app.pattern_kinds.is_empty() {
-        ui.add(
-            egui::Label::new(theme::hint("Nothing saved yet. Build a rule beside this and give it a name to keep it."))
-                .selectable(false),
-        );
+        return false;
     }
     let mut apply = None;
     let mut delete = None;
-    let room = ui.available_height();
-    egui::ScrollArea::vertical().max_height(room).show(ui, |ui| {
-        for entry in &app.pattern_kinds {
-            ui.horizontal(|ui| {
-                if ui.selectable_label(false, &entry.name).on_hover_text("Put this rule on the pattern").clicked() {
-                    apply = Some(entry.clone());
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.small_button("\u{00d7}").on_hover_text("Delete this saved kind").clicked() {
-                        delete = Some(entry.clone());
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(theme::header_text("Saved kinds")).selectable(false));
+        // The rule on the pattern is the one named in the box, when that name is
+        // a saved kind's -- which is what `apply_saved_kind` leaves behind, and
+        // what the name field is filled with.
+        let on_shelf = app.pattern_kinds.iter().find(|entry| entry.name == app.pattern_tool_name).cloned();
+        let shown = match &on_shelf {
+            Some(entry) => entry.name.clone(),
+            None => "Pick one".to_string(),
+        };
+        egui::ComboBox::from_id_salt("pattern-shelf")
+            .selected_text(theme::value(shown))
+            .width((ui.available_width() - 40.0).clamp(80.0, 220.0))
+            .show_ui(ui, |ui| {
+                for entry in &app.pattern_kinds {
+                    let chosen = Some(&entry.name) == on_shelf.as_ref().map(|e| &e.name);
+                    if ui.selectable_label(chosen, &entry.name).clicked() {
+                        apply = Some(entry.clone());
                     }
-                });
+                }
             });
+        if ui
+            .add_enabled(on_shelf.is_some(), egui::Button::new("\u{00d7}"))
+            .on_hover_text("Delete the saved kind named here")
+            .clicked()
+        {
+            delete = on_shelf;
         }
     });
     if let Some(entry) = apply {
@@ -243,6 +263,7 @@ fn shelf(app: &mut App, ui: &mut egui::Ui) {
     if let Some(entry) = delete {
         app.delete_saved_kind(&entry);
     }
+    true
 }
 
 /// The rule itself: how many stages, and each stage's numbers.
@@ -318,51 +339,157 @@ fn describe(stage: &pattern::Stage, unit: simple3d_core::unit::Unit) -> String {
     format!("{} copies, {}", stage.copies(), what.join(", "))
 }
 
-/// Where the copies land, drawn as one dot each.
+/// What the rule lays out, as a viewport.
 ///
-/// A rule is a handful of numbers and nobody reads a helix out of six of them.
-/// The viewport behind the dialog shows the real thing, but it is behind the
-/// dialog: this is the picture that is *in front of* the numbers being typed,
-/// and it costs one call to the same `instances` the renderer uses.
+/// It was a flat scatter of dots, one per copy, because a rule is a handful of
+/// numbers and nobody reads a helix out of six of them. Dots answer "how many
+/// and roughly where" and nothing else, though, and the question a rule is
+/// actually judged by -- what the shape looks like repeated -- needs the shape.
+/// So this is the same render the viewport behind the window is drawing, from a
+/// camera of its own that the pointer can turn.
+///
+/// Everything but the camera comes from the main window: the display mode, the
+/// grid, the axes, the plane marks. An axis switched off out there is switched
+/// off in here, because there is one set of view settings in the application
+/// and this is not a second one.
 fn preview(app: &mut App, ui: &mut egui::Ui) {
     let params = app.pattern_tool_params();
-    let copies = pattern::instances(&params);
-    ui.add(egui::Label::new(theme::header_text("Lays out")).selectable(false));
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(theme::header_text("Lays out")).selectable(false));
+        let (wanted, made) = pattern::instance_count(&params);
+        let note = if wanted > made {
+            format!("{made} copies -- {wanted} were asked for, which is more than can be drawn")
+        } else {
+            format!("{made} copies")
+        };
+        ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Frame").on_hover_text("Point the preview back at the pattern").clicked() {
+                app.frame_pattern_preview();
+            }
+        });
+    });
     ui.add_space(4.0);
-    // Square, and never wider than the column it is in: a lower bound above what
-    // the column actually has is a picture that hangs off the edge of it.
-    let side = ui.available_width().min(ui.available_height() - 24.0).clamp(120.0, 420.0);
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, theme::token::SURFACE_0);
 
-    // Straight isometric, the view the viewport opens in, so a helix reads as
-    // one and a grid does not collapse onto a line.
-    let flat = |p: Vec3| egui::vec2(((p.x - p.y) * 0.866) as f32, ((p.x + p.y) * 0.5 - p.z) as f32);
-    let points: Vec<egui::Vec2> = copies.iter().map(|c| flat(c.xform.t)).collect();
-    let (mut lo, mut hi) = (egui::vec2(0.0, 0.0), egui::vec2(0.0, 0.0));
-    for p in &points {
-        lo = lo.min(*p);
-        hi = hi.max(*p);
+    // Whatever is left of the column, which is what makes this a viewport and
+    // not a stamp: it grows with the window.
+    let rect = ui.available_rect_before_wrap();
+    if rect.width() < 32.0 || rect.height() < 32.0 {
+        return;
     }
-    let span = (hi - lo).max(egui::vec2(1.0, 1.0));
-    let scale = ((rect.width() - 32.0) / span.x).min((rect.height() - 32.0) / span.y);
-    let centre = (lo + hi) * 0.5;
-    for (index, p) in points.iter().enumerate() {
-        let at = rect.center() + (*p - centre) * scale;
-        // The original is the one every other copy is a copy *of*, so it is the
-        // one drawn brightest.
-        let colour = if index == 0 { theme::token::ACCENT } else { theme::token::TEXT_LO };
-        painter.circle_filled(at, if index == 0 { 4.0 } else { 2.5 }, colour);
+    let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+    paint_preview(app, ui, rect);
+
+    // The same navigation bindings the viewport uses, read from the keymap on
+    // every frame, so a rebinding applies here as immediately as it does there.
+    let nav = app.keymap.nav;
+    let (ctrl, shift, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
+    let held = [
+        response.dragged_by(egui::PointerButton::Primary),
+        response.dragged_by(egui::PointerButton::Middle),
+        response.dragged_by(egui::PointerButton::Secondary),
+    ];
+    if let Some(gesture) = crate::panel_viewport::nav_gesture(&nav, held, ctrl, shift, alt) {
+        let view = View::new(app.pattern_preview_camera, rect);
+        crate::panel_viewport::apply_gesture(&mut app.pattern_preview_camera, gesture, response.drag_delta(), &view);
     }
-    ui.add_space(4.0);
-    let (wanted, made) = pattern::instance_count(&params);
-    let note = if wanted > made {
-        format!("{made} copies -- {wanted} were asked for, which is more than can be drawn")
-    } else {
-        format!("{made} copies")
-    };
-    ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+    if response.hovered() {
+        let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+        crate::panel_viewport::apply_zoom(&mut app.pattern_preview_camera, &nav, scroll);
+    }
+    if response.dragged() || response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+}
+
+/// Rasterize the preview, reusing the last image while nothing that affects it
+/// has changed -- the same bargain the viewport's own image strikes, and the
+/// reason a dialog that redraws sixty times a second can hold a render at all.
+///
+/// Always the software rasterizer: the GPU renderer draws into a texture owned
+/// by the main window's context, and this is a second native window.
+fn paint_preview(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect) {
+    // Capped, unlike the viewport's own image: this one is rasterized in
+    // software on every frame of an orbit, and on a large screen the dialog's
+    // half of it is a million pixels. Past the cap the picture is drawn scaled,
+    // which costs a little sharpness and keeps the drag smooth.
+    let pixels_per_point = ui.ctx().pixels_per_point().min(PREVIEW_MAX_PX / rect.width().max(rect.height()));
+    let size = [
+        (rect.width() * pixels_per_point).round().max(1.0) as usize,
+        (rect.height() * pixels_per_point).round().max(1.0) as usize,
+    ];
+    let dark = ui.visuals().dark_mode;
+    let key = preview_key(app, size, dark);
+    if key != app.pattern_preview_key || app.pattern_preview_texture.is_none() {
+        // Scoped so the borrow of the renderables ends before the texture,
+        // which lives on the same application, is written to.
+        let image = {
+            // The framebuffer's own space, not the dialog's position on screen.
+            let render_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
+            let mut items = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
+            // The pattern itself wears the selection outline, so which copies
+            // the rule is laying out is never in doubt.
+            if let Some(renderable) = app.pattern_tool.and_then(|id| app.node_renderables.get(&id)) {
+                items.push(Item { renderable, style: Style::Selected });
+            }
+            let request = render::Request {
+                view: View::new(app.pattern_preview_camera, render_rect),
+                size,
+                mode: app.settings.display_mode,
+                palette: Palette::for_dark_mode(dark),
+                grid: Grid {
+                    visible: app.scene.settings.grid_visible,
+                    spacing: app.scene.settings.grid_spacing,
+                    axes: app.scene.settings.axes_visible,
+                    style: app.scene.settings.axis_style,
+                    plane_marks: app.scene.settings.plane_marks,
+                },
+                items,
+            };
+            let prepared = render::prepare_frame(&request);
+            render::render_prepared(&request, &prepared).to_color_image()
+        };
+        match &mut app.pattern_preview_texture {
+            Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
+            None => {
+                app.pattern_preview_texture =
+                    Some(ui.ctx().load_texture("pattern-preview", image, egui::TextureOptions::LINEAR));
+            }
+        }
+        app.pattern_preview_key = key;
+    }
+    if let Some(texture) = &app.pattern_preview_texture {
+        ui.painter().image(
+            texture.id(),
+            rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+}
+
+/// Everything the preview's image is drawn from. Unchanged, and the last one is
+/// still what should be on screen.
+fn preview_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    size.hash(&mut hasher);
+    dark.hash(&mut hasher);
+    app.evaluation_generation.hash(&mut hasher);
+    app.renderable_key.hash(&mut hasher);
+    (app.settings.display_mode as u8).hash(&mut hasher);
+    app.scene.settings.grid_visible.hash(&mut hasher);
+    app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
+    app.scene.settings.axes_visible.hash(&mut hasher);
+    app.scene.settings.axis_style.hash(&mut hasher);
+    app.scene.settings.plane_marks.hash(&mut hasher);
+    let camera = app.pattern_preview_camera;
+    for value in
+        [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]
+    {
+        value.to_bits().hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// The dialog's buttons: name the rule and keep it, or close.
