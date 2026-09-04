@@ -5177,6 +5177,61 @@ mod tests {
         assert_eq!(seen.first(), seen.last(), "the divider drifted: {seen:?}");
     }
 
+    /// Reported: "the preview does not render anything".
+    ///
+    /// It rendered nothing because it was never drawn. With `embed_dialogs` on
+    /// -- the setting that keeps the application off a second window system
+    /// surface, and the way out of the freeze in issue 64 -- a dialog is an
+    /// `egui::Window`, and the window was given no size, so it sized itself to
+    /// what was in it. The tool's body lays itself out against the room it is
+    /// *given*, and what it was given was the auto-sized default: 362 px, under
+    /// what the two columns need, at which the tool gives the picture up and
+    /// draws the numbers alone.
+    ///
+    /// The second half of the same fault is the height. The buttons were
+    /// stacked under a body that fills whatever room it has, so once the window
+    /// had a width worth having, it grew by the height of the button row every
+    /// frame -- 907 px on an 880 px screen, with the buttons off the bottom of
+    /// it.
+    ///
+    /// Asked of the frame rather than of the layout arithmetic: the headless
+    /// context hands every dialog back as `Embedded`, so running `App::ui`
+    /// against it draws the dialog the way that setting does, and the context
+    /// is then asked where the preview and the window itself ended up.
+    #[test]
+    fn the_pattern_tools_preview_is_drawn_when_the_dialog_is_embedded() {
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
+        app.reevaluate_for_test();
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 880.0));
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        // Several frames: a window that grows to fit its contents does it one
+        // frame at a time, and one frame of it looks like a rounding error.
+        for _ in 0..4 {
+            let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+            let _ = ctx.run(input, |ctx| app.ui(ctx));
+        }
+
+        let preview = ctx
+            .read_response(crate::pattern_tool::preview_id())
+            .expect("the preview was not drawn in the embedded dialog")
+            .rect;
+        assert!(
+            preview.width() >= 220.0 && preview.height() >= 220.0,
+            "the preview was drawn at {preview:?}, which is a stamp rather than a viewport"
+        );
+        let window = ctx
+            .memory(|memory| memory.area_rect(egui::Id::new("Custom pattern kind")))
+            .expect("the embedded dialog was not drawn");
+        assert!(
+            screen.contains_rect(window),
+            "the embedded dialog is {window:?}, which runs off the {screen:?} it is drawn on"
+        );
+    }
+
     #[test]
     fn the_pattern_tools_preview_turns_without_turning_the_viewport() {
         // The preview is a viewport now rather than a scatter of dots, and the

@@ -770,16 +770,61 @@ impl App {
         ctx.show_viewport_immediate(id, builder, |ctx, class| {
             if class == egui::ViewportClass::Embedded {
                 let mut open = true;
-                egui::Window::new(title)
+                let mut window = egui::Window::new(title)
                     .open(&mut open)
                     .collapsible(false)
                     .resizable(resizable)
-                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                    .show(ctx, |ui| {
+                    .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO);
+                // The size a dialog asks for is the size it gets here too. An
+                // `egui::Window` given none sizes itself to its contents, and a
+                // body that lays itself out against the room it is given has no
+                // contents to be sized to: the pattern tool came out 362 px
+                // wide, which is under what its two columns need, so it dropped
+                // the picture and drew the numbers alone -- the preview
+                // rendering nothing at all, in the one configuration
+                // (`embed_dialogs`) that exists to keep the application off a
+                // second window system surface.
+                if resizable {
+                    window = window.default_size(size);
+                    if let Some(min) = min_size {
+                        window = window.min_size(min);
+                    }
+                } else {
+                    // The short forms are as tall as what is in them, which is
+                    // what an auto-sized window already does and what
+                    // `fit_height` asks the real window for. Only the width has
+                    // to be said.
+                    window = window.default_width(size.x);
+                }
+                window.show(ctx, |ui| {
+                    if resizable {
+                        // The same shape as the window of its own: the buttons
+                        // are a panel along the foot, taken out of the room
+                        // before the body is laid out. Stacked under a body
+                        // that fills whatever it is given, they are pushed out
+                        // of the window -- and the window, being sized to what
+                        // is in it, grows by their height every frame until it
+                        // is off the bottom of the screen.
+                        egui::TopBottomPanel::bottom("dialog-actions-embedded")
+                            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
+                                left: 0,
+                                right: 0,
+                                top: 8,
+                                bottom: 0,
+                            }))
+                            .exact_height(theme::metric::DIALOG_ACTIONS)
+                            .show_separator_line(true)
+                            .show_inside(ui, |ui| action_row(ui, |ui| actions(self, ui)));
+                        egui::CentralPanel::default().frame(egui::Frame::NONE).show_inside(ui, |ui| body(self, ui));
+                    } else {
+                        // A dialog whose height is its contents' has no room to
+                        // take the buttons out of: they go under the body, and
+                        // the window is as tall as the two together.
                         body(self, ui);
                         ui.separator();
                         action_row(ui, |ui| actions(self, ui));
-                    });
+                    }
+                });
                 if !open {
                     self.dismiss_modal();
                 }
