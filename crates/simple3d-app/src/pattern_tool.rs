@@ -355,16 +355,17 @@ fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                 );
             }
         }
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(4.0);
-        let room_for_more = used < pattern::MAX_STAGES;
-        let add = ui
-            .add_enabled(room_for_more, egui::Button::new("Add a stage"))
-            .on_hover_text("Repeat what the stages above it make")
-            .on_disabled_hover_text(format!("A rule holds {} stages", pattern::MAX_STAGES));
-        if add.clicked() {
-            wanted = used + 1;
+        // With the rule full there is nothing to add, so the button goes rather
+        // than sitting there greyed out -- and its rule goes with it, or the
+        // last stage would be underlined by a line with nothing under it. The
+        // count in the header already says the rule is full.
+        if used < pattern::MAX_STAGES {
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(4.0);
+            if ui.button("Add a stage").on_hover_text("Repeat what the stages above it make").clicked() {
+                wanted = used + 1;
+            }
         }
     });
     if wanted != used {
