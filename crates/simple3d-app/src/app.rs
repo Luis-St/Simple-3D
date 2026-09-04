@@ -5039,6 +5039,45 @@ mod tests {
     }
 
     #[test]
+    fn the_pattern_tools_stages_keep_one_width_however_wide_the_window_is() {
+        // Widening the window widens the picture and nothing else. The stages
+        // are labelled fields with a natural width, and stretching them with the
+        // window put a hundred pixels of nothing between every name and its
+        // number; the viewport is the half that is worth more the bigger it is.
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
+        app.reevaluate_for_test();
+
+        // Every width at which both columns fit, which is where the promise
+        // holds; below it the stages give width up rather than the picture
+        // vanishing, and that is a different rule.
+        let mut measured: Vec<(f32, egui::Rect)> = Vec::new();
+        for width in [640.0_f32, 900.0, 1200.0, 1600.0, 2400.0] {
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx);
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 640.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(&mut app, ui));
+            });
+            let grip = crate::panel_properties::grip_id("tool:1 Copies");
+            let rect = ctx.read_response(grip).expect("the first stage's copies field is drawn").rect;
+            measured.push((width, rect));
+        }
+        let (first_width, first) = measured[0];
+        for (width, rect) in &measured {
+            assert!(
+                (rect.width() - first.width()).abs() < 1.0 && (rect.right() - first.right()).abs() < 1.0,
+                "at {width} px the stage field is {:?}, against {first:?} at {first_width} px",
+                rect
+            );
+        }
+    }
+
+    #[test]
     fn the_pattern_tools_preview_turns_without_turning_the_viewport() {
         // The preview is a viewport now rather than a scatter of dots, and the
         // point of giving it a camera of its own is that turning the pattern

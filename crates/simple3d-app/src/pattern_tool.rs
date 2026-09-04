@@ -158,10 +158,15 @@ impl App {
     }
 }
 
+/// The width the stages column keeps, whatever the window is dragged to: a name
+/// column and a field beside it, which is all these rows are, and a field twice
+/// as wide holds no more of a number. Room the window gains goes to the picture
+/// instead, which is the half of the window that can use it.
+const STAGES_WIDTH: f32 = 360.0;
 /// The narrowest the stages are worth drawing at. Their rows are the property
 /// panel's own, which stack a name above its field rather than beside it once
 /// the room runs out, so the numbers stay usable well below the width two
-/// columns need.
+/// columns need. Only reached in a window too narrow for [`STAGES_WIDTH`].
 const STAGES_MIN: f32 = 240.0;
 /// The smallest the preview can be and still be a viewport rather than a stamp.
 const PREVIEW_MIN: f32 = 220.0;
@@ -169,13 +174,18 @@ const PREVIEW_MIN: f32 = 220.0;
 /// drawn at. See `paint_preview`.
 const PREVIEW_MAX_PX: f32 = 1280.0;
 
-/// The tool's contents: the rule down the left, and a viewport on what it lays
-/// out beside it.
+/// The tool's contents: the rule down the left at a fixed width, and a viewport
+/// on what it lays out taking everything else.
 ///
-/// The window is resizable, so the two are shares of the room there is rather
-/// than two fixed widths. Narrowed far enough the picture is the column that
-/// goes: the viewport behind this window is showing the same scene, and the
-/// numbers are what the window is open for.
+/// Widening the window widens the picture and nothing else. The stages are a
+/// column of labelled fields with a natural width, and stretching them with the
+/// window put a hundred pixels of nothing between every name and its number;
+/// the viewport is the part of this window that is worth more the bigger it is.
+///
+/// Narrowed past what both need, the stages give width up before the picture
+/// disappears, and narrower still the picture is the column that goes: the
+/// viewport behind this window is showing the same scene, and the numbers are
+/// what the window is open for.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
@@ -185,15 +195,12 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     // What one `ui.separator()` costs in a horizontal layout: the rule itself
     // and the gap either side of it.
     let rule = 6.0 + ui.spacing().item_spacing.x * 2.0;
+    let stages_width = STAGES_WIDTH.min(room - PREVIEW_MIN - rule);
 
-    if room >= STAGES_MIN + PREVIEW_MIN + rule {
-        // The picture takes the larger share of a wide window: it is a viewport
-        // now, and the stages are a column of fields that gain nothing from
-        // being any wider than they need.
-        let picture = (room * 0.46).clamp(PREVIEW_MIN, 760.0);
+    if stages_width >= STAGES_MIN {
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {
-                ui.set_width(room - picture - rule);
+                ui.set_width(stages_width);
                 rule_column(app, ui, id);
             });
             ui.separator();
