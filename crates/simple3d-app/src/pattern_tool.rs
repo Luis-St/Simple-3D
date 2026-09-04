@@ -291,31 +291,53 @@ fn shelf(app: &mut App, ui: &mut egui::Ui) -> bool {
 }
 
 /// The rule itself: how many stages, and each stage's numbers.
+///
+/// A stage is added by a button that says so and dropped by the cross on the
+/// stage itself, rather than by a `+` and a `−` beside the count. A pair of
+/// signs is the control for a *number*, and the number here is not the thing
+/// being edited: what the buttons did was add and remove whole sections of the
+/// form below them, and only the count they sat beside said so.
 fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let params = app.pattern_tool_params();
     let used = pattern::stage_count(&params);
     ui.horizontal(|ui| {
         ui.add(egui::Label::new(theme::header_text("Stages")).selectable(false));
         ui.add(egui::Label::new(theme::value(format!("{used} of {}", pattern::MAX_STAGES))).selectable(false));
-        if ui.small_button("+").on_hover_text("Repeat what the stages so far make").clicked() {
-            app.set_stage_count(used + 1);
-        }
-        if ui.small_button("\u{2212}").on_hover_text("Drop the last stage").clicked() {
-            app.set_stage_count(used.saturating_sub(1));
-        }
     });
     ui.add(egui::Label::new(theme::hint("Each stage repeats what the ones above it made.")).selectable(false));
-    ui.add_space(4.0);
 
     let unit = app.unit();
     let room = ui.available_height();
+    let mut wanted = used;
     egui::ScrollArea::vertical().max_height(room).id_salt("pattern-stages").show(ui, |ui| {
         for index in 0..used {
             let stage = pattern::stage(&params, index);
-            ui.add_space(6.0);
+            // A rule is read as a stack of stages, so each one is ruled off from
+            // the one above it: six pixels of air made the whole column one run
+            // of rows, and which numbers belonged to which stage had to be
+            // worked out from the names.
+            ui.add_space(10.0);
+            ui.separator();
+            ui.add_space(2.0);
             ui.horizontal(|ui| {
                 ui.add(egui::Label::new(theme::header_text(pattern::STAGES[index].label)).selectable(false));
                 ui.add(egui::Label::new(theme::hint(describe(&stage, unit))).selectable(false));
+                // Only the last stage can go: a stage repeats what the ones
+                // above it made, so there is no such thing as removing one from
+                // the middle -- the stages below it would be repeating something
+                // else. The cross is on the one that can, rather than on all of
+                // them refusing.
+                if index + 1 == used && used > 1 {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .small_button("\u{00d7}")
+                            .on_hover_text("Drop this stage. Only the last one can go: the others are what it repeats.")
+                            .clicked()
+                        {
+                            wanted = used - 1;
+                        }
+                    });
+                }
             });
             for key in pattern::stage_keys(index) {
                 let Some(spec) = pattern::PARAMS.iter().find(|p| p.key == key) else { continue };
@@ -333,7 +355,21 @@ fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                 );
             }
         }
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(4.0);
+        let room_for_more = used < pattern::MAX_STAGES;
+        let add = ui
+            .add_enabled(room_for_more, egui::Button::new("Add a stage"))
+            .on_hover_text("Repeat what the stages above it make")
+            .on_disabled_hover_text(format!("A rule holds {} stages", pattern::MAX_STAGES));
+        if add.clicked() {
+            wanted = used + 1;
+        }
     });
+    if wanted != used {
+        app.set_stage_count(wanted);
+    }
 }
 
 /// A line of English saying what one stage does, so the numbers above it can be
