@@ -214,6 +214,14 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         .width_range(STAGES_MIN..=widest)
         .show_inside(ui, |ui| {
             width = ui.available_width();
+            // Claim the column's full width up front. egui remembers a panel by
+            // the rectangle its *content* filled, and a property row pins its
+            // right edge `EDGE_PAD` inside that -- so the column came back eight
+            // pixels narrower every frame, and being remembered, kept coming
+            // back narrower until it hit its own minimum. The docks have to do
+            // exactly this, for exactly this reason.
+            ui.expand_to_include_rect(ui.max_rect());
+            ui.set_min_width(width);
             rule_column(app, ui, id);
         });
     app.settings.pattern_stages_width = width.clamp(STAGES_MIN, STAGES_MAX);

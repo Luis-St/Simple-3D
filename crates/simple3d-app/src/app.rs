@@ -5077,6 +5077,37 @@ mod tests {
         }
     }
 
+    /// Reported: "the divider auto shrinks over time".
+    ///
+    /// It did, by eight pixels a frame, until it hit its own minimum. egui
+    /// remembers a panel by the rectangle its *content* filled rather than by
+    /// the panel's own, and a property row pins its right edge `EDGE_PAD` inside
+    /// the room it is given -- so every frame handed the column back eight
+    /// pixels narrower and it kept the smaller number.
+    ///
+    /// Nothing but running frames finds this: one frame is correct, and so is
+    /// every part of it. Forty frames is what it takes.
+    #[test]
+    fn the_pattern_tools_divider_stays_where_it_is_put() {
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        app.reevaluate_for_test();
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let mut seen = Vec::new();
+        for _ in 0..40 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 640.0))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(&mut app, ui));
+            });
+            seen.push(app.settings.pattern_stages_width);
+        }
+        assert_eq!(seen.first(), seen.last(), "the divider drifted: {seen:?}");
+    }
+
     #[test]
     fn the_pattern_tools_preview_turns_without_turning_the_viewport() {
         // The preview is a viewport now rather than a scatter of dots, and the
