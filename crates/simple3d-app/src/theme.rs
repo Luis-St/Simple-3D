@@ -236,10 +236,10 @@ pub fn axis_chip(ui: &mut egui::Ui, id: egui::Id, axis: usize) -> egui::Response
 /// on the panel, the same size and colour as the row labels around it, and the
 /// only thing that says it can be clicked at all is a background that appears
 /// once the pointer is already on it. A control that has to be found by sweeping
-/// the panel with the mouse is not a control. So the frame is drawn in both
-/// states instead -- a chip, outlined in the divider grey while it is off and in
-/// the accent, filled, while it is on -- and the only question a row of them
-/// leaves is which ones are pressed.
+/// the panel with the mouse is not a control. So an off one is drawn as a chip
+/// too -- the input-field fill, outlined in the divider grey -- and the only
+/// question a row of them leaves is which ones are on. What an *on* one looks
+/// like was never the problem, and is left as egui draws it: the accent tint.
 ///
 /// Takes and returns the flag the way `egui::Ui::toggle_value` does, so the
 /// response is `changed()` on the click that flipped it.
@@ -266,12 +266,19 @@ pub fn choice(ui: &mut egui::Ui, chosen: bool, text: &str) -> egui::Response {
 /// The chip both are drawn as. `frame_when_inactive` is the whole point: egui
 /// turns it off for a selectable button, which is what leaves an unselected one
 /// looking like a label.
+///
+/// On, this is exactly egui's own selected button -- the accent tint it has
+/// always been, untouched. Only the off state is drawn differently, because only
+/// the off state was invisible.
 fn chip(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
-    // On, the accent outlines its own tinted fill. Off, the divider grey draws
-    // the same outline the input fields carry, so the chip belongs to the row of
-    // controls rather than to the prose.
-    let outline = if on { token::ACCENT } else { token::SURFACE_3 };
-    ui.add(egui::Button::selectable(on, text).frame_when_inactive(true).stroke(Stroke::new(1.0_f32, outline)))
+    let mut button = egui::Button::selectable(on, text).frame_when_inactive(true);
+    if !on {
+        // The divider grey, the same line the panel draws between its sections:
+        // enough to say "control" against the input-field fill behind it without
+        // competing with the chip beside it that is actually on.
+        button = button.stroke(Stroke::new(1.0_f32, token::SURFACE_3));
+    }
+    ui.add(button)
 }
 
 /// Install the palette and the metrics on a context. Called once, at startup.
@@ -453,16 +460,25 @@ mod tests {
         );
     }
 
-    /// And a chip that is on says so in the accent, filled and outlined, rather
-    /// than in the same grey as the one beside it.
+    /// And a chip that is on is left alone: the accent tint egui gives a selected
+    /// button, which is what this panel has always marked a toggled control with.
+    /// Framing the off state was not licence to restyle the on one.
     #[test]
-    fn a_chosen_option_is_drawn_in_the_accent() {
-        let on = rects(|ui| {
+    fn a_chosen_option_keeps_the_accent_it_always_had() {
+        let ours = rects(|ui| {
             choice(ui, true, "Along the grid");
         });
-        assert!(
-            on.iter().any(|r| r.stroke.color == token::ACCENT && r.fill != token::SURFACE_2),
-            "a chosen chip is not outlined in the accent: {on:#?}"
+        let egui_own = rects(|ui| {
+            let _ = ui.selectable_label(true, "Along the grid");
+        });
+        // The panel's own background is the one rectangle both draw regardless.
+        let chip_of = |shapes: &[egui::epaint::RectShape]| {
+            shapes.iter().find(|r| r.fill != token::SURFACE_1).map(|r| (r.fill, r.stroke)).expect("no chip was painted")
+        };
+        assert_eq!(
+            chip_of(&ours),
+            chip_of(&egui_own),
+            "a chosen chip no longer looks the way egui draws a selected button"
         );
     }
 
