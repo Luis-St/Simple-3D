@@ -80,6 +80,41 @@ const SEGMENTS: ParamKind = ParamKind::Count { min: 3, max: 512 };
 /// span. A length with no floor, because half of space is behind the origin.
 const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
 
+/// How wide one of the three fields on a point row is: a third of whatever the
+/// row has, out of the room the row actually has.
+///
+/// They shrink with the panel and wrap onto a second line rather than shrinking
+/// past being readable (issue 51) -- that is the floor. The ceiling is what the
+/// numbers need: a place in space is signed and rarely round, so `-1234.5678`
+/// is an ordinary value here, where a dimension is usually a number somebody
+/// typed. Held at the old 56 points these were the only fields in the panel
+/// whose text ran edge to edge, with a column of empty row beside them.
+fn point_field_width(ui: &egui::Ui) -> f32 {
+    (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 88.0)
+}
+
+/// A view centre at the precision worth showing it in.
+///
+/// Every other number in the panel is a measurement, and a measurement is shown
+/// to the last place that round-trips -- four decimals in millimetres. The
+/// camera's target is not a measurement: it is wherever a drag happened to stop,
+/// so it carries all four of those places nearly all of the time, and
+/// `-8.2888` in a field sized for `40` is the number that would not fit.
+///
+/// So the precision follows the magnitude, the way a readout's does: hundredths
+/// of a millimetre while the view is anywhere near the model, whole millimetres
+/// once it is a metre or more out -- where the camera can go five kilometres,
+/// and `-6248194.99` is eleven characters of which the last three say nothing.
+/// This is what the field displays and what a scrub counts from; the camera
+/// itself keeps whatever a drag left it at.
+fn shown_view_centre(mm: f64) -> f64 {
+    if mm.abs() >= 1000.0 {
+        mm.round()
+    } else {
+        (mm * 100.0).round() / 100.0
+    }
+}
+
 /// How a section renders the parameter rows it shares with every other
 /// section: what its edits are called in the undo history, and what tells its
 /// gestures apart from the same rows drawn somewhere else.
@@ -564,10 +599,7 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
         "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
              Shift+right-click in the viewport puts it under the pointer.",
         |ui| {
-            // Three numbers out of whatever the row has: they shrink with the
-            // panel, and wrap onto a second line rather than shrinking past
-            // being readable (issue 51).
-            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            let each = point_field_width(ui);
             for axis in 0..3 {
                 let field_id = ui.id().with(("cursor", axis));
                 // Named the way `axis_row` names its three, so one field cannot
@@ -621,16 +653,16 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
         "What the camera looks at: the point a pan carries about and an orbit turns around. \
              A new shape lands here when \u{201C}Add at\u{201D} is the view centre.",
         |ui| {
-            // Three numbers out of whatever the row has, laid out like the 3D
-            // cursor's above -- they are the same kind of thing and read as a
-            // pair.
-            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            // Laid out like the 3D cursor's row above: they are the same kind of
+            // thing and read as a pair.
+            let each = point_field_width(ui);
             for axis in 0..3 {
                 let field_id = ui.id().with(("view-centre", axis));
                 let grip = format!("View centre:{axis}");
                 ui.scope(|ui| {
                     ui.set_width(each);
-                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                    let current = shown_view_centre(component(at, axis));
+                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current, step };
                     // No undo step: where the camera looks is not part of the
                     // scene the history holds, and neither pan nor orbit nor the
                     // wheel records one either. Typing a view centre is the same
@@ -682,7 +714,7 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
             None => "Click in the viewport to place it, or type it here.".to_string(),
         };
         field_row(ui, &named(label, unit.suffix()), &hover, |ui| {
-            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            let each = point_field_width(ui);
             for axis in 0..3 {
                 let field_id = ui.id().with(("measure", index, axis));
                 let grip = format!("{label}:{axis}");
@@ -1755,6 +1787,37 @@ mod tests {
 
     fn width_spec() -> &'static primitive::ParamSpec {
         primitive::lookup("plate").unwrap().params.iter().find(|p| p.key == "width").unwrap()
+    }
+
+    /// A view centre is shown at a precision that follows its magnitude, not at
+    /// the four decimals a measurement gets.
+    ///
+    /// The camera's target is wherever a drag happened to stop, so it carries
+    /// all four of those places nearly all of the time -- and `-8.2888` in a
+    /// field sized for `40` is the number that would not fit. Zoomed right out
+    /// it was worse: `-6248194.99`, eleven characters running edge to edge.
+    #[test]
+    fn a_view_centre_is_shown_at_the_precision_worth_showing() {
+        let shown = |mm: f64| format_length(shown_view_centre(mm), Unit::Millimetre);
+        assert_eq!(shown(-8.288812), "-8.29");
+        assert_eq!(shown(39.236851), "39.24");
+        // A rounding, not a truncation.
+        assert_eq!(shown_view_centre(0.005), 0.01);
+        assert_eq!(shown_view_centre(-0.005), -0.01);
+        // It never lengthens a number that was already short.
+        assert_eq!(shown(40.0), "40");
+        assert_eq!(shown(0.0), "0");
+        // And a metre out, hundredths of a millimetre are noise: they go, and
+        // what is left fits the field at the far end of the camera's range.
+        assert_eq!(shown(-6248194.99), "-6248195");
+        assert_eq!(shown(-12345.678912), "-12346");
+        assert_eq!(shown(999.994), "999.99", "the change of precision is at a metre, not before it");
+        // Nine characters at the very worst, sign and all -- the field is sized
+        // for that, where the four-decimal form ran to twelve.
+        for mm in [-6248194.994, -5.0e6, 5.0e6, 1234.5678, -0.0051] {
+            let text = shown(mm);
+            assert!(text.len() <= 9, "{mm} shows as {text}, which is {} characters", text.len());
+        }
     }
 
     #[test]
