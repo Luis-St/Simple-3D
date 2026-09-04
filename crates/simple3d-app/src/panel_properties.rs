@@ -473,6 +473,9 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         // puts it roughly where it is wanted; this is where it is given the
         // exact place (issue 42).
         cursor_rows(app, ui);
+        // And the other place in space the document works from: what the camera
+        // is looking at.
+        view_centre_rows(app, ui);
         field_row(ui, "Axes", "", |ui| {
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
                 let mut on = app.scene.settings.axes_visible[axis];
@@ -592,6 +595,66 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
         {
             app.cursor = None;
             app.status = Status::Info("3D cursor back at the origin".into());
+        }
+    });
+}
+
+/// What the camera is looking at, as three numbers, and a way back to the
+/// origin.
+///
+/// The viewport is the usual way to move it -- a middle drag carries it across
+/// the ground and the wheel walks it towards the pointer -- but no gesture says
+/// *exactly* here, and once the view has wandered off the model none of them
+/// says "back to the middle of everything" either. It is a number the document
+/// already works from: `Add at` places a new shape at the view centre, and this
+/// is the row that says where that is.
+///
+/// Read as well as written: it follows a pan or a zoom live, so it is also the
+/// answer to "where am I looking?".
+fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
+    let unit = app.unit();
+    let at = app.scene.camera.target;
+    let step = unit.from_mm(app.move_snap()).max(1e-6);
+    field_row(
+        ui,
+        &named("View centre", unit.suffix()),
+        "What the camera looks at: the point a pan carries about and an orbit turns around. \
+             A new shape lands here when \u{201C}Add at\u{201D} is the view centre.",
+        |ui| {
+            // Three numbers out of whatever the row has, laid out like the 3D
+            // cursor's above -- they are the same kind of thing and read as a
+            // pair.
+            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            for axis in 0..3 {
+                let field_id = ui.id().with(("view-centre", axis));
+                let grip = format!("View centre:{axis}");
+                ui.scope(|ui| {
+                    ui.set_width(each);
+                    let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                    // No undo step: where the camera looks is not part of the
+                    // scene the history holds, and neither pan nor orbit nor the
+                    // wheel records one either. Typing a view centre is the same
+                    // gesture by another route, so it cannot be the one thing
+                    // about the camera that Ctrl+Z takes back.
+                    scalar_field(app, ui, field, |app, mm, _| {
+                        set_component(&mut app.scene.camera.target, axis, mm);
+                    });
+                });
+            }
+        },
+    );
+    field_row(ui, "", "", |ui| {
+        // Deliberately not the cursor's "Back to the origin" wording, three rows
+        // above: two buttons with one label in the same section, each belonging
+        // to a different row, is a coin toss rather than a choice.
+        let away = app.scene.camera.target != Vec3::ZERO;
+        if ui
+            .add_enabled(away, egui::Button::new("Look at the origin"))
+            .on_hover_text("The camera looks at 0, 0, 0 again, from the angle and distance it is at now")
+            .clicked()
+        {
+            app.scene.camera.target = Vec3::ZERO;
+            app.status = Status::Info("View centre back at the origin".into());
         }
     });
 }

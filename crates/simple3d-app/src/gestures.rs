@@ -640,6 +640,64 @@ fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_origin() {
     assert!(harness.state().cursor.is_none(), "a click on nothing did not put the cursor back at the origin");
 }
 
+// -- the view centre ----------------------------------------------------------
+
+/// The Document section says what the camera is looking at, and takes a new
+/// answer.
+///
+/// Pan and the wheel move that point but no gesture states it, and once the view
+/// has wandered there was nothing that said "back to the origin" -- Frame is the
+/// nearest, and it re-frames the model rather than re-centring the view. The
+/// three fields read the camera live and write it, and the button re-centres it
+/// without touching the angle or the distance it looks from.
+///
+/// The Document section is drawn only with nothing selected, so the test clears
+/// the selection first, the way reaching those rows in the running application
+/// does.
+#[test]
+fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = harness("view-centre");
+    let rect = harness.state().viewport_rect;
+
+    // Carry the view off the origin with the middle drag a user would use.
+    let from = rect.center() + egui::vec2(-120.0, 40.0);
+    drag_button(&mut harness, egui::PointerButton::Middle, from, from + egui::vec2(140.0, 90.0), 6);
+    let moved = harness.state().scene.camera.target;
+    assert_ne!(moved, Vec3::ZERO, "the middle drag did not move the view centre");
+
+    harness.state_mut().selection.clear();
+    harness.step();
+
+    // The field holds what the drag left, and takes a number over it.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("View centre:0"));
+    press(&mut harness, field.center());
+    release(&mut harness, field.center());
+    // The frame after the click is the one that opens the text field.
+    harness.step();
+    text(&mut harness, "25");
+    key(&mut harness, egui::Key::Enter);
+    harness.step();
+
+    let typed = harness.state().scene.camera.target;
+    assert!((typed.x - 25.0).abs() < 1e-9, "typing 25 into the X field left the camera looking at {typed:?}");
+    assert_eq!((typed.y, typed.z), (moved.y, moved.z), "typing the X moved the other two axes with it");
+
+    // And the button puts it back on the origin, from the same angle and the
+    // same distance -- re-centring a view is not re-framing it.
+    let before = harness.state().scene.camera;
+    harness.get_by_label("Look at the origin").click();
+    harness.step();
+    let after = harness.state().scene.camera;
+    assert_eq!(after.target, Vec3::ZERO, "the button left the view centre at {:?}", after.target);
+    assert_eq!(
+        (after.yaw, after.pitch, after.distance),
+        (before.yaw, before.pitch, before.distance),
+        "re-centring the view turned or zoomed the camera as well"
+    );
+}
+
 /// Clicking a value field puts the whole number under the caret, so what is typed
 /// next replaces it.
 ///
