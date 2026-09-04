@@ -121,7 +121,7 @@ portable.
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **582 tests**, none failing, and every
+`cargo test --workspace` runs **583 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 

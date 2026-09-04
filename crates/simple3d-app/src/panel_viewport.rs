@@ -292,15 +292,28 @@ fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response) {
     // A manipulator drag owns the pointer while it is running.
     let gesture = if app.drag.is_some() { None } else { nav_gesture(&nav, held, ctrl, shift, alt) };
 
+    // A locked view centre pins the point the camera turns about (`AppSettings::
+    // lock_view_centre`). Orbit and zoom still work -- they are what the pin is
+    // for -- but the two gestures that carry the point itself leave it alone: a
+    // pan, and the zoom's walk towards the pointer, which falls back to zooming
+    // about the frame centre.
+    let locked = app.settings.lock_view_centre;
     if let Some(gesture) = gesture {
-        let view = app.current_view();
-        apply_gesture(&mut app.scene.camera, gesture, response.drag_delta(), &view);
+        if locked && gesture == Gesture::Pan {
+            // Said out loud, or a drag that does nothing reads as a drag that
+            // does not work.
+            app.status = Status::Info("The view centre is locked, so the pan moved nothing".into());
+        } else {
+            let view = app.current_view();
+            apply_gesture(&mut app.scene.camera, gesture, response.drag_delta(), &view);
+        }
     }
 
     if response.hovered() {
         let (scroll, at) = ui.input(|i| (i.smooth_scroll_delta.y, i.pointer.hover_pos()));
         let rect = app.viewport_rect;
-        apply_zoom(&mut app.scene.camera, &nav, scroll, at.map(|at| (rect, at)));
+        let anchor = if locked { None } else { at.map(|at| (rect, at)) };
+        apply_zoom(&mut app.scene.camera, &nav, scroll, anchor);
     }
 }
 

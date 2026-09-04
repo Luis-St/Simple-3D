@@ -835,14 +835,30 @@ impl App {
         }
     }
 
+    /// Frame `lo`..`hi`, honouring the view-centre lock: a pinned centre keeps
+    /// its place and only the zoom changes.
+    ///
+    /// Framing is the one command whose whole job is to move the view centre, so
+    /// a lock could as easily have disabled it. It fits the zoom instead, and
+    /// says which half it did: a Frame button that does nothing at all reads as
+    /// a broken button, and half of framing is still worth having.
+    fn frame_onto(&mut self, lo: Vec3, hi: Vec3) {
+        let aspect = self.aspect();
+        let pinned = self.settings.lock_view_centre.then_some(self.scene.camera.target);
+        frame_bounds(&mut self.scene.camera, lo, hi, aspect);
+        if let Some(target) = pinned {
+            self.scene.camera.target = target;
+            self.status = Status::Info("The view centre is locked, so framing changed the zoom only".into());
+        }
+    }
+
     pub fn frame_all(&mut self) {
         match self.evaluated.mesh.bounds().or_else(|| self.selection_bounds()) {
-            Some((lo, hi)) => {
-                let aspect = self.aspect();
-                frame_bounds(&mut self.scene.camera, lo, hi, aspect);
-            }
+            Some((lo, hi)) => self.frame_onto(lo, hi),
             None => {
-                self.scene.camera.target = Vec3::ZERO;
+                if !self.settings.lock_view_centre {
+                    self.scene.camera.target = Vec3::ZERO;
+                }
                 self.scene.camera.distance = 160.0;
             }
         }
@@ -850,10 +866,7 @@ impl App {
 
     pub fn frame_selection(&mut self) {
         match self.selection_bounds() {
-            Some((lo, hi)) => {
-                let aspect = self.aspect();
-                frame_bounds(&mut self.scene.camera, lo, hi, aspect);
-            }
+            Some((lo, hi)) => self.frame_onto(lo, hi),
             None => self.frame_all(),
         }
     }

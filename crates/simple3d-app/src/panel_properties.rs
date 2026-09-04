@@ -85,15 +85,17 @@ const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
 ///
 /// They shrink with the panel and wrap onto a second line rather than shrinking
 /// past being readable (issue 51) -- that is the floor. The ceiling is what the
-/// numbers need: a place in space is signed and rarely round, so `-1234.5678`
-/// is an ordinary value here, where a dimension is usually a number somebody
-/// typed. Held at the old 56 points these were the only fields in the panel
-/// whose text ran edge to edge, with a column of empty row beside them.
+/// numbers need: a place in space is signed and rarely round, where a dimension
+/// is usually a number somebody typed. The widest of them is a view centre at
+/// the far end of the camera's range, `-6248130.96`, and the ceiling is what
+/// leaves that one padding rather than running it edge to edge. Held at the old
+/// 56 points these were the only fields in the panel whose text touched both
+/// sides of the box, with a column of empty row beside them.
 fn point_field_width(ui: &egui::Ui) -> f32 {
-    (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 88.0)
+    (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 104.0)
 }
 
-/// A view centre at the precision worth showing it in.
+/// A view centre to a hundredth of a millimetre, at whatever magnitude.
 ///
 /// Every other number in the panel is a measurement, and a measurement is shown
 /// to the last place that round-trips -- four decimals in millimetres. The
@@ -101,18 +103,13 @@ fn point_field_width(ui: &egui::Ui) -> f32 {
 /// so it carries all four of those places nearly all of the time, and
 /// `-8.2888` in a field sized for `40` is the number that would not fit.
 ///
-/// So the precision follows the magnitude, the way a readout's does: hundredths
-/// of a millimetre while the view is anywhere near the model, whole millimetres
-/// once it is a metre or more out -- where the camera can go five kilometres,
-/// and `-6248194.99` is eleven characters of which the last three say nothing.
-/// This is what the field displays and what a scrub counts from; the camera
-/// itself keeps whatever a drag left it at.
+/// Two decimals everywhere rather than fewer as the number grows: a readout the
+/// eye can compare from one frame to the next is one whose shape does not change
+/// under it, and the far end of the camera's range is somewhere a view visits,
+/// not somewhere it works. This is what the field displays and what a scrub
+/// counts from; the camera itself keeps whatever a drag left it at.
 fn shown_view_centre(mm: f64) -> f64 {
-    if mm.abs() >= 1000.0 {
-        mm.round()
-    } else {
-        (mm * 100.0).round() / 100.0
-    }
+    (mm * 100.0).round() / 100.0
 }
 
 /// How a section renders the parameter rows it shares with every other
@@ -656,11 +653,18 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
             // Laid out like the 3D cursor's row above: they are the same kind of
             // thing and read as a pair.
             let each = point_field_width(ui);
+            // Locked, they are a readout: still shown, still following the
+            // camera, but greyed and inert. A field that takes a number and
+            // then puts it back is worse than one that says it will not.
+            let locked = app.settings.lock_view_centre;
             for axis in 0..3 {
                 let field_id = ui.id().with(("view-centre", axis));
                 let grip = format!("View centre:{axis}");
                 ui.scope(|ui| {
                     ui.set_width(each);
+                    if locked {
+                        ui.disable();
+                    }
                     let current = shown_view_centre(component(at, axis));
                     let field = Scalar { grip: &grip, id: field_id, kind: POINT, current, step };
                     // No undo step: where the camera looks is not part of the
@@ -676,12 +680,27 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
         },
     );
     field_row(ui, "", "", |ui| {
+        // Two things, so two buttons: one pins the point the camera turns about,
+        // the other moves it. They were one button, and a button that both
+        // locked and moved a value would be neither.
+        let mut locked = app.settings.lock_view_centre;
+        if ui
+            .toggle_value(&mut locked, "Lock")
+            .on_hover_text(
+                "Pin what the camera looks at. Orbit and zoom still work; a pan, a zoom about the pointer \
+                 and these fields leave the view centre where it is.",
+            )
+            .changed()
+        {
+            app.settings.lock_view_centre = locked;
+            app.status = Status::Info(if locked { "View centre locked" } else { "View centre unlocked" }.to_string());
+        }
         // Deliberately not the cursor's "Back to the origin" wording, three rows
         // above: two buttons with one label in the same section, each belonging
         // to a different row, is a coin toss rather than a choice.
         let away = app.scene.camera.target != Vec3::ZERO;
         if ui
-            .add_enabled(away, egui::Button::new("Look at the origin"))
+            .add_enabled(away && !locked, egui::Button::new("Reset to origin"))
             .on_hover_text("The camera looks at 0, 0, 0 again, from the angle and distance it is at now")
             .clicked()
         {
@@ -1789,15 +1808,15 @@ mod tests {
         primitive::lookup("plate").unwrap().params.iter().find(|p| p.key == "width").unwrap()
     }
 
-    /// A view centre is shown at a precision that follows its magnitude, not at
-    /// the four decimals a measurement gets.
+    /// A view centre is shown to a hundredth of a millimetre, not to the four
+    /// decimals a measurement gets.
     ///
     /// The camera's target is wherever a drag happened to stop, so it carries
     /// all four of those places nearly all of the time -- and `-8.2888` in a
-    /// field sized for `40` is the number that would not fit. Zoomed right out
-    /// it was worse: `-6248194.99`, eleven characters running edge to edge.
+    /// field sized for `40` is the number that would not fit. Two decimals at
+    /// every magnitude, so the readout keeps its shape as the view travels.
     #[test]
-    fn a_view_centre_is_shown_at_the_precision_worth_showing() {
+    fn a_view_centre_is_shown_to_a_hundredth_of_a_millimetre() {
         let shown = |mm: f64| format_length(shown_view_centre(mm), Unit::Millimetre);
         assert_eq!(shown(-8.288812), "-8.29");
         assert_eq!(shown(39.236851), "39.24");
@@ -1807,16 +1826,15 @@ mod tests {
         // It never lengthens a number that was already short.
         assert_eq!(shown(40.0), "40");
         assert_eq!(shown(0.0), "0");
-        // And a metre out, hundredths of a millimetre are noise: they go, and
-        // what is left fits the field at the far end of the camera's range.
-        assert_eq!(shown(-6248194.99), "-6248195");
-        assert_eq!(shown(-12345.678912), "-12346");
-        assert_eq!(shown(999.994), "999.99", "the change of precision is at a metre, not before it");
-        // Nine characters at the very worst, sign and all -- the field is sized
-        // for that, where the four-decimal form ran to twelve.
-        for mm in [-6248194.994, -5.0e6, 5.0e6, 1234.5678, -0.0051] {
+        // And the two decimals stay on however far out the camera is taken.
+        assert_eq!(shown(-12345.678912), "-12345.68");
+        assert_eq!(shown(-6248194.994), "-6248194.99");
+        // Never more than two, which is the whole point: four made every value
+        // a pan left behind too long for the field.
+        for mm in [-8.288812, 39.236851, -6248194.994, 1234.5678, -0.0051] {
             let text = shown(mm);
-            assert!(text.len() <= 9, "{mm} shows as {text}, which is {} characters", text.len());
+            let decimals = text.split_once('.').map_or(0, |(_, rest)| rest.len());
+            assert!(decimals <= 2, "{mm} shows as {text}, which has {decimals} decimals");
         }
     }
 

@@ -383,6 +383,13 @@ pub struct AppSettings {
     /// the settings file, so an older one reads as "while a key is held".
     #[serde(default)]
     pub geometry_snap: SnapMode,
+    /// Pin what the camera looks at. Pan and the wheel's zoom-about-the-pointer
+    /// both move that point, and a view that is being orbited about one place
+    /// should not drift off it; locked, the fields that show it are read-only
+    /// and the gestures that would move it leave it alone. Newer than the
+    /// settings file, so an older one reads as unlocked.
+    #[serde(default)]
+    pub lock_view_centre: bool,
     /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
     /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
@@ -421,6 +428,7 @@ impl Default for AppSettings {
             handle_frame: HandleFrame::Object,
             placement: Placement::Origin,
             geometry_snap: SnapMode::default(),
+            lock_view_centre: false,
             rotate_snap_deg: 15.0,
             recent_colours: Vec::new(),
             last_export_dir: None,

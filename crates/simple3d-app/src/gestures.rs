@@ -687,7 +687,7 @@ fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     // And the button puts it back on the origin, from the same angle and the
     // same distance -- re-centring a view is not re-framing it.
     let before = harness.state().scene.camera;
-    harness.get_by_label("Look at the origin").click();
+    harness.get_by_label("Reset to origin").click();
     harness.step();
     let after = harness.state().scene.camera;
     assert_eq!(after.target, Vec3::ZERO, "the button left the view centre at {:?}", after.target);
@@ -696,6 +696,73 @@ fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
         (before.yaw, before.pitch, before.distance),
         "re-centring the view turned or zoomed the camera as well"
     );
+}
+
+/// Locked, the view centre is the point the camera turns about and nothing
+/// moves it.
+///
+/// It is one setting read in three places -- the panel's fields, the viewport's
+/// pan and wheel, and framing -- so the test drives all three. Orbit and the
+/// zoom itself must go on working: pinning the point is what they are pinned
+/// *for*, and a lock that stopped the camera moving at all would be a lock on
+/// the view, not on its centre.
+#[test]
+fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = harness("view-centre-lock");
+    let rect = harness.state().viewport_rect;
+    harness.state_mut().selection.clear();
+    // Off the origin to begin with, so a lock that quietly re-centred would show.
+    harness.state_mut().scene.camera.target = Vec3::new(12.0, -8.0, 3.0);
+    harness.step();
+
+    harness.get_by_label("Lock").click();
+    harness.step();
+    assert!(harness.state().settings.lock_view_centre, "the Lock button locked nothing");
+
+    let pinned = harness.state().scene.camera.target;
+    let before = harness.state().scene.camera;
+    let from = rect.center() + egui::vec2(-120.0, 40.0);
+
+    drag_button(&mut harness, egui::PointerButton::Middle, from, from + egui::vec2(140.0, 90.0), 6);
+    assert_eq!(harness.state().scene.camera.target, pinned, "a pan moved a locked view centre");
+
+    // The wheel still zooms; what it no longer does is walk the centre towards
+    // the pointer on the way.
+    wheel(&mut harness, from, egui::vec2(0.0, 60.0));
+    let zoomed = harness.state().scene.camera;
+    assert_eq!(zoomed.target, pinned, "the wheel walked a locked view centre towards the pointer");
+    assert!(zoomed.distance < before.distance, "locking the view centre stopped the wheel zooming");
+
+    drag_button(&mut harness, egui::PointerButton::Secondary, from, from + egui::vec2(80.0, 0.0), 6);
+    assert_ne!(harness.state().scene.camera.yaw, before.yaw, "locking the view centre stopped the orbit");
+    assert_eq!(harness.state().scene.camera.target, pinned, "the orbit moved the locked view centre");
+
+    // Framing is the one command whose job is to move the centre. It fits the
+    // zoom and leaves the centre where it is.
+    let distance = harness.state().scene.camera.distance;
+    harness.state_mut().frame_all();
+    harness.step();
+    assert_eq!(harness.state().scene.camera.target, pinned, "framing moved a locked view centre");
+    assert_ne!(harness.state().scene.camera.distance, distance, "framing did not fit the zoom either");
+
+    // And the fields are a readout: they take no number while it is locked.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("View centre:0"));
+    press(&mut harness, field.center());
+    release(&mut harness, field.center());
+    harness.step();
+    text(&mut harness, "500");
+    key(&mut harness, egui::Key::Enter);
+    harness.step();
+    assert_eq!(harness.state().scene.camera.target, pinned, "a locked field still took a number");
+
+    // Unlocked, the pan is given back.
+    harness.get_by_label("Lock").click();
+    harness.step();
+    assert!(!harness.state().settings.lock_view_centre, "the Lock button did not unlock");
+    drag_button(&mut harness, egui::PointerButton::Middle, from, from + egui::vec2(140.0, 90.0), 6);
+    assert_ne!(harness.state().scene.camera.target, pinned, "unlocking did not give the pan back");
 }
 
 /// Clicking a value field puts the whole number under the caret, so what is typed
