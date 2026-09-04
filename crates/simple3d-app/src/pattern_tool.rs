@@ -67,12 +67,53 @@ impl App {
         self.modal = Modal::PatternKind;
     }
 
-    /// What the preview is looking at: the pattern, or the whole scene while the
-    /// pattern has no geometry of its own yet.
+    /// What the preview is looking at: the pattern, what the rule lays out while
+    /// there is nothing in the pattern to lay out, or the whole scene.
+    ///
+    /// The middle one is the case a pattern is *built* in. A pattern with
+    /// nothing in it has no bounds of its own, and framing on the scene instead
+    /// pointed the picture at everything except the thing the window is open
+    /// for -- and, with an empty scene behind it, at nothing at all, which is
+    /// where the Frame button had nothing to do.
     pub(crate) fn pattern_preview_target(&self) -> Option<(Vec3, Vec3)> {
         self.pattern_tool
             .and_then(|id| self.evaluated.node_world_bounds.get(&id).copied())
+            .or_else(|| self.pattern_placement_bounds())
             .or_else(|| self.evaluated.mesh.bounds())
+    }
+
+    /// Where the rule would put a copy, in world space. These are the
+    /// placements a pattern still has when there is no shape in it to place.
+    pub(crate) fn pattern_placements(&self) -> Vec<Vec3> {
+        let Some(id) = self.pattern_tool_target() else { return Vec::new() };
+        let Some(params) = self.scene.node(id).params() else { return Vec::new() };
+        // The instances are laid out in the pattern's own frame; the gizmo's is
+        // what carries that frame out into the world, the same way the lay-out
+        // grips in the viewport are placed.
+        let Some(gizmo) = self.gizmo_for(id) else { return Vec::new() };
+        pattern::instances(params).into_iter().map(|copy| gizmo.own.point(copy.xform.t)).collect()
+    }
+
+    /// The room the placements take, with air around them -- a rule that lays
+    /// out one copy is a single point, and a picture framed on a point is a
+    /// grid line filling the window.
+    fn pattern_placement_bounds(&self) -> Option<(Vec3, Vec3)> {
+        let places = self.pattern_placements();
+        let (first, rest) = places.split_first()?;
+        let (mut lo, mut hi) = (*first, *first);
+        for at in rest {
+            lo = lo.min(*at);
+            hi = hi.max(*at);
+        }
+        let pad = self.scene.settings.grid_spacing.max(1.0);
+        let pad = Vec3::new(pad, pad, pad);
+        Some((lo - pad, hi + pad))
+    }
+
+    /// A pattern with the rule but not yet the shape it repeats. Its preview
+    /// has no geometry to render, so it is drawn as its placements instead.
+    pub(crate) fn pattern_tool_is_empty(&self) -> bool {
+        self.pattern_tool_target().is_some_and(|id| !self.evaluated.node_world_bounds.contains_key(&id))
     }
 
     /// Point the preview camera at the pattern, at the aspect the picture is
@@ -441,6 +482,10 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
         let (wanted, made) = pattern::instance_count(&params);
         let note = if wanted > made {
             format!("{made} copies -- {wanted} were asked for, which is more than can be drawn")
+        } else if app.pattern_tool_is_empty() {
+            // Otherwise the dots are a picture with no caption: the rule works,
+            // and what is missing is the shape it has nothing to repeat.
+            format!("{made} copies, marked -- put a shape in the pattern to see it repeated")
         } else {
             format!("{made} copies")
         };
@@ -474,6 +519,9 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
     ui.allocate_rect(rect, egui::Sense::hover());
     let response = ui.interact(rect, preview_id(), egui::Sense::click_and_drag());
     paint_preview(app, ui, rect);
+    if app.pattern_tool_is_empty() {
+        paint_placements(app, ui, rect);
+    }
 
     // The same navigation bindings the viewport uses, read from the keymap on
     // every frame, so a rebinding applies here as immediately as it does there.
@@ -495,6 +543,33 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
     // No cursor of its own. The viewport this is a copy of leaves the pointer
     // alone while it is orbited, and a preview that swapped it for a hand said
     // the picture was something to pick up.
+}
+
+/// Orange dots where the rule would put a copy.
+///
+/// A pattern is *built* empty: the tool makes one out of the selection, and a
+/// selection of nothing makes a pattern with nothing in it. That pattern has no
+/// geometry, so the render behind this has nothing to draw and the picture is
+/// the bare grid -- which reads as a preview that does not work rather than as
+/// a pattern with nothing in it yet. The rule still has placements, and while
+/// the shape is missing they are the whole of what the window has to show.
+///
+/// Drawn over the render rather than into it, in the picture's own camera, so
+/// the dots sit on the grid exactly where the copies will and turn with an
+/// orbit like everything else. The original is the one every other copy is a
+/// copy *of*, so it is the one drawn brightest.
+fn paint_placements(app: &App, ui: &egui::Ui, rect: egui::Rect) {
+    let view = View::new(app.pattern_preview_camera, rect);
+    let painter = ui.painter_at(rect);
+    for (index, at) in app.pattern_placements().iter().enumerate() {
+        // Orthographic, so there is no behind-the-camera to test for: every
+        // placement lands somewhere, and the clip takes the ones off the
+        // picture.
+        let Some((screen, _)) = view.project(*at) else { continue };
+        let (radius, colour) =
+            if index == 0 { (5.0, theme::token::ACCENT) } else { (3.5, theme::token::ACCENT.gamma_multiply(0.7)) };
+        painter.circle_filled(screen, radius, colour);
+    }
 }
 
 /// Rasterize the preview, reusing the last image while nothing that affects it

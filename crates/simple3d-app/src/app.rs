@@ -5146,6 +5146,89 @@ mod tests {
         }
     }
 
+    /// Reported: "the preview does not render anything ... it is supposed to
+    /// render orange dots where the object of that pattern would be placed",
+    /// and "the frame button does now nothing".
+    ///
+    /// One fault, seen twice. The tool makes a pattern out of the selection,
+    /// and a selection of nothing makes a pattern with nothing in it -- which
+    /// is the state a rule is *built* in. That pattern has no geometry, so the
+    /// render behind the picture had nothing to draw but the grid, and no
+    /// bounds, so the preview's target fell through to the whole scene's:
+    /// `None` on an empty document, which parks the camera at the origin at a
+    /// fixed distance. Framing it again put it back exactly where it already
+    /// was, which is a button that does nothing.
+    ///
+    /// Asked of the placements rather than of the pixels: what the rule lays
+    /// out is somewhere whether or not there is a shape to put there, and the
+    /// question is whether the picture is pointed at it. On the code this was
+    /// written against, `pattern_preview_target` was `None` for a rule laying
+    /// out three copies 20 mm apart.
+    #[test]
+    fn an_empty_pattern_is_previewed_as_the_places_it_would_put_a_copy() {
+        // An empty document, so the pattern the tool makes has nothing in it
+        // and the scene has no bounds to fall back to either.
+        let mut app = app_in(temp_config_dir("empty-pattern"));
+        app.open_pattern_tool();
+        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
+        app.reevaluate_for_test();
+        assert!(app.pattern_tool_is_empty(), "the pattern was not empty, so this measures the wrong thing");
+
+        let params = app.pattern_tool.and_then(|id| app.scene.node(id).params().cloned()).expect("a pattern's params");
+        let (_, made) = simple3d_core::pattern::instance_count(&params);
+        let places = app.pattern_placements();
+        assert!(made > 1, "a rule laying out one copy says nothing about where copies go");
+        assert_eq!(places.len(), made, "the rule lays out {made} copies but marks {}", places.len());
+        assert!(
+            places.iter().any(|at| (*at - places[0]).length() > 1e-6),
+            "every copy was marked in the same place: {places:?}"
+        );
+
+        // The picture is pointed at them, which is what the Frame button had
+        // nothing to do without.
+        let (lo, hi) = app.pattern_preview_target().expect("the preview had nothing to look at");
+        for at in &places {
+            assert!(
+                at.x >= lo.x && at.y >= lo.y && at.z >= lo.z && at.x <= hi.x && at.y <= hi.y && at.z <= hi.z,
+                "the copy at {at:?} is outside the {lo:?}..{hi:?} the preview frames on"
+            );
+        }
+
+        // And the dots land inside the picture once it is drawn.
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1100.0, 700.0))),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(&mut app, ui));
+        });
+        let rect = ctx.read_response(crate::pattern_tool::preview_id()).expect("the preview was not drawn").rect;
+        let view = crate::view::View::new(app.pattern_preview_camera, rect);
+        for at in &app.pattern_placements() {
+            let (screen, _) = view.project(*at).expect("an orthographic projection always lands");
+            assert!(rect.contains(screen), "the copy at {at:?} is marked at {screen:?}, outside the preview {rect:?}");
+        }
+    }
+
+    /// The dots stand in for a shape that is not there, so a pattern that has
+    /// one is drawn as the shape and nothing else -- the case that was working,
+    /// and the one the fix above must not start scattering dots over.
+    #[test]
+    fn a_pattern_with_a_shape_in_it_is_previewed_as_the_shape() {
+        let mut app = headless_app();
+        app.open_pattern_tool();
+        app.reevaluate_for_test();
+        let pattern = app.pattern_tool.expect("the tool opened on a pattern");
+        assert!(!app.pattern_tool_is_empty(), "a pattern made out of a plate has the plate in it");
+        assert_eq!(
+            app.pattern_preview_target(),
+            app.evaluated.node_world_bounds.get(&pattern).copied(),
+            "the preview framed on something other than the pattern's own body"
+        );
+    }
+
     /// Reported: "the divider auto shrinks over time".
     ///
     /// It did, by eight pixels a frame, until it hit its own minimum. egui
