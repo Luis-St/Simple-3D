@@ -983,8 +983,19 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let params = app.scene.node(id).params().cloned().unwrap_or_default();
     let unit = app.unit();
     let targets = [id];
+    // A custom kind is edited in the tool, and nowhere else. Its stages are
+    // thirty-odd numbered fields -- "3 Radius per copy", "4 Turn per copy" --
+    // and a column of them under the kind row says nothing about the rule they
+    // make: which stage repeats which, and what any of it lays down, is what the
+    // tool draws beside them. Here they were only a wall to scroll past on the
+    // way to the button that opens it.
+    let custom = params.int("kind") == simple3d_core::pattern::CUSTOM;
     for param in simple3d_core::pattern::PARAMS {
         if !simple3d_core::pattern::param_visible(param, &params) {
+            continue;
+        }
+        // The kind itself stays: it is how a pattern stops being custom again.
+        if custom && param.shown_when == Some(("kind", simple3d_core::pattern::CUSTOM)) {
             continue;
         }
         param_field(app, ui, &targets, id, param, unit, PATTERN_ROW);

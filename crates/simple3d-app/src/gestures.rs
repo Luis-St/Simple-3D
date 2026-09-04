@@ -930,6 +930,62 @@ fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     assert!(harness.state().scene.node(opened).is_pattern(), "the tool opened on something that is not a pattern");
 }
 
+#[test]
+fn a_custom_pattern_offers_the_tool_in_place_of_its_stages() {
+    use egui_kittest::kittest::Queryable;
+
+    // Asked for from the running application. A custom kind's rule is thirty-odd
+    // numbered fields -- "1 Copies", "3 Radius per copy" -- and the Pattern
+    // section listed every one of them under the kind row, where they say
+    // nothing about the rule they make and are only a wall to scroll past on the
+    // way to the button that opens the tool. The tool is where they are edited,
+    // and it draws each stage beside what it lays down.
+    let mut harness = harness("pattern-custom-rows");
+    harness.state_mut().add_pattern();
+    harness.step();
+    let id = harness.state().primary().expect("the new pattern is selected");
+
+    // A fixed kind still shows its numbers: this is about the custom one only.
+    assert!(
+        harness.ctx.read_response(crate::panel_properties::grip_id("Copies")).is_some(),
+        "a linear pattern lost the numbers that place it"
+    );
+
+    let custom = simple3d_core::pattern::CUSTOM;
+    harness
+        .state_mut()
+        .scene
+        .get_mut(id)
+        .and_then(|node| node.params_mut())
+        .expect("a pattern has parameters")
+        .insert("kind".to_string(), simple3d_core::primitive::ParamValue::Choice(custom));
+    harness.step();
+
+    // The stages are gone, all four of them.
+    for stage in 0..simple3d_core::pattern::MAX_STAGES {
+        for key in simple3d_core::pattern::stage_keys(stage) {
+            let spec = simple3d_core::pattern::PARAMS.iter().find(|p| p.key == key).expect("a stage key with no spec");
+            assert!(
+                harness.ctx.read_response(crate::panel_properties::grip_id(spec.label)).is_none(),
+                "the Pattern section still draws {}",
+                spec.label
+            );
+        }
+    }
+    assert!(
+        harness.ctx.read_response(crate::panel_properties::grip_id("Stages")).is_none(),
+        "the Pattern section still draws the stage count"
+    );
+    // What is left is the way in to the tool, the kind itself, and the line
+    // saying what the pattern makes.
+    assert!(harness.query_by_label("Edit kind...").is_some(), "the way into the tool went with the stages");
+    assert!(harness.query_by_label("Custom").is_some(), "the kind row went with the stages");
+    assert!(
+        harness.query_by_label_contains("Put shapes under this pattern").is_some(),
+        "the line saying what the pattern makes went with the stages"
+    );
+}
+
 /// The Frame button puts the preview back the way it opened -- the angle and
 /// the zoom with the rest, not just where the camera is pointed.
 ///
