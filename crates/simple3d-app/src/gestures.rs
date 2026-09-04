@@ -1279,14 +1279,29 @@ fn every_value_field_stays_inside_the_properties_panel_at_any_width() {
             );
             assert!(rect.left() >= 0.0 && rect.width() >= 40.0, "{name} at {width} px is {rect:?}");
         }
-        // A dimension field has to leave its unit room on the same line: the
-        // suffix used to be pushed onto a line of its own under the label,
-        // which is the same overflow seen from the other side.
-        let dimension = fields.iter().find(|(name, _)| name == "Width (X)").map(|(_, rect)| *rect).unwrap();
-        let position = fields.iter().find(|(name, _)| name == "Position (mm):2").map(|(_, rect)| *rect).unwrap();
+        // And every row ends at the same place. The unit is in the row's name
+        // now rather than beside the field, so nothing takes a bite out of one
+        // row's field that it does not take out of the others -- which is the
+        // whole reason for writing it there. Measured on the last field of each
+        // row, since the transform rows put three side by side.
+        let last: Vec<&(String, egui::Rect)> =
+            fields.iter().filter(|(name, _)| !name.contains(':') || name.ends_with(":2")).collect();
+        let right = last[0].1.right();
+        for (name, rect) in &last {
+            assert!(
+                (rect.right() - right).abs() < 1.0,
+                "at a panel {width} px wide, {name} ends at {} and {} ends at {right}",
+                rect.right(),
+                last[0].0
+            );
+        }
+        // The rows with one field to a line are that same width as each other,
+        // whether their value carries a unit or not.
+        let single: Vec<f32> =
+            fields.iter().filter(|(name, _)| !name.contains(':')).map(|(_, rect)| rect.width()).collect();
         assert!(
-            dimension.right() < position.right() - 8.0,
-            "the dimension field at {width} px left no room for its unit: {dimension:?} against {position:?}"
+            single.iter().all(|w| (w - single[0]).abs() < 1.0),
+            "at a panel {width} px wide the dimension fields are different widths: {single:?}"
         );
     }
 }

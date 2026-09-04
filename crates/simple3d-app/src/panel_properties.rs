@@ -81,8 +81,8 @@ const SEGMENTS: ParamKind = ParamKind::Count { min: 3, max: 512 };
 const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
 
 /// How a section renders the parameter rows it shares with every other
-/// section: what its edits are called in the undo history, and where a value's
-/// unit is written.
+/// section: what its edits are called in the undo history, and what tells its
+/// gestures apart from the same rows drawn somewhere else.
 #[derive(Clone, Copy)]
 pub(crate) struct RowStyle {
     /// What the undo step is called. A primitive's choices really are
@@ -90,7 +90,6 @@ pub(crate) struct RowStyle {
     /// are its kind and its axis, and filing those under "Set measurement" made
     /// the undo history describe something the user had not done.
     edit_label: &'static str,
-    unit: UnitPlace,
     /// What tells this row's scrub gesture apart from the same parameter's row
     /// somewhere else. A gesture is remembered by the value it drags rather
     /// than by where the field sits, which is what lets a panel relay itself out
@@ -100,29 +99,12 @@ pub(crate) struct RowStyle {
     grip_scope: &'static str,
 }
 
-/// A shape's dimensions: the unit rides after the number it qualifies.
-const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", unit: UnitPlace::AfterField, grip_scope: "" };
-/// A pattern's numbers: the unit goes in the name, so the count and the
-/// distances line up down one column.
-pub(crate) const PATTERN_ROW: RowStyle =
-    RowStyle { edit_label: "Set pattern", unit: UnitPlace::InLabel, grip_scope: "" };
+/// A shape's dimensions.
+const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", grip_scope: "" };
+/// A pattern's numbers.
+pub(crate) const PATTERN_ROW: RowStyle = RowStyle { edit_label: "Set pattern", grip_scope: "" };
 /// The same rows, in the creation tool's own window (issue 67).
 pub(crate) const PATTERN_TOOL_ROW: RowStyle = RowStyle { grip_scope: "tool", ..PATTERN_ROW };
-
-/// Where a value row writes its unit.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum UnitPlace {
-    /// After the field, one size down and in the label colour. What the shape
-    /// editors use: there the row's name is the measurement and the unit
-    /// qualifies the number beside it.
-    AfterField,
-    /// In brackets on the end of the row's name, the way the transform rows
-    /// read. The fields on the section are then all one width, whether their
-    /// value carries a unit or not -- a pattern's copies count has no unit and
-    /// its steps do, and the two used to sit at different widths down the same
-    /// column.
-    InLabel,
-}
 
 /// How much room is left on the line a row is currently laying out on:
 /// from where the next control will start to the row's own right-hand edge.
@@ -137,16 +119,25 @@ fn room_left(ui: &egui::Ui) -> f32 {
     (ui.max_rect().right() - ui.cursor().left()).max(0.0)
 }
 
-/// The width a label takes at the size the panel writes its asides in, plus the
-/// gap before it -- what a control has to leave behind for a suffix.
-fn suffix_room(ui: &egui::Ui, text: &str) -> f32 {
-    if text.is_empty() {
-        return 0.0;
+/// A row's name with the unit its value is written in, in brackets on the end:
+/// "Width (mm)", "Rotation (deg)".
+///
+/// Every value row in the panel names its unit this way rather than writing it
+/// after the field. A suffix beside the field takes its width out of the field,
+/// and it takes a different width for every unit and for none at all -- so a
+/// column that mixed a length, an angle and a plain count had a different field
+/// width on every line of it.
+fn named(label: &str, unit: &str) -> String {
+    if unit.is_empty() {
+        return label.to_string();
     }
-    let width = ui.fonts(|fonts| {
-        fonts.layout_no_wrap(text.to_string(), egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO).size().x
-    });
-    width + ui.spacing().item_spacing.x
+    // Half the names in the registry already end in brackets -- "Width (X)",
+    // "Top diameter (0 = point)" -- and a second pair straight after the first
+    // reads as a mistake, so the unit joins the ones that are there.
+    match label.strip_suffix(')') {
+        Some(head) => format!("{head}, {unit})"),
+        None => format!("{label} ({unit})"),
+    }
 }
 
 /// A width a control would like, capped at what the row actually has left.
@@ -411,10 +402,10 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
         });
-        field_row(ui, "Grid", "", |ui| {
+        field_row(ui, &named("Grid", unit.suffix()), "", |ui| {
             let kind = ParamKind::Length { min: 1e-6 };
             let spacing = app.scene.settings.grid_spacing;
-            let width = (room_left(ui) - suffix_room(ui, unit.suffix())).max(40.0);
+            let width = room_left(ui).max(40.0);
             let id = ui.id().with("doc-grid");
             ui.scope(|ui| {
                 ui.set_width(width);
@@ -424,7 +415,6 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                     app.scene.settings.grid_spacing = mm.min(MAX_LENGTH);
                 });
             });
-            ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
         step_row(app, ui);
         // Where a new shape lands. It is a document question -- the same one the
@@ -558,14 +548,14 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
     let step = unit.from_mm(app.move_snap()).max(1e-6);
     field_row(
         ui,
-        "3D cursor",
+        &named("3D cursor", unit.suffix()),
         "Where a new shape lands when \u{201C}Add at\u{201D} is the cursor. \
              Shift+right-click in the viewport puts it under the pointer.",
         |ui| {
-            // Three numbers and a unit out of whatever the row has: they shrink
-            // with the panel, and wrap onto a second line rather than shrinking
-            // past being readable (issue 51).
-            let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+            // Three numbers out of whatever the row has: they shrink with the
+            // panel, and wrap onto a second line rather than shrinking past
+            // being readable (issue 51).
+            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
             for axis in 0..3 {
                 let field_id = ui.id().with(("cursor", axis));
                 // Named the way `axis_row` names its three, so one field cannot
@@ -583,7 +573,6 @@ fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
                     });
                 });
             }
-            ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         },
     );
     field_row(ui, "", "", |ui| {
@@ -620,8 +609,8 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
             None if point.is_some() => "Click in the viewport to move it, or type it exactly.".to_string(),
             None => "Click in the viewport to place it, or type it here.".to_string(),
         };
-        field_row(ui, label, &hover, |ui| {
-            let each = ((ui.available_width() - 26.0) / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
+        field_row(ui, &named(label, unit.suffix()), &hover, |ui| {
+            let each = (ui.available_width() / 3.0 - ui.spacing().item_spacing.x).clamp(44.0, 56.0);
             for axis in 0..3 {
                 let field_id = ui.id().with(("measure", index, axis));
                 let grip = format!("{label}:{axis}");
@@ -640,7 +629,6 @@ fn measure(app: &mut App, ui: &mut egui::Ui) {
                     });
                 });
             }
-            ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
         });
     }
 
@@ -1111,16 +1099,16 @@ pub(crate) fn param_field(
             });
         }
         kind => {
-            // Worked out before the row is laid out, because where it goes is
-            // part of the row's name in one of the two placements.
-            let unit_text = match kind {
-                ParamKind::Length { .. } => unit.suffix(),
-                ParamKind::Angle { .. } => "deg",
-                _ => "",
-            };
-            let in_label = style.unit == UnitPlace::InLabel && !unit_text.is_empty();
-            let name = if in_label { format!("{} ({unit_text})", param.label) } else { param.label.to_string() };
-            let suffix = if in_label { "" } else { unit_text };
+            // Worked out before the row is laid out, because the unit is part
+            // of the row's name.
+            let name = named(
+                param.label,
+                match kind {
+                    ParamKind::Length { .. } => unit.suffix(),
+                    ParamKind::Angle { .. } => "deg",
+                    _ => "",
+                },
+            );
             field_row(ui, &name, "", |ui| {
                 let step = ui::scrub_increment(kind, unit);
                 // A lock toggle where the type offers one: a sphere's three
@@ -1139,11 +1127,9 @@ pub(crate) fn param_field(
                         toggle_lock(app, id, param.lock_group, param.key);
                     }
                 }
-                // Where the unit rides after the field, room is left for it so
-                // it never competes with the number it qualifies; where it is in
-                // the name, there is nothing to leave room for and the field
-                // takes the whole column.
-                let field_width = (room_left(ui) - suffix_room(ui, suffix)).max(40.0);
+                // The unit is in the name, so there is nothing to leave room for
+                // and the field takes the whole column.
+                let field_width = room_left(ui).max(40.0);
                 let field_id = ui.id().with((id, param.key));
                 // With several nodes selected, a field shows the value they
                 // agree on and an em dash when they do not.
@@ -1164,9 +1150,6 @@ pub(crate) fn param_field(
                         value_field(app, ui, &grip_name, field_id, &shown, step)
                     })
                     .inner;
-                if !suffix.is_empty() {
-                    ui.add(egui::Label::new(theme::hint(suffix)).selectable(false));
-                }
                 if let Some(scrubbed) = outcome.scrubbed {
                     scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
                 }
@@ -1381,10 +1364,11 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 /// selected.
 pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
-    field_row(ui, "Step", "How far one nudge, and one snapped step of a move or resize drag, goes.", |ui| {
+    let hover = "How far one nudge, and one snapped step of a move or resize drag, goes.";
+    field_row(ui, &named("Step", unit.suffix()), hover, |ui| {
         let kind = ParamKind::Length { min: 1e-6 };
         let snap = app.scene.settings.snap_step;
-        let width = (room_left(ui) - suffix_room(ui, unit.suffix())).max(40.0);
+        let width = room_left(ui).max(40.0);
         let field_id = ui.id().with("doc-step");
         ui.scope(|ui| {
             ui.set_width(width);
@@ -1395,7 +1379,6 @@ pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
                 app.scene.settings.snap_step = mm.min(MAX_LENGTH);
             });
         });
-        ui.add(egui::Label::new(theme::hint(unit.suffix())).selectable(false));
     });
 }
 
