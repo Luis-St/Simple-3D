@@ -408,10 +408,14 @@ pub struct App {
     /// the window, and so it can be framed on the pattern rather than on
     /// whatever the scene happens to be showing.
     pub pattern_preview_camera: Camera,
-    /// The pattern's extent the preview was last pointed at. A rule that lays
-    /// out more, or further, is a different thing to look at, so the preview
-    /// frames itself on it again -- see `pattern_tool::preview`.
-    pub(crate) pattern_preview_bounds: Option<(Vec3, Vec3)>,
+    /// Whether the preview's camera has been framed on the pattern yet. Framing
+    /// needs the aspect the picture is actually drawn at, so it cannot happen
+    /// where it is asked for -- opening the tool and the Frame button both clear
+    /// this, and `pattern_tool::preview` does the framing on the next frame.
+    ///
+    /// Nothing else clears it. Once the picture is framed, where it is looking
+    /// from is the user's, and typing a number must not take it off them.
+    pub(crate) pattern_preview_framed: bool,
     /// The last image the preview drew, and what it was drawn from. The preview
     /// is a full render of the scene, so it is kept between frames exactly the
     /// way the viewport's own image is.
@@ -554,7 +558,7 @@ impl App {
             pattern_tool_name: String::new(),
             pattern_kinds: Vec::new(),
             pattern_preview_camera: Camera::default(),
-            pattern_preview_bounds: None,
+            pattern_preview_framed: false,
             pattern_preview_texture: None,
             pattern_preview_key: u64::MAX,
             keymap_search: String::new(),
@@ -5082,23 +5086,24 @@ mod tests {
         }
     }
 
-    /// Reported: "the preview does not show what the stages do".
+    /// Reported: "why does the preview change when i change the values? this
+    /// should not happen, the preview should be under user control."
     ///
-    /// It framed itself once, when the tool opened, and stayed pointed there.
-    /// Adding a stage lays the copies out further than the rule did when it was
-    /// opened, so what the new stage made was off the edges of the picture --
-    /// verified by eye against the running window, where three stages laid out
-    /// twelve copies and the preview showed a cropped clump of them.
+    /// It framed itself again whenever the rule started laying its copies out
+    /// somewhere else, so every number typed moved the camera: a picture turned
+    /// and zoomed to look at one end of a run jumped back to the whole of it on
+    /// the next keystroke.
     ///
-    /// Asked as a question about the picture: project the pattern's own corners
-    /// through the preview's camera and check they land inside the preview's
-    /// rectangle. Counting drawn pixels would pass on the broken version -- most
-    /// of the copies were on screen; it is the ones that were not that mattered.
-    ///
-    /// On the code this was written against, the far corner of a three-stage
-    /// rule was drawn at x = 1266 with the picture ending at x = 1092.
+    /// **This reverses an earlier fix**, whose test this replaces. That one was
+    /// for "the preview does not show what the stages do" -- the camera was
+    /// pointed once, when the tool opened, so adding a stage laid copies out
+    /// past the edges of the picture. Reframing on every change answered it and
+    /// took the camera off the user to do it. The picture going off the edges is
+    /// now the expected thing, and the Frame button is the answer to it: it is
+    /// one click, it says what it does, and it leaves the choice where it
+    /// belongs. Do not put the automatic reframing back.
     #[test]
-    fn the_preview_frames_itself_on_what_the_stages_lay_out() {
+    fn editing_the_rule_leaves_the_previews_camera_alone() {
         let mut app = headless_app();
         app.open_pattern_tool();
         let pattern = app.pattern_tool.expect("the tool opened on a pattern");
@@ -5115,18 +5120,30 @@ mod tests {
                 egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(app, ui));
             });
         };
-        // One frame with the rule as it opens: the preview points itself at it.
+        // One frame to let it point itself at the pattern, which is the one
+        // time it may.
         draw(&mut app);
+        // Then the user looks where they want to look.
+        app.pattern_preview_camera.yaw += 40.0;
+        app.pattern_preview_camera.pitch -= 15.0;
+        app.pattern_preview_camera.distance *= 0.35;
+        draw(&mut app);
+        let looked = app.pattern_preview_camera;
 
-        // Now the rule lays out a great deal more, the way adding stages does.
+        // Now the rule lays out a great deal more, the way typing does.
         if let Some(params) = app.scene.get_mut(pattern).and_then(|n| n.params_mut()) {
             params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(3));
         }
         app.reevaluate_for_test();
         draw(&mut app);
+        assert_eq!(app.pattern_preview_camera, looked, "editing the rule moved the preview's camera");
 
-        let rect = ctx.read_response(crate::pattern_tool::preview_id()).expect("the preview was not drawn").rect;
+        // And Frame is still how the whole of it is asked for back.
+        app.reset_pattern_preview();
+        draw(&mut app);
+        assert_ne!(app.pattern_preview_camera, looked, "Frame left the picture where the user had put it");
         let (lo, hi) = app.evaluated.node_world_bounds[&pattern];
+        let rect = ctx.read_response(crate::pattern_tool::preview_id()).expect("the preview was not drawn").rect;
         let view = crate::view::View::new(app.pattern_preview_camera, rect);
         for corner in [
             Vec3::new(lo.x, lo.y, lo.z),
@@ -5138,95 +5155,9 @@ mod tests {
             Vec3::new(lo.x, hi.y, hi.z),
             Vec3::new(hi.x, hi.y, hi.z),
         ] {
-            let (at, _) = view.project(corner).expect("a corner behind the preview's camera");
-            assert!(
-                rect.contains(at),
-                "the corner {corner:?} of what the stages lay out is drawn at {at:?}, outside the preview {rect:?}"
-            );
+            let (at, _) = view.project(corner).expect("an orthographic projection always lands");
+            assert!(rect.contains(at), "after Frame the corner {corner:?} is drawn at {at:?}, outside {rect:?}");
         }
-    }
-
-    /// Reported: "the preview does not render anything ... it is supposed to
-    /// render orange dots where the object of that pattern would be placed",
-    /// and "the frame button does now nothing".
-    ///
-    /// One fault, seen twice. The tool makes a pattern out of the selection,
-    /// and a selection of nothing makes a pattern with nothing in it -- which
-    /// is the state a rule is *built* in. That pattern has no geometry, so the
-    /// render behind the picture had nothing to draw but the grid, and no
-    /// bounds, so the preview's target fell through to the whole scene's:
-    /// `None` on an empty document, which parks the camera at the origin at a
-    /// fixed distance. Framing it again put it back exactly where it already
-    /// was, which is a button that does nothing.
-    ///
-    /// Asked of the placements rather than of the pixels: what the rule lays
-    /// out is somewhere whether or not there is a shape to put there, and the
-    /// question is whether the picture is pointed at it. On the code this was
-    /// written against, `pattern_preview_target` was `None` for a rule laying
-    /// out three copies 20 mm apart.
-    #[test]
-    fn an_empty_pattern_is_previewed_as_the_places_it_would_put_a_copy() {
-        // An empty document, so the pattern the tool makes has nothing in it
-        // and the scene has no bounds to fall back to either.
-        let mut app = app_in(temp_config_dir("empty-pattern"));
-        app.open_pattern_tool();
-        assert_eq!(app.modal, Modal::PatternKind, "the tool did not open, so this measures nothing");
-        app.reevaluate_for_test();
-        assert!(app.pattern_tool_is_empty(), "the pattern was not empty, so this measures the wrong thing");
-
-        let params = app.pattern_tool.and_then(|id| app.scene.node(id).params().cloned()).expect("a pattern's params");
-        let (_, made) = simple3d_core::pattern::instance_count(&params);
-        let places = app.pattern_placements();
-        assert!(made > 1, "a rule laying out one copy says nothing about where copies go");
-        assert_eq!(places.len(), made, "the rule lays out {made} copies but marks {}", places.len());
-        assert!(
-            places.iter().any(|at| (*at - places[0]).length() > 1e-6),
-            "every copy was marked in the same place: {places:?}"
-        );
-
-        // The picture is pointed at them, which is what the Frame button had
-        // nothing to do without.
-        let (lo, hi) = app.pattern_preview_target().expect("the preview had nothing to look at");
-        for at in &places {
-            assert!(
-                at.x >= lo.x && at.y >= lo.y && at.z >= lo.z && at.x <= hi.x && at.y <= hi.y && at.z <= hi.z,
-                "the copy at {at:?} is outside the {lo:?}..{hi:?} the preview frames on"
-            );
-        }
-
-        // And the dots land inside the picture once it is drawn.
-        let ctx = egui::Context::default();
-        crate::theme::apply(&ctx);
-        let input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1100.0, 700.0))),
-            ..Default::default()
-        };
-        let _ = ctx.run(input, |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(&mut app, ui));
-        });
-        let rect = ctx.read_response(crate::pattern_tool::preview_id()).expect("the preview was not drawn").rect;
-        let view = crate::view::View::new(app.pattern_preview_camera, rect);
-        for at in &app.pattern_placements() {
-            let (screen, _) = view.project(*at).expect("an orthographic projection always lands");
-            assert!(rect.contains(screen), "the copy at {at:?} is marked at {screen:?}, outside the preview {rect:?}");
-        }
-    }
-
-    /// The dots stand in for a shape that is not there, so a pattern that has
-    /// one is drawn as the shape and nothing else -- the case that was working,
-    /// and the one the fix above must not start scattering dots over.
-    #[test]
-    fn a_pattern_with_a_shape_in_it_is_previewed_as_the_shape() {
-        let mut app = headless_app();
-        app.open_pattern_tool();
-        app.reevaluate_for_test();
-        let pattern = app.pattern_tool.expect("the tool opened on a pattern");
-        assert!(!app.pattern_tool_is_empty(), "a pattern made out of a plate has the plate in it");
-        assert_eq!(
-            app.pattern_preview_target(),
-            app.evaluated.node_world_bounds.get(&pattern).copied(),
-            "the preview framed on something other than the pattern's own body"
-        );
     }
 
     /// Reported: "the divider auto shrinks over time".

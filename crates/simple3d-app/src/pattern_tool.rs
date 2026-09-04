@@ -69,13 +69,14 @@ impl App {
     /// next frame, which is where the picture's own shape is known -- forgetting
     /// what it was framed on is what asks for it, in `preview`.
     ///
-    /// This is what the Frame button does, and it resets the angle and the zoom
-    /// with the rest. The *automatic* reframing, when a rule starts laying its
-    /// copies out somewhere else, deliberately does not -- see
-    /// `frame_pattern_preview`.
+    /// This is what the Frame button does, and the only thing besides opening
+    /// the tool that moves the preview's camera on the user's behalf. Editing
+    /// the rule does not: a picture turned and zoomed to look at one end of a
+    /// run has to survive the next keystroke, and Frame is how the whole of it
+    /// is asked for back.
     pub(crate) fn reset_pattern_preview(&mut self) {
         self.pattern_preview_camera = self.scene.camera;
-        self.pattern_preview_bounds = None;
+        self.pattern_preview_framed = false;
     }
 
     /// What the preview is looking at: the pattern, what the rule lays out while
@@ -128,17 +129,22 @@ impl App {
     }
 
     /// Point the preview camera at the pattern, at the aspect the picture is
-    /// actually drawn at, and remember what it was pointed at.
+    /// actually drawn at, and mark it framed.
     ///
-    /// Only the target and the distance move: which way round the pattern is
-    /// seen from is the user's, and the *automatic* framing -- which happens
-    /// whenever a rule starts laying its copies out somewhere else -- must not
-    /// undo an orbit halfway through one. Asking for it by name, with the Frame
-    /// button, is a different thing: see `reset_pattern_preview`.
+    /// Only the target and the distance move. The angle is set where the
+    /// framing is *asked* for, by `reset_pattern_preview`, because this runs a
+    /// frame later -- by which time the user may already be dragging.
     pub(crate) fn frame_pattern_preview(&mut self, aspect: f64) {
-        self.pattern_preview_bounds = self.pattern_preview_target();
-        match self.pattern_preview_bounds {
-            Some((lo, hi)) => crate::view::frame_bounds(&mut self.pattern_preview_camera, lo, hi, aspect),
+        match self.pattern_preview_target() {
+            Some((lo, hi)) => {
+                crate::view::frame_bounds(&mut self.pattern_preview_camera, lo, hi, aspect);
+                self.pattern_preview_framed = true;
+            }
+            // Nothing to frame on yet. The pattern's extent comes out of the
+            // evaluation, which is asynchronous, so the first frames after the
+            // tool opens can have no answer -- and a picture that gave up on
+            // the first of them would stay pointed at the origin for good.
+            // Park it and ask again next frame.
             None => {
                 self.pattern_preview_camera.target = Vec3::ZERO;
                 self.pattern_preview_camera.distance = 160.0;
@@ -522,14 +528,13 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
     if rect.width() < 32.0 || rect.height() < 32.0 {
         return;
     }
-    // A rule that lays out more, or further, is a different thing to look at, so
-    // the picture is framed on it again.
-    //
-    // Without this the camera was pointed once, when the tool opened, and stayed
-    // there: adding a stage grew the pattern out past the edges of the preview
-    // and what the new stage did was off the picture. Only the target and the
-    // distance move, so an orbit survives it.
-    if app.pattern_preview_bounds != app.pattern_preview_target() {
+    // Framed once, when the tool opens, and then only when the Frame button asks
+    // for it. It used to frame itself again whenever the rule started laying its
+    // copies out somewhere else, which meant every number typed moved the
+    // camera: a picture turned and zoomed to look at one end of a run jumped
+    // back to the whole of it on the next keystroke. Where the picture is
+    // looking from is the user's, and Frame is how they hand it back.
+    if !app.pattern_preview_framed {
         app.frame_pattern_preview((rect.width() / rect.height().max(1.0)) as f64);
     }
     ui.allocate_rect(rect, egui::Sense::hover());
