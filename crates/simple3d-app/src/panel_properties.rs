@@ -177,6 +177,19 @@ fn row_label(ui: &mut egui::Ui, text: &str) -> egui::Response {
 /// pushing it off the panel edge (issue 51). Either way the controls are laid
 /// out wrapped, so a row of choices that no longer fits across breaks onto a
 /// second line instead of overflowing.
+/// The right-hand edge a row is pinned to, fixed before anything is laid out
+/// inside it. A wrapped horizontal ui lets its `max_rect` grow to hold whatever
+/// overflowed it, so a row that ran off the panel once went on doing so for as
+/// long as the panel was open. Pinned here it cannot, and `room_left` is exact.
+///
+/// Public because anything drawn *beside* these rows has to end where they do:
+/// a control on its own line whose right edge is a few pixels out from the
+/// fields above it reads as a mistake, and one constant answering for both is
+/// the only way they cannot drift apart.
+pub(crate) fn row_right_edge(ui: &egui::Ui) -> f32 {
+    ui.max_rect().right().min(ui.clip_rect().right() - EDGE_PAD)
+}
+
 fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
     if stacked(ui) {
         ui.vertical(|ui| {
@@ -194,11 +207,7 @@ fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(
         });
         return;
     }
-    // The row's right-hand edge, fixed before anything is laid out inside it. A
-    // wrapped horizontal ui lets its `max_rect` grow to hold whatever overflowed
-    // it, so a row that ran off the panel once went on doing so for as long as
-    // the panel was open. Pinned here, it cannot, and `room_left` is exact.
-    let right = ui.max_rect().right().min(ui.clip_rect().right() - EDGE_PAD);
+    let right = row_right_edge(ui);
     ui.horizontal_wrapped(|ui| {
         ui.set_max_width((right - ui.max_rect().left()).max(LABEL_WIDTH));
         let name = row_label(ui, label);

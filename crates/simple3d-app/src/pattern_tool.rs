@@ -229,6 +229,11 @@ impl App {
     }
 }
 
+/// The cross that drops a stage: twice the height egui's small button comes out
+/// at, and square, because it is a mark rather than a word and a wide one reads
+/// as a button with its label missing.
+const DROP_STAGE: f32 = 28.0;
+
 /// The narrowest the stages are worth drawing at. Their rows are the property
 /// panel's own, which stack a name above its field rather than beside it once
 /// the room runs out, so the numbers stay usable well below the width two
@@ -390,7 +395,15 @@ fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(2.0);
+            // The stage's name line ends where its own fields do. Left to
+            // itself the row runs to the edge of the column, and the cross sat
+            // those eight pixels further right than every field under it --
+            // which reads as a button that missed the column rather than as one
+            // belonging to it. Measured out here, on the ui the field rows are
+            // given, because that is the rectangle they are pinned to.
+            let right = crate::panel_properties::row_right_edge(ui);
             ui.horizontal(|ui| {
+                ui.set_max_width((right - ui.max_rect().left()).max(0.0));
                 ui.add(egui::Label::new(theme::header_text(pattern::STAGES[index].label)).selectable(false));
                 ui.add(egui::Label::new(theme::hint(describe(&stage, unit))).selectable(false));
                 // Only the last stage can go: a stage repeats what the ones
@@ -400,11 +413,16 @@ fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                 // them refusing.
                 if index + 1 == used && used > 1 {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .small_button("\u{00d7}")
-                            .on_hover_text("Drop this stage. Only the last one can go: the others are what it repeats.")
-                            .clicked()
-                        {
+                        let cross =
+                            ui.add_sized(egui::Vec2::splat(DROP_STAGE), egui::Button::new("\u{00d7}")).on_hover_text(
+                                "Drop this stage. Only the last one can go: the others are what it repeats.",
+                            );
+                        // Named rather than found by where it sits, so a test can
+                        // ask the context where it was drawn -- the bargain the
+                        // preview and every grip in the application make. It
+                        // senses nothing; the button above answers the pointer.
+                        ui.interact(cross.rect, drop_stage_id(), egui::Sense::hover());
+                        if cross.clicked() {
                             wanted = used - 1;
                         }
                     });
@@ -469,6 +487,12 @@ fn describe(stage: &pattern::Stage, unit: simple3d_core::unit::Unit) -> String {
         what.push("in place".to_string());
     }
     format!("{} copies, {}", stage.copies(), what.join(", "))
+}
+
+/// The id the cross that drops the last stage answers to. Named for the same
+/// reason `preview_id` is: a test asks where it was drawn rather than guessing.
+pub(crate) fn drop_stage_id() -> egui::Id {
+    egui::Id::new("pattern-drop-stage")
 }
 
 /// The id the preview's picture answers to. Named rather than taken from the
