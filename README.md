@@ -117,7 +117,7 @@ portable.
 
 ## Status
 
-**v0.0.24.** All four crates are implemented and all 29 of the spec's acceptance
+**v0.0.25.** All four crates are implemented and all 29 of the spec's acceptance
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
