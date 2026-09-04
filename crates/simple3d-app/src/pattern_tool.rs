@@ -371,6 +371,10 @@ fn describe(stage: &pattern::Stage, unit: simple3d_core::unit::Unit) -> String {
 fn preview(app: &mut App, ui: &mut egui::Ui) {
     let params = app.pattern_tool_params();
     ui.horizontal(|ui| {
+        // Clear of the divider, the way a panel header stands clear of its dock's
+        // edge. The picture below is left flush with it: a viewport against a rule
+        // reads as a viewport, and a *word* against one reads as crowding.
+        ui.add_space(theme::metric::PANEL_PAD);
         ui.add(egui::Label::new(theme::header_text("Lays out")).selectable(false));
         let (wanted, made) = pattern::instance_count(&params);
         let note = if wanted > made {
@@ -413,9 +417,9 @@ fn preview(app: &mut App, ui: &mut egui::Ui) {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         crate::panel_viewport::apply_zoom(&mut app.pattern_preview_camera, &nav, scroll);
     }
-    if response.dragged() || response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-    }
+    // No cursor of its own. The viewport this is a copy of leaves the pointer
+    // alone while it is orbited, and a preview that swapped it for a hand said
+    // the picture was something to pick up.
 }
 
 /// Rasterize the preview, reusing the last image while nothing that affects it
