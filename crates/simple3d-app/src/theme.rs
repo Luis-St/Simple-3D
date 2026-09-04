@@ -229,6 +229,51 @@ pub fn axis_chip(ui: &mut egui::Ui, id: egui::Id, axis: usize) -> egui::Response
     response
 }
 
+/// A control that is on or off, drawn so that it reads as a control while it is
+/// off.
+///
+/// egui's own toggle paints nothing at rest: an unset one is a bare word sitting
+/// on the panel, the same size and colour as the row labels around it, and the
+/// only thing that says it can be clicked at all is a background that appears
+/// once the pointer is already on it. A control that has to be found by sweeping
+/// the panel with the mouse is not a control. So the frame is drawn in both
+/// states instead -- a chip, outlined in the divider grey while it is off and in
+/// the accent, filled, while it is on -- and the only question a row of them
+/// leaves is which ones are pressed.
+///
+/// Takes and returns the flag the way `egui::Ui::toggle_value` does, so the
+/// response is `changed()` on the click that flipped it.
+pub fn toggle(ui: &mut egui::Ui, on: &mut bool, text: &str) -> egui::Response {
+    let mut response = chip(ui, *on, text);
+    if response.clicked() {
+        *on = !*on;
+        response.mark_changed();
+    }
+    response
+}
+
+/// One option out of a set, exactly one of which is chosen: the same chip,
+/// clicked to choose rather than to flip. The caller compares the click against
+/// what is chosen now, since choosing what is already chosen is not an edit.
+///
+/// Deliberately the same shape as [`toggle`]: to the eye both are "a thing that
+/// is on or off and can be clicked", and the difference between them -- whether
+/// turning one on turns its neighbour off -- is what the row's label says.
+pub fn choice(ui: &mut egui::Ui, chosen: bool, text: &str) -> egui::Response {
+    chip(ui, chosen, text)
+}
+
+/// The chip both are drawn as. `frame_when_inactive` is the whole point: egui
+/// turns it off for a selectable button, which is what leaves an unselected one
+/// looking like a label.
+fn chip(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
+    // On, the accent outlines its own tinted fill. Off, the divider grey draws
+    // the same outline the input fields carry, so the chip belongs to the row of
+    // controls rather than to the prose.
+    let outline = if on { token::ACCENT } else { token::SURFACE_3 };
+    ui.add(egui::Button::selectable(on, text).frame_when_inactive(true).stroke(Stroke::new(1.0_f32, outline)))
+}
+
 /// Install the palette and the metrics on a context. Called once, at startup.
 pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
@@ -348,6 +393,78 @@ pub fn apply(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Draw one frame of `contents` on a context wearing this palette, and
+    /// return every rectangle it painted.
+    fn rects(contents: impl FnOnce(&mut egui::Ui)) -> Vec<egui::epaint::RectShape> {
+        let ctx = egui::Context::default();
+        apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(300.0, 200.0))),
+            ..Default::default()
+        };
+        // `run` wants a closure it may call more than once; the contents can
+        // only be drawn once, so they are handed over on the first frame.
+        let mut contents = Some(contents);
+        let output = ctx.run(input, move |ctx| {
+            if let Some(contents) = contents.take() {
+                egui::CentralPanel::default().show(ctx, contents);
+            }
+        });
+        let mut found = Vec::new();
+        fn walk(shape: &egui::Shape, found: &mut Vec<egui::epaint::RectShape>) {
+            match shape {
+                egui::Shape::Rect(rect) => found.push(rect.clone()),
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, found)),
+                _ => {}
+            }
+        }
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut found);
+        }
+        found
+    }
+
+    /// A chip that is off must still be a chip. This is the whole reason
+    /// [`toggle`] and [`choice`] exist rather than egui's own two calls: an
+    /// unselected `toggle_value` paints *nothing* -- no fill, no outline -- so
+    /// "Lock" and "Pinned at the origin" sat in the panel as bare words, with
+    /// only a hover to say they were controls at all.
+    #[test]
+    fn a_toggle_that_is_off_still_draws_a_frame() {
+        let ours = rects(|ui| {
+            let mut off = false;
+            toggle(ui, &mut off, "Lock");
+        });
+        let framed = ours
+            .iter()
+            .any(|r| r.fill == token::SURFACE_2 && r.stroke.width > 0.0 && r.stroke.color == token::SURFACE_3);
+        assert!(framed, "an off chip drew no filled, outlined frame: {ours:#?}");
+
+        // What it replaced, in the same context: egui's own toggle draws one
+        // rectangle for the panel behind it and nothing else.
+        let egui_own = rects(|ui| {
+            let mut off = false;
+            ui.toggle_value(&mut off, "Lock");
+        });
+        assert!(
+            !egui_own.iter().any(|r| r.fill == token::SURFACE_2),
+            "egui learnt to frame an unselected toggle; this helper may no longer be needed"
+        );
+    }
+
+    /// And a chip that is on says so in the accent, filled and outlined, rather
+    /// than in the same grey as the one beside it.
+    #[test]
+    fn a_chosen_option_is_drawn_in_the_accent() {
+        let on = rects(|ui| {
+            choice(ui, true, "Along the grid");
+        });
+        assert!(
+            on.iter().any(|r| r.stroke.color == token::ACCENT && r.fill != token::SURFACE_2),
+            "a chosen chip is not outlined in the accent: {on:#?}"
+        );
+    }
 
     #[test]
     fn a_panel_header_reads_as_spaced_capitals() {

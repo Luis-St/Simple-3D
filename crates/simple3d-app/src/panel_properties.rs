@@ -511,8 +511,7 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         field_row(ui, "Axes", "", |ui| {
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
                 let mut on = app.scene.settings.axes_visible[axis];
-                if ui
-                    .toggle_value(&mut on, name)
+                if theme::toggle(ui, &mut on, name)
                     .on_hover_text(format!("Draw the {name} axis through the origin"))
                     .changed()
                 {
@@ -528,7 +527,7 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
             |ui| {
                 for option in AxisStyle::ALL {
                     let showing = app.scene.settings.axis_style == option;
-                    if ui.selectable_label(showing, option.label()).clicked() && !showing {
+                    if theme::choice(ui, showing, option.label()).clicked() && !showing {
                         app.scene.settings.axis_style = option;
                     }
                 }
@@ -684,8 +683,7 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
         // the other moves it. They were one button, and a button that both
         // locked and moved a value would be neither.
         let mut locked = app.settings.lock_view_centre;
-        if ui
-            .toggle_value(&mut locked, "Lock")
+        if theme::toggle(ui, &mut locked, "Lock")
             .on_hover_text(
                 "Pin what the camera looks at. Orbit and zoom still work; a pan, a zoom about the pointer \
                  and these fields leave the view centre where it is.",
@@ -849,7 +847,7 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
             ui.add_enabled_ui(!is_root, |ui| {
                 for option in Visibility::ALL {
                     let showing = !mixed_visibility && visibility == option;
-                    if ui.selectable_label(showing, option.label()).clicked()
+                    if theme::choice(ui, showing, option.label()).clicked()
                         && (mixed_visibility || visibility != option)
                     {
                         app.edit("Visibility", None);
@@ -911,7 +909,7 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         let mixed = targets.iter().any(|t| app.scene.node(*t).anchor != anchor);
         for option in Anchor::ALL {
             let showing = !mixed && anchor == option;
-            if ui.selectable_label(showing, option.label()).clicked() && (mixed || anchor != option) {
+            if theme::choice(ui, showing, option.label()).clicked() && (mixed || anchor != option) {
                 anchor = option;
                 app.edit("Anchor", None);
                 for target in targets {
@@ -1029,7 +1027,7 @@ fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     // Position, Rotation and Scale off the panel with no way to reach it.
     field_row(ui, "Operation", "", |ui| {
         for option in GroupOp::ALL {
-            if ui.selectable_label(op == option, option.label()).clicked() && op != option {
+            if theme::choice(ui, op == option, option.label()).clicked() && op != option {
                 op = option;
                 app.edit("Operation", None);
                 if let Some(node) = app.scene.get_mut(id) {
@@ -1199,7 +1197,7 @@ pub(crate) fn param_field(
             field_row(ui, param.label, "", |ui| {
                 let mut chosen = value.as_u32();
                 for (index, option) in options.iter().enumerate() {
-                    if ui.selectable_label(chosen == index as u32, *option).clicked() && chosen != index as u32 {
+                    if theme::choice(ui, chosen == index as u32, option).clicked() && chosen != index as u32 {
                         chosen = index as u32;
                         app.edit(style.edit_label, None);
                         for target in targets {
