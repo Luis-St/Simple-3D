@@ -55,23 +55,32 @@ impl App {
         }
         self.renderable_key = key;
 
-        let mut wanted: Vec<NodeId> = Vec::new();
-        for id in self.top_level_selection() {
-            wanted.extend(std::iter::once(id).chain(self.scene.descendants(id)));
-        }
-        // Every node the user asked to keep as a ghost, so a subtracted tool
-        // body can be seen while it is being positioned (spec section 6.1).
-        for id in self.ghosts() {
-            wanted.extend(std::iter::once(id).chain(self.scene.descendants(id)));
-        }
-        wanted.sort_unstable();
-        wanted.dedup();
-        wanted.retain(|id| self.evaluated.node_meshes.contains_key(id));
-
         let mut fresh = std::collections::BTreeMap::new();
-        for id in wanted {
-            let mesh = self.evaluated.node_meshes[&id].clone();
-            fresh.insert(id, Renderable::prepare(&mesh));
+        // Every node the user asked to keep as a ghost, so a subtracted tool
+        // body can be seen while it is being positioned (spec section 6.1). A
+        // ghost group is drawn as its children, one translucent body each,
+        // because that is the assembly the user is placing.
+        let mut ghosts: Vec<NodeId> = Vec::new();
+        for id in self.ghosts() {
+            ghosts.extend(std::iter::once(id).chain(self.scene.descendants(id)));
+        }
+        ghosts.sort_unstable();
+        ghosts.dedup();
+        for id in ghosts {
+            if let Some(mesh) = self.evaluated.node_meshes.get(&id) {
+                fresh.insert(id, Renderable::prepare(mesh));
+            }
+        }
+        // The selection is drawn as *what each selected node evaluates to*, and
+        // not one row further down. Descending to the children outlined shapes
+        // the result does not contain: a difference's cutter as two rims
+        // hanging in mid-air, an intersection's whole uncut box as a cage round
+        // the small lens it leaves, a pattern's source child standing where no
+        // copy of it does.
+        for id in self.top_level_selection() {
+            if let Some(mesh) = self.evaluated.result_mesh(id) {
+                fresh.insert(id, Renderable::prepare_outlined(&mesh));
+            }
         }
         self.node_renderables = fresh;
         self.invalidate_image();
@@ -92,11 +101,21 @@ impl App {
             return;
         }
         let (events, modifiers, held, pointer) = ctx.input(|input| {
+            // `egui-winit` eats Ctrl+X, Ctrl+C and Ctrl+V: it pushes `Cut`,
+            // `Copy` or `Paste` and returns *before* it emits the `Key` event
+            // (egui-winit 0.32.3 `lib.rs:766-781`). Nothing downstream ever
+            // sees the press, so those three bindings -- and anything a user
+            // rebinds onto them -- could never fire. Putting the press back is
+            // what keeps the keymap the single answer to what a chord does,
+            // rather than hard-wiring copy and paste past it.
             let events: Vec<(egui::Key, egui::Modifiers)> = input
                 .events
                 .iter()
                 .filter_map(|event| match event {
                     egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                    egui::Event::Cut => Some((egui::Key::X, egui::Modifiers::COMMAND)),
+                    egui::Event::Copy => Some((egui::Key::C, egui::Modifiers::COMMAND)),
+                    egui::Event::Paste(_) => Some((egui::Key::V, egui::Modifiers::COMMAND)),
                     _ => None,
                 })
                 .collect();
@@ -268,6 +287,11 @@ impl App {
             // with nothing selected too -- an empty pattern to fill later -- so
             // unlike Group it is never disabled.
             self.command_item(ui, Command::Pattern, true);
+            // Issue 80 and issue 82's other half: baking a shape into the
+            // triangles it evaluates to, and taking a cut result apart into the
+            // pieces it is actually in.
+            self.command_item(ui, Command::ConvertToMesh, !self.selection.is_empty());
+            self.command_item(ui, Command::BreakApart, self.selection.len() == 1);
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
             self.command_item(ui, Command::MoveUp, self.can_reorder(-1));
@@ -590,9 +614,55 @@ impl App {
                     if ui.small_button("Cancel").clicked() {
                         job.cancel();
                     }
-                } else if self.worker.is_busy() {
+                } else if let Some(prompt) = &self.file_prompt {
+                    // The dialog is a window of the desktop's, not ours, and on
+                    // Linux it is the portal's -- which can be slow, or absent,
+                    // or simply never answer. It waits on its own thread now, so
+                    // this line is here to say what the application is waiting
+                    // for rather than to apologise for being frozen.
                     ui.add(egui::Spinner::new().size(12.0));
-                    ui.add(egui::Label::new(theme::value("Evaluating\u{2026}")).selectable(false));
+                    ui.add(
+                        egui::Label::new(theme::value(format!(
+                            "{}: choosing a file\u{2026} ({}s)",
+                            prompt.what(),
+                            prompt.waiting_for().as_secs()
+                        )))
+                        .selectable(false),
+                    );
+                    if ui
+                        .small_button("Stop waiting")
+                        .on_hover_text("Give up on the file dialog. If it does answer later, the answer is ignored.")
+                        .clicked()
+                    {
+                        self.stop_waiting_for_file();
+                    }
+                } else if self.worker.is_busy() {
+                    // A spinner and the word "Evaluating..." was the whole of
+                    // what this said, with no way out of a run that had decided
+                    // to take minutes -- while an export in the same bar gets
+                    // its elapsed seconds and a Cancel button. There is no
+                    // honest progress to show for a boolean, which does not know
+                    // how much of itself is left, but how long the user has been
+                    // waiting is always knowable and Stop always available.
+                    ui.add(egui::Spinner::new().size(12.0));
+                    let waited = self.worker.waiting_for().unwrap_or_default();
+                    let text = if waited.as_secs() >= 1 {
+                        format!("Evaluating\u{2026} ({}s)", waited.as_secs())
+                    } else {
+                        "Evaluating\u{2026}".to_string()
+                    };
+                    ui.add(egui::Label::new(theme::value(text)).selectable(false));
+                    if ui
+                        .small_button("Stop")
+                        .on_hover_text(
+                            "Abandon this evaluation. The viewport keeps the last shape it managed to \
+                             build, so what is on screen will be out of date until the next edit.",
+                        )
+                        .clicked()
+                    {
+                        self.worker.abandon();
+                        self.status = Status::Warning("Evaluation stopped -- the viewport is out of date".into());
+                    }
                 } else {
                     let colour = match &self.status {
                         Status::Warning(_) => theme::token::ACCENT,
@@ -774,6 +844,11 @@ impl App {
                     .open(&mut open)
                     .collapsible(false)
                     .resizable(resizable)
+                    // Above the backdrop that blocks the main window, which is
+                    // a foreground layer created just before this one. A window
+                    // left at the default `Middle` would be under it and could
+                    // not be clicked at all.
+                    .order(egui::Order::Foreground)
                     .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO);
                 // The size a dialog asks for is the size it gets here too. An
                 // `egui::Window` given none sizes itself to its contents, and a
@@ -1234,29 +1309,29 @@ impl App {
             label_cell(ui, "Keymap file", label_column);
             ui.horizontal(|ui| {
                 if ui.button("Export...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
+                    let dialog = rfd::FileDialog::new()
                         .add_filter("Simple 3D keymap", &["json"])
-                        .set_file_name("simple3d-keymap.json")
-                        .save_file()
-                    {
-                        if let Err(e) = std::fs::write(&path, self.keymap.to_text()) {
-                            self.fail("Could not write the keymap", &e.to_string());
+                        .set_file_name("simple3d-keymap.json");
+                    self.ask_for_file("Keymap export", dialog, true, |app, path| {
+                        if let Err(e) = std::fs::write(&path, app.keymap.to_text()) {
+                            app.fail("Could not write the keymap", &e.to_string());
                         }
-                    }
+                    });
                 }
                 if ui.button("Import...").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]).pick_file() {
+                    let dialog = rfd::FileDialog::new().add_filter("Simple 3D keymap", &["json"]);
+                    self.ask_for_file("Keymap import", dialog, false, |app, path| {
                         match std::fs::read_to_string(&path)
                             .map_err(|e| e.to_string())
                             .and_then(|t| Keymap::from_text(&t))
                         {
                             Ok(keymap) => {
-                                self.keymap = keymap;
-                                self.persist_keymap();
+                                app.keymap = keymap;
+                                app.persist_keymap();
                             }
-                            Err(e) => self.fail("Could not read the keymap", &e),
+                            Err(e) => app.fail("Could not read the keymap", &e),
                         }
-                    }
+                    });
                 }
             });
             ui.end_row();

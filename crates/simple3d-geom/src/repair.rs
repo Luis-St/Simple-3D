@@ -473,11 +473,22 @@ fn fan_loop_from_own_centre(
 /// ordinary case, which stops at the first attempt, and a tenth of a micron is
 /// still two orders of magnitude below anything a printer resolves.
 pub fn heal(mesh: &Mesh) -> Mesh {
+    heal_until(mesh, &crate::never)
+}
+
+/// The same, giving up between attempts when the answer is no longer wanted.
+/// Four attempts over a mesh of a hundred thousand triangles is where the rest
+/// of a boolean's time goes once the clipping is done, so a cancellation that
+/// only landed in the kernel would still leave the interface waiting on this.
+pub fn heal_until(mesh: &Mesh, give_up: crate::Abandon<'_>) -> Mesh {
     let best = heal_at(mesh, WELD_TOL);
     if best.manifold_issue().is_none() {
         return best;
     }
     for factor in [10.0, 100.0, 1000.0] {
+        if give_up() {
+            return best;
+        }
         let again = heal_at(mesh, WELD_TOL * factor);
         if again.manifold_issue().is_none() {
             return again;

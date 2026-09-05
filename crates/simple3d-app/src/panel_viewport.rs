@@ -81,12 +81,8 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         // A hidden node is hidden: no body, and no selection outline drawn
         // around the body it does not have. Selecting it still gets a
         // manipulator, so it can be put where it belongs before being shown.
-        let selected: Vec<NodeId> = app
-            .top_level_selection()
-            .into_iter()
-            .flat_map(|id| std::iter::once(id).chain(app.scene.descendants(id)))
-            .filter(|&id| app.scene.is_shown(id))
-            .collect();
+        let selected: Vec<NodeId> =
+            app.top_level_selection().into_iter().filter(|&id| app.scene.is_shown(id)).collect();
 
         let mut items: Vec<Item> = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
         // Ghosts before the selection outline, so the outline stays readable.

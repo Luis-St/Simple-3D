@@ -263,6 +263,17 @@ pub struct App {
     /// (issue 59). A rename asks this whether both clicks were on the same row.
     pub(crate) outliner_last_click: Option<NodeId>,
     pub clipboard: Option<Clip>,
+    /// A line to hand the desktop's clipboard on the next frame.
+    ///
+    /// The nodes themselves stay in `clipboard`, which is the whole of what a
+    /// paste reads. This is for the *other* half of the problem: `egui-winit`
+    /// only reports a Ctrl+V at all when the system clipboard holds non-empty
+    /// text, so an application that never writes to it can never be pasted
+    /// into by keyboard. Writing a line saying what was copied also makes
+    /// Ctrl+C do what a desktop expects of it.
+    pub(crate) clipboard_text: Option<String>,
+    /// The file dialog in flight, if there is one. See [`FilePrompt`].
+    pub(crate) file_prompt: Option<FilePrompt>,
 
     pub worker: EvalWorker,
     pub evaluated: Evaluated,
@@ -499,6 +510,8 @@ impl App {
             selection_anchor: None,
             outliner_last_click: None,
             clipboard: None,
+            clipboard_text: None,
+            file_prompt: None,
             worker: EvalWorker::spawn(),
             evaluated: crate::tabs::empty_evaluation(),
             evaluation_generation: 0,
@@ -744,14 +757,70 @@ impl App {
         format!("{}{name} - {APP_NAME}", if self.unsaved() { "*" } else { "" })
     }
 
+    /// Put a file dialog up and say what to do with the path it answers with.
+    ///
+    /// `what` names the wait for the footer, and is what a cancelled dialog
+    /// reports having cancelled -- silence there is the other half of the bug
+    /// this fixes: a portal that answered with nothing left Ctrl+S on an unsaved
+    /// document with no dialog *and* no message, which is indistinguishable from
+    /// a save the user cancelled on purpose.
+    ///
+    /// One at a time. A second dialog while one is up would be two windows
+    /// asking the same question, and only one answer could be acted on.
+    pub(crate) fn ask_for_file(
+        &mut self,
+        what: &'static str,
+        dialog: rfd::FileDialog,
+        saving: bool,
+        then: impl FnOnce(&mut App, std::path::PathBuf) + 'static,
+    ) {
+        if let Some(waiting) = &self.file_prompt {
+            self.status = Status::Warning(format!("Still choosing a file for {}", waiting.what().to_lowercase()));
+            return;
+        }
+        self.file_prompt = Some(FilePrompt {
+            what,
+            answer: ask_for_path(dialog, saving),
+            then: Box::new(then),
+            started: std::time::Instant::now(),
+        });
+    }
+
+    /// Act on a file dialog that has answered. Called once a frame, beside the
+    /// export job's own poll.
+    pub(crate) fn poll_file_prompt(&mut self) {
+        let Some(prompt) = &self.file_prompt else { return };
+        let answer = match prompt.answer.try_recv() {
+            Ok(answer) => answer,
+            // The dialog thread went away without answering, which is the same
+            // outcome as a cancel and is reported as one.
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => None,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        };
+        let prompt = self.file_prompt.take().expect("checked just above");
+        match answer {
+            Some(path) => (prompt.then)(self, path),
+            None => self.status = Status::Info(format!("{} cancelled", prompt.what)),
+        }
+    }
+
+    /// Stop waiting on the dialog in flight.
+    ///
+    /// The thread stays parked until the portal answers, if it ever does, and
+    /// its answer is dropped: what it is holding is a channel nobody is
+    /// listening to any more.
+    pub(crate) fn stop_waiting_for_file(&mut self) {
+        if let Some(prompt) = self.file_prompt.take() {
+            self.status = Status::Warning(format!("Stopped waiting for the file dialog ({})", prompt.what));
+        }
+    }
+
     pub fn open_dialog(&mut self) {
         let mut dialog = rfd::FileDialog::new().add_filter("Simple 3D project", &[PROJECT_EXTENSION]);
         if let Some(dir) = self.path.as_ref().and_then(|p| p.parent()) {
             dialog = dialog.set_directory(dir);
         }
-        if let Some(path) = dialog.pick_file() {
-            self.open_path(&path);
-        }
+        self.ask_for_file("Open", dialog, false, |app, path| app.open_path(&path));
     }
 
     /// Read `path` into the document on screen, replacing whatever it held.
@@ -800,12 +869,12 @@ impl App {
         if let Some(dir) = self.path.as_ref().and_then(|p| p.parent()) {
             dialog = dialog.set_directory(dir);
         }
-        if let Some(mut path) = dialog.save_file() {
+        self.ask_for_file("Save as", dialog, true, |app, mut path| {
             if path.extension().is_none() {
                 path.set_extension(PROJECT_EXTENSION);
             }
-            self.save_to(&path);
-        }
+            app.save_to(&path);
+        });
     }
 
     fn save_to(&mut self, path: &Path) {
@@ -962,6 +1031,8 @@ impl App {
             Delete => self.delete_selection(),
             Group => self.group_selection(),
             Pattern => self.make_pattern(),
+            ConvertToMesh => self.convert_selection_to_mesh(),
+            BreakApart => self.break_selection_apart(),
             Rename => {
                 if let Some(id) = self.primary() {
                     self.rename = Some((id, self.scene.node(id).name.clone()));
@@ -1596,6 +1667,11 @@ impl App {
             return;
         };
         let count = clip.nodes.len();
+        let what = match clip.nodes.as_slice() {
+            [only] => only.name.clone(),
+            nodes => format!("{} nodes", nodes.len()),
+        };
+        self.clipboard_text = Some(format!("Simple 3D: {what}"));
         self.clipboard = Some(clip);
         if cut {
             // Cut is an undoable step of its own, so it cannot lose work even if
@@ -1647,6 +1723,7 @@ impl App {
                 created.push(copy);
             }
         }
+        self.size_fresh_patterns();
         if !created.is_empty() {
             self.selection = created;
             self.on_selection_changed();
@@ -2075,6 +2152,123 @@ impl App {
         }
     }
 
+    /// Bake the selection into stored geometry (issue 80).
+    ///
+    /// What is captured is what the node evaluates to -- booleans done, pattern
+    /// copies laid down -- in the node's *own* frame, so its position, rotation
+    /// and scale still mean what they meant and the shape does not move at the
+    /// moment it is converted.
+    pub fn convert_selection_to_mesh(&mut self) {
+        let targets = self.top_level_selection();
+        if targets.is_empty() {
+            self.status = Status::Warning("Select something to convert".into());
+            return;
+        }
+        if targets.iter().all(|&id| self.scene.node(id).is_mesh()) {
+            self.status = Status::Info("That is already a mesh".into());
+            return;
+        }
+        let mut baked: Vec<(NodeId, simple3d_core::mesh_data::MeshData)> = Vec::new();
+        for &id in &targets {
+            if self.scene.node(id).is_mesh() {
+                continue;
+            }
+            let mesh = simple3d_core::eval::baked_mesh(&self.scene, id);
+            if mesh.triangle_count() == 0 {
+                continue;
+            }
+            baked.push((id, simple3d_core::mesh_data::MeshData::new(mesh)));
+        }
+        if baked.is_empty() {
+            self.status = Status::Warning("There is no geometry there to convert".into());
+            return;
+        }
+        self.edit("Convert to a mesh", None);
+        let mut triangles = 0;
+        for (id, mesh) in baked {
+            triangles += mesh.triangle_count();
+            self.scene.convert_to_mesh(id, mesh);
+        }
+        // The children went with the old body, so anything selected inside one
+        // of them no longer exists.
+        self.selection.retain(|id| self.scene.contains(*id));
+        if self.selection.is_empty() {
+            self.select_only(targets[0]);
+        }
+        self.status = Status::Info(format!(
+            "Converted to {triangles} triangle{} of geometry -- the parameters behind it are gone",
+            plural(triangles)
+        ));
+    }
+
+    /// Take what a node evaluates to, find the pieces it is actually in, and
+    /// make each one a node of its own under a group (issues 80 and 82).
+    ///
+    /// What a cut leaves behind is often several disconnected solids under one
+    /// node, and this is what turns them into objects that can be moved,
+    /// painted and exported apart. A union of shapes that never touched is as
+    /// many pieces as it has operands.
+    pub fn break_selection_apart(&mut self) {
+        let targets = self.top_level_selection();
+        let Some(&id) = targets.first() else {
+            self.status = Status::Warning("Select something to break apart".into());
+            return;
+        };
+        if targets.len() > 1 {
+            self.status = Status::Warning("Break one object apart at a time".into());
+            return;
+        }
+        let mesh = simple3d_core::eval::baked_mesh(&self.scene, id);
+        let parts = simple3d_geom::mesh_ops::connected_parts(&mesh);
+        match parts.len() {
+            0 => {
+                self.status = Status::Warning("There is no geometry there to break apart".into());
+                return;
+            }
+            1 => {
+                self.status = Status::Info("That is one connected piece, so there is nothing to break apart".into());
+                return;
+            }
+            _ => {}
+        }
+        self.edit("Break into separate objects", None);
+        let name = self.scene.node(id).name.clone();
+        let Some(parent) = self.scene.node(id).parent else {
+            self.history.discard_last();
+            return;
+        };
+        let index = self.scene.node(parent).children.iter().position(|&c| c == id).unwrap_or(0);
+        // The pieces go into a union group standing where the original stood,
+        // carrying its transform -- so the whole thing is still one item to
+        // move, and the pieces inside it are where they were.
+        let group = self.scene.add_group(GroupOp::Union, parent, index);
+        {
+            let original = self.scene.node(id);
+            let (position, rotation, scale, anchor, colour) =
+                (original.position, original.rotation, original.scale, original.anchor, original.colour);
+            let holder = self.scene.get_mut(group).unwrap();
+            holder.name = name.clone();
+            holder.position = position;
+            holder.rotation = rotation;
+            holder.scale = scale;
+            holder.anchor = anchor;
+            holder.colour = colour;
+        }
+        let count = parts.len();
+        for (index, part) in parts.into_iter().enumerate() {
+            self.scene.add_mesh(
+                &format!("{name} {}", index + 1),
+                simple3d_core::mesh_data::MeshData::new(part),
+                group,
+                index,
+            );
+        }
+        self.scene.remove(id);
+        self.collapsed.remove(&group);
+        self.select_only(group);
+        self.status = Status::Info(format!("Broke {name} into {count} separate objects"));
+    }
+
     /// Add an empty pattern, for shapes to be put under it afterwards
     /// (issue 67).
     ///
@@ -2340,6 +2534,14 @@ impl App {
                 if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
+                // A pattern that has just gained its first child can now be
+                // measured, the same as when one is dropped in or pasted in.
+                // Without this an empty pattern kept the stock 20 mm step, and
+                // a 20 mm shape added into it afterwards was repeated at
+                // exactly its own width -- one welded bar rather than shapes
+                // standing clear, which is not what the tool gives for the same
+                // shapes the other way round.
+                self.size_fresh_patterns();
                 self.select_only(id);
                 self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
             }
@@ -2488,6 +2690,7 @@ impl App {
         self.edit("Add", None);
         let target = self.primary();
         let created = clipboard::insert(&mut self.scene, &clip, target, false);
+        self.size_fresh_patterns();
         if created.is_empty() {
             self.status = Status::Warning(format!("\u{201C}{}\u{201D} has nothing in it", entry.name));
             return;
@@ -2665,16 +2868,10 @@ impl App {
         {
             dialog = dialog.set_directory(dir);
         }
-        let Some(mut path) = dialog.save_file() else { return };
-        if path.extension().is_none() {
-            path.set_extension(self.export_format.extension());
-        }
-
-        self.settings.last_export_dir = path.parent().map(|p| p.to_path_buf());
-        self.settings.last_export_format = self.export_format.id().to_string();
-        self.settings.last_export_scale = scale;
-        self.settings.last_export_bodies = self.export_bodies.id().to_string();
-
+        // Everything the export needs is settled here, before the dialog goes
+        // up, and travels with it: the answer arrives on a later frame, and the
+        // job must be the one the user asked for and not whatever the document
+        // looks like by the time they have finished choosing a folder.
         let options = simple3d_export::Options {
             format: self.export_format,
             scale,
@@ -2682,8 +2879,20 @@ impl App {
             allow_invalid: false,
             bodies,
         };
-        self.export_job = Some(ExportJob::spawn_parts(path, parts, options, EXPORT_LIMIT));
-        self.modal = Modal::None;
+        let extension = self.export_format.extension();
+        let format_id = self.export_format.id().to_string();
+        let bodies_id = self.export_bodies.id().to_string();
+        self.ask_for_file("Export", dialog, true, move |app, mut path| {
+            if path.extension().is_none() {
+                path.set_extension(extension);
+            }
+            app.settings.last_export_dir = path.parent().map(|p| p.to_path_buf());
+            app.settings.last_export_format = format_id;
+            app.settings.last_export_scale = scale;
+            app.settings.last_export_bodies = bodies_id;
+            app.export_job = Some(ExportJob::spawn_parts(path, parts, options, EXPORT_LIMIT));
+            app.modal = Modal::None;
+        });
     }
 
     fn poll_export(&mut self) {
@@ -2738,6 +2947,62 @@ impl App {
 /// offer.
 fn is_preset(rgb: [u8; 3]) -> bool {
     crate::theme::PAINT_PRESETS.iter().any(|(_, colour)| [colour.r(), colour.g(), colour.b()] == rgb)
+}
+
+/// A file dialog that has been put up, and what to do with the path it comes
+/// back with.
+///
+/// The dialog used to be called straight from `App::update`. `rfd` 0.17 is in
+/// the lock file with neither `ashpd` nor `gtk`, so on Linux it is the raw
+/// D-Bus portal backend: it talks to the portal itself and waits on `pollster`,
+/// on the calling thread. A portal that is slow, absent or confused therefore
+/// took the whole application down with it -- the last frame stayed on screen
+/// with its hover states frozen mid-frame, and the process had to be killed.
+///
+/// It waits on its own thread now. The window keeps drawing, the footer says
+/// what is being waited for and offers a way to stop waiting, and an answer
+/// that never comes costs nothing but a parked thread.
+pub(crate) struct FilePrompt {
+    what: &'static str,
+    answer: std::sync::mpsc::Receiver<Option<std::path::PathBuf>>,
+    then: FollowUp,
+    started: std::time::Instant,
+}
+
+/// What to do with the path a dialog answers with, on the frame it arrives.
+/// Runs on the interaction thread, so it can touch the whole application.
+type FollowUp = Box<dyn FnOnce(&mut App, std::path::PathBuf)>;
+
+impl FilePrompt {
+    pub(crate) fn what(&self) -> &'static str {
+        self.what
+    }
+
+    pub(crate) fn waiting_for(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+}
+
+/// Put the dialog up on a thread of its own and hand back the channel its
+/// answer will arrive on.
+///
+/// Not on macOS, where AppKit requires a file dialog to be run from the main
+/// thread and moving it would be a crash rather than a fix. The bug this
+/// addresses is the Linux portal's, and the platform that cannot have the fix
+/// is the one that does not have the bug.
+fn ask_for_path(dialog: rfd::FileDialog, saving: bool) -> std::sync::mpsc::Receiver<Option<std::path::PathBuf>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let run = move || if saving { dialog.save_file() } else { dialog.pick_file() };
+    #[cfg(target_os = "macos")]
+    let _ = tx.send(run());
+    #[cfg(not(target_os = "macos"))]
+    std::thread::Builder::new()
+        .name("simple3d-file-dialog".into())
+        .spawn(move || {
+            let _ = tx.send(run());
+        })
+        .expect("the platform can start a thread");
+    rx
 }
 
 fn plural(n: usize) -> &'static str {
@@ -2864,6 +3129,23 @@ impl App {
         crate::tabs::show(self, ctx);
         panel_viewport::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
+        // A dialog is modal, and it was only half of one: `handle_shortcuts`
+        // hands it the keyboard, but nothing stopped the main window taking the
+        // pointer, so a dialog left open behind it was an application whose
+        // shortcuts had all silently stopped while the document could still be
+        // edited by mouse -- including, with the Export dialog up, editing the
+        // very geometry that dialog is reporting on.
+        //
+        // Drawn before the dialog itself, so the dialog's own layer is created
+        // after this one and therefore sits above it: an embedded dialog is a
+        // window in this same viewport and has to stay live. A dialog that is a
+        // window of its own is a viewport of its own, which this cannot reach.
+        if self.modal != Modal::None {
+            egui::Modal::new(egui::Id::new("dialog-backdrop"))
+                .backdrop_color(egui::Color32::from_black_alpha(64))
+                .frame(egui::Frame::NONE)
+                .show(ctx, |_ui| {});
+        }
         self.modals(ctx);
         // A load let go of somewhere no drop could take it is simply put down.
         // The outliner ends a drag it can see the end of, but a shape picked up
@@ -2923,8 +3205,12 @@ impl eframe::App for App {
             self.dirty = false;
         }
         self.poll_export();
+        self.poll_file_prompt();
         self.advance_camera();
         self.refresh_node_renderables();
+        if let Some(text) = self.clipboard_text.take() {
+            ctx.copy_text(text);
+        }
 
         let title = self.title();
         if title != self.last_title {
@@ -2962,6 +3248,12 @@ impl eframe::App for App {
             // Progress and the preview, at a rate a person can read rather than
             // at whatever the rasterizer can manage.
             ctx.request_repaint_after(Duration::from_millis(33));
+        } else if self.file_prompt.is_some() {
+            // The dialog answers on a thread, and nothing else will wake this
+            // loop to notice: the answer arrives with no event of its own. Four
+            // times a second is enough to pick it up without being felt, and it
+            // keeps the footer's count of seconds honest.
+            ctx.request_repaint_after(Duration::from_millis(250));
         } else if self.status != Status::Idle {
             // A status message is still for its whole lifetime and only then
             // fades. Nothing changes until the fade starts, so ask for the
@@ -4006,6 +4298,85 @@ mod tests {
         let (whole_lo, whole_hi) = app.export_mesh().bounds().expect("the scene exported nothing");
         assert!((whole_lo.z - lo.z).abs() < 1e-6 && (whole_hi.z - hi.z).abs() < 1e-6);
     }
+    #[test]
+    fn a_file_dialog_does_not_hold_up_the_frame_and_never_answers_silently() {
+        // The dialog used to be called straight from `App::update` and waited on
+        // the calling thread, so a portal that was slow, absent or confused took
+        // the whole application down with it -- the last frame stayed on screen
+        // with its hover states frozen, and the process had to be killed. It
+        // waits on a thread now and is picked up by `poll_file_prompt`.
+        //
+        // Driven through a channel of this test's own rather than a real
+        // dialog: what is under test is that the answer arrives on a later
+        // frame and that no outcome is silent.
+        let mut app = app_in(temp_config_dir("file-prompt"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let chosen = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let sink = chosen.clone();
+        app.file_prompt = Some(FilePrompt {
+            what: "Save as",
+            answer: rx,
+            then: Box::new(move |_app, path| *sink.borrow_mut() = Some(path)),
+            started: std::time::Instant::now(),
+        });
+
+        // Nothing yet, and nothing blocking: the frame goes on without an answer.
+        app.poll_file_prompt();
+        assert!(app.file_prompt.is_some(), "the prompt was given up on before it answered");
+        assert!(chosen.borrow().is_none());
+
+        tx.send(Some(PathBuf::from("/tmp/simple3d-test.simple3d"))).expect("the prompt is listening");
+        app.poll_file_prompt();
+        assert!(app.file_prompt.is_none(), "the answered prompt was not cleared");
+        assert_eq!(chosen.borrow().as_deref(), Some(Path::new("/tmp/simple3d-test.simple3d")));
+
+        // A dialog that answers with nothing says so. Silence there was the
+        // other half of the bug: Ctrl+S on an unsaved document produced no
+        // dialog and no message, which is indistinguishable from a cancel.
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.file_prompt = Some(FilePrompt {
+            what: "Save as",
+            answer: rx,
+            then: Box::new(|_app, _path| panic!("a cancelled dialog must not act")),
+            started: std::time::Instant::now(),
+        });
+        tx.send(None).expect("the prompt is listening");
+        app.poll_file_prompt();
+        assert!(app.file_prompt.is_none());
+        assert!(app.status_text().contains("cancelled"), "a cancelled dialog said nothing: {}", app.status_text());
+    }
+
+    /// The selection outline draws the shape a node evaluates to, and stops
+    /// there. It used to expand to the node *and all its descendants*, so a
+    /// group's operands were outlined alongside its result: a difference's
+    /// cutter as two rims hanging in mid-air beside the solid, an
+    /// intersection's whole uncut box as a cage around the small lens it
+    /// leaves, a pattern's source child standing where no copy of it does.
+    #[test]
+    fn a_selected_group_is_outlined_as_its_result_not_as_its_operands() {
+        let mut app = app_in(temp_config_dir("outline-group"));
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Difference, root, 0);
+        let plate = app.scene.add_primitive("plate", group, 0).expect("the plate is in the registry");
+        let cutter = app.scene.add_primitive("box", group, 1).expect("the box is in the registry");
+        app.reevaluate_for_test();
+        let (plate_lo, plate_hi) = app.evaluated.node_meshes[&plate].bounds().expect("the plate has bounds");
+        let (cut_lo, cut_hi) = app.evaluated.node_meshes[&cutter].bounds().expect("the cutter has bounds");
+        assert!(cut_lo.z < plate_lo.z && cut_hi.z > plate_hi.z, "this test needs a cutter taller than the plate");
+
+        app.select_only(group);
+        app.renderable_key = u64::MAX;
+        app.refresh_node_renderables();
+        let outlined: Vec<NodeId> = app.node_renderables.keys().copied().collect();
+        assert_eq!(outlined, vec![group], "the operands were outlined too");
+
+        let (lo, hi) = app.node_renderables[&group].mesh.bounds().expect("the group outlines nothing");
+        assert!(
+            lo.z >= plate_lo.z - 1e-6 && hi.z <= plate_hi.z + 1e-6,
+            "the outline reaches {lo:?}..{hi:?}, past the plate the cut left -- it is drawing the cutter"
+        );
+    }
+
     /// Issue 58: a 3MF used to hold the whole scene as one component, so a
     /// slicer had nothing to pick apart. The objects an export separates are
     /// the scene's top-level nodes, each named and each the body it evaluates
@@ -5492,6 +5863,31 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_made_empty_is_sized_by_the_first_shape_added_into_it() {
+        // The pattern *tool* measures the shapes it wraps, so Ctrl+Shift+P on a
+        // 20 mm box gives a 30 mm step. A pattern made with nothing selected
+        // has nothing to measure yet and kept the stock 20 mm, so a 20 mm shape
+        // added into it afterwards was repeated at exactly its own width and
+        // the copies fused into one bar instead of standing clear.
+        let mut app = app_in(temp_config_dir("pattern-sized-on-add"));
+        app.clear_selection();
+        app.run(Command::Pattern);
+        let pat = app.primary().expect("the pattern is selected");
+        assert_eq!(app.scene.node(pat).params(), Some(&simple3d_core::pattern::default_params()));
+
+        // Through the palette's own path -- a click on a tile with the empty
+        // pattern selected -- rather than the outliner's row menu.
+        app.add_node(Some("box"), GroupOp::Union);
+        let params = app.scene.node(pat).params().expect("the pattern kept its parameters");
+        assert_ne!(params, &simple3d_core::pattern::default_params(), "the pattern kept the stock 20 mm step");
+
+        // And what it evaluates to is three shapes standing clear, not one bar.
+        app.reevaluate_for_test();
+        let (lo, hi) = app.evaluated.node_meshes[&pat].bounds().expect("the pattern evaluated to nothing");
+        assert!(hi.x - lo.x > 60.0, "the copies fused: the run is only {} mm across", hi.x - lo.x);
+    }
+
+    #[test]
     fn the_spacing_handle_lengthens_a_diagonal_run_without_straightening_it() {
         // The handle drives the whole run, not just its X component: a pattern
         // stepping diagonally must stay diagonal when it is dragged longer, and
@@ -5862,5 +6258,83 @@ mod tests {
             "the drag snapped to the corner with snapping off: {:?}",
             app.scene.node(a).position
         );
+    }
+
+    // -- the bodies and commands issue 83 added ------------------------------
+
+    #[test]
+    fn converting_to_a_mesh_keeps_the_node_and_loses_the_recipe() {
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Difference, root, 0);
+        app.scene.add_primitive("box", group, 0).unwrap();
+        let hole = app.scene.add_primitive("cylinder", group, 1).unwrap();
+        app.scene.get_mut(hole).unwrap().position = Vec3::new(4.0, 0.0, 0.0);
+        app.scene.get_mut(group).unwrap().name = "Drilled".into();
+        app.select_only(group);
+        app.reevaluate_for_test();
+
+        app.run(Command::ConvertToMesh);
+        assert!(app.scene.node(group).is_mesh(), "it is still a group");
+        assert_eq!(app.scene.node(group).name, "Drilled", "the node was replaced rather than converted");
+        assert!(app.scene.node(group).children.is_empty(), "the operands outlived the body they made");
+        assert!(app.scene.node(group).mesh().unwrap().triangle_count() > 0);
+        assert_eq!(app.selection, vec![group], "the converted node should stay selected");
+
+        // And it is one undo step that puts the whole thing back.
+        app.run(Command::Undo);
+        assert!(app.scene.node(group).is_group());
+        assert_eq!(app.scene.node(group).children.len(), 2);
+    }
+
+    #[test]
+    fn converting_something_that_is_already_a_mesh_says_so_rather_than_working() {
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+        app.run(Command::ConvertToMesh);
+        let before = app.history.undo_len();
+        app.run(Command::ConvertToMesh);
+        assert_eq!(app.history.undo_len(), before, "converting a mesh recorded an undo step");
+        let _ = id;
+    }
+
+    #[test]
+    fn breaking_apart_makes_one_node_per_piece_and_leaves_them_where_they_were() {
+        // Issue 82 end to end: a union of solids that never touch evaluates to
+        // one node holding several separate pieces, and this turns each of them
+        // into an object of its own.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Union, root, 0);
+        for i in 0..3 {
+            let id = app.scene.add_primitive("box", group, i).unwrap();
+            app.scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 60.0, 0.0, 0.0);
+        }
+        app.scene.get_mut(group).unwrap().position = Vec3::new(40.0, 10.0, 0.0);
+        app.select_only(group);
+        app.reevaluate_for_test();
+        let before = app.evaluated.mesh.bounds().unwrap();
+
+        app.run(Command::BreakApart);
+        let holder = app.primary().expect("the holder is selected");
+        assert!(app.scene.node(holder).is_group());
+        assert_eq!(app.scene.node(holder).children.len(), 3, "three boxes standing apart are three pieces");
+        for &child in &app.scene.node(holder).children {
+            assert!(app.scene.node(child).is_mesh());
+            assert!(app.scene.node(child).mesh().unwrap().triangle_count() > 0);
+        }
+        app.reevaluate_for_test();
+        let after = app.evaluated.mesh.bounds().unwrap();
+        assert!((before.0 - after.0).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
+        assert!((before.1 - after.1).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
+    }
+
+    #[test]
+    fn breaking_apart_one_connected_piece_says_what_to_do_instead() {
+        let mut app = headless_app();
+        let before = app.scene.len();
+        app.run(Command::BreakApart);
+        assert_eq!(app.scene.len(), before, "a single piece was taken apart anyway");
+        assert!(app.status_text().contains("one connected piece"), "{}", app.status_text());
     }
 }

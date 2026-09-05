@@ -40,6 +40,9 @@ pub enum Glyph {
     EyeOff,
     Bracket,
     Warning,
+    /// The body that is not a primitive: geometry a node owns outright
+    /// (issue 80).
+    Mesh,
     // Primitive silhouettes.
     Box,
     RoundedBox,
@@ -296,6 +299,14 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.closed(&[(0.5, 0.10), (0.94, 0.86), (0.06, 0.86)]);
             pen.line(&[(0.5, 0.38), (0.5, 0.62)]);
             pen.disc(0.5, 0.75, 0.05, pen.colour);
+        }
+        // A surface made of triangles, which is exactly what a mesh body is and
+        // what tells it apart from the parametric shape it was converted from.
+        Glyph::Mesh => {
+            pen.closed(&[(0.5, 0.10), (0.90, 0.34), (0.90, 0.70), (0.5, 0.92), (0.10, 0.70), (0.10, 0.34)]);
+            pen.line(&[(0.10, 0.34), (0.5, 0.52), (0.90, 0.34)]);
+            pen.line(&[(0.5, 0.10), (0.5, 0.52), (0.5, 0.92)]);
+            pen.line(&[(0.10, 0.70), (0.5, 0.52), (0.90, 0.70)]);
         }
         Glyph::Box => {
             pen.closed(&[(0.10, 0.34), (0.50, 0.14), (0.90, 0.34), (0.90, 0.72), (0.50, 0.92), (0.10, 0.72)]);

@@ -64,9 +64,15 @@ fn shapes(app: &mut App, ui: &mut egui::Ui, empty: bool) {
 /// nobody reads. The choice it reports lives in the document options, beside
 /// the rest of what the document does to a new shape.
 fn landing_hint(app: &mut App, ui: &mut egui::Ui) {
-    ui.horizontal_wrapped(|ui| {
+    let hint = crate::app::insertion_hint(app);
+    ui.horizontal(|ui| {
         ui.add_space(theme::metric::PANEL_PAD);
-        ui.add(egui::Label::new(theme::hint(crate::app::insertion_hint(app))).selectable(false));
+        // Held to the room actually left, and told to wrap in it. It used to run
+        // off the end at the stock dock width -- "Lands at what the camera is
+        // looking at: 0," and then nothing -- so the coordinates, which are the
+        // only reason the line exists, were the part that was cut off.
+        ui.set_max_width((ui.available_width() - theme::metric::PANEL_PAD).max(1.0));
+        ui.add(egui::Label::new(theme::hint(hint)).selectable(false).wrap());
     });
     ui.add_space(4.0);
 }

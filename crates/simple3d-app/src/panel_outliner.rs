@@ -261,13 +261,7 @@ fn drag_ghost(app: &App, ctx: &egui::Context, load: Carried, carried: usize) {
                 return;
             }
             let node = app.scene.node(source);
-            let glyph = if node.is_pattern() {
-                Glyph::Pattern
-            } else if node.is_group() {
-                Glyph::Bracket
-            } else {
-                Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
-            };
+            let glyph = node_glyph(node);
             // A whole selection travels under one slab, named for how much of
             // it there is: eight slabs stacked on the pointer would cover the
             // drop indicator they exist to point at.
@@ -392,12 +386,10 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], draggin
     let name = node.name.clone();
     let visible = node.visible;
     let is_group = node.is_group();
-    let is_pattern = node.is_pattern();
     let is_root = id == app.scene.root();
     let selected = app.is_selected(id);
     let failed = app.evaluated.error_for(id).is_some();
     let badge = operator_badge(&app.scene, id);
-    let type_id = node.spec().map(|s| s.type_id).unwrap_or("");
 
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, metric::ROW), egui::Sense::hover());
     // A shadowed row is a picture of where the load came from and nothing else:
@@ -483,13 +475,7 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], draggin
 
     // Type glyph: a bracket for a group, a solid mark for a shape.
     let glyph_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::Vec2::splat(14.0));
-    let glyph = if is_pattern {
-        Glyph::Pattern
-    } else if is_group {
-        Glyph::Bracket
-    } else {
-        Glyph::for_primitive(type_id)
-    };
+    let glyph = node_glyph(app.scene.node(id));
     let glyph_colour = if failed {
         token::DANGER
     } else if !visible {
@@ -682,6 +668,25 @@ pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> 
         && carried.iter().all(|&source| target.parent != source && !scene.is_ancestor_of(source, target.parent))
 }
 
+/// The mark a node wears in the tree, by what kind of body it is.
+///
+/// One function rather than the same chain of tests written out at each of the
+/// three places a row's mark is drawn -- the row itself, the drag slab, and the
+/// palette's own tiles -- because a body type added without a mark shows up as
+/// a box in some of them and not others, which is worse than showing up as a
+/// box in all three.
+pub(crate) fn node_glyph(node: &simple3d_core::scene::Node) -> Glyph {
+    if node.is_mesh() {
+        Glyph::Mesh
+    } else if node.is_pattern() {
+        Glyph::Pattern
+    } else if node.is_group() {
+        Glyph::Bracket
+    } else {
+        Glyph::for_primitive(node.spec().map(|s| s.type_id).unwrap_or(""))
+    }
+}
+
 /// The right-click menu on an outliner row.
 ///
 /// Everything here is also a command with a keyboard binding and a place in the
@@ -690,7 +695,6 @@ pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> 
 /// reading the row you are already looking at.
 fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: bool) {
     let is_group = app.scene.node(id).is_group();
-    let is_pattern = app.scene.node(id).is_pattern();
     use simple3d_core::keymap::Command;
 
     /// One command in the menu. What was picked is collected rather than run on
@@ -780,7 +784,7 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
             }
         })
         .response
-        .on_hover_text(if is_pattern {
+        .on_hover_text(if app.scene.node(id).is_pattern() {
             "Into this pattern, to be repeated"
         } else if is_group {
             "Into this group"
@@ -797,6 +801,11 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         ui.separator();
         item(ui, keymap, &mut chosen, Command::Group, !is_root);
         item(ui, keymap, &mut chosen, Command::Pattern, !is_root);
+        // Baking a shape into its triangles, and taking apart what a cut left
+        // behind (issues 80 and 82). Both act on the selection, which the click
+        // above has already made this row.
+        item(ui, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
+        item(ui, keymap, &mut chosen, Command::BreakApart, !is_root && !multiple);
         // Disabled where the move has nowhere to go, rather than enabled and
         // silent: a node that is already first among its siblings used to
         // answer a click with a status line that had faded by the time anyone

@@ -3,6 +3,7 @@ pub mod config;
 pub mod eval;
 pub mod keymap;
 pub mod library;
+pub mod mesh_data;
 pub mod pattern;
 pub mod pattern_library;
 pub mod primitive;

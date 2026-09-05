@@ -17,7 +17,7 @@
 use crate::primitive::ParamValue;
 use crate::scene::{Anchor, Body, ExportBody, GroupOp, NodeId, Scene};
 use crate::xform::Xform;
-use simple3d_geom::{evaluate_boolean, Mesh, Vec3};
+use simple3d_geom::{evaluate_boolean, evaluate_boolean_until, Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -45,6 +45,15 @@ pub struct Evaluated {
     /// and its inverse to turn a world-space drag back into the parent-frame
     /// coordinates `Node::position` is stored in.
     pub node_frames: BTreeMap<NodeId, Xform>,
+    /// What each *group* evaluates to, in the frame `node_frames` records for
+    /// it -- its own boolean result, not its operands.
+    ///
+    /// A group has no surface of its own to click on, which is why it is not in
+    /// `node_meshes`, but it does have a shape, and the selection outline has to
+    /// draw that shape rather than the shapes that went into it. Held
+    /// untransformed and shared with the subtree cache, so recording it costs an
+    /// `Arc` rather than a copy of the geometry.
+    pub group_meshes: BTreeMap<NodeId, Arc<Mesh>>,
     /// Each node's own bounding box in its own frame, after its anchor and before
     /// its rotation and position. This is what the resize handles sit on.
     pub node_local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
@@ -64,6 +73,26 @@ pub struct Evaluated {
 impl Evaluated {
     pub fn error_for(&self, node: NodeId) -> Option<&NodeError> {
         self.errors.iter().find(|e| e.node == node)
+    }
+
+    /// A node's own result in world space: what the node *is*, booleans and all.
+    ///
+    /// This is what the selection outline draws. Outlining a group by outlining
+    /// its children instead draws shapes the result does not contain -- a
+    /// difference's cutter as two rims hanging in mid-air where nothing is, an
+    /// intersection's whole uncut box as a cage around the small lens it
+    /// actually leaves.
+    pub fn result_mesh(&self, id: NodeId) -> Option<std::borrow::Cow<'_, Mesh>> {
+        if let Some(mesh) = self.node_meshes.get(&id) {
+            return Some(std::borrow::Cow::Borrowed(mesh));
+        }
+        let mesh = self.group_meshes.get(&id)?;
+        let frame = self.node_frames.get(&id)?;
+        Some(std::borrow::Cow::Owned(Mesh {
+            positions: mesh.positions.iter().map(|&p| frame.point(p)).collect(),
+            indices: mesh.indices.clone(),
+            tags: mesh.tags.clone(),
+        }))
     }
 }
 
@@ -146,6 +175,7 @@ impl Evaluator {
         Evaluated {
             mesh: result.mesh.clone(),
             node_meshes: collected.meshes,
+            group_meshes: collected.group_meshes,
             node_frames: collected.frames,
             node_local_bounds: collected.local_bounds,
             node_world_bounds: collected.world_bounds,
@@ -173,6 +203,13 @@ impl Evaluator {
         let node = scene.node(id);
         let mut errors: Vec<NodeError> = Vec::new();
         let mut local = match &node.body {
+            Body::Mesh { mesh } => {
+                let mut copy = mesh.mesh.clone();
+                if let Some(colour) = scene.effective_colour(id) {
+                    copy.set_tag(colour.tag());
+                }
+                copy
+            }
             Body::Primitive { .. } => {
                 // The generated mesh is cached by its shape alone and shared
                 // between identical primitives, so the colour is stamped on the
@@ -196,7 +233,7 @@ impl Evaluator {
                 if cancel.is_cancelled() {
                     return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
                 }
-                combine(*op, &child_meshes, id, &node.name, &mut errors)
+                combine(*op, &child_meshes, id, &node.name, &mut errors, cancel)
             }
             Body::Pattern { params } => {
                 // The unit the pattern repeats: its children, placed by their own
@@ -249,7 +286,7 @@ impl Evaluator {
                 // other, which is the ordinary case and the one a helix makes
                 // many of: `union_all` rejects non-overlapping operands on their
                 // bounding boxes and never enters the BSP kernel for them.
-                combine(GroupOp::Union, &copies, id, &node.name, &mut errors)
+                combine(GroupOp::Union, &copies, id, &node.name, &mut errors, cancel)
             }
         };
 
@@ -327,8 +364,31 @@ impl Evaluator {
                 }
                 out.meshes.insert(id, world);
             }
+            // A stored mesh: its own geometry in world space, so picking, the
+            // selection outline and the ghost display all reach it.
+            Body::Mesh { .. } => {
+                let subtree = self.subtree(scene, id, cancel);
+                let inv =
+                    Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale))
+                        .inverse();
+                if let Some((lo, hi)) = subtree.mesh.bounds() {
+                    let (a, b) = (inv.point(lo), inv.point(hi));
+                    out.local_bounds.insert(id, (a.min(b), a.max(b)));
+                }
+                let world = Arc::new(apply(&parent, &subtree.mesh));
+                if let Some(bounds) = world.bounds() {
+                    out.world_bounds.insert(id, bounds);
+                }
+                out.meshes.insert(id, world);
+            }
             Body::Group { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
+                // The group's own result, kept so the selection outline can draw
+                // the shape the group *is*. It stays in the parent's frame:
+                // `parent` is what `node_frames` records for this node, so the
+                // pair is enough to place it, and sharing the `Arc` with the
+                // subtree cache costs nothing.
+                out.group_meshes.insert(id, subtree.mesh.clone());
                 if let Some((lo, hi)) = subtree.mesh.bounds() {
                     // A group's mesh is already in its parent's frame, so undo
                     // the node's own transform to get its local box.
@@ -429,6 +489,17 @@ impl Evaluator {
                     }
                 }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
+            }
+            Body::Mesh { mesh } => {
+                "mesh".hash(&mut hasher.0);
+                // The geometry itself never changes -- a stored mesh is
+                // immutable, and an edit to one replaces it -- so its identity
+                // is the allocation it lives in plus how big it is. Hashing a
+                // hundred thousand vertices on every keystroke would cost more
+                // than rebuilding the shapes the cache exists to avoid.
+                (Arc::as_ptr(mesh) as usize).hash(&mut hasher.0);
+                mesh.triangle_count().hash(&mut hasher.0);
+                crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
             }
         }
     }
@@ -583,11 +654,63 @@ pub fn subtree_bounds(scene: &Scene, id: NodeId) -> Option<(Vec3, Vec3)> {
     Evaluator::new().subtree(scene, id, &Cancel::new()).mesh.bounds()
 }
 
-fn combine(op: GroupOp, children: &[Mesh], id: NodeId, name: &str, errors: &mut Vec<NodeError>) -> Mesh {
+/// The geometry a node evaluates to, in the node's *own* frame: its booleans
+/// done and its pattern copies laid down, but before its anchor, scale,
+/// rotation and position (issue 80).
+///
+/// The node's own frame, and not the parent's, is what "convert this to a mesh"
+/// has to capture. A stored mesh replaces the *body*, and the node keeps its
+/// transform -- so capturing the placed geometry and then placing it again would
+/// move the shape twice at the moment it was converted, which is the one thing
+/// a conversion must never do.
+///
+/// The anchor is taken back out for the same reason: the node keeps its anchor,
+/// and the offset a base anchor applies is recomputed from the stored mesh --
+/// which is this same geometry, so it comes out the same. Leaving it in would
+/// apply it twice.
+pub fn baked_mesh(scene: &Scene, id: NodeId) -> Mesh {
+    if !scene.contains(id) {
+        return Mesh::new();
+    }
+    let mut evaluator = Evaluator::new();
+    let result = evaluator.subtree(scene, id, &Cancel::new());
+    let node = scene.node(id);
+    let inverse =
+        Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale)).inverse();
+    let mesh = apply(&inverse, &result.mesh);
+    if result.anchor_offset == Vec3::ZERO {
+        mesh
+    } else {
+        mesh.translated(-result.anchor_offset)
+    }
+}
+
+fn combine(
+    op: GroupOp,
+    children: &[Mesh],
+    id: NodeId,
+    name: &str,
+    errors: &mut Vec<NodeError>,
+    cancel: &Cancel,
+) -> Mesh {
     if children.is_empty() {
         return Mesh::new();
     }
-    let mut result = evaluate_boolean(op.to_geom(), children);
+    // The boolean is where an evaluation's time goes, and it used to be the one
+    // part of it that could not be interrupted: the flag was checked where the
+    // work is not. A union of dozens of finely tessellated solids ran for
+    // minutes with nothing able to stop it, so `EvalWorker::submit`'s
+    // `cancel.cancel()` never landed, every newer edit queued behind it, and the
+    // application could not be got out of it -- the footer still said
+    // "Evaluating..." with every node deleted.
+    let result = evaluate_boolean_until(op.to_geom(), children, &|| cancel.is_cancelled());
+    if cancel.is_cancelled() {
+        // Not a result, and never used: the run is marked cancelled and the
+        // worker drops it. Saying so here rather than reporting the abandoned
+        // mesh as non-manifold, which it usually is.
+        return result;
+    }
+    let mut result = result;
     if op == GroupOp::Hull {
         // A hull is a new surface stretched over the operands, not a selection
         // of their faces: there is no body a given face came from. It takes the
@@ -619,6 +742,7 @@ fn combine(op: GroupOp, children: &[Mesh], id: NodeId, name: &str, errors: &mut 
 #[derive(Default)]
 struct Collected {
     meshes: BTreeMap<NodeId, Arc<Mesh>>,
+    group_meshes: BTreeMap<NodeId, Arc<Mesh>>,
     frames: BTreeMap<NodeId, Xform>,
     local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
     world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
@@ -706,6 +830,52 @@ mod tests {
     fn size(mesh: &Mesh) -> Vec3 {
         let (lo, hi) = mesh.bounds().unwrap();
         hi - lo
+    }
+
+    #[test]
+    fn a_boolean_in_flight_can_be_cancelled() {
+        // The flag used to be checked where the work is not: `combine` took no
+        // cancellation at all, so once a union started, the flag the interface
+        // sets on the next edit could never land. The job ran to the end, every
+        // newer edit queued behind it, and with a big enough union the
+        // application could not be got out of it -- the footer still said
+        // "Evaluating..." with every node deleted.
+        //
+        // A union of finely tessellated spheres that all overlap is the easiest
+        // way to reach a boolean that costs seconds. Cancelled a moment in, it
+        // must stop in a moment rather than run to the end.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        for i in 0..4 {
+            let id = scene.add_primitive("sphere", group, i).expect("the sphere is in the registry");
+            let node = scene.get_mut(id).unwrap();
+            node.segments = Some(96);
+            node.position = Vec3::new(i as f64 * 12.0, 0.0, 0.0);
+        }
+
+        // How long it takes when nobody interrupts it, so the assertion below is
+        // measured against this machine rather than against a guess.
+        let uninterrupted = std::time::Instant::now();
+        let whole = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let uninterrupted = uninterrupted.elapsed();
+        assert!(!whole.cancelled);
+        assert!(
+            uninterrupted > std::time::Duration::from_millis(250),
+            "this test needs a union that takes a while; it took {uninterrupted:?}"
+        );
+
+        let cancel = Cancel::new();
+        let flag = cancel.clone();
+        let started = std::time::Instant::now();
+        let runner = std::thread::spawn(move || Evaluator::new().evaluate(&scene, &cancel));
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        flag.cancel();
+        let out = runner.join().expect("the evaluation thread did not panic");
+        let took = started.elapsed();
+
+        assert!(out.cancelled, "the run does not report itself cancelled");
+        assert!(took < uninterrupted / 2, "it took {took:?} of the {uninterrupted:?} it takes uninterrupted");
     }
 
     /// Every colour a mesh's faces are painted, with how many faces each has.
@@ -995,7 +1165,7 @@ mod tests {
         let mut sliver = Mesh::new();
         sliver.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
         let mut errors = Vec::new();
-        let out = combine(GroupOp::Union, &[sliver.clone(), sliver], 42, "Bad group", &mut errors);
+        let out = combine(GroupOp::Union, &[sliver.clone(), sliver], 42, "Bad group", &mut errors, &Cancel::new());
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0].node, 42);
         assert_eq!(errors[0].name, "Bad group");
@@ -1320,5 +1490,59 @@ mod tests {
         // Its own mesh is still available so it can be drawn as a ghost.
         assert!(out.node_meshes.contains_key(&b));
         let _ = a;
+    }
+
+    // -- the bodies issue 80 added ------------------------------------------
+
+    #[test]
+    fn baking_a_node_captures_what_it_evaluates_to_without_moving_it() {
+        // Issue 80's whole correctness condition: converting must not shift the
+        // shape, whatever the node's transform and anchor happen to be.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Difference, root, 0);
+        let base = plate(&mut scene, group);
+        let hole = cylinder(&mut scene, group, 6.0, 40.0);
+        scene.get_mut(hole).unwrap().position = Vec3::new(5.0, 0.0, 0.0);
+        {
+            let node = scene.get_mut(group).unwrap();
+            node.position = Vec3::new(30.0, -12.0, 4.0);
+            node.rotation = Vec3::new(0.0, 0.0, 35.0);
+            node.scale = Vec3::new(1.5, 1.0, 2.0);
+            node.anchor = Anchor::Base;
+        }
+        let before = Evaluator::new().evaluate(&scene, &Cancel::new()).mesh.bounds().unwrap();
+
+        let baked = baked_mesh(&scene, group);
+        assert!(baked.triangle_count() > 0);
+        let mut converted = scene.clone();
+        assert!(converted.convert_to_mesh(group, crate::mesh_data::MeshData::new(baked)));
+        assert!(converted.node(group).is_mesh());
+        assert!(converted.node(group).children.is_empty(), "the operands outlived the body they made");
+
+        let after = Evaluator::new().evaluate(&converted, &Cancel::new()).mesh.bounds().unwrap();
+        assert!((before.0 - after.0).length() < 1e-6, "the shape moved: {before:?} -> {after:?}");
+        assert!((before.1 - after.1).length() < 1e-6, "the shape moved: {before:?} -> {after:?}");
+        let _ = base;
+    }
+
+    #[test]
+    fn a_stored_mesh_is_placed_by_its_node_like_any_other_body() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let id = scene.add_mesh(
+            "Baked",
+            crate::mesh_data::MeshData::new(simple3d_geom::primitives::box_mesh(20.0, 20.0, 20.0)),
+            root,
+            0,
+        );
+        scene.get_mut(id).unwrap().position = Vec3::new(50.0, 0.0, 0.0);
+        scene.get_mut(id).unwrap().scale = Vec3::new(2.0, 1.0, 1.0);
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (lo, hi) = out.mesh.bounds().unwrap();
+        assert!((hi.x - lo.x - 40.0).abs() < 1e-6, "the scale was not applied: {}", hi.x - lo.x);
+        assert!(((lo.x + hi.x) * 0.5 - 50.0).abs() < 1e-6, "the position was not applied");
+        assert!(out.node_meshes.contains_key(&id), "a mesh body has nothing to pick");
     }
 }

@@ -1143,6 +1143,28 @@ fn key(harness: &mut Harness<'_, App>, key: egui::Key) {
 }
 
 #[test]
+fn the_clipboard_chords_reach_the_application() {
+    // `egui-winit` turns Ctrl+X, Ctrl+C and Ctrl+V into `Cut`, `Copy` and
+    // `Paste` and never emits the key press underneath them, so these three
+    // bindings -- alone in the whole keymap -- can only be tested through the
+    // events the window system really delivers. Driving `Command::Copy`
+    // directly, which is what the other tests do, is exactly what let this go
+    // unnoticed.
+    let mut harness = harness("clipboard-chords");
+    let root = harness.state().scene.root();
+    let before = harness.state().scene.node(root).children.len();
+
+    event(&mut harness, egui::Event::Copy);
+    assert!(harness.state().clipboard.is_some(), "Ctrl+C filled the clipboard");
+
+    event(&mut harness, egui::Event::Paste("anything".into()));
+    assert_eq!(harness.state().scene.node(root).children.len(), before + 1, "Ctrl+V pasted the copied node");
+
+    event(&mut harness, egui::Event::Cut);
+    assert_eq!(harness.state().scene.node(root).children.len(), before, "Ctrl+X took the node away");
+}
+
+#[test]
 fn escape_abandons_a_half_typed_value_and_enter_takes_it() {
     // Escape is the way out of everything else in this application. It used to
     // be the one place it was not: egui surrenders focus on Escape, the field
@@ -1346,6 +1368,46 @@ fn a_tile_still_adds_its_shape_when_it_is_merely_clicked() {
     let app = harness.state();
     assert_eq!(app.scene.node(root).children.len(), before + 1, "a click on a tile added nothing");
     assert!(app.outliner_drag.is_none(), "a click left a drag running");
+}
+
+#[test]
+fn a_dialog_stops_the_mouse_as_well_as_the_keyboard() {
+    // With About open, clicking a tile in the palette still added a shape,
+    // while Ctrl+N did nothing: `handle_shortcuts` returned early on a modal
+    // and nothing stopped the pointer. A dialog left open behind the main
+    // window was an application whose shortcuts had silently stopped while the
+    // document could still be edited by mouse.
+    let mut harness = harness("dialog-blocks-pointer");
+    let root = harness.state().scene.root();
+    let before = harness.state().scene.node(root).children.len();
+    let tile = rect_of(&harness, crate::panel_primitives::tile_id("sphere")).center();
+
+    harness.state_mut().modal = crate::app::Modal::About;
+    // Two frames: the backdrop has to be drawn once before its layer can win a
+    // hit test, which egui settles at the end of the pass it was drawn in.
+    harness.step();
+    harness.step();
+
+    press(&mut harness, tile);
+    release(&mut harness, tile);
+    harness.step();
+    assert_eq!(
+        harness.state().scene.node(root).children.len(),
+        before,
+        "a click reached the palette through an open dialog"
+    );
+
+    harness.state_mut().modal = crate::app::Modal::None;
+    harness.step();
+    harness.step();
+    press(&mut harness, tile);
+    release(&mut harness, tile);
+    harness.step();
+    assert_eq!(
+        harness.state().scene.node(root).children.len(),
+        before + 1,
+        "closing the dialog did not give the palette its clicks back"
+    );
 }
 
 #[test]

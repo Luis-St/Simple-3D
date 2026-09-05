@@ -85,6 +85,13 @@ portable.
   choose — the origin, the 3D cursor, what the camera is looking at, or clear of
   the selection — set by Add at in the document options, with the palette saying
   which answer is in force.
+- **Convert to a mesh, and break it apart.** A shape, a boolean or a whole
+  pattern can be baked into the triangles it evaluates to — the node keeps its
+  name, its place, its transform and its colour, and loses only the parameters
+  behind it. And whatever a node evaluates to can be broken into the separate
+  pieces it is actually in, each a node of its own: cut a plate into four with a
+  boolean, break it apart, and every piece is an object to move, paint and
+  export.
 - **Booleans that hold up.** Union, difference, intersection and hull, nested
   arbitrarily. Results are checked for manifoldness on every evaluation; a
   boolean that cannot be evaluated names its own node in the outliner while the
@@ -121,7 +128,7 @@ portable.
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **588 tests**, none failing, and every
+`cargo test --workspace` runs **617 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
@@ -166,13 +173,14 @@ them is now covered by a test that fails without its fix.
 ```
 crates/
   simple3d-geom/     Vec3, Mesh, primitive generators, BSP CSG boolean
-                       kernel, convex hull, post-boolean mesh repair and
-                       flat-region retriangulation. Pure math; depends on
-                       none of the others.
+                       kernel, convex hull, post-boolean mesh repair,
+                       flat-region retriangulation and connected-piece
+                       splitting. Pure math; depends on none of the others.
   simple3d-core/     Domain model: Node/Scene tree, the declarative
-                       primitive parameter registry, scene evaluation with
-                       per-subtree caching and cancellation, undo, clipboard,
-                       units, project files, settings, keymaps.
+                       primitive parameter registry, the stored-mesh body,
+                       scene evaluation with per-subtree caching and
+                       cancellation, undo, clipboard, units, project files,
+                       settings, keymaps.
   simple3d-export/   STL (binary and ASCII), OBJ, PLY and 3MF writers, with
                        pre-write watertightness verification, progress
                        reporting and cancellation. Includes a minimal zip

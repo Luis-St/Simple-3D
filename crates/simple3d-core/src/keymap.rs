@@ -42,6 +42,8 @@ pub enum Command {
     Delete,
     Group,
     Pattern,
+    ConvertToMesh,
+    BreakApart,
     Rename,
     ToggleVisibility,
     MoveUp,
@@ -124,6 +126,8 @@ impl Command {
         Command::Delete,
         Command::Group,
         Command::Pattern,
+        Command::ConvertToMesh,
+        Command::BreakApart,
         Command::Rename,
         Command::ToggleVisibility,
         Command::MoveUp,
@@ -183,6 +187,8 @@ impl Command {
             Delete => "Delete",
             Group => "Group selection",
             Pattern => "Make a pattern of the selection",
+            ConvertToMesh => "Convert to a mesh",
+            BreakApart => "Break into separate objects",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
             MoveUp => "Move up among siblings",
@@ -226,8 +232,8 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | Rename | ToggleVisibility
-            | MoveUp | MoveDown => Area::Edit,
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | BreakApart
+            | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
@@ -575,6 +581,11 @@ impl Keymap {
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
         set(Pattern, Chord::ctrl_shift("P"));
+        // The two halves of issue 80's "convert to a mesh": one bakes a shape
+        // into the triangles it evaluates to, the other takes what a cut left
+        // behind and makes each piece a node of its own (issue 82).
+        set(ConvertToMesh, Chord::ctrl_shift("M"));
+        set(BreakApart, Chord::ctrl_shift("B"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
         set(MoveUp, Chord::ctrl("Up"));

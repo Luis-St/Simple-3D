@@ -38,6 +38,11 @@ pub struct EvalWorker {
     generation: u64,
     /// The generation whose result we are still waiting for.
     outstanding: Option<u64>,
+    /// When the job in flight was submitted, so the footer can say how long the
+    /// user has been waiting. An evaluation has no honest progress to report --
+    /// a boolean does not know how much of itself is left -- but it can always
+    /// say how long it has been going.
+    started: Option<Instant>,
     pub last_elapsed: Option<Duration>,
 }
 
@@ -49,7 +54,15 @@ impl EvalWorker {
             .name("simple3d-eval".into())
             .spawn(move || evaluation_loop(job_rx, done_tx))
             .expect("the platform can start a thread");
-        EvalWorker { jobs: job_tx, done: done_rx, current: None, generation: 0, outstanding: None, last_elapsed: None }
+        EvalWorker {
+            jobs: job_tx,
+            done: done_rx,
+            current: None,
+            generation: 0,
+            outstanding: None,
+            started: None,
+            last_elapsed: None,
+        }
     }
 
     /// Ask for a fresh evaluation, cancelling whatever is in flight.
@@ -61,6 +74,7 @@ impl EvalWorker {
         let cancel = Cancel::new();
         self.current = Some(cancel.clone());
         self.outstanding = Some(self.generation);
+        self.started = Some(Instant::now());
         let job = Job { scene: scene.clone(), cancel, generation: self.generation };
         // A send failure means the worker thread is gone, which we cannot
         // recover from here; the interface stays usable with the last result.
@@ -88,12 +102,34 @@ impl EvalWorker {
         }
         self.outstanding = None;
         self.current = None;
+        self.started = None;
         self.last_elapsed = Some(finished.elapsed);
         Some(finished.result)
     }
 
     pub fn is_busy(&self) -> bool {
         self.outstanding.is_some()
+    }
+
+    /// How long the job in flight has been running.
+    pub fn waiting_for(&self) -> Option<Duration> {
+        self.started.map(|at| at.elapsed())
+    }
+
+    /// Abandon the evaluation in flight and stop waiting for it.
+    ///
+    /// The way out of a run that is taking longer than the user is willing to
+    /// give it. The viewport keeps the last result it had -- which is a picture
+    /// of an older scene, and the status bar says so -- and the next edit
+    /// submits a fresh job. The worker drops the abandoned answer when it
+    /// notices the flag, so nothing stale can arrive later: `poll` would refuse
+    /// it on its generation anyway.
+    pub fn abandon(&mut self) {
+        if let Some(cancel) = self.current.take() {
+            cancel.cancel();
+        }
+        self.outstanding = None;
+        self.started = None;
     }
 }
 

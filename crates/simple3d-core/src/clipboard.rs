@@ -74,8 +74,9 @@ pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy
     let mut created = Vec::new();
     for (offset, data) in clip.nodes.iter().enumerate() {
         let mut data = data.clone();
-        data.name = unique_name(scene, parent, &data.name, as_copy);
+        data.name = unique_name(scene, &data.name, as_copy);
         if let Some(id) = scene.import_subtree(&data, parent, index + offset) {
+            scene.rename_subtree_uniquely(id, true);
             created.push(id);
         }
     }
@@ -83,22 +84,13 @@ pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy
 }
 
 /// `Plate` -> `Plate copy` -> `Plate copy 2`, or `Bracket` -> `Bracket 2` when
-/// the node is not a copy of anything. Only the arriving node's own name is
-/// touched; descendants keep theirs, since they are unambiguous inside their
-/// parent.
-fn unique_name(scene: &Scene, parent: NodeId, name: &str, as_copy: bool) -> String {
-    let taken: Vec<&str> = scene.node(parent).children.iter().map(|c| scene.node(*c).name.as_str()).collect();
-    let base = if as_copy { format!("{name} copy") } else { name.to_string() };
-    if !taken.contains(&base.as_str()) {
-        return base;
-    }
-    for n in 2.. {
-        let candidate = format!("{base} {n}");
-        if !taken.contains(&candidate.as_str()) {
-            return candidate;
-        }
-    }
-    unreachable!()
+/// the node is not a copy of anything. Measured against every name in the
+/// document, not just the new parent's children, because the outliner shows
+/// every depth at once; the descendants that arrive with it are put through the
+/// same rule by `rename_subtree_uniquely`.
+fn unique_name(scene: &Scene, name: &str, as_copy: bool) -> String {
+    let base = if as_copy { crate::scene::copy_name(name) } else { name.to_string() };
+    crate::scene::free_name(&scene.taken_names(), &base)
 }
 
 #[cfg(test)]
@@ -173,9 +165,16 @@ mod tests {
         assert_eq!(arrived.len(), 3);
         for (new, old) in arrived.iter().zip(children.iter()) {
             assert_eq!(scene.node(*new).position, scene.node(*old).position);
-            assert_eq!(scene.node(*new).name, scene.node(*old).name);
             assert_ne!(new, old);
         }
+        // The arriving children are renamed rather than kept, because names are
+        // unique across the whole document and the outliner shows every depth
+        // at once.
+        let names: Vec<&str> = scene.ids().map(|id| scene.node(id).name.as_str()).collect();
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "every name in the document is distinct: {names:?}");
     }
 
     #[test]

@@ -5,13 +5,45 @@
 //! reparenting and undo. `BTreeMap` rather than `HashMap` so iteration order is
 //! deterministic, which matters because evaluation must be (section 5.2).
 
+use crate::mesh_data::{MeshBlob, MeshData};
 use crate::primitive::{self, Params, PrimitiveSpec};
 use crate::unit::Unit;
 use serde::{Deserialize, Serialize};
 use simple3d_geom::{BooleanOp, Vec3};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 pub type NodeId = u64;
+
+/// What a copy of `name` is called before it is numbered: `Box` -> `Box copy`,
+/// and `Box copy` -> `Box copy` again rather than `Box copy copy`.
+///
+/// Duplicating repeatedly is the ordinary way to lay out a row of something, and
+/// each duplicate is of the one just made -- so without the trim the fourth
+/// press of Ctrl+D gives "Box copy copy copy copy". Trimmed, the numbering rule
+/// below takes over and gives "Box copy 2", "Box copy 3".
+pub fn copy_name(name: &str) -> String {
+    let stem = name.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end();
+    let stem = stem.strip_suffix(" copy").unwrap_or(name);
+    format!("{stem} copy")
+}
+
+/// `base`, or `base 2`, `base 3`... -- the first that is not in `taken`.
+///
+/// The one place the numbering rule lives, so a node added, pasted, duplicated
+/// or dropped in from the library all read the same way in the outliner.
+pub fn free_name(taken: &HashSet<String>, base: &str) -> String {
+    if !taken.contains(base) {
+        return base.to_string();
+    }
+    for n in 2.. {
+        let candidate = format!("{base} {n}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
 
 /// Where a node's origin sits (spec section 3.1). Changing it moves the origin,
 /// never the shape.
@@ -156,6 +188,15 @@ pub enum Body {
     Pattern {
         params: Params,
     },
+    /// Geometry the node owns outright, with no recipe behind it -- what a
+    /// shape becomes when it is converted to a mesh (issue 80).
+    ///
+    /// Behind an `Arc` because undo snapshots the whole scene, and a converted
+    /// body of any size is megabytes: sharing the triangles between every
+    /// snapshot that did not touch them is what keeps the history affordable.
+    Mesh {
+        mesh: Arc<MeshData>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -258,8 +299,32 @@ impl Node {
         matches!(self.body, Body::Pattern { .. })
     }
 
+    pub fn is_mesh(&self) -> bool {
+        matches!(self.body, Body::Mesh { .. })
+    }
+
+    /// The geometry this node owns, for a body that owns any.
+    pub fn mesh(&self) -> Option<&Arc<MeshData>> {
+        match &self.body {
+            Body::Mesh { mesh } => Some(mesh),
+            _ => None,
+        }
+    }
+
+    /// What kind of thing this node is, in one word, for a status line or a
+    /// tooltip. Not the primitive's own label -- "Box" -- but the family.
+    pub fn kind_label(&self) -> &'static str {
+        match &self.body {
+            Body::Group { .. } => "group",
+            Body::Primitive { .. } => "shape",
+            Body::Pattern { .. } => "pattern",
+            Body::Mesh { .. } => "mesh",
+        }
+    }
+
     /// Whether this node can hold children: a group or a pattern. A primitive
-    /// cannot, and a drag or an Add that would put a child under one is refused.
+    /// and a mesh cannot, and a drag or an Add that would put a child under one
+    /// is refused.
     pub fn can_hold_children(&self) -> bool {
         self.is_group() || self.is_pattern()
     }
@@ -563,20 +628,20 @@ impl Scene {
         }
     }
 
-    /// A name that does not already exist among the parent's children, so the
-    /// outliner stays readable. Names are not required to be unique.
-    fn unique_name(&self, parent: NodeId, base: &str) -> String {
-        let taken: Vec<&str> = self.nodes[&parent].children.iter().map(|c| self.nodes[c].name.as_str()).collect();
-        if !taken.contains(&base) {
-            return base.to_string();
-        }
-        for n in 2.. {
-            let candidate = format!("{base} {n}");
-            if !taken.contains(&candidate.as_str()) {
-                return candidate;
-            }
-        }
-        unreachable!()
+    /// Every name in the document, which is what a new name has to be free of.
+    pub fn taken_names(&self) -> HashSet<String> {
+        self.nodes.values().map(|n| n.name.clone()).collect()
+    }
+
+    /// A name no other node in the document carries, so the outliner stays
+    /// readable.
+    ///
+    /// Scoped to the whole tree rather than to one parent's children: the
+    /// outliner shows every depth at once, so two rows reading "Box 2" are two
+    /// rows the user cannot tell apart, whether or not they happen to share a
+    /// parent.
+    fn unique_name(&self, base: &str) -> String {
+        free_name(&self.taken_names(), base)
     }
 
     pub fn add_primitive(&mut self, type_id: &str, parent: NodeId, index: usize) -> Option<NodeId> {
@@ -584,7 +649,7 @@ impl Scene {
         let id = self.fresh_id();
         let node = Node {
             id,
-            name: self.unique_name(parent, spec.label),
+            name: self.unique_name(spec.label),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
             scale: Vec3::ONE,
@@ -607,7 +672,7 @@ impl Scene {
         let id = self.fresh_id();
         let node = Node {
             id,
-            name: self.unique_name(parent, "Group"),
+            name: self.unique_name("Group"),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
             scale: Vec3::ONE,
@@ -632,7 +697,7 @@ impl Scene {
         let id = self.fresh_id();
         let node = Node {
             id,
-            name: self.unique_name(parent, "Pattern"),
+            name: self.unique_name("Pattern"),
             position: Vec3::ZERO,
             rotation: Vec3::ZERO,
             scale: Vec3::ONE,
@@ -649,6 +714,52 @@ impl Scene {
         self.nodes.insert(id, node);
         self.link(id, parent, index);
         id
+    }
+
+    /// Add a node that owns the geometry it is given (issue 80).
+    pub fn add_mesh(&mut self, name: &str, mesh: MeshData, parent: NodeId, index: usize) -> NodeId {
+        let id = self.fresh_id();
+        let name = self.unique_name(name);
+        let node = Node {
+            id,
+            name,
+            position: Vec3::ZERO,
+            rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
+            anchor: Anchor::Centre,
+            visible: true,
+            ghost: false,
+            colour: None,
+            segments: None,
+            export_body: None,
+            body: Body::Mesh { mesh: Arc::new(mesh) },
+            children: Vec::new(),
+            parent: Some(parent),
+        };
+        self.nodes.insert(id, node);
+        self.link(id, parent, index);
+        id
+    }
+
+    /// Replace a node's body with stored geometry, keeping everything about the
+    /// node that is not its shape -- its name, its place in the tree, its
+    /// transform, its colour, its export mark (issue 80).
+    ///
+    /// Its children go with the old body, because they *were* the old body: the
+    /// operands of a boolean are not parts of the result, and leaving them in
+    /// the tree under a mesh that already contains them would double every
+    /// solid in the export.
+    pub fn convert_to_mesh(&mut self, id: NodeId, mesh: MeshData) -> bool {
+        if id == self.root || !self.nodes.contains_key(&id) {
+            return false;
+        }
+        for child in self.descendants(id) {
+            self.nodes.remove(&child);
+        }
+        let Some(node) = self.nodes.get_mut(&id) else { return false };
+        node.children.clear();
+        node.body = Body::Mesh { mesh: Arc::new(mesh) };
+        true
     }
 
     fn link(&mut self, id: NodeId, parent: NodeId, index: usize) {
@@ -687,8 +798,39 @@ impl Scene {
         }
         let parent = self.nodes.get(&id)?.parent?;
         let index = self.nodes[&parent].children.iter().position(|&c| c == id)? + 1;
-        let data = self.export_subtree(id)?;
-        self.import_subtree(&data, parent, index)
+        let mut data = self.export_subtree(id)?;
+        // A duplicate is a copy of something already in the document, so it is
+        // named the way a pasted copy is -- "Box copy", not a second "Box".
+        data.name = free_name(&self.taken_names(), &copy_name(&data.name));
+        let new_id = self.import_subtree(&data, parent, index)?;
+        self.rename_subtree_uniquely(new_id, true);
+        Some(new_id)
+    }
+
+    /// Give every node of a freshly imported subtree a name no other node in the
+    /// document carries.
+    ///
+    /// `keep_top` is for a top whose name was already chosen against the
+    /// document -- a duplicate's "Box copy", a paste's -- so it is not put
+    /// through the rule twice and does not come out "Box copy 2" when nothing
+    /// clashed.
+    pub fn rename_subtree_uniquely(&mut self, id: NodeId, keep_top: bool) {
+        let subtree: HashSet<NodeId> = std::iter::once(id).chain(self.descendants(id)).collect();
+        let mut taken: HashSet<String> =
+            self.nodes.values().filter(|n| !subtree.contains(&n.id)).map(|n| n.name.clone()).collect();
+        if keep_top {
+            taken.insert(self.nodes[&id].name.clone());
+        }
+        let mut stack = if keep_top { self.nodes[&id].children.clone() } else { vec![id] };
+        stack.reverse();
+        while let Some(node) = stack.pop() {
+            let name = free_name(&taken, &self.nodes[&node].name);
+            taken.insert(name.clone());
+            self.nodes.get_mut(&node).unwrap().name = name;
+            for &child in self.nodes[&node].children.iter().rev() {
+                stack.push(child);
+            }
+        }
     }
 
     /// Move `id` under `new_parent` at `index`. Refuses to create a cycle and
@@ -808,10 +950,15 @@ impl Scene {
 
     pub fn export_subtree(&self, id: NodeId) -> Option<NodeData> {
         let node = self.nodes.get(&id)?;
+        let mut blob: Option<MeshBlob> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
             Body::Pattern { params } => ("pattern".to_string(), None, params.clone()),
+            Body::Mesh { mesh } => {
+                blob = Some(mesh.to_blob());
+                ("mesh".to_string(), None, Params::new())
+            }
         };
         Some(NodeData {
             name: node.name.clone(),
@@ -826,6 +973,7 @@ impl Scene {
             colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
             export_body: node.export_body,
+            mesh: blob,
             params,
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
         })
@@ -835,13 +983,17 @@ impl Scene {
     /// primitive types are rejected so a corrupt or newer file cannot produce a
     /// half-loaded scene.
     pub fn import_subtree(&mut self, data: &NodeData, parent: NodeId, index: usize) -> Option<NodeId> {
-        let body = if data.type_id == "group" {
-            Body::Group { op: data.op.unwrap_or_default() }
-        } else if data.type_id == "pattern" {
-            Body::Pattern { params: crate::pattern::migrate_params(&data.params) }
-        } else {
-            let spec = primitive::lookup(&data.type_id)?;
-            Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
+        let body = match data.type_id.as_str() {
+            "group" => Body::Group { op: data.op.unwrap_or_default() },
+            "pattern" => Body::Pattern { params: crate::pattern::migrate_params(&data.params) },
+            // A mesh whose blob cannot be read is refused rather than loaded as
+            // an empty node: the geometry is the whole of what the node is, and
+            // a silently empty one would be a body quietly missing from a print.
+            "mesh" => Body::Mesh { mesh: Arc::new(MeshData::from_blob(data.mesh.as_ref()?)?) },
+            type_id => {
+                let spec = primitive::lookup(type_id)?;
+                Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
+            }
         };
         let id = self.fresh_id();
         let node = Node {
@@ -1040,6 +1192,10 @@ pub struct NodeData {
     /// before export bodies existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_body: Option<ExportBody>,
+    /// The geometry of a `mesh` node, and nothing else's. Present only on the
+    /// one body type that owns its triangles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<MeshBlob>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1069,6 +1225,60 @@ mod tests {
         let id = scene.add_primitive("box", parent, index).unwrap();
         scene.get_mut(id).unwrap().position = Vec3::new(x, 0.0, 0.0);
         id
+    }
+
+    #[test]
+    fn a_duplicate_is_named_as_a_copy() {
+        // A duplicate is the same thing the clipboard makes, so it reads the
+        // same way; two siblings both called "Box" say nothing about which is
+        // which.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let a = box_at(&mut scene, root, 0.0);
+        let copy = scene.duplicate(a).unwrap();
+        assert_eq!(scene.node(a).name, "Box");
+        assert_eq!(scene.node(copy).name, "Box copy");
+        let again = scene.duplicate(a).unwrap();
+        assert_eq!(scene.node(again).name, "Box copy 2");
+
+        // Duplicating a duplicate is how a row of something actually gets laid
+        // out, and each one is of the one just made. Without trimming the
+        // suffix the fourth press of Ctrl+D reads "Box copy copy copy copy".
+        let mut chained = copy;
+        for expected in ["Box copy 3", "Box copy 4", "Box copy 5"] {
+            chained = scene.duplicate(chained).unwrap();
+            assert_eq!(scene.node(chained).name, expected);
+        }
+    }
+
+    #[test]
+    fn a_duplicated_group_renames_what_travels_inside_it() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        box_at(&mut scene, group, 0.0);
+        let copy = scene.duplicate(group).unwrap();
+        assert_eq!(scene.node(copy).name, "Group copy");
+        let inside = scene.node(copy).children[0];
+        assert_eq!(scene.node(inside).name, "Box 2");
+    }
+
+    #[test]
+    fn a_name_is_free_across_the_tree_not_only_among_siblings() {
+        // The outliner shows every depth at once, so a "Box 2" nested in a
+        // pattern is a row the user has to tell apart from a "Box 2" beside it.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let pattern = scene.add_pattern(root, 0);
+        box_at(&mut scene, pattern, 0.0);
+        let beside = box_at(&mut scene, root, 0.0);
+        assert_eq!(scene.node(beside).name, "Box 2");
+
+        let names: Vec<String> = scene.ids().map(|id| scene.node(id).name.clone()).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "{names:?}");
     }
 
     #[test]
@@ -1350,6 +1560,7 @@ mod tests {
             colour: None,
             segments: None,
             export_body: None,
+            mesh: None,
             params: Params::new(),
             children: vec![NodeData {
                 name: "From the future".into(),
@@ -1364,6 +1575,7 @@ mod tests {
                 colour: None,
                 segments: None,
                 export_body: None,
+                mesh: None,
                 params: Params::new(),
                 children: vec![],
             }],

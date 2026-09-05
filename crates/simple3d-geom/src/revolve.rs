@@ -78,18 +78,68 @@ pub fn extrude_frustum_polygon(bottom: &[(f64, f64)], top: &[(f64, f64)], h: f64
     let cb = Vec3::new(0.0, 0.0, -h / 2.0);
     let ct = Vec3::new(0.0, 0.0, h / 2.0);
     if shoelace_area2(bottom).abs() > 1e-9 {
-        for i in 0..n {
-            let i2 = (i + 1) % n;
-            mesh.push_triangle(cb, b[i2], b[i]);
+        if flat_cap(bottom) {
+            for i in 1..n - 1 {
+                mesh.push_triangle(b[0], b[i + 1], b[i]);
+            }
+        } else {
+            for i in 0..n {
+                let i2 = (i + 1) % n;
+                mesh.push_triangle(cb, b[i2], b[i]);
+            }
         }
     }
     if shoelace_area2(top).abs() > 1e-9 {
-        for i in 0..n {
-            let i2 = (i + 1) % n;
-            mesh.push_triangle(ct, t[i], t[i2]);
+        if flat_cap(top) {
+            for i in 1..n - 1 {
+                mesh.push_triangle(t[0], t[i], t[i + 1]);
+            }
+        } else {
+            for i in 0..n {
+                let i2 = (i + 1) % n;
+                mesh.push_triangle(ct, t[i], t[i2]);
+            }
         }
     }
     mesh
+}
+
+/// Whether a cap outline should be fanned from one of its own corners rather
+/// than from a vertex added in the middle of it.
+///
+/// A centre vertex is what keeps a *round* cap's triangles well shaped: fanning
+/// a 448-segment circle from one point on its rim gives 446 slivers, and the
+/// boolean kernel's classification is only as good as the normals it computes
+/// off them. A square has no such problem, and there the centre vertex is pure
+/// noise: a plain box came out 16 triangles and 10 vertices rather than 12 and
+/// 8, and those two invented cap centres travel into every 3MF, STL, OBJ and
+/// PLY the application writes -- of the shape a reader is most likely to open a
+/// file to check.
+///
+/// So: a convex cap of four corners or fewer, which is every flat-sided
+/// extrusion in the library and no curve approximation.
+fn flat_cap(outline: &[(f64, f64)]) -> bool {
+    if outline.len() < 3 || outline.len() > 4 {
+        return false;
+    }
+    // Convex: every turn around the outline goes the same way. A dart would
+    // put the fan's triangles outside the shape.
+    let n = outline.len();
+    let mut sign = 0.0;
+    for i in 0..n {
+        let (x0, y0) = outline[i];
+        let (x1, y1) = outline[(i + 1) % n];
+        let (x2, y2) = outline[(i + 2) % n];
+        let cross = (x1 - x0) * (y2 - y1) - (y1 - y0) * (x2 - x1);
+        if cross.abs() < 1e-12 {
+            continue;
+        }
+        if sign != 0.0 && cross.signum() != sign {
+            return false;
+        }
+        sign = cross.signum();
+    }
+    true
 }
 
 /// Revolve an open (radius, z) profile curve fully around Z. Ends whose

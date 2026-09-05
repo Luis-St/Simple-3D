@@ -10,6 +10,21 @@ use simple3d_core::scene::{AxisStyle, Colour};
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 
+/// An edge of the surface with the triangles that meet at it.
+///
+/// What the selection outline is drawn from. Which edges make up a shape's
+/// outline depends on where the camera is -- an edge is on the silhouette when
+/// the surface turns away from the eye across it -- so it cannot be settled
+/// once at preparation time the way a crease can.
+pub struct BorderEdge {
+    pub ends: [u32; 2],
+    /// The two triangles either side of it, or the same one twice when the edge
+    /// has only one -- an open boundary, or a non-manifold junction. Those are
+    /// drawn whatever the camera is doing: there is no surface on the far side
+    /// for the silhouette test to ask about.
+    pub faces: [u32; 2],
+}
+
 /// A mesh prepared for drawing: welded, so edges can be found, together with
 /// its feature edges.
 pub struct Renderable {
@@ -17,6 +32,13 @@ pub struct Renderable {
     /// Edges worth drawing: a real crease in the surface, not an artefact of how
     /// a flat face happens to be triangulated.
     pub edges: Vec<[u32; 2]>,
+    /// Every edge of the surface, with its neighbours -- what the silhouette is
+    /// picked out of each frame.
+    ///
+    /// Empty unless the item may be drawn as a selection: it is one entry per
+    /// edge rather than per crease, which for a large mesh is millions, and the
+    /// scene as a whole is never outlined.
+    pub outline: Vec<BorderEdge>,
     /// Which separate body each vertex belongs to: two vertices share a number
     /// when the surface joins them. The viewport hands the renderer the whole
     /// evaluated scene as *one* mesh, so this is the only thing that says where
@@ -31,15 +53,27 @@ pub struct Renderable {
 
 impl Renderable {
     pub fn prepare(mesh: &Mesh) -> Renderable {
+        Renderable::prepare_with(mesh, false)
+    }
+
+    /// The same, plus the edge adjacency the selection outline needs. For the
+    /// nodes that may be drawn as a selection, which is a handful rather than
+    /// the whole scene.
+    pub fn prepare_outlined(mesh: &Mesh) -> Renderable {
+        Renderable::prepare_with(mesh, true)
+    }
+
+    fn prepare_with(mesh: &Mesh, outlined: bool) -> Renderable {
         let welded = mesh.weld();
         let edges = feature_edges(&welded, 20.0);
+        let outline = if outlined { border_edges(&welded) } else { Vec::new() };
         let bodies = bodies_of(&welded);
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
-        Renderable { mesh: welded, edges, bodies, body_count }
+        Renderable { mesh: welded, edges, outline, bodies, body_count }
     }
 
     pub fn empty() -> Renderable {
-        Renderable { mesh: Mesh::new(), edges: Vec::new(), bodies: Vec::new(), body_count: 0 }
+        Renderable { mesh: Mesh::new(), edges: Vec::new(), outline: Vec::new(), bodies: Vec::new(), body_count: 0 }
     }
 
     /// The body a triangle belongs to, as a tag for the depth buffer. `base` is
@@ -118,6 +152,40 @@ pub fn feature_edges(mesh: &Mesh, angle_deg: f64) -> Vec<[u32; 2]> {
     // identical and the image comparison in the tests is meaningful.
     edges.sort_unstable();
     edges
+}
+
+/// Every edge of the mesh with the triangles that meet at it, in a
+/// deterministic order.
+fn border_edges(mesh: &Mesh) -> Vec<BorderEdge> {
+    let mut faces: HashMap<(u32, u32), [u32; 2]> = HashMap::new();
+    let mut counts: HashMap<(u32, u32), u32> = HashMap::new();
+    for (index, tri) in mesh.indices.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (tri[k], tri[(k + 1) % 3]);
+            let key = if a < b { (a, b) } else { (b, a) };
+            let count = counts.entry(key).or_insert(0);
+            let slot = faces.entry(key).or_insert([index as u32; 2]);
+            if *count == 1 {
+                slot[1] = index as u32;
+            }
+            // A third triangle on one edge is a non-manifold junction: leave the
+            // first two, and let the count say it is not a plain edge.
+            *count += 1;
+        }
+    }
+    let mut out: Vec<BorderEdge> = faces
+        .into_iter()
+        .map(|(key, mut pair)| {
+            if counts[&key] != 2 {
+                // Always drawn: `push_selection` reads a repeated triangle as
+                // "there is no far side to ask about".
+                pair[1] = pair[0];
+            }
+            BorderEdge { ends: [key.0, key.1], faces: pair }
+        })
+        .collect();
+    out.sort_unstable_by_key(|edge| edge.ends);
+    out
 }
 
 /// Colours, resolved from the host theme so the viewport is usable under both
@@ -655,12 +723,93 @@ fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgb
     }
 }
 
+/// The selected shape's *outline*: the edges its surface turns away from the
+/// camera across, plus any edge with no far side at all.
+///
+/// It used to draw the feature edges instead, and that swung between the two
+/// opposite failures. A sphere at the stock 32 segments creases at 11.25
+/// degrees, under the 20-degree threshold, so it has no feature edges and
+/// selecting one drew *nothing* -- with only the manipulator in the frame,
+/// nothing said what was selected. A torus at the same segment count creases
+/// past the threshold around its tube, so selecting one scribbled concentric
+/// rings over the whole surface. A silhouette is the same picture for both, and
+/// it is what the word outline means.
 fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
-    for edge in &item.edges {
+    // Drawn a second time, one pixel out from the shape, and that is what makes
+    // it a line rather than a row of dots.
+    //
+    // A silhouette edge is the one line in the frame a depth test cannot draw.
+    // It lies exactly where the surface turns away from the eye, so the face
+    // beside it is nearly edge-on and its depth changes by more across a single
+    // pixel than a bias can cover: measured on a 32-segment sphere, seventeen of
+    // a hundred and eighty two-degree sectors of the rim had nothing drawn at
+    // all, and raising the bias tenfold -- past where a mark starts showing
+    // through the far side of a solid -- still left six. It is not an epsilon
+    // problem, and the pixel just outside the silhouette is not covered by the
+    // shape at all, so nothing there has to be won from.
+    //
+    // The offset is perpendicular to the edge on screen and away from the front
+    // face's own centre, which for a silhouette edge is out of the shape. It
+    // does not thicken the line where it is already drawn -- the two passes land
+    // on the same pixel for a nearly-vertical edge -- so a selection still reads
+    // as a hairline and not as a halo.
+    let mut push = |edge: [u32; 2], away: Option<Vec3>| {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
         let tag = item.body_tag(edge[0] as usize, tag_base);
         steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
+        let Some(away) = away else { return };
+        let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
+        let along = vb.pos - va.pos;
+        let normal = egui::vec2(-along.y, along.x);
+        if normal.length() < 1e-6 {
+            return;
+        }
+        // Which way along that perpendicular leads out of the shape, decided in
+        // screen space so a foreshortened face cannot get it backwards.
+        let inward = to_vertex(view, view.to_view(away)).pos - va.pos;
+        let normal = normal / normal.length();
+        let out = if egui::vec2(normal.x, normal.y).dot(inward) > 0.0 { -normal } else { normal };
+        let shift = |v: Vertex| Vertex { pos: v.pos + out, key: v.key };
+        steps.push(Step::Line {
+            a: shift(va),
+            b: shift(vb),
+            colour,
+            bias: SELECTION_BIAS * (va.key.abs() + vb.key.abs()) * 0.5,
+            tag,
+            write_depth: true,
+        });
+    };
+    if item.outline.is_empty() {
+        // Prepared without the adjacency -- the creases are what there is, and a
+        // crease has an inside on both sides, so no outward pass for it.
+        for &edge in &item.edges {
+            push(edge, None);
+        }
+        return;
+    }
+    let towards = view.forward();
+    let front: Vec<bool> =
+        item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri).dot(towards) < 0.0).collect();
+    let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
+    let centroid = |face: u32| -> Option<Vec3> {
+        let tri = item.mesh.indices.get(face as usize)?;
+        Some(
+            (item.mesh.positions[tri[0] as usize]
+                + item.mesh.positions[tri[1] as usize]
+                + item.mesh.positions[tri[2] as usize])
+                / 3.0,
+        )
+    };
+    for edge in &item.outline {
+        let [near, far] = edge.faces;
+        if near != far && faces_the_eye(near) == faces_the_eye(far) {
+            continue;
+        }
+        // The face on the shape's own side of this edge, whose centre says
+        // which way is inward.
+        let inside = if faces_the_eye(near) { near } else { far };
+        push(edge.ends, centroid(inside));
     }
 }
 
@@ -1828,6 +1977,134 @@ mod tests {
         let frame = render(&req);
         let highlighted = frame.color.chunks_exact(4).filter(|p| *p == req.palette.selected).count();
         assert!(highlighted > 50, "the selection outline is missing");
+    }
+
+    /// Where the selection colour was painted when `item` is drawn selected
+    /// over itself: how many pixels in all, and how many in the middle of the
+    /// frame.
+    ///
+    /// The middle is the discriminator. An outline touches the shape's rim and
+    /// leaves the inside alone; a set of creases scribbles across it.
+    fn selection_coverage_of(item: &Renderable) -> (usize, usize) {
+        let req = request(
+            vec![Item { renderable: item, style: Style::Solid }, Item { renderable: item, style: Style::Selected }],
+            DisplayMode::Shaded,
+        );
+        let frame = render(&req);
+        let mut drawn = 0;
+        let mut middle = 0;
+        for y in 0..frame.height {
+            for x in 0..frame.width {
+                let offset = (y * frame.width + x) * 4;
+                let pixel: Rgba =
+                    [frame.color[offset], frame.color[offset + 1], frame.color[offset + 2], frame.color[offset + 3]];
+                if pixel != req.palette.selected {
+                    continue;
+                }
+                drawn += 1;
+                let middling = (x as f32 - frame.width as f32 / 2.0).abs() < frame.width as f32 / 8.0
+                    && (y as f32 - frame.height as f32 / 2.0).abs() < frame.height as f32 / 8.0;
+                if middling {
+                    middle += 1;
+                }
+            }
+        }
+        (drawn, middle)
+    }
+
+    #[test]
+    fn a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over() {
+        // Both halves of one bug, measured against the picture the feature
+        // edges used to draw -- which is still what `prepare` alone gives, so
+        // the old and the new can be rendered side by side.
+        //
+        // A 32-segment sphere creases at 11.25 degrees, under the 20-degree
+        // feature-edge threshold, so it had no feature edges at all: selecting
+        // one drew nothing, and only the manipulator said what was selected. A
+        // torus at the same segment count creases past the threshold around its
+        // tube, so selecting one scribbled concentric rings across the surface.
+        let ball = primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 32);
+        let (creased, _) = selection_coverage_of(&Renderable::prepare(&ball));
+        assert_eq!(creased, 0, "the sphere is only interesting because the creases drew nothing");
+        let (outlined, middle) = selection_coverage_of(&Renderable::prepare_outlined(&ball));
+        assert!(outlined > 50, "a smooth sphere got no selection outline: {outlined} pixels");
+        assert_eq!(middle, 0, "the outline ran across the middle of the sphere: {middle} pixels");
+
+        let ring = primitives::torus_mesh(40.0, 14.0, 360.0, 32);
+        let (creased, creased_middle) = selection_coverage_of(&Renderable::prepare(&ring));
+        let (outlined, middle) = selection_coverage_of(&Renderable::prepare_outlined(&ring));
+        assert!(outlined > 50, "the torus got no selection outline: {outlined} pixels");
+        // The hole is in the middle of the frame at this camera, so the inner
+        // silhouette does cross it; the creases covered it three times over.
+        assert!(
+            middle * 3 <= creased_middle,
+            "the outline still scribbles over the torus: {middle} pixels in the middle against {creased_middle}"
+        );
+        assert!(outlined < creased, "the outline is no smaller than the creases: {outlined} against {creased}");
+    }
+
+    #[test]
+    fn the_selection_outline_goes_all_the_way_round() {
+        // A silhouette edge is the one line a depth test cannot draw: it lies
+        // exactly where the surface turns away from the eye, so the face beside
+        // it is nearly edge-on and its depth changes by more across one pixel
+        // than a bias can cover. Drawn once, the outline of a 32-segment sphere
+        // came out as a row of dots -- seventeen of these hundred and eighty
+        // sectors with nothing in them at all, and raising the bias tenfold
+        // still left six. The second pass, one pixel out from the shape, is over
+        // background rather than over the shape and has nothing to win from.
+        //
+        // Asked as "is the rim drawn all the way round" rather than "how many
+        // pixels are orange", because a dotted line and a solid one differ by
+        // very little on a pixel count and by everything to look at.
+        // A frame big enough for the question: at the stock test size the rim is
+        // forty pixels across and a two-degree sector is less than one of them,
+        // so bare sectors would say nothing about the drawing.
+        fn wide<'a>(items: Vec<Item<'a>>) -> Request<'a> {
+            Request {
+                view: View::new(
+                    Camera { yaw: -55.0, pitch: 28.0, distance: 150.0, ..Camera::default() },
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0)),
+                ),
+                size: [640, 480],
+                mode: DisplayMode::Shaded,
+                palette: Palette::dark(),
+                grid: Grid {
+                    visible: false,
+                    spacing: 10.0,
+                    axes: [false; 3],
+                    style: AxisStyle::Origin,
+                    plane_marks: false,
+                },
+                items,
+            }
+        }
+        let ball = primitives::ellipsoid_mesh(50.0, 50.0, 50.0, 32);
+        let prepared = Renderable::prepare_outlined(&ball);
+        let plain = render(&wide(vec![Item { renderable: &prepared, style: Style::Solid }]));
+        let outlined = render(&wide(vec![
+            Item { renderable: &prepared, style: Style::Solid },
+            Item { renderable: &prepared, style: Style::Selected },
+        ]));
+
+        // Every pixel the outline changed, measured as the difference selecting
+        // makes: an alpha-blended line is never exactly its own colour.
+        let changed: Vec<usize> = (0..plain.width * plain.height)
+            .filter(|&i| plain.color[i * 4..i * 4 + 4] != outlined.color[i * 4..i * 4 + 4])
+            .collect();
+        assert!(changed.len() > 100, "the sphere got no outline at all: {} pixels", changed.len());
+
+        let (width, sum) = (plain.width, changed.len() as f64);
+        let cx = changed.iter().map(|i| (i % width) as f64).sum::<f64>() / sum;
+        let cy = changed.iter().map(|i| (i / width) as f64).sum::<f64>() / sum;
+        let mut sectors = [false; 180];
+        for &i in &changed {
+            let (x, y) = ((i % width) as f64 - cx, (i / width) as f64 - cy);
+            let degrees = y.atan2(x).to_degrees().rem_euclid(360.0);
+            sectors[(degrees / 2.0) as usize % 180] = true;
+        }
+        let bare: Vec<usize> = (0..180).filter(|&s| !sectors[s]).map(|s| s * 2).collect();
+        assert!(bare.is_empty(), "the outline is broken at these bearings: {bare:?}");
     }
 
     #[test]

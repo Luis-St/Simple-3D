@@ -12,7 +12,12 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Bumped whenever the schema changes in a way an older build could not read.
-pub const FORMAT_VERSION: u32 = 1;
+///
+/// Version 2 added the body issue 80 called for: a `mesh` node carrying its own
+/// geometry rather than a recipe for it. A version 1 build meeting one would
+/// fail on the unknown type rather than open the file half-understood, so the
+/// version says so first.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct ProjectFile {
@@ -124,9 +129,20 @@ fn unknown_types(root: &NodeData) -> String {
     }
 }
 
+/// The node types that are not entries in the primitive registry. Each is a
+/// [`crate::scene::Body`] of its own, so `lookup` will never find one and a
+/// file holding one must not be reported as carrying an unknown shape.
+const BODY_TYPES: &[&str] = &["group", "pattern", "mesh"];
+
 fn collect_unknown(node: &NodeData, out: &mut Vec<String>) {
-    if node.type_id != "group" && crate::primitive::lookup(&node.type_id).is_none() {
+    if !BODY_TYPES.contains(&node.type_id.as_str()) && crate::primitive::lookup(&node.type_id).is_none() {
         out.push(node.type_id.clone());
+    }
+    // A mesh node whose geometry cannot be read fails the load the same way an
+    // unknown type does, and for the same reason: the alternative is a body
+    // silently missing from whatever gets printed.
+    if node.type_id == "mesh" && node.mesh.as_ref().and_then(crate::mesh_data::MeshData::from_blob).is_none() {
+        out.push("mesh (its geometry could not be read)".to_string());
     }
     for child in &node.children {
         collect_unknown(child, out);
@@ -199,7 +215,7 @@ mod tests {
         let text = to_string(&sample());
         assert!(text.starts_with("{\n"), "not pretty-printed");
         assert!(text.ends_with('\n'), "no trailing newline");
-        assert!(text.contains("\"format\": 1"));
+        assert!(text.contains("\"format\": 2"));
         assert!(text.contains("\"Drilled plate\""));
         // Every value on its own line, so a one-dimension change is a one-line diff.
         assert!(text.lines().count() > 30);
@@ -209,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_newer_format_is_refused_with_a_clear_message() {
-        let text = to_string(&sample()).replace("\"format\": 1", "\"format\": 99");
+        let text = to_string(&sample()).replace("\"format\": 2", "\"format\": 99");
         let err = from_str(&text).unwrap_err();
         assert_eq!(err, LoadError::TooNew { found: 99, supported: FORMAT_VERSION });
         assert!(err.to_string().contains("99"));
@@ -315,6 +331,44 @@ mod tests {
         // A file written by this version has to diff cleanly against one
         // written before export bodies existed.
         assert!(!to_string(&sample()).contains("export_body"));
+    }
+
+    #[test]
+    fn a_stored_mesh_round_trips_through_the_file() {
+        // Issue 80: a converted body is as much a part of the document as a
+        // box, and a project that loses its geometry on save is worse than one
+        // that never had it.
+        use crate::mesh_data::MeshData;
+
+        let mut scene = sample();
+        let root = scene.root();
+        let mesh =
+            scene.add_mesh("Baked", MeshData::new(simple3d_geom::primitives::box_mesh(11.0, 12.0, 13.0)), root, 0);
+
+        let text = to_string(&scene);
+        let back = from_str(&text).expect("it should load again");
+        let ids = back.depth_first();
+        let name = scene.node(mesh).name.clone();
+        let mesh_back = ids.iter().copied().find(|id| back.node(*id).name == name).expect("the mesh node");
+
+        let stored = back.node(mesh_back).mesh().expect("the mesh body kept its geometry");
+        assert_eq!(stored.triangle_count(), scene.node(mesh).mesh().unwrap().triangle_count());
+        let (lo, hi) = stored.mesh.bounds().unwrap();
+        assert!((hi.x - lo.x - 11.0).abs() < 1e-3, "the stored mesh came back {} wide", hi.x - lo.x);
+    }
+
+    #[test]
+    fn a_mesh_body_whose_geometry_is_damaged_fails_the_file_rather_than_loading_empty() {
+        use crate::mesh_data::MeshData;
+
+        let mut scene = Scene::new();
+        let root = scene.root();
+        scene.add_mesh("Baked", MeshData::new(simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0)), root, 0);
+        let text = to_string(&scene);
+        // Cut the vertex array short, as a truncated copy or a bad edit would.
+        let damaged = text.replacen("\"positions\": \"", "\"positions\": \"AAAA", 1);
+        let err = from_str(&damaged).unwrap_err();
+        assert!(err.to_string().contains("geometry"), "{err}");
     }
 
     #[test]

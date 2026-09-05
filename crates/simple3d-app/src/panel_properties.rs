@@ -426,6 +426,7 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
             None => match app.scene.node(primary).body.clone() {
                 Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
                 Body::Pattern { .. } if targets.len() == 1 => section(ui, "Pattern", |ui| pattern(app, ui, primary)),
+                Body::Mesh { .. } if targets.len() == 1 => section(ui, "Mesh", |ui| mesh_body(app, ui, primary)),
                 // A selection of different types has no shared dimension to
                 // offer. Saying so beats an empty panel or a set of fields that
                 // would edit only one of them without saying which.
@@ -1102,6 +1103,28 @@ fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
             .selectable(false),
         );
     }
+}
+
+/// A stored mesh's panel. There are no parameters -- that is what being a mesh
+/// means -- so what it can say is how much geometry there is and what can still
+/// be done to it.
+fn mesh_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    let Some(mesh) = app.scene.node(id).mesh() else { return };
+    let triangles = mesh.triangle_count();
+    let vertices = mesh.mesh.positions.len();
+    field_row(ui, "Triangles", "", |ui| {
+        ui.add(egui::Label::new(theme::value(triangles.to_string())).selectable(false));
+    });
+    field_row(ui, "Vertices", "", |ui| {
+        ui.add(egui::Label::new(theme::value(vertices.to_string())).selectable(false));
+    });
+    ui.add(
+        egui::Label::new(theme::hint(
+            "Geometry with no parameters behind it. It can still be moved, painted, cut with a boolean and \
+             broken into its separate pieces.",
+        ))
+        .selectable(false),
+    );
 }
 
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {

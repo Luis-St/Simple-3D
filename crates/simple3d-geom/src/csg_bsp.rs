@@ -18,6 +18,10 @@ use crate::vec3::Vec3;
 
 const EPSILON: f64 = 1e-5;
 
+/// How many polygons a clip gets through between asking whether the answer is
+/// still wanted. See [`crate::Abandon`].
+const ABANDON_EVERY: u32 = 256;
+
 #[derive(Clone, Copy, Debug)]
 struct Plane {
     normal: Vec3,
@@ -315,6 +319,63 @@ impl BoxTree {
     /// clip needs instead, because the faces in it are the only ones whose
     /// planes can cut the query polygon anywhere the body's surface actually
     /// is. `stack` is the caller's, for the same reason as in `meets`.
+    /// Every polygon whose box the ray from `origin` along `dir` could enter,
+    /// in no particular order. The slab test, with the divisions done once per
+    /// query rather than once per node.
+    ///
+    /// An infinite ray rather than a segment: a parity count has to see every
+    /// face ahead of the point, however far away.
+    fn along_ray(&self, origin: Vec3, dir: Vec3, out: &mut Vec<u32>, stack: &mut Vec<u32>) {
+        let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
+        // Generous by `EPSILON`, like every other box test here: the point of
+        // one is to prove a face *cannot* be crossed, and a box the ray only
+        // just misses proves nothing.
+        let hits = |lo: Vec3, hi: Vec3| -> bool {
+            let mut near = f64::NEG_INFINITY;
+            let mut far = f64::INFINITY;
+            for (o, d, l, h) in [
+                (origin.x, inv.x, lo.x - EPSILON, hi.x + EPSILON),
+                (origin.y, inv.y, lo.y - EPSILON, hi.y + EPSILON),
+                (origin.z, inv.z, lo.z - EPSILON, hi.z + EPSILON),
+            ] {
+                let (mut t0, mut t1) = ((l - o) * d, (h - o) * d);
+                if t0 > t1 {
+                    std::mem::swap(&mut t0, &mut t1);
+                }
+                // A direction with a zero component gives infinities here, and
+                // they compare the right way round: the slab is missed entirely
+                // only when the origin is outside it, which makes both bounds
+                // the same infinity.
+                near = near.max(t0);
+                far = far.min(t1);
+            }
+            far >= near.max(0.0)
+        };
+        out.clear();
+        stack.clear();
+        stack.push(0);
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i as usize];
+            if !hits(node.lo, node.hi) {
+                continue;
+            }
+            match node.kind {
+                BoxKind::Split(left, right) => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                BoxKind::Leaf(from, to) => {
+                    for &p in &self.order[from as usize..to as usize] {
+                        let (lo, hi) = self.boxes[p as usize];
+                        if hits(lo, hi) {
+                            out.push(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn gather(&self, query: (Vec3, Vec3), out: &mut Vec<u32>, stack: &mut Vec<u32>) {
         out.clear();
         stack.clear();
@@ -488,8 +549,13 @@ struct BspNode {
     /// Set when this body's own planes divide none of its faces, which is what
     /// `non_splitting_order` proves. `clip_polygons` uses it instead of
     /// descending the chain. Only a root carries one; the nodes `chain` and
-    /// `build_one_level` create are empty.
+    /// `chain` create are empty.
     convex: Option<ConvexBody>,
+    /// Which side of a general body's surface is solid. Flipped by `invert`,
+    /// the way `ConvexBody::inverted` is: a general body has no tree to turn
+    /// inside out any more, only its faces and the parity test over them, and
+    /// parity says nothing about which side of the count is the solid one.
+    inverted: bool,
 }
 
 /// Do the two boxes come within `EPSILON` of each other? Deliberately generous:
@@ -522,6 +588,10 @@ struct ClipScratch {
     next: Vec<Polygon>,
     /// A general clip's undecided pieces.
     work: Vec<Undecided>,
+    /// The faces a parity ray could cross, and the hierarchy walk that finds
+    /// them.
+    ray: Vec<u32>,
+    ray_stack: Vec<u32>,
 }
 
 /// A piece a general clip has not settled yet: the piece itself, the face index
@@ -557,6 +627,7 @@ impl BspNode {
             face_planes: Vec::new(),
             faces: Vec::new(),
             convex: None,
+            inverted: false,
         };
         if !polygons.is_empty() {
             let surface = BoxTree::new(&polygons);
@@ -569,11 +640,24 @@ impl BspNode {
                     node.chain(polygons, groups);
                 }
                 None => {
-                    // Asked and answered: give the root its plane so `build`
-                    // does not ask `non_splitting_order` the same question a
-                    // second time on the way in.
-                    node.plane = Some(polygons[0].plane);
-                    node.build(polygons);
+                    // No tree. A general body used to be partitioned into a BSP
+                    // of its own planes, and that tree was the body: it held the
+                    // polygons a clip handed back, and it answered "is this
+                    // point inside". `clip_near` took the first of those jobs
+                    // over -- it cuts by the planes of the faces that come near
+                    // a piece, and never by the rest -- and the second is now
+                    // `ray_outside`, which counts the faces a ray from the point
+                    // crosses. Neither needs the polygons partitioned, and
+                    // partitioning them was ruinous: a 200 mm landscape's 18,811
+                    // faces came out of its own tree as 102,801 fragments, two
+                    // seconds of work, and it was the *fragments* a union
+                    // emitted -- a surface riddled with T-junctions and slivers
+                    // a hundred millimetres from anything the other body
+                    // touched, which `repair` could not always close. Half the
+                    // shipped landscapes reported `Union produced non-manifold
+                    // geometry` the moment any shape overlapped them. The faces
+                    // now come out of a union as the faces that went in.
+                    node.polygons = polygons;
                 }
             }
             node.surface = surface;
@@ -600,6 +684,7 @@ impl BspNode {
         }
         let mut stack: Vec<&mut BspNode> = vec![self];
         while let Some(node) = stack.pop() {
+            node.inverted = !node.inverted;
             for p in node.polygons.iter_mut() {
                 *p = p.flip();
             }
@@ -612,13 +697,42 @@ impl BspNode {
         }
     }
 
-    /// Is `point` on the solid side of this subtree?
+    /// Build a set that no plane of its own divides, as the chain of nodes the
+    /// general path would have arrived at -- without the work of arriving.
     ///
-    /// The same walk `clip_polygons` makes, for a single point and without
-    /// splitting anything: front at a leaf is outside the body, back at a leaf
-    /// is inside it. Only meaningful for a point the surface does not pass
-    /// near, which is exactly where it is used.
-    fn keeps_point(&self, point: Vec3) -> bool {
+    /// `groups` lists the polygons of each plane, in the order the planes are
+    /// to be chained. Each node keeps the polygons lying in its own plane, just
+    /// as a general BSP build would put coplanar polygons at the node; everything
+    /// further down is behind it.
+    fn chain(&mut self, polygons: Vec<Polygon>, groups: Vec<Vec<usize>>) {
+        let mut polygons: Vec<Option<Polygon>> = polygons.into_iter().map(Some).collect();
+        let mut node = self;
+        let last = groups.len() - 1;
+        for (i, group) in groups.into_iter().enumerate() {
+            node.plane = Some(polygons[group[0]].as_ref().expect("each polygon is in one group").plane);
+            node.polygons = group.iter().map(|&i| polygons[i].take().expect("groups do not overlap")).collect();
+            // No node past the last plane. A node with no plane of its own
+            // *keeps* everything that reaches it, so a trailing empty one would
+            // hand back the far side of the body as though it were outside --
+            // the deepest back child being absent is what says "solid here".
+            if i < last {
+                node = node.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
+            }
+        }
+    }
+
+    /// Is `point` outside this body -- and so kept by a clip against it?
+    ///
+    /// A convex body is a chain of its own face planes and is walked: front at a
+    /// leaf is outside it, back at a leaf is inside. A general body has no tree
+    /// to walk any more (see `BspNode::new`) and is answered by `ray_outside`.
+    ///
+    /// Only meaningful for a point the surface does not pass through, which is
+    /// exactly where it is used.
+    fn keeps_point(&self, point: Vec3, hits: &mut Vec<u32>, stack: &mut Vec<u32>) -> bool {
+        if self.plane.is_none() {
+            return self.ray_outside(point, hits, stack);
+        }
         let mut node = self;
         loop {
             let Some(plane) = node.plane else { return true };
@@ -631,14 +745,86 @@ impl BspNode {
         }
     }
 
+    /// Is `point` outside the surface, by counting the faces a ray from it
+    /// crosses? An odd count means it started inside.
+    ///
+    /// The faces come from the same box hierarchy `clip_near` gathers from, so
+    /// a query costs a walk of that hierarchy rather than a pass over every
+    /// triangle of the body.
+    ///
+    /// A direction is abandoned the moment the ray meets a face edge-on, or
+    /// crosses one within a hair of its rim, or starts on one: a count taken
+    /// along an edge or through a vertex is the classic way a parity test comes
+    /// out wrong. That is not a rare case here -- `clip_near` asks this exactly
+    /// about the pieces that lie *in* the plane of one of the body's faces but
+    /// off the end of it, and such a point sits on the rim of every face
+    /// perpendicular to that one. The six axis directions are all unusable
+    /// there, which is why the directions tried are deliberately skew: no plane
+    /// of an axis-aligned body is parallel to one, and no edge of one lies
+    /// along one.
+    fn ray_outside(&self, point: Vec3, hits: &mut Vec<u32>, stack: &mut Vec<u32>) -> bool {
+        let Some(surface) = &self.surface else { return !self.inverted };
+        let (lo, hi) = (surface.nodes[0].lo, surface.nodes[0].hi);
+        // Beyond the body's own extent there is nothing to count.
+        let clear = |a: f64, b: f64, c: f64| a < b - EPSILON || a > c + EPSILON;
+        if clear(point.x, lo.x, hi.x) || clear(point.y, lo.y, hi.y) || clear(point.z, lo.z, hi.z) {
+            return !self.inverted;
+        }
+        let mut fallback = None;
+        for dir in RAY_DIRECTIONS {
+            surface.along_ray(point, dir, hits, stack);
+            let mut crossings = 0usize;
+            let mut clean = true;
+            for &i in hits.iter() {
+                let face = &self.faces[i as usize];
+                let along = face.plane.normal.dot(dir);
+                let distance = face.plane.normal.dot(point) - face.plane.w;
+                if along.abs() < 1e-9 {
+                    // Edge-on to the ray: it crosses nothing, unless the point
+                    // is in the face's plane, where the answer is undecidable.
+                    if distance.abs() < RAY_EPSILON {
+                        clean = false;
+                        break;
+                    }
+                    continue;
+                }
+                let t = -distance / along;
+                if t < -RAY_EPSILON {
+                    continue;
+                }
+                let margin = covered_by(face, point + dir * t);
+                if margin < -RAY_EPSILON {
+                    continue;
+                }
+                if margin < RAY_EPSILON || t < RAY_EPSILON {
+                    // Through the rim of a face, or starting on one.
+                    clean = false;
+                    break;
+                }
+                crossings += 1;
+            }
+            let outside = crossings.is_multiple_of(2) != self.inverted;
+            if clean {
+                return outside;
+            }
+            fallback.get_or_insert(outside);
+        }
+        fallback.unwrap_or(!self.inverted)
+    }
+
     /// Clip `polygons` against this body, consuming them: a polygon that
     /// survives whole is handed straight back rather than copied.
-    fn clip_polygons(&self, polygons: Vec<Polygon>, scratch: &mut ClipScratch) -> Vec<Polygon> {
+    fn clip_polygons(
+        &self,
+        polygons: Vec<Polygon>,
+        scratch: &mut ClipScratch,
+        give_up: crate::Abandon<'_>,
+    ) -> Vec<Polygon> {
         if let (Some(convex), Some(surface)) = (&self.convex, &self.surface) {
-            return clip_convex(convex, surface, polygons, scratch);
+            return clip_convex(convex, surface, polygons, scratch, give_up);
         }
         if let Some(surface) = &self.surface {
-            return clip_near(self, surface, polygons, scratch);
+            return clip_near(self, surface, polygons, scratch, give_up);
         }
         let mut kept = Vec::new();
         // Pushed back-subtree first so the front one is popped first: the
@@ -671,7 +857,7 @@ impl BspNode {
                     None => false,
                 };
                 if clear {
-                    if node.keeps_point(p.vertices[0]) {
+                    if node.keeps_point(p.vertices[0], &mut scratch.ray, &mut scratch.ray_stack) {
                         kept.push(p);
                     }
                     continue;
@@ -696,10 +882,14 @@ impl BspNode {
         kept
     }
 
-    fn clip_to(&mut self, other: &BspNode, scratch: &mut ClipScratch) {
+    fn clip_to(&mut self, other: &BspNode, scratch: &mut ClipScratch, give_up: crate::Abandon<'_>) {
         let mut stack: Vec<&mut BspNode> = vec![self];
         while let Some(node) = stack.pop() {
-            node.polygons = other.clip_polygons(std::mem::take(&mut node.polygons), scratch);
+            if give_up() {
+                node.polygons.clear();
+                continue;
+            }
+            node.polygons = other.clip_polygons(std::mem::take(&mut node.polygons), scratch, give_up);
             stack.extend(node.front.as_deref_mut());
             stack.extend(node.back.as_deref_mut());
         }
@@ -716,87 +906,6 @@ impl BspNode {
             stack.extend(node.front.as_deref());
         }
         result
-    }
-
-    fn build(&mut self, polygons: Vec<Polygon>) {
-        let mut splitter = Splitter::default();
-        // The hierarchy describes the polygons the tree already had; polygons
-        // arriving now are not in it, so the shortcut it serves is withdrawn.
-        // Nothing in `op` clips a tree after building into it.
-        self.surface = None;
-        let mut stack: Vec<(&mut BspNode, Vec<Polygon>)> = vec![(self, polygons)];
-        while let Some((node, polygons)) = stack.pop() {
-            if polygons.is_empty() {
-                continue;
-            }
-            if node.plane.is_none() {
-                if let Some(groups) = non_splitting_order(&polygons) {
-                    node.chain(polygons, groups);
-                    continue;
-                }
-            }
-            node.build_one_level(polygons, &mut stack, &mut splitter);
-        }
-    }
-
-    /// Build a set that no plane of its own divides, as the chain of nodes the
-    /// general path would have arrived at -- without the work of arriving.
-    ///
-    /// `groups` lists the polygons of each plane, in the order the planes are
-    /// to be chained. Each node keeps the polygons lying in its own plane, just
-    /// as `build_one_level` puts coplanar polygons at the node; everything
-    /// further down is behind it.
-    fn chain(&mut self, polygons: Vec<Polygon>, groups: Vec<Vec<usize>>) {
-        let mut polygons: Vec<Option<Polygon>> = polygons.into_iter().map(Some).collect();
-        let mut node = self;
-        let last = groups.len() - 1;
-        for (i, group) in groups.into_iter().enumerate() {
-            node.plane = Some(polygons[group[0]].as_ref().expect("each polygon is in one group").plane);
-            node.polygons = group.iter().map(|&i| polygons[i].take().expect("groups do not overlap")).collect();
-            // No node past the last plane. A node with no plane of its own
-            // *keeps* everything that reaches it, so a trailing empty one would
-            // hand back the far side of the body as though it were outside --
-            // the deepest back child being absent is what says "solid here".
-            if i < last {
-                node = node.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
-            }
-        }
-    }
-
-    /// Partition `polygons` by this node's plane, keeping what is coplanar with
-    /// it and handing the two sides to the children.
-    fn build_one_level<'a>(
-        &'a mut self,
-        polygons: Vec<Polygon>,
-        stack: &mut Vec<(&'a mut BspNode, Vec<Polygon>)>,
-        splitter: &mut Splitter,
-    ) {
-        let node = self;
-        if node.plane.is_none() {
-            node.plane = Some(polygons[0].plane);
-        }
-        let plane = node.plane.unwrap();
-        let mut front = Vec::new();
-        let mut back = Vec::new();
-        for p in polygons {
-            let mut cf = Vec::new();
-            let mut cb = Vec::new();
-            let mut fr = Vec::new();
-            let mut bk = Vec::new();
-            splitter.split(&plane, p, &mut cf, &mut cb, &mut fr, &mut bk);
-            node.polygons.extend(cf);
-            node.polygons.extend(cb);
-            front.extend(fr);
-            back.extend(bk);
-        }
-        if !front.is_empty() {
-            let child = node.front.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
-            stack.push((child, front));
-        }
-        if !back.is_empty() {
-            let child = node.back.get_or_insert_with(|| Box::new(BspNode::new(Vec::new())));
-            stack.push((child, back));
-        }
     }
 }
 
@@ -827,13 +936,25 @@ fn clip_convex(
     surface: &BoxTree,
     polygons: Vec<Polygon>,
     scratch: &mut ClipScratch,
+    give_up: crate::Abandon<'_>,
 ) -> Vec<Polygon> {
     let mut kept = Vec::new();
     // Behind every face is inside the body, which the clip removes -- unless
     // the body has been inverted, when inside is what survives.
     let keep_outside = !body.inverted;
     let (mut cf, mut cb, mut front, mut back) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    // Asked once a batch rather than once a polygon: an atomic load is cheap but
+    // this is the innermost loop in the kernel, and a batch of this size is
+    // microseconds of work.
+    let mut countdown = ABANDON_EVERY;
     for p in polygons {
+        countdown -= 1;
+        if countdown == 0 {
+            countdown = ABANDON_EVERY;
+            if give_up() {
+                return Vec::new();
+            }
+        }
         surface.gather(p.bounds, &mut scratch.near, &mut scratch.boxes);
         // By plane rather than by face, in the order `chain` took the planes,
         // so the same input gives the same output every run.
@@ -911,11 +1032,25 @@ fn clip_convex(
 /// other way is the inside. That is the rule the classic algorithm applies at
 /// the node owning the plane, and it is what leaves exactly one copy of two
 /// coincident faces.
-fn clip_near(root: &BspNode, surface: &BoxTree, polygons: Vec<Polygon>, scratch: &mut ClipScratch) -> Vec<Polygon> {
+fn clip_near(
+    root: &BspNode,
+    surface: &BoxTree,
+    polygons: Vec<Polygon>,
+    scratch: &mut ClipScratch,
+    give_up: crate::Abandon<'_>,
+) -> Vec<Polygon> {
     let face_planes = &root.face_planes;
     let mut kept = Vec::new();
     let (mut cf, mut cb, mut front, mut back) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut countdown = ABANDON_EVERY;
     for p in polygons {
+        countdown -= 1;
+        if countdown == 0 {
+            countdown = ABANDON_EVERY;
+            if give_up() {
+                return Vec::new();
+            }
+        }
         // Each piece carries the face it has been cut past, and whichever face
         // it was found to lie in the plane of. The faces are taken in
         // increasing index and never revisited, which is what makes this
@@ -973,7 +1108,25 @@ fn clip_near(root: &BspNode, surface: &BoxTree, polygons: Vec<Polygon>, scratch:
                     // surface does not either: it is wholly on one side, and
                     // one point settles the whole of it.
                     let centre = piece.centroid();
-                    let keep = match lies_in {
+                    // Which face the piece is lying *on* -- not merely which one
+                    // it shares a plane with. One face of a body is very often
+                    // several triangles in the one plane: a box's side wall is
+                    // two, and a piece resting on that wall lies in the plane of
+                    // both and on only one of them. Taking the first found gave
+                    // the coincident-face rule the other triangle's answer,
+                    // which is no answer at all -- so the rule fell through to a
+                    // side test on a point that is *on* the surface, and both
+                    // copies of a shared wall survived. That is the union of a
+                    // box with a mesh of several separate boxes coming back
+                    // non-manifold.
+                    let on = lies_in.filter(|&i| covers(&root.faces[i as usize], centre)).or_else(|| {
+                        scratch.near.iter().copied().find(|&j| {
+                            let plane = face_planes[j as usize];
+                            piece.vertices.iter().all(|v| (plane.normal.dot(*v) - plane.w).abs() <= EPSILON)
+                                && covers(&root.faces[j as usize], centre)
+                        })
+                    });
+                    let keep = match on {
                         // On the body's own surface, where a side test has no
                         // answer: facing the same way as the face is the
                         // outside of it, the other way is the inside. This is
@@ -981,12 +1134,10 @@ fn clip_near(root: &BspNode, surface: &BoxTree, polygons: Vec<Polygon>, scratch:
                         // owning the plane, and with the second clip either
                         // side of an `invert` it is what leaves one copy of two
                         // coincident faces rather than two or none.
-                        Some(i) if covers(&root.faces[i as usize], centre) => {
-                            face_planes[i as usize].normal.dot(piece.plane.normal) > 0.0
-                        }
+                        Some(i) => face_planes[i as usize].normal.dot(piece.plane.normal) > 0.0,
                         // In the plane of a face but off the end of it, which
                         // says nothing about the body at all.
-                        _ => root.keeps_point(centre),
+                        None => root.keeps_point(centre, &mut scratch.ray, &mut scratch.ray_stack),
                     };
                     if keep {
                         kept.push(piece);
@@ -1012,6 +1163,44 @@ fn covers(face: &Polygon, point: Vec3) -> bool {
         (b - a).cross(point - a).dot(face.plane.normal) >= -EPSILON * (b - a).length()
     })
 }
+
+/// How far inside the face `point` is, measured in its own plane: positive
+/// inside, negative outside, and near zero on the rim. The signed form of
+/// [`covers`], for the parity test, which has to know when it is passing
+/// through an edge rather than through a face.
+fn covered_by(face: &Polygon, point: Vec3) -> f64 {
+    let n = face.vertices.len();
+    let mut margin = f64::MAX;
+    for i in 0..n {
+        let (a, b) = (face.vertices[i], face.vertices[(i + 1) % n]);
+        let edge = b - a;
+        let length = edge.length();
+        if length < 1e-12 {
+            continue;
+        }
+        margin = margin.min(edge.cross(point - a).dot(face.plane.normal) / length);
+    }
+    margin
+}
+
+/// How close to a face's rim a ray may pass before the count it is taking part
+/// in is abandoned for another direction. Well under `EPSILON`, which is what
+/// decides whether a polygon is *on* a plane at all: a crossing this close to an
+/// edge is one the parity test cannot be trusted about, not one that is wrong.
+const RAY_EPSILON: f64 = 1e-9;
+
+/// Directions for the parity ray, tried in order until one gives a clean count.
+///
+/// Skew on purpose, and to no round fraction: the bodies this is asked about are
+/// full of axis-aligned faces and axis-aligned edges, and a ray along an axis
+/// meets those edge-on. Their length is immaterial: only the direction, and the
+/// sign of the `t` it produces, are used.
+const RAY_DIRECTIONS: [Vec3; 4] = [
+    Vec3 { x: 0.5628, y: 0.6567, z: 0.5019 },
+    Vec3 { x: -0.7237, y: 0.4265, z: 0.5427 },
+    Vec3 { x: 0.4109, y: -0.7583, z: 0.5065 },
+    Vec3 { x: 0.3181, y: 0.5023, z: -0.8038 },
+];
 
 impl Drop for BspNode {
     fn drop(&mut self) {
@@ -1284,16 +1473,16 @@ fn non_splitting_order(polygons: &[Polygon]) -> Option<Vec<Vec<usize>>> {
     Some(groups)
 }
 
-fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {
+fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
     let mut na = BspNode::new(mesh_to_polygons(a));
     let mut nb = BspNode::new(mesh_to_polygons(b));
     let scratch = &mut ClipScratch::default();
     let polys = match kind {
         BoolOp::Union => {
-            na.clip_to(&nb, scratch);
-            nb.clip_to(&na, scratch);
+            na.clip_to(&nb, scratch, give_up);
+            nb.clip_to(&na, scratch, give_up);
             nb.invert();
-            nb.clip_to(&na, scratch);
+            nb.clip_to(&na, scratch, give_up);
             nb.invert();
             let mut polys = na.all_polygons();
             polys.extend(nb.all_polygons());
@@ -1301,10 +1490,10 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {
         }
         BoolOp::Subtract => {
             na.invert();
-            na.clip_to(&nb, scratch);
-            nb.clip_to(&na, scratch);
+            na.clip_to(&nb, scratch, give_up);
+            nb.clip_to(&na, scratch, give_up);
             nb.invert();
-            nb.clip_to(&na, scratch);
+            nb.clip_to(&na, scratch, give_up);
             nb.invert();
             na.invert();
             let mut polys = na.all_polygons();
@@ -1313,21 +1502,24 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp) -> Mesh {
         }
         BoolOp::Intersect => {
             na.invert();
-            nb.clip_to(&na, scratch);
+            nb.clip_to(&na, scratch, give_up);
             nb.invert();
-            na.clip_to(&nb, scratch);
-            nb.clip_to(&na, scratch);
+            na.clip_to(&nb, scratch, give_up);
+            nb.clip_to(&na, scratch, give_up);
             na.invert();
             let mut polys = na.all_polygons();
             polys.extend(nb.all_polygons().iter().map(Polygon::flip));
             polys
         }
     };
+    if give_up() {
+        return Mesh::new();
+    }
     // The BSP clips whole polygons, which leaves T-junctions wherever two
     // polygons sharing an edge were split at different points along it; heal
     // them here so every boolean result -- including one feeding the next
     // boolean in a chain -- is edge-manifold. See `repair`.
-    crate::repair::heal(&polygons_to_mesh(&polys))
+    crate::repair::heal_until(&polygons_to_mesh(&polys), give_up)
 }
 
 enum BoolOp {
@@ -1337,13 +1529,27 @@ enum BoolOp {
 }
 
 pub fn union(a: &Mesh, b: &Mesh) -> Mesh {
-    op(a, b, BoolOp::Union)
+    op(a, b, BoolOp::Union, &crate::never)
 }
 
 pub fn subtract(a: &Mesh, b: &Mesh) -> Mesh {
-    op(a, b, BoolOp::Subtract)
+    op(a, b, BoolOp::Subtract, &crate::never)
 }
 
 pub fn intersect(a: &Mesh, b: &Mesh) -> Mesh {
-    op(a, b, BoolOp::Intersect)
+    op(a, b, BoolOp::Intersect, &crate::never)
+}
+
+/// The three of them again, abandoned part-way when `give_up` says so. See
+/// [`crate::Abandon`].
+pub fn union_until(a: &Mesh, b: &Mesh, give_up: crate::Abandon<'_>) -> Mesh {
+    op(a, b, BoolOp::Union, give_up)
+}
+
+pub fn subtract_until(a: &Mesh, b: &Mesh, give_up: crate::Abandon<'_>) -> Mesh {
+    op(a, b, BoolOp::Subtract, give_up)
+}
+
+pub fn intersect_until(a: &Mesh, b: &Mesh, give_up: crate::Abandon<'_>) -> Mesh {
+    op(a, b, BoolOp::Intersect, give_up)
 }

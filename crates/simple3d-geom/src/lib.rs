@@ -1,6 +1,7 @@
 pub mod csg_bsp;
 pub mod hull;
 pub mod mesh;
+pub mod mesh_ops;
 pub mod planar;
 pub mod polyhedra;
 pub mod primitives;
@@ -66,15 +67,18 @@ fn meshes_overlap(a: &Mesh, b: &Mesh) -> bool {
 /// Merging two islands grows the merged box, which can bring it into contact
 /// with an island that was previously clear, so the search restarts until no
 /// part overlaps.
-fn union_all(children: &[Mesh]) -> Mesh {
+fn union_all(children: &[Mesh], give_up: Abandon<'_>) -> Mesh {
     let mut parts: Vec<(Mesh, Bounds)> = Vec::new();
     for child in children {
         let Some(child_bounds) = child.bounds() else { continue };
         let mut acc = child.clone();
         let mut bounds = child_bounds;
         while let Some(i) = parts.iter().position(|(_, b)| boxes_overlap(*b, bounds)) {
+            if give_up() {
+                return Mesh::new();
+            }
             let (other, other_bounds) = parts.remove(i);
-            acc = csg_bsp::union(&other, &acc);
+            acc = csg_bsp::union_until(&other, &acc, give_up);
             bounds = merged_bounds(bounds, other_bounds);
         }
         parts.push((acc, bounds));
@@ -84,6 +88,28 @@ fn union_all(children: &[Mesh]) -> Mesh {
         out.append(mesh);
     }
     out
+}
+
+/// Asked at every point the kernel can safely abandon what it is doing: is this
+/// answer still wanted?
+///
+/// A boolean is where the time goes, and it used to be the one thing in an
+/// evaluation that could not be interrupted. `Evaluator::scatter` checked its
+/// `Cancel` while it was *placing* the copies and then handed the ground and all
+/// of them to a union that took no cancellation at all, so the flag the
+/// interface sets on the next edit could never land: the job ran to the end,
+/// every newer edit queued behind it, and with a big enough scatter the
+/// application could not be got out of it -- the footer still said
+/// "Evaluating..." with every node deleted.
+///
+/// A callback rather than the core crate's `Cancel`, because this crate sits
+/// below it and knows nothing of scenes or workers.
+pub type Abandon<'a> = &'a dyn Fn() -> bool;
+
+/// Never gives up. For the callers -- tests, benches, the exporter's own fixture
+/// -- with nothing to cancel against.
+pub fn never() -> bool {
+    false
 }
 
 /// Combine already-evaluated child meshes according to a group's boolean
@@ -99,26 +125,38 @@ fn union_all(children: &[Mesh]) -> Mesh {
 /// one. The result is identical either way; a disjoint union through the kernel
 /// is a pure pass-through by construction.
 pub fn evaluate_boolean(op: BooleanOp, children: &[Mesh]) -> Mesh {
+    evaluate_boolean_until(op, children, &never)
+}
+
+/// The same, abandoned part-way when `give_up` says the answer is no longer
+/// wanted. What comes back then is not a result and is never used: the evaluator
+/// marks the whole run cancelled and the worker drops it.
+pub fn evaluate_boolean_until(op: BooleanOp, children: &[Mesh], give_up: Abandon<'_>) -> Mesh {
     match op {
-        BooleanOp::Union => union_all(children),
+        BooleanOp::Union => union_all(children, give_up),
         BooleanOp::Difference => {
             let mut iter = children.iter();
             let Some(first) = iter.next() else { return Mesh::new() };
-            iter.fold(first.clone(), |acc, m| if meshes_overlap(&acc, m) { csg_bsp::subtract(&acc, m) } else { acc })
+            iter.fold(first.clone(), |acc, m| {
+                if give_up() {
+                    Mesh::new()
+                } else if meshes_overlap(&acc, m) {
+                    csg_bsp::subtract_until(&acc, m, give_up)
+                } else {
+                    acc
+                }
+            })
         }
         BooleanOp::Intersection => {
             let mut iter = children.iter();
             let Some(first) = iter.next() else { return Mesh::new() };
-            iter.fold(
-                first.clone(),
-                |acc, m| {
-                    if meshes_overlap(&acc, m) {
-                        csg_bsp::intersect(&acc, m)
-                    } else {
-                        Mesh::new()
-                    }
-                },
-            )
+            iter.fold(first.clone(), |acc, m| {
+                if give_up() || !meshes_overlap(&acc, m) {
+                    Mesh::new()
+                } else {
+                    csg_bsp::intersect_until(&acc, m, give_up)
+                }
+            })
         }
         BooleanOp::Hull => {
             let points: Vec<Vec3> = children.iter().flat_map(|m| m.positions.iter().copied()).collect();
