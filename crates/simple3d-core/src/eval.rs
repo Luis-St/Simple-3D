@@ -218,7 +218,11 @@ impl Evaluator {
                 mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                 mesh
             }
-            Body::Group { op } => {
+            // A group and a split are one arm: both are their children
+            // combined, and they differ only in the operation, which for a
+            // split is always the union its pieces already stood in (issue 82).
+            Body::Group { .. } | Body::Split { .. } => {
+                let op = node.combine_op().unwrap_or_default();
                 let mut child_meshes: Vec<Mesh> = Vec::new();
                 for &child in &node.children {
                     if !scene.node(child).visible {
@@ -233,7 +237,7 @@ impl Evaluator {
                 if cancel.is_cancelled() {
                     return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
                 }
-                combine(*op, &child_meshes, id, &node.name, &mut errors, cancel)
+                combine(op, &child_meshes, id, &node.name, &mut errors, cancel)
             }
             Body::Pattern { params } => {
                 // The unit the pattern repeats: its children, placed by their own
@@ -381,7 +385,9 @@ impl Evaluator {
                 }
                 out.meshes.insert(id, world);
             }
-            Body::Group { .. } => {
+            // A split is walked as the group it behaves like: its pieces are
+            // its children, and the node itself outlines what they make.
+            Body::Group { .. } | Body::Split { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 // The group's own result, kept so the selection outline can draw
                 // the shape the group *is*. It stays in the parent's frame:
@@ -483,6 +489,18 @@ impl Evaluator {
             Body::Pattern { params } => {
                 "pattern".hash(&mut hasher.0);
                 hash_params(hasher, params);
+                for &child in &node.children {
+                    if scene.node(child).visible {
+                        self.hash_subtree(scene, child, hasher);
+                    }
+                }
+                node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
+            }
+            // The recipe a split carries is not geometry -- nothing evaluates
+            // it until the pieces are joined back together -- so it stays out of
+            // the key, and two splits holding the same pieces share one result.
+            Body::Split { .. } => {
+                "split".hash(&mut hasher.0);
                 for &child in &node.children {
                     if scene.node(child).visible {
                         self.hash_subtree(scene, child, hasher);

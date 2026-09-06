@@ -292,6 +292,13 @@ impl App {
             // pieces it is actually in.
             self.command_item(ui, Command::ConvertToMesh, !self.selection.is_empty());
             self.command_item(ui, Command::BreakApart, self.selection.len() == 1);
+            // Enabled only on a split, because a split is the only thing it has
+            // anything to say to -- everything else was never broken apart.
+            self.command_item(
+                ui,
+                Command::Rejoin,
+                self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_split()),
+            );
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
             self.command_item(ui, Command::MoveUp, self.can_reorder(-1));

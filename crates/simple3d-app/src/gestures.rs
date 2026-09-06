@@ -2151,6 +2151,43 @@ fn the_measure_section_shows_the_span_and_takes_it_back() {
 }
 
 #[test]
+fn the_split_panels_button_joins_the_pieces_back_together_without_taking_the_panel_with_it() {
+    use egui_kittest::kittest::Queryable;
+    use simple3d_core::keymap::Command;
+
+    // The button takes a node out of the tree, and the sections under it -- the
+    // transform, the measurements -- are laid out in the same frame from the
+    // selection that frame started with. Run on the spot, the click left them
+    // drawing a row that was no longer there and the window went down with
+    // "node 6 is not in the scene". So the panel asks for the command and the
+    // command runs when the panel is done.
+    let mut harness = harness_configured("split-panel", |app| {
+        let root = app.scene.root();
+        let group = app.scene.add_group(simple3d_core::scene::GroupOp::Union, root, 0);
+        for i in 0..2 {
+            let id = app.scene.add_primitive("box", group, i).unwrap();
+            app.scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 60.0, 0.0, 0.0);
+        }
+        app.select_only(group);
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+        app.run(Command::BreakApart);
+    });
+    let split = harness.state().primary().expect("the split is selected");
+    assert!(harness.state().scene.node(split).is_split());
+
+    let label = format!("Join back together ({})", harness.state().keymap.shortcut_text(Command::Rejoin));
+    assert!(harness.query_by_label(&label).is_some(), "the split panel has no button to join the pieces back");
+    harness.get_by_label(&label).click();
+    harness.step();
+    harness.step();
+
+    assert!(!harness.state().scene.contains(split), "the split is still there");
+    let back = harness.state().primary().expect("the object that came back is selected");
+    assert!(harness.state().scene.node(back).is_group(), "what came back is not the group it was made from");
+    assert_eq!(harness.state().scene.node(back).children.len(), 2, "the operands did not come back");
+}
+
+#[test]
 fn a_patterns_kind_is_clicked_from_a_row_and_its_fields_are_all_one_width() {
     use egui_kittest::kittest::Queryable;
 

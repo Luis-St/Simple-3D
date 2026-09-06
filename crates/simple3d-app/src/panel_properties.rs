@@ -396,6 +396,12 @@ fn edit_or_touch(app: &mut App, started: bool, label: &str, key: &str) {
 /// drawn in either dock.
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
+    // A command a button in here asks for is run *after* the panel is drawn,
+    // never on the spot: the sections below this one are still to be laid out
+    // from the selection this frame started with, and a command that changes
+    // the tree -- joining a split back together takes a node out of it -- would
+    // leave them drawing a row that is no longer there.
+    let mut command: Option<simple3d_core::keymap::Command> = None;
     let (area, restore) = theme::list_scroll_area(ui);
     area.show(ui, |ui| {
         ui.set_style(restore);
@@ -427,6 +433,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
                 Body::Pattern { .. } if targets.len() == 1 => section(ui, "Pattern", |ui| pattern(app, ui, primary)),
                 Body::Mesh { .. } if targets.len() == 1 => section(ui, "Mesh", |ui| mesh_body(app, ui, primary)),
+                Body::Split { .. } if targets.len() == 1 => {
+                    section(ui, "Split", |ui| split_body(app, ui, primary, &mut command))
+                }
                 // A selection of different types has no shared dimension to
                 // offer. Saying so beats an empty panel or a set of fields that
                 // would edit only one of them without saying which.
@@ -444,6 +453,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         section(ui, "Transform", |ui| placement(app, ui, &targets));
         section(ui, "Measured", |ui| measurements(app, ui, primary, targets.len()));
     });
+    if let Some(command) = command {
+        app.run(command);
+    }
 }
 
 /// The primitive type every selected node has, or `None` when they are not all
@@ -1122,6 +1134,46 @@ fn mesh_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         egui::Label::new(theme::hint(
             "Geometry with no parameters behind it. It can still be moved, painted, cut with a boolean and \
              broken into its separate pieces.",
+        ))
+        .selectable(false),
+    );
+}
+
+/// A split's panel (issue 82): what it was made from, how many pieces it is in,
+/// and the one button that undoes the break.
+///
+/// The point of the section is that a break is not a one-way door. The object
+/// the pieces came from is still here, whole, with its parameters -- so the
+/// panel names it rather than leaving the user to remember what a group of
+/// nameless meshes used to be.
+fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option<simple3d_core::keymap::Command>) {
+    let Some(original) = app.scene.node(id).split_original().cloned() else { return };
+    let pieces = app.scene.node(id).children.len();
+    // A shape is named by its label -- "Rounded box", not "rounded_box" -- and
+    // every other body is its own type name, which is already the word for it.
+    let kind = simple3d_core::primitive::lookup(&original.type_id).map_or(original.type_id.as_str(), |s| s.label);
+    field_row(ui, "Pieces", "Each piece is an object of its own: move it, paint it, export it apart.", |ui| {
+        ui.add(egui::Label::new(theme::value(pieces.to_string())).selectable(false));
+    });
+    field_row(ui, "Made from", "The object this was broken apart from, kept whole so it can come back.", |ui| {
+        ui.add(egui::Label::new(theme::value(format!("{} ({kind})", original.name))).selectable(false));
+    });
+    field_row(ui, "", "", |ui| {
+        let shortcut = app.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
+        let label = if shortcut.is_empty() {
+            "Join back together".to_string()
+        } else {
+            format!("Join back together ({shortcut})")
+        };
+        if ui.button(label).clicked() {
+            *command = Some(simple3d_core::keymap::Command::Rejoin);
+        }
+    });
+    ui.add(
+        egui::Label::new(theme::hint(
+            "The pieces are stored geometry, so what is done to them is not written back to the object they came \
+             from. Joining them back together brings that object back as it was, wherever the pieces have been \
+             moved to since.",
         ))
         .selectable(false),
     );

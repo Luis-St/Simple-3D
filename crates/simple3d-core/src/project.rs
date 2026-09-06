@@ -17,7 +17,11 @@ use std::fmt;
 /// geometry rather than a recipe for it. A version 1 build meeting one would
 /// fail on the unknown type rather than open the file half-understood, so the
 /// version says so first.
-pub const FORMAT_VERSION: u32 = 2;
+///
+/// Version 3 added the other half of issue 82: a `split` node, holding the
+/// pieces a shape was broken into and -- in its `original` field -- the shape
+/// itself, so the break can be undone long after the fact.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 struct ProjectFile {
@@ -132,7 +136,7 @@ fn unknown_types(root: &NodeData) -> String {
 /// The node types that are not entries in the primitive registry. Each is a
 /// [`crate::scene::Body`] of its own, so `lookup` will never find one and a
 /// file holding one must not be reported as carrying an unknown shape.
-const BODY_TYPES: &[&str] = &["group", "pattern", "mesh"];
+const BODY_TYPES: &[&str] = &["group", "pattern", "mesh", "split"];
 
 fn collect_unknown(node: &NodeData, out: &mut Vec<String>) {
     if !BODY_TYPES.contains(&node.type_id.as_str()) && crate::primitive::lookup(&node.type_id).is_none() {
@@ -143,6 +147,14 @@ fn collect_unknown(node: &NodeData, out: &mut Vec<String>) {
     // silently missing from whatever gets printed.
     if node.type_id == "mesh" && node.mesh.as_ref().and_then(crate::mesh_data::MeshData::from_blob).is_none() {
         out.push("mesh (its geometry could not be read)".to_string());
+    }
+    // A split carries the object it was broken from, which is a node like any
+    // other: an unknown type in *there* fails the load too, and naming it is
+    // what tells the user which shape the file is asking for.
+    match &node.original {
+        Some(original) => collect_unknown(original, out),
+        None if node.type_id == "split" => out.push("split (the object it was made from is missing)".to_string()),
+        None => {}
     }
     for child in &node.children {
         collect_unknown(child, out);
@@ -215,7 +227,7 @@ mod tests {
         let text = to_string(&sample());
         assert!(text.starts_with("{\n"), "not pretty-printed");
         assert!(text.ends_with('\n'), "no trailing newline");
-        assert!(text.contains("\"format\": 2"));
+        assert!(text.contains(&format!("\"format\": {FORMAT_VERSION}")));
         assert!(text.contains("\"Drilled plate\""));
         // Every value on its own line, so a one-dimension change is a one-line diff.
         assert!(text.lines().count() > 30);
@@ -225,7 +237,7 @@ mod tests {
 
     #[test]
     fn a_newer_format_is_refused_with_a_clear_message() {
-        let text = to_string(&sample()).replace("\"format\": 2", "\"format\": 99");
+        let text = to_string(&sample()).replace(&format!("\"format\": {FORMAT_VERSION}"), "\"format\": 99");
         let err = from_str(&text).unwrap_err();
         assert_eq!(err, LoadError::TooNew { found: 99, supported: FORMAT_VERSION });
         assert!(err.to_string().contains("99"));

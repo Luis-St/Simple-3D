@@ -1033,6 +1033,7 @@ impl App {
             Pattern => self.make_pattern(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             BreakApart => self.break_selection_apart(),
+            Rejoin => self.rejoin_selection(),
             Rename => {
                 if let Some(id) = self.primary() {
                     self.rename = Some((id, self.scene.node(id).name.clone()));
@@ -1741,7 +1742,11 @@ impl App {
         // Deleting a group is two different actions wearing one word: the
         // children can go with it, or stay. Rather than guess, or open a dialog
         // over the model, the outliner asks in place.
-        if targets.iter().any(|id| self.scene.node(*id).is_group() && !self.scene.node(*id).children.is_empty()) {
+        let holds_children = |id: &NodeId| {
+            (self.scene.node(*id).is_group() || self.scene.node(*id).is_split())
+                && !self.scene.node(*id).children.is_empty()
+        };
+        if targets.iter().any(holds_children) {
             self.pending_delete = Some(targets);
             return;
         }
@@ -2202,12 +2207,17 @@ impl App {
     }
 
     /// Take what a node evaluates to, find the pieces it is actually in, and
-    /// make each one a node of its own under a group (issues 80 and 82).
+    /// make each one a node of its own under a split (issues 80 and 82).
     ///
     /// What a cut leaves behind is often several disconnected solids under one
     /// node, and this is what turns them into objects that can be moved,
     /// painted and exported apart. A union of shapes that never touched is as
     /// many pieces as it has operands.
+    ///
+    /// The pieces go into a [`Body::Split`], which stands where the shape stood,
+    /// wears its name and its transform, and keeps the shape itself -- so the
+    /// break is not a one-way door: [`App::rejoin_selection`] puts the object
+    /// back, with its parameters and its operands, however long afterwards.
     pub fn break_selection_apart(&mut self) {
         let targets = self.top_level_selection();
         let Some(&id) = targets.first() else {
@@ -2232,41 +2242,81 @@ impl App {
             _ => {}
         }
         self.edit("Break into separate objects", None);
-        let name = self.scene.node(id).name.clone();
         let Some(parent) = self.scene.node(id).parent else {
             self.history.discard_last();
             return;
         };
         let index = self.scene.node(parent).children.iter().position(|&c| c == id).unwrap_or(0);
-        // The pieces go into a union group standing where the original stood,
-        // carrying its transform -- so the whole thing is still one item to
-        // move, and the pieces inside it are where they were.
-        let group = self.scene.add_group(GroupOp::Union, parent, index);
-        {
-            let original = self.scene.node(id);
-            let (position, rotation, scale, anchor, colour) =
-                (original.position, original.rotation, original.scale, original.anchor, original.colour);
-            let holder = self.scene.get_mut(group).unwrap();
-            holder.name = name.clone();
-            holder.position = position;
-            holder.rotation = rotation;
-            holder.scale = scale;
-            holder.anchor = anchor;
-            holder.colour = colour;
-        }
+        // The shape itself, in the portable form the project file already uses,
+        // taken before it leaves the document: it is what the split holds, and
+        // what joining the pieces back together puts back.
+        let Some(original) = self.scene.export_subtree(id) else {
+            self.history.discard_last();
+            return;
+        };
+        let name = original.name.clone();
+        // Out first, so the split standing in its place can carry its name
+        // rather than a numbered variant of it.
+        self.scene.remove(id);
+        let split = self.scene.add_split(original, parent, index);
         let count = parts.len();
         for (index, part) in parts.into_iter().enumerate() {
             self.scene.add_mesh(
                 &format!("{name} {}", index + 1),
                 simple3d_core::mesh_data::MeshData::new(part),
-                group,
+                split,
                 index,
             );
         }
-        self.scene.remove(id);
-        self.collapsed.remove(&group);
-        self.select_only(group);
-        self.status = Status::Info(format!("Broke {name} into {count} separate objects"));
+        self.collapsed.remove(&split);
+        self.select_only(split);
+        // Says the way back in the same breath as the break, because a break
+        // that cannot be seen to be reversible is one nobody tries.
+        let shortcut = self.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
+        let back = if shortcut.is_empty() {
+            "they can be joined back together".to_string()
+        } else {
+            format!("{shortcut} joins them back together")
+        };
+        self.status = Status::Info(format!("Broke {name} into {count} separate objects -- {back}"));
+    }
+
+    /// Put a broken-apart shape back together (issue 82): the object returns,
+    /// with its parameters and its operands, and the pieces go.
+    ///
+    /// The split keeps its own transform through this, so pieces that were moved
+    /// about as one item come back where they now stand rather than where the
+    /// shape was when it was broken. What was done to the pieces themselves is
+    /// let go -- they are triangles, and what comes back is the recipe -- so
+    /// this is a step the history holds like any other.
+    pub fn rejoin_selection(&mut self) {
+        let targets = self.top_level_selection();
+        let Some(&id) = targets.first() else {
+            self.status = Status::Warning("Select a broken-apart object to join back together".into());
+            return;
+        };
+        if targets.len() > 1 {
+            self.status = Status::Warning("Join one broken-apart object back together at a time".into());
+            return;
+        }
+        if !self.scene.node(id).is_split() {
+            self.status = Status::Warning(
+                "Only something that was broken into separate objects can be joined back together".into(),
+            );
+            return;
+        }
+        let pieces = self.scene.node(id).children.len();
+        self.edit("Join the pieces back together", None);
+        let Some(restored) = self.scene.restore_split(id) else {
+            self.history.discard_last();
+            self.status = Status::Warning("The object this was made from could not be rebuilt".into());
+            return;
+        };
+        let node = self.scene.node(restored);
+        let (name, kind) = (node.name.clone(), node.kind_label());
+        self.collapsed.remove(&restored);
+        self.select_only(restored);
+        self.status = Status::Info(format!("Joined {pieces} pieces back into {name}, the {kind} they came from"));
     }
 
     /// Add an empty pattern, for shapes to be put under it afterwards
@@ -6317,7 +6367,8 @@ mod tests {
 
         app.run(Command::BreakApart);
         let holder = app.primary().expect("the holder is selected");
-        assert!(app.scene.node(holder).is_group());
+        assert!(app.scene.node(holder).is_split(), "the pieces went under a plain group");
+        assert_eq!(app.scene.node(holder).name, "Group", "the split is not named for what it was made from");
         assert_eq!(app.scene.node(holder).children.len(), 3, "three boxes standing apart are three pieces");
         for &child in &app.scene.node(holder).children {
             assert!(app.scene.node(child).is_mesh());
@@ -6327,6 +6378,119 @@ mod tests {
         let after = app.evaluated.mesh.bounds().unwrap();
         assert!((before.0 - after.0).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
         assert!((before.1 - after.1).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
+    }
+
+    #[test]
+    fn joining_the_pieces_back_together_brings_the_original_object_back() {
+        // The other half of the rework of issue 82: a break is reversible, and
+        // what comes back is the recipe -- the difference with both its operands
+        // and their parameters -- not the triangles the pieces are.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Difference, root, 0);
+        app.scene.get_mut(group).unwrap().name = "Cut plate".into();
+        let plate = app.scene.add_primitive("box", group, 0).unwrap();
+        app.scene.get_mut(plate).unwrap().params_mut().unwrap().insert("width".into(), ParamValue::Length(80.0));
+        let knife = app.scene.add_primitive("box", group, 1).unwrap();
+        {
+            let node = app.scene.get_mut(knife).unwrap();
+            node.params_mut().unwrap().insert("width".into(), ParamValue::Length(6.0));
+            node.params_mut().unwrap().insert("depth".into(), ParamValue::Length(200.0));
+            node.params_mut().unwrap().insert("height".into(), ParamValue::Length(200.0));
+        }
+        app.select_only(group);
+        app.reevaluate_for_test();
+        let before = app.evaluated.mesh.bounds().unwrap();
+
+        app.run(Command::BreakApart);
+        let split = app.primary().expect("the split is selected");
+        assert!(app.scene.node(split).is_split());
+        assert_eq!(app.scene.node(split).children.len(), 2, "a box cut in two is two pieces");
+
+        app.run(Command::Rejoin);
+        let back = app.primary().expect("the restored object is selected");
+        assert_eq!(app.scene.node(back).name, "Cut plate");
+        assert_eq!(app.scene.node(back).group_op(), Some(GroupOp::Difference), "it came back as something else");
+        assert_eq!(app.scene.node(back).children.len(), 2, "the operands did not come back");
+        let sizes: Vec<f64> =
+            app.scene.node(back).children.iter().map(|&c| app.scene.node(c).params().unwrap().num("width")).collect();
+        assert_eq!(sizes, vec![80.0, 6.0], "the operands came back with different dimensions");
+        app.reevaluate_for_test();
+        let after = app.evaluated.mesh.bounds().unwrap();
+        assert!((before.0 - after.0).length() < 1e-3, "the shape moved: {before:?} -> {after:?}");
+        assert!((before.1 - after.1).length() < 1e-3, "the shape moved: {before:?} -> {after:?}");
+    }
+
+    #[test]
+    fn the_pieces_can_be_moved_as_one_and_joined_back_where_they_now_stand() {
+        // Moving the split moves the object that comes out of it: the transform
+        // belongs to the node standing in the tree, not to the recipe it holds.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Union, root, 0);
+        for i in 0..2 {
+            let id = app.scene.add_primitive("box", group, i).unwrap();
+            app.scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 60.0, 0.0, 0.0);
+        }
+        app.select_only(group);
+        app.reevaluate_for_test();
+
+        app.run(Command::BreakApart);
+        let split = app.primary().unwrap();
+        app.scene.get_mut(split).unwrap().position = Vec3::new(0.0, 0.0, 25.0);
+        app.scene.get_mut(split).unwrap().name = "Renamed".into();
+        app.reevaluate_for_test();
+        let moved = app.evaluated.mesh.bounds().unwrap();
+
+        app.run(Command::Rejoin);
+        let back = app.primary().unwrap();
+        assert_eq!(app.scene.node(back).position, Vec3::new(0.0, 0.0, 25.0), "the object went back to where it was");
+        assert_eq!(app.scene.node(back).name, "Renamed", "the name the row now carries was not kept");
+        app.reevaluate_for_test();
+        let after = app.evaluated.mesh.bounds().unwrap();
+        assert!((moved.0 - after.0).length() < 1e-3, "joining moved the shape: {moved:?} -> {after:?}");
+        assert!((moved.1 - after.1).length() < 1e-3, "joining moved the shape: {moved:?} -> {after:?}");
+    }
+
+    #[test]
+    fn joining_something_that_was_never_broken_apart_says_so_rather_than_working() {
+        let mut app = headless_app();
+        let before = app.history.undo_len();
+        app.run(Command::Rejoin);
+        assert_eq!(app.history.undo_len(), before, "joining a shape that is not a split recorded an undo step");
+        assert!(app.status_text().contains("broken into separate objects"), "{}", app.status_text());
+    }
+
+    #[test]
+    fn a_split_survives_saving_and_loading_with_the_object_it_was_made_from() {
+        // The split is a body of its own in the project file (format 3), and the
+        // recipe it holds has to come back with it or the break stops being
+        // reversible the moment the file is closed.
+        let mut app = headless_app();
+        let root = app.scene.root();
+        let group = app.scene.add_group(GroupOp::Union, root, 0);
+        for i in 0..2 {
+            let id = app.scene.add_primitive("box", group, i).unwrap();
+            app.scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 60.0, 0.0, 0.0);
+        }
+        app.select_only(group);
+        app.reevaluate_for_test();
+        app.run(Command::BreakApart);
+
+        let text = simple3d_core::project::to_string(&app.scene);
+        let scene = simple3d_core::project::from_str(&text).expect("a scene with a split loads");
+        let split = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
+        assert_eq!(scene.node(split).children.len(), 2);
+        let original = scene.node(split).split_original().expect("the object it was made from");
+        assert_eq!(original.type_id, "group");
+        assert_eq!(original.children.len(), 2, "the operands were not written to the file");
+
+        // And it still joins back together after the round trip.
+        let mut reopened = headless_app();
+        reopened.scene = scene;
+        let restored = reopened.scene.restore_split(split).expect("the recipe rebuilds");
+        assert_eq!(reopened.scene.node(restored).group_op(), Some(GroupOp::Union));
+        assert_eq!(reopened.scene.node(restored).children.len(), 2);
     }
 
     #[test]

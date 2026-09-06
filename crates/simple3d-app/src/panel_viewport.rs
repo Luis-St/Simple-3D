@@ -335,7 +335,9 @@ fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view:
         app.grabbed = None;
         return false;
     };
-    let is_group = app.scene.node(id).is_group();
+    // A split counts as a group here: it has no dimensions of its own either,
+    // and its pieces are meshes, which have none at all.
+    let is_group = app.scene.node(id).is_group() || app.scene.node(id).is_split();
     let cursor = ui.input(|i| i.pointer.hover_pos());
     let dragging = app.drag.is_some();
 
@@ -586,7 +588,7 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
 
     if let Some(id) = app.primary() {
         if let Some(gizmo) = app.gizmo_for(id) {
-            draw_gizmo(app, &painter, ui, &gizmo, view, app.scene.node(id).is_group());
+            draw_gizmo(app, &painter, ui, &gizmo, view, app.scene.node(id).is_group() || app.scene.node(id).is_split());
         }
     }
 

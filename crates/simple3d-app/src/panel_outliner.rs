@@ -678,6 +678,8 @@ pub fn drop_is_legal(scene: &Scene, carried: &[NodeId], target: &DropTarget) -> 
 pub(crate) fn node_glyph(node: &simple3d_core::scene::Node) -> Glyph {
     if node.is_mesh() {
         Glyph::Mesh
+    } else if node.is_split() {
+        Glyph::Split
     } else if node.is_pattern() {
         Glyph::Pattern
     } else if node.is_group() {
@@ -806,6 +808,9 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         // above has already made this row.
         item(ui, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
         item(ui, keymap, &mut chosen, Command::BreakApart, !is_root && !multiple);
+        // The way back, offered where the break was: on the split itself, which
+        // is the only row it can act on.
+        item(ui, keymap, &mut chosen, Command::Rejoin, !multiple && app.scene.node(id).is_split());
         // Disabled where the move has nowhere to go, rather than enabled and
         // silent: a node that is already first among its siblings used to
         // answer a click with a status line that had faded by the time anyone

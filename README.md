@@ -91,7 +91,12 @@ portable.
   behind it. And whatever a node evaluates to can be broken into the separate
   pieces it is actually in, each a node of its own: cut a plate into four with a
   boolean, break it apart, and every piece is an object to move, paint and
-  export.
+  export. The pieces land in a *split* — a node kind of its own, made only by
+  breaking something apart, standing where the shape stood and wearing its name
+  and its transform — which keeps the shape itself, operands and parameters and
+  all. So the break is reversible: **join the pieces back together** and the
+  object returns as it was, where the pieces now stand, however long afterwards
+  and across a save.
 - **Booleans that hold up.** Union, difference, intersection and hull, nested
   arbitrarily. Results are checked for manifoldness on every evaluation; a
   boolean that cannot be evaluated names its own node in the outliner while the
@@ -177,7 +182,8 @@ crates/
                        flat-region retriangulation and connected-piece
                        splitting. Pure math; depends on none of the others.
   simple3d-core/     Domain model: Node/Scene tree, the declarative
-                       primitive parameter registry, the stored-mesh body,
+                       primitive parameter registry, the stored-mesh and
+                       broken-apart bodies,
                        scene evaluation with per-subtree caching and
                        cancellation, undo, clipboard, units, project files,
                        settings, keymaps.

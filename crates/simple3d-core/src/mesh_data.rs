@@ -113,7 +113,7 @@ impl MeshData {
 
 /// The stored form. `triangles` and `vertices` are for the person reading the
 /// file; the loader trusts the arrays and checks them against each other.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MeshBlob {
     pub triangles: usize,
     pub vertices: usize,

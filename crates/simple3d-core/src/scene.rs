@@ -197,6 +197,24 @@ pub enum Body {
     Mesh {
         mesh: Arc<MeshData>,
     },
+    /// What breaking a shape apart leaves behind (issue 82): a node holding the
+    /// separate pieces the shape was actually in, as children, and the object it
+    /// was made from, so it can be put back together.
+    ///
+    /// It combines its children exactly as a union group does -- the pieces
+    /// stand side by side, which is what they did inside the shape -- but it is
+    /// a body of its own rather than a group, because a group is something the
+    /// user assembles and this is something the application made *out of* one
+    /// object. That is also why nothing offers to create one: it exists only
+    /// where "break into separate objects" put it.
+    ///
+    /// `original` is the whole subtree the pieces came from, in the portable
+    /// form the project file and the clipboard already use, behind an `Arc` for
+    /// the same reason a stored mesh is: undo snapshots the scene, and the
+    /// recipe must not be copied into every snapshot that never touched it.
+    Split {
+        original: Arc<NodeData>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -303,6 +321,19 @@ impl Node {
         matches!(self.body, Body::Mesh { .. })
     }
 
+    /// Whether this node is a shape that was broken into its pieces (issue 82).
+    pub fn is_split(&self) -> bool {
+        matches!(self.body, Body::Split { .. })
+    }
+
+    /// The object a split was made from, for a node that is one.
+    pub fn split_original(&self) -> Option<&Arc<NodeData>> {
+        match &self.body {
+            Body::Split { original } => Some(original),
+            _ => None,
+        }
+    }
+
     /// The geometry this node owns, for a body that owns any.
     pub fn mesh(&self) -> Option<&Arc<MeshData>> {
         match &self.body {
@@ -319,19 +350,34 @@ impl Node {
             Body::Primitive { .. } => "shape",
             Body::Pattern { .. } => "pattern",
             Body::Mesh { .. } => "mesh",
+            Body::Split { .. } => "split",
         }
     }
 
-    /// Whether this node can hold children: a group or a pattern. A primitive
-    /// and a mesh cannot, and a drag or an Add that would put a child under one
-    /// is refused.
+    /// Whether this node can hold children: a group, a pattern or a split. A
+    /// primitive and a mesh cannot, and a drag or an Add that would put a child
+    /// under one is refused.
     pub fn can_hold_children(&self) -> bool {
-        self.is_group() || self.is_pattern()
+        self.is_group() || self.is_pattern() || self.is_split()
     }
 
+    /// The node's own boolean operation, which only a group has. A split
+    /// combines its children too -- see [`Node::combine_op`] -- but it is not a
+    /// group, and nothing that edits an operation may reach it.
     pub fn group_op(&self) -> Option<GroupOp> {
         match self.body {
             Body::Group { op } => Some(op),
+            _ => None,
+        }
+    }
+
+    /// How this node's children are combined, for the bodies that combine
+    /// children at all: the group's own operation, and a union for a split,
+    /// because pieces of one shape standing side by side is what a union is.
+    pub fn combine_op(&self) -> Option<GroupOp> {
+        match self.body {
+            Body::Group { op } => Some(op),
+            Body::Split { .. } => Some(GroupOp::Union),
             _ => None,
         }
     }
@@ -741,6 +787,80 @@ impl Scene {
         id
     }
 
+    /// Add the node that holds what a shape was broken into (issue 82).
+    ///
+    /// It stands where the shape stood and wears the shape's own properties --
+    /// its name, its transform, its anchor, its colour, its export mark -- so
+    /// the pieces inside it are exactly where they were and the document still
+    /// shows one item called what it was called. `original` is kept whole, and
+    /// is what [`Scene::restore_split`] puts back.
+    ///
+    /// The caller adds the pieces as children afterwards; a split with none is
+    /// as empty as a group with none, and evaluates to nothing.
+    pub fn add_split(&mut self, original: NodeData, parent: NodeId, index: usize) -> NodeId {
+        let id = self.fresh_id();
+        let node = Node {
+            id,
+            // Verbatim, not put through `unique_name`: the shape this was made
+            // from is on its way out of the document, and its name goes to the
+            // node standing in its place rather than to a second copy of it.
+            name: original.name.clone(),
+            position: original.position,
+            rotation: original.rotation,
+            scale: Node::sane_scale(original.scale),
+            anchor: original.anchor,
+            visible: original.visible,
+            ghost: original.ghost,
+            colour: original.colour.as_deref().and_then(Colour::from_hex),
+            segments: original.segments,
+            export_body: original.export_body,
+            body: Body::Split { original: Arc::new(original) },
+            children: Vec::new(),
+            parent: Some(parent),
+        };
+        self.nodes.insert(id, node);
+        self.link(id, parent, index);
+        id
+    }
+
+    /// Put a split back together: the object it was made from returns to its
+    /// place, and the pieces go with the split node (issue 82).
+    ///
+    /// The restored object takes the *split's* current properties, not the ones
+    /// it had when it was broken -- moving the pieces about as one item and then
+    /// joining them back must not send the shape back to where it started. What
+    /// was done to the pieces themselves is not carried across, because the
+    /// object coming back is the recipe, not the triangles: that is the whole of
+    /// what makes the break reversible, and undo is there for the other answer.
+    ///
+    /// Returns the id of the restored object, or `None` for a node that is not
+    /// a split, or one whose stored recipe this build cannot rebuild.
+    pub fn restore_split(&mut self, id: NodeId) -> Option<NodeId> {
+        // The whole node, cloned: a split's body is a pointer to its recipe, so
+        // this costs nothing and keeps every property in one place.
+        let kept = self.nodes.get(&id)?.clone();
+        let original = Arc::clone(kept.split_original()?);
+        let parent = kept.parent?;
+        let index = self.nodes.get(&parent)?.children.iter().position(|&c| c == id)?;
+        // Rebuilt before the split is taken out, so a recipe that cannot be
+        // rebuilt leaves the document exactly as it was rather than empty-handed.
+        let restored = self.import_subtree(&original, parent, index)?;
+        self.remove(id);
+        let node = self.nodes.get_mut(&restored)?;
+        node.name = kept.name;
+        node.position = kept.position;
+        node.rotation = kept.rotation;
+        node.scale = kept.scale;
+        node.anchor = kept.anchor;
+        node.visible = kept.visible;
+        node.ghost = kept.ghost;
+        node.colour = kept.colour;
+        node.segments = kept.segments;
+        node.export_body = kept.export_body;
+        self.rename_subtree_uniquely(restored, true);
+        Some(restored)
+    }
+
     /// Replace a node's body with stored geometry, keeping everything about the
     /// node that is not its shape -- its name, its place in the tree, its
     /// transform, its colour, its export mark (issue 80).
@@ -951,6 +1071,7 @@ impl Scene {
     pub fn export_subtree(&self, id: NodeId) -> Option<NodeData> {
         let node = self.nodes.get(&id)?;
         let mut blob: Option<MeshBlob> = None;
+        let mut original: Option<Box<NodeData>> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -958,6 +1079,10 @@ impl Scene {
             Body::Mesh { mesh } => {
                 blob = Some(mesh.to_blob());
                 ("mesh".to_string(), None, Params::new())
+            }
+            Body::Split { original: was } => {
+                original = Some(Box::new((**was).clone()));
+                ("split".to_string(), None, Params::new())
             }
         };
         Some(NodeData {
@@ -974,6 +1099,7 @@ impl Scene {
             segments: node.segments,
             export_body: node.export_body,
             mesh: blob,
+            original,
             params,
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
         })
@@ -990,6 +1116,11 @@ impl Scene {
             // an empty node: the geometry is the whole of what the node is, and
             // a silently empty one would be a body quietly missing from a print.
             "mesh" => Body::Mesh { mesh: Arc::new(MeshData::from_blob(data.mesh.as_ref()?)?) },
+            // A split without the object it was made from is refused for the
+            // same reason: what the node *is* is missing. Its pieces would still
+            // draw, but it would be a shape broken apart with no way back, which
+            // is not the node the file says it is.
+            "split" => Body::Split { original: Arc::new((**data.original.as_ref()?).clone()) },
             type_id => {
                 let spec = primitive::lookup(type_id)?;
                 Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -1053,11 +1184,13 @@ impl Scene {
     /// the nearest painted ancestor's, else nothing at all. This is what makes
     /// painting a group paint every shape inside it without touching any of
     /// them, and what a shape painted inside a painted group overrides.
-    /// Whether `id` is a group whose children an export could consider one by
+    /// Whether `id` is a node whose children an export could consider one by
     /// one. A primitive has no parts, and a boolean that fuses its operands has
-    /// none that survive it.
+    /// none that survive it. A split's children are separate solids by
+    /// construction -- that is what breaking a shape apart found -- so it always
+    /// can.
     pub fn can_split_for_export(&self, id: NodeId) -> bool {
-        self.get(id).and_then(|n| n.group_op()).is_some_and(GroupOp::separable)
+        self.get(id).and_then(|n| n.combine_op()).is_some_and(GroupOp::separable)
     }
 
     /// Every export body mark in the scene, by node, in a stable order. Small
@@ -1155,7 +1288,7 @@ fn is_false(value: &bool) -> bool {
 /// The readable, diffable form of a node used by both the project file and the
 /// clipboard, so a selection can be pasted into a text editor and back again
 /// (spec sections 8.1, 10).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct NodeData {
     pub name: String,
     #[serde(rename = "type")]
@@ -1196,6 +1329,11 @@ pub struct NodeData {
     /// one body type that owns its triangles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<MeshBlob>,
+    /// The object a `split` node was broken apart from, and nothing else's:
+    /// the whole subtree, so joining the pieces back together rebuilds the
+    /// shape with its operands and its parameters intact (issue 82).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<Box<NodeData>>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1225,6 +1363,77 @@ mod tests {
         let id = scene.add_primitive("box", parent, index).unwrap();
         scene.get_mut(id).unwrap().position = Vec3::new(x, 0.0, 0.0);
         id
+    }
+
+    #[test]
+    fn a_split_stands_where_the_shape_stood_and_gives_it_back_on_request() {
+        // Issue 82: breaking a shape apart must be reversible, so the node the
+        // pieces go under carries the shape itself, and putting it back is one
+        // call rather than a rebuild by hand.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        scene.get_mut(group).unwrap().name = "Bracket".into();
+        scene.get_mut(group).unwrap().position = Vec3::new(5.0, 0.0, 0.0);
+        scene.get_mut(group).unwrap().anchor = Anchor::Base;
+        box_at(&mut scene, group, 0.0);
+        box_at(&mut scene, group, 60.0);
+
+        let original = scene.export_subtree(group).unwrap();
+        scene.remove(group);
+        let split = scene.add_split(original, root, 0);
+        assert!(scene.node(split).is_split());
+        // The shape's own properties came across, name included.
+        assert_eq!(scene.node(split).name, "Bracket");
+        assert_eq!(scene.node(split).position, Vec3::new(5.0, 0.0, 0.0));
+        assert_eq!(scene.node(split).anchor, Anchor::Base);
+        assert_eq!(scene.node(split).group_op(), None, "a split is not a group");
+        assert_eq!(scene.node(split).combine_op(), Some(GroupOp::Union), "its pieces stand side by side");
+        assert!(scene.can_split_for_export(split), "its pieces are separate solids and an export can say so");
+
+        // Whatever is done to the node afterwards is what the restored shape
+        // wears: the recipe says what it is, the node says where it is.
+        scene.get_mut(split).unwrap().position = Vec3::new(5.0, 0.0, 40.0);
+        scene.get_mut(split).unwrap().name = "Bracket, in pieces".into();
+        let back = scene.restore_split(split).unwrap();
+        assert!(!scene.contains(split), "the split outlived the shape it gave back");
+        assert_eq!(scene.node(back).group_op(), Some(GroupOp::Union));
+        assert_eq!(scene.node(back).children.len(), 2, "the operands did not come back");
+        assert_eq!(scene.node(back).name, "Bracket, in pieces");
+        assert_eq!(scene.node(back).position, Vec3::new(5.0, 0.0, 40.0));
+        assert_eq!(scene.node(back).anchor, Anchor::Base);
+        assert_eq!(scene.node(root).children, vec![back], "it came back somewhere else in the tree");
+    }
+
+    #[test]
+    fn a_split_survives_the_portable_form_with_its_shape_and_its_pieces() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Difference, root, 0);
+        box_at(&mut scene, group, 0.0);
+        box_at(&mut scene, group, 5.0);
+        let original = scene.export_subtree(group).unwrap();
+        scene.remove(group);
+        let split = scene.add_split(original, root, 0);
+        let piece = crate::mesh_data::MeshData::new(simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0));
+        scene.add_mesh("Piece", piece, split, 0);
+
+        let data = scene.export_subtree(split).unwrap();
+        assert_eq!(data.type_id, "split");
+        let mut other = Scene::new();
+        let other_root = other.root();
+        let copy = other.import_subtree(&data, other_root, 0).expect("a split imports");
+        assert!(other.node(copy).is_split());
+        assert_eq!(other.node(copy).children.len(), 1, "the piece was lost");
+        let back = other.restore_split(copy).expect("the shape rebuilds");
+        assert_eq!(other.node(back).group_op(), Some(GroupOp::Difference));
+        assert_eq!(other.node(back).children.len(), 2);
+
+        // A split with no shape behind it is not a split, and is refused the way
+        // a mesh with no geometry is rather than loaded as something else.
+        let mut hollow = data.clone();
+        hollow.original = None;
+        assert!(other.import_subtree(&hollow, other_root, 0).is_none());
     }
 
     #[test]
@@ -1561,6 +1770,7 @@ mod tests {
             segments: None,
             export_body: None,
             mesh: None,
+            original: None,
             params: Params::new(),
             children: vec![NodeData {
                 name: "From the future".into(),
@@ -1576,6 +1786,7 @@ mod tests {
                 segments: None,
                 export_body: None,
                 mesh: None,
+                original: None,
                 params: Params::new(),
                 children: vec![],
             }],

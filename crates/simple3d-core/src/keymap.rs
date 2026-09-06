@@ -44,6 +44,7 @@ pub enum Command {
     Pattern,
     ConvertToMesh,
     BreakApart,
+    Rejoin,
     Rename,
     ToggleVisibility,
     MoveUp,
@@ -128,6 +129,7 @@ impl Command {
         Command::Pattern,
         Command::ConvertToMesh,
         Command::BreakApart,
+        Command::Rejoin,
         Command::Rename,
         Command::ToggleVisibility,
         Command::MoveUp,
@@ -189,6 +191,7 @@ impl Command {
             Pattern => "Make a pattern of the selection",
             ConvertToMesh => "Convert to a mesh",
             BreakApart => "Break into separate objects",
+            Rejoin => "Join the pieces back together",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
             MoveUp => "Move up among siblings",
@@ -233,7 +236,7 @@ impl Command {
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | BreakApart
-            | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
+            | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
@@ -586,6 +589,9 @@ impl Keymap {
         // behind and makes each piece a node of its own (issue 82).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
         set(BreakApart, Chord::ctrl_shift("B"));
+        // The way back from it (issue 82), beside it in every menu and one key
+        // along from it: J for "join", which no preset spends on anything else.
+        set(Rejoin, Chord::ctrl_shift("J"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
         set(MoveUp, Chord::ctrl("Up"));

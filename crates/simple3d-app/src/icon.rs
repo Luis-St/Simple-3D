@@ -43,6 +43,8 @@ pub enum Glyph {
     /// The body that is not a primitive: geometry a node owns outright
     /// (issue 80).
     Mesh,
+    /// A shape broken into the pieces it was actually in (issue 82).
+    Split,
     // Primitive silhouettes.
     Box,
     RoundedBox,
@@ -307,6 +309,14 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.line(&[(0.10, 0.34), (0.5, 0.52), (0.90, 0.34)]);
             pen.line(&[(0.5, 0.10), (0.5, 0.52), (0.5, 0.92)]);
             pen.line(&[(0.10, 0.70), (0.5, 0.52), (0.90, 0.70)]);
+        }
+        // The same solid the mesh mark draws, cut in two and the halves drawn
+        // apart: one shape that is now several objects, which is the whole of
+        // what a split is.
+        Glyph::Split => {
+            pen.line(&[(0.44, 0.12), (0.10, 0.32), (0.10, 0.68), (0.44, 0.88)]);
+            pen.line(&[(0.44, 0.12), (0.44, 0.88)]);
+            pen.line(&[(0.62, 0.12), (0.62, 0.88), (0.94, 0.68), (0.94, 0.32), (0.62, 0.12)]);
         }
         Glyph::Box => {
             pen.closed(&[(0.10, 0.34), (0.50, 0.14), (0.90, 0.34), (0.90, 0.72), (0.50, 0.92), (0.10, 0.72)]);
