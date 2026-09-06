@@ -311,7 +311,17 @@ impl Evaluator {
         }
         let mesh = local.transformed(node.position, node.rotation);
         let result = Arc::new(SubtreeResult { mesh: Arc::new(mesh), anchor_offset, errors });
-        self.subtrees.insert(key, result.clone());
+        // Nothing computed under cancellation is kept, however finished it
+        // looks. An abandoned boolean gives back an empty mesh, and the
+        // evaluator -- and so this cache -- outlives the run that was
+        // abandoned: cached, that empty mesh is what every later evaluation of
+        // the same content gets back, so the shapes vanish from the viewport
+        // and stay vanished until something changes the content hash. The
+        // cancelled run's own answer is dropped by the worker; this is the
+        // other half of dropping it.
+        if !cancel.is_cancelled() {
+            self.subtrees.insert(key, result.clone());
+        }
         result
     }
 
@@ -723,9 +733,10 @@ fn combine(
     // "Evaluating..." with every node deleted.
     let result = evaluate_boolean_until(op.to_geom(), children, &|| cancel.is_cancelled());
     if cancel.is_cancelled() {
-        // Not a result, and never used: the run is marked cancelled and the
-        // worker drops it. Saying so here rather than reporting the abandoned
-        // mesh as non-manifold, which it usually is.
+        // Not a result: an abandoned boolean is an empty or half-built mesh.
+        // Returned as it is rather than reported as non-manifold, which it
+        // usually is -- and `subtree` keeps it out of the cache, because the
+        // run is dropped but the cache would not be.
         return result;
     }
     let mut result = result;
@@ -1562,5 +1573,57 @@ mod tests {
         assert!((hi.x - lo.x - 40.0).abs() < 1e-6, "the scale was not applied: {}", hi.x - lo.x);
         assert!(((lo.x + hi.x) * 0.5 - 50.0).abs() < 1e-6, "the position was not applied");
         assert!(out.node_meshes.contains_key(&id), "a mesh body has nothing to pick");
+    }
+
+    #[test]
+    fn an_interrupted_evaluation_leaves_nothing_of_itself_in_the_cache() {
+        // The bug this holds back, seen in the running application: three boxes
+        // in a union group, all of them visible, and a viewport with nothing in
+        // it -- "4 nodes, 0 triangles" in 0.03 ms, which is the time a cache hit
+        // takes and not the time a boolean takes.
+        //
+        // An abandoned boolean returns an empty mesh (`evaluate_boolean_until`
+        // gives back `Mesh::new()` the moment `give_up` says so), and the
+        // worker's `Evaluator` -- and so its subtree cache -- lives for as long
+        // as the application does. Cached under the content hash of a perfectly
+        // good scene, that empty mesh was what every later evaluation of the
+        // same content got back: the shapes vanished the moment an edit landed
+        // while a boolean was running, and stayed gone until something changed
+        // the hash again.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Union, root, 0);
+        // Heavy enough that the boolean is still running when the cancel lands.
+        for i in 0..2 {
+            let id = scene.add_primitive("sphere", group, i).unwrap();
+            scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 12.0, 0.0, 0.0);
+            scene.get_mut(id).unwrap().segments = Some(96);
+            scene.get_mut(id).unwrap().params_mut().unwrap().insert("diameter".into(), ParamValue::Length(30.0));
+        }
+        let whole = Evaluator::new().evaluate(&scene, &Cancel::new()).mesh.triangle_count();
+        assert!(whole > 0, "the scene this is about evaluates to nothing even uninterrupted");
+
+        // One evaluator across both runs, exactly as the worker keeps one.
+        let mut evaluator = Evaluator::new();
+        let cancel = Arc::new(Cancel::new());
+        let flag = Arc::clone(&cancel);
+        // Interrupted after the run has started and while the boolean is in it,
+        // which is where a newer edit interrupts one. Landing late is harmless:
+        // the run then finishes honestly and the assertion below still holds.
+        let hand = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            flag.cancel();
+        });
+        let interrupted = evaluator.evaluate(&scene, &cancel);
+        hand.join().unwrap();
+        assert!(interrupted.cancelled, "the run was not interrupted, so this proves nothing");
+
+        // The next frame: the same scene, nothing cancelled, the same evaluator.
+        let again = evaluator.evaluate(&scene, &Cancel::new());
+        assert_eq!(
+            again.mesh.triangle_count(),
+            whole,
+            "the abandoned run left its empty mesh in the cache: the shapes are gone from every frame after it"
+        );
     }
 }
