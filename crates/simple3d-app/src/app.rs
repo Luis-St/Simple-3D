@@ -21,7 +21,7 @@ use simple3d_export::Format;
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const APP_NAME: &str = "Simple 3D";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -247,6 +247,13 @@ pub struct App {
     pub tabs: Vec<crate::tabs::Document>,
     pub active: usize,
     pub settings: AppSettings,
+    /// The settings as they are on disk, so a change to them can be noticed and
+    /// written without every place that makes one having to remember to.
+    persisted_settings: AppSettings,
+    /// When they were last written, so a scrubbed number -- which changes on
+    /// every frame of the drag -- costs one write a moment rather than one a
+    /// frame.
+    settings_written: Option<Instant>,
     pub keymap: Keymap,
 
     /// The current selection, in click order. The last entry is the primary one
@@ -503,6 +510,8 @@ impl App {
             history: History::new(),
             tabs: vec![crate::tabs::Document::empty()],
             active: 0,
+            persisted_settings: settings.clone(),
+            settings_written: None,
             settings,
             paint_run_colours: None,
             keymap,
@@ -2982,7 +2991,39 @@ impl App {
 
     pub fn persist(&mut self) {
         let _ = config::save_settings_to(&self.config_dir, &self.settings);
+        self.persisted_settings = self.settings.clone();
+        self.settings_written = Some(Instant::now());
         self.persist_keymap();
+    }
+
+    /// Write the settings out as soon as they change, rather than only when the
+    /// application is closed cleanly.
+    ///
+    /// A setting changed in the property panel -- where a shape lands, the snap
+    /// mode, a snap step -- used to live in memory until `on_exit` ran, so
+    /// anything that ended the process another way took it with it: a crash, a
+    /// kill, a power cut. The keymap has been written on the spot since
+    /// acceptance criterion 28 asked for a rebinding to survive a hard kill, and
+    /// there is no reason the rest of the settings deserve less.
+    ///
+    /// Noticed by comparing rather than by calling `persist` from each of the
+    /// dozen places that change something, because that is a list nobody keeps
+    /// complete. Rate-limited because a scrubbed number changes every frame,
+    /// and the frame that the limit turned away asks for one more frame so the
+    /// value is not left unwritten until something else happens to repaint.
+    fn persist_settings_if_changed(&mut self, ctx: &egui::Context) {
+        const GAP: Duration = Duration::from_millis(250);
+        if self.settings == self.persisted_settings {
+            return;
+        }
+        match self.settings_written.map(|at| at.elapsed()) {
+            Some(since) if since < GAP => ctx.request_repaint_after(GAP - since),
+            _ => {
+                let _ = config::save_settings_to(&self.config_dir, &self.settings);
+                self.persisted_settings = self.settings.clone();
+                self.settings_written = Some(Instant::now());
+            }
+        }
     }
 
     /// Write the keymap out now, so a rebinding survives even a hard kill --
@@ -3168,6 +3209,10 @@ impl App {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
+        // Before the panels rather than after: what they change this frame is
+        // written on the next one, and a frame is drawn for every change any of
+        // them makes.
+        self.persist_settings_if_changed(ctx);
         self.menu_bar(ctx);
         self.status_bar(ctx);
         crate::panel_toolrail::show(self, ctx);
@@ -3658,6 +3703,43 @@ mod tests {
 
         // And nothing was written outside the directory we handed it.
         assert_eq!(second.config_dir(), dir.as_path());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_setting_changed_in_the_panel_is_on_disk_before_the_application_closes() {
+        // The user set "Add at" to the view centre, the process was killed
+        // rather than quit, and the next run opened on the origin again. Only
+        // `on_exit` wrote the settings, so anything that ended the process
+        // another way -- a crash, a kill, the machine going down -- took every
+        // setting changed that session with it. The keymap has been written on
+        // the spot since acceptance criterion 28 asked for a rebinding to
+        // survive a hard kill; this is the rest of the settings catching up.
+        //
+        // A real frame is what has to write it, so a real frame is what this
+        // draws: calling the writer directly would pass on the broken code,
+        // where nothing called it until the application closed.
+        let dir = temp_config_dir("settings-survive-a-kill");
+        let ctx = egui::Context::default();
+        let mut app = app_in(dir.clone());
+        assert_eq!(app.settings.placement, Placement::Origin, "the default this test is about has changed");
+
+        // Changed as the panel changes it, and then one frame of the running
+        // application -- and then the process is gone.
+        app.settings.placement = Placement::ViewCentre;
+        app.settings.rotate_snap_deg = 22.5;
+        // A window's worth of screen: the default is unbounded, and the
+        // viewport would try to rasterize a texture the size of it.
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| app.ui(ctx));
+        drop(app);
+
+        let next = app_in(dir.clone());
+        assert_eq!(next.settings.placement, Placement::ViewCentre, "\"Add at\" was lost with the process");
+        assert_eq!(next.settings.rotate_snap_deg, 22.5, "the snap setting was lost with the process");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
