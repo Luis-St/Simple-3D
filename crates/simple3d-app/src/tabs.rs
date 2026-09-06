@@ -174,10 +174,10 @@ impl App {
         self.renderable_key = u64::MAX;
         self.invalidate_image();
 
-        // Submit here rather than leaving `dirty` for the next frame: the
-        // submission is what supersedes an evaluation of the tab we just left,
-        // which would otherwise come back and be applied to this one.
-        self.worker.submit(&self.scene);
+        // Submit here rather than leaving `dirty` for the next frame, and as a
+        // supersede rather than an ordinary edit: an evaluation of the tab we
+        // just left would otherwise come back and be applied to this one.
+        self.worker.supersede(&self.scene);
         self.dirty = false;
     }
 

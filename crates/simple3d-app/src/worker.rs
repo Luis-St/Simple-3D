@@ -38,6 +38,11 @@ pub struct EvalWorker {
     generation: u64,
     /// The generation whose result we are still waiting for.
     outstanding: Option<u64>,
+    /// The newest scene, waiting for the run in flight to finish.
+    ///
+    /// Only ever one: a drag submits on every frame, and what the viewport owes
+    /// the user is the newest of those, not each of them.
+    pending: Option<Scene>,
     /// When the job in flight was submitted, so the footer can say how long the
     /// user has been waiting. An evaluation has no honest progress to report --
     /// a boolean does not know how much of itself is left -- but it can always
@@ -60,22 +65,56 @@ impl EvalWorker {
             current: None,
             generation: 0,
             outstanding: None,
+            pending: None,
             started: None,
             last_elapsed: None,
         }
     }
 
-    /// Ask for a fresh evaluation, cancelling whatever is in flight.
+    /// Ask for a fresh evaluation of the document being edited.
+    ///
+    /// While a run is in flight the new scene *waits* for it rather than
+    /// killing it, and only the newest waiting scene is kept. Cancelling
+    /// instead is what froze the viewport during a drag: a drag marks the scene
+    /// dirty on every frame, so every run was cancelled by the next frame a few
+    /// milliseconds in, and on the frames where the boolean actually costs
+    /// something -- which is exactly when the shape being dragged meets another
+    /// one -- no evaluation ever finished. The user saw 139 frames in a row
+    /// with no preview at all, and then a jump when the drag stopped.
+    ///
+    /// Waiting costs the preview one evaluation of lag. Cancelling costs the
+    /// preview altogether, and throws the work away as well. A run that really
+    /// is taking too long is the user's to abandon, which the footer offers for
+    /// as long as one is going.
     pub fn submit(&mut self, scene: &Scene) {
+        if self.outstanding.is_some() {
+            self.pending = Some(scene.clone());
+            return;
+        }
+        self.start(scene.clone());
+    }
+
+    /// Ask for an evaluation of a *different document* -- a tab shown, a file
+    /// opened -- which supersedes whatever is running.
+    ///
+    /// Nothing about the scene being left is worth waiting for, and its answer
+    /// must never be applied to the document now on screen; the generation bump
+    /// is what makes `poll` refuse it if it arrives anyway.
+    pub fn supersede(&mut self, scene: &Scene) {
         if let Some(cancel) = self.current.take() {
             cancel.cancel();
         }
+        self.pending = None;
+        self.start(scene.clone());
+    }
+
+    fn start(&mut self, scene: Scene) {
         self.generation += 1;
         let cancel = Cancel::new();
         self.current = Some(cancel.clone());
         self.outstanding = Some(self.generation);
         self.started = Some(Instant::now());
-        let job = Job { scene: scene.clone(), cancel, generation: self.generation };
+        let job = Job { scene, cancel, generation: self.generation };
         // A send failure means the worker thread is gone, which we cannot
         // recover from here; the interface stays usable with the last result.
         let _ = self.jobs.send(job);
@@ -104,6 +143,11 @@ impl EvalWorker {
         self.current = None;
         self.started = None;
         self.last_elapsed = Some(finished.elapsed);
+        // The newest edit made while this one was running goes next, so a drag
+        // keeps producing pictures for as long as it lasts.
+        if let Some(scene) = self.pending.take() {
+            self.start(scene);
+        }
         Some(finished.result)
     }
 
@@ -128,6 +172,10 @@ impl EvalWorker {
         if let Some(cancel) = self.current.take() {
             cancel.cancel();
         }
+        // Including whatever was waiting behind it: the user asked to stop
+        // waiting, and starting the next run on the spot is not that. The next
+        // edit submits again.
+        self.pending = None;
         self.outstanding = None;
         self.started = None;
     }
@@ -284,36 +332,83 @@ mod tests {
         assert!(worker.last_elapsed.is_some());
     }
 
-    #[test]
-    fn a_burst_of_edits_yields_the_newest_result_and_no_stale_ones() {
-        let mut worker = EvalWorker::spawn();
+    /// The radius of the hole in a drilled plate. Nothing sits inside the hole,
+    /// so the closest vertex to its axis is on its wall -- a more reliable
+    /// measure than the farthest, since the boolean scatters T-junction
+    /// vertices across the plate's faces near the hole too.
+    fn hole_radius(result: &Evaluated) -> f64 {
+        result.mesh.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min)
+    }
+
+    fn burst(worker: &mut EvalWorker, diameters: [f64; 5]) {
         let mut scene = drilled_plate();
         let hole = scene.depth_first().into_iter().last().unwrap();
-        for diameter in [4.0, 5.0, 6.0, 7.0, 8.0] {
-            scene
-                .get_mut(hole)
-                .unwrap()
-                .params_mut()
-                .unwrap()
-                .insert("diameter_x".into(), ParamValue::Length(diameter));
-            scene
-                .get_mut(hole)
-                .unwrap()
-                .params_mut()
-                .unwrap()
-                .insert("diameter_y".into(), ParamValue::Length(diameter));
+        for diameter in diameters {
+            let params = scene.get_mut(hole).unwrap().params_mut().unwrap();
+            params.insert("diameter_x".into(), ParamValue::Length(diameter));
+            params.insert("diameter_y".into(), ParamValue::Length(diameter));
             worker.submit(&scene);
         }
-        let result = wait_for(|| worker.poll());
-        // The final 8mm hole, not one of the superseded ones. Nothing sits
-        // inside the hole, so the closest vertex to its axis is on its wall --
-        // a more reliable measure than the farthest, since the boolean scatters
-        // T-junction vertices across the plate's faces near the hole too.
-        let hole_radius = result.mesh.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min);
-        assert!((hole_radius - 4.0).abs() < 1e-6, "got radius {hole_radius}, expected 4mm");
+    }
+
+    #[test]
+    fn a_burst_of_edits_keeps_answering_and_settles_on_the_newest() {
+        // What a drag is: an edit on every frame, faster than the evaluation
+        // they ask for. Each one used to cancel the run in flight, so while the
+        // scene was expensive enough to matter -- a shape being dragged into
+        // another one, where the union stops being a bounding-box rejection and
+        // becomes a real boolean -- nothing ever finished and the viewport
+        // showed the same picture for the whole gesture.
+        //
+        // Now the newest edit waits, so answers keep arriving; the last of them
+        // is the newest scene, which is the part that was never negotiable.
+        let mut worker = EvalWorker::spawn();
+        burst(&mut worker, [4.0, 5.0, 6.0, 7.0, 8.0]);
+
+        let mut answers: Vec<f64> = Vec::new();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while worker.is_busy() {
+            if let Some(result) = worker.poll() {
+                answers.push(hole_radius(&result));
+            }
+            assert!(Instant::now() < deadline, "the worker never finished the burst");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // Answers, plural: a burst that produces one picture is a frozen
+        // viewport, whatever it settles on afterwards.
+        assert!(answers.len() >= 2, "the whole burst produced one answer: {answers:?}");
+        // The final 8mm hole, not one of the ones it overtook.
+        let last = *answers.last().unwrap();
+        assert!((last - 4.0).abs() < 1e-6, "settled on radius {last}, expected 4mm");
         // Nothing left queued behind it.
         assert!(worker.poll().is_none());
         assert!(!worker.is_busy());
+    }
+
+    #[test]
+    fn a_document_shown_supersedes_the_evaluation_of_the_one_left_behind() {
+        // A tab switch is the one submission that must not wait: the answer the
+        // old document is still working on would be applied to the new one.
+        let mut worker = EvalWorker::spawn();
+        burst(&mut worker, [4.0, 5.0, 6.0, 7.0, 8.0]);
+        let mut other = drilled_plate();
+        let hole = other.depth_first().into_iter().last().unwrap();
+        let params = other.get_mut(hole).unwrap().params_mut().unwrap();
+        params.insert("diameter_x".into(), ParamValue::Length(12.0));
+        params.insert("diameter_y".into(), ParamValue::Length(12.0));
+        worker.supersede(&other);
+
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            if let Some(result) = worker.poll() {
+                let radius = hole_radius(&result);
+                assert!((radius - 6.0).abs() < 1e-6, "the document left behind was drawn: radius {radius}");
+                break;
+            }
+            assert!(Instant::now() < deadline, "the worker never answered");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!worker.is_busy(), "the superseded edits are still queued");
     }
 
     #[test]
