@@ -7,7 +7,7 @@ use crate::panel_viewport;
 use crate::render::Renderable;
 use crate::ui::{self, FieldBuffers};
 use crate::view::{frame_bounds, CameraMove, ViewPreset};
-use crate::worker::{EvalWorker, ExportJob};
+use crate::worker::{EvalWorker, ExportJob, SplitJob};
 use simple3d_core::clipboard::{self, Clip};
 use simple3d_core::config::{self, AppSettings, DisplayMode, HandleFrame, Placement, Side, SnapMode};
 use simple3d_core::eval::Evaluated;
@@ -62,6 +62,8 @@ pub enum Modal {
     SavePrimitive,
     /// Building a custom pattern kind out of stages (issue 67).
     PatternKind,
+    /// Choosing the pattern of cells a shape is to be cut into (issue 82).
+    SplitTool,
     /// Quitting with unsaved changes.
     ConfirmQuit,
     /// Closing a tab with unsaved changes (issue 61).
@@ -381,6 +383,12 @@ pub struct App {
     pub dock_rects: Vec<(Side, egui::Rect)>,
 
     pub export_job: Option<ExportJob>,
+    /// The split tool's window while it is open, and the cutting it started
+    /// (issue 82). The tool holds the shape it is about to cut; the job holds
+    /// the thread cutting it, and nothing in the document changes until it
+    /// lands -- see [`crate::split_tool`].
+    pub split_tool: Option<crate::split_tool::SplitTool>,
+    pub split_job: Option<SplitJob>,
     pub export_format: Format,
     pub export_scale: String,
     pub export_selection_only: bool,
@@ -563,6 +571,8 @@ impl App {
             dock_headers: Vec::new(),
             dock_rects: Vec::new(),
             export_job: None,
+            split_tool: None,
+            split_job: None,
             export_format: Format::ThreeMf,
             export_scale: "1".to_string(),
             export_selection_only: false,
@@ -1042,6 +1052,7 @@ impl App {
             Pattern => self.make_pattern(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             BreakApart => self.break_selection_apart(),
+            SplitIntoPieces => self.open_split_tool(),
             Rejoin => self.rejoin_selection(),
             Rename => {
                 if let Some(id) = self.primary() {
@@ -2251,43 +2262,79 @@ impl App {
             _ => {}
         }
         self.edit("Break into separate objects", None);
-        let Some(parent) = self.scene.node(id).parent else {
+        let Some((name, count)) = self.hold_pieces(id, parts, None) else {
             self.history.discard_last();
             return;
         };
-        let index = self.scene.node(parent).children.iter().position(|&c| c == id).unwrap_or(0);
-        // The shape itself, in the portable form the project file already uses,
-        // taken before it leaves the document: it is what the split holds, and
-        // what joining the pieces back together puts back.
-        let Some(original) = self.scene.export_subtree(id) else {
-            self.history.discard_last();
-            return;
+        self.status = Status::Info(format!("Broke {name} into {count} separate objects -- {}", self.way_back()));
+    }
+
+    /// Stand a split where a node stands, holding `pieces`, and select it
+    /// (issue 82). Both ways of making pieces end here: the separation of a
+    /// shape into the parts it was already in, and the cutting of one into a
+    /// pattern of cells.
+    ///
+    /// A node that is *already* a split keeps its identity and the shape it was
+    /// made from -- only its pieces are replaced -- which is what makes cutting
+    /// a split again a change of pattern rather than a split of a split, and
+    /// what keeps one Join back together enough to undo any number of them.
+    ///
+    /// Returns the name the pieces were made from and how many there are, or
+    /// `None` where the document could not be changed at all; the caller has
+    /// taken the history snapshot and discards it in that case.
+    pub(crate) fn hold_pieces(
+        &mut self,
+        id: NodeId,
+        pieces: Vec<simple3d_geom::Mesh>,
+        tiling: Option<simple3d_geom::tiling::Tiling>,
+    ) -> Option<(String, usize)> {
+        let count = pieces.len();
+        let split = if self.scene.node(id).is_split() {
+            for child in self.scene.node(id).children.clone() {
+                self.scene.remove(child);
+            }
+            if let Some(node) = self.scene.get_mut(id) {
+                if let simple3d_core::scene::Body::Split { tiling: was, .. } = &mut node.body {
+                    *was = tiling;
+                }
+            }
+            id
+        } else {
+            let parent = self.scene.node(id).parent?;
+            let index = self.scene.node(parent).children.iter().position(|&c| c == id).unwrap_or(0);
+            // The shape itself, in the portable form the project file already
+            // uses, taken before it leaves the document: it is what the split
+            // holds, and what joining the pieces back together puts back.
+            let original = self.scene.export_subtree(id)?;
+            // Out first, so the split standing in its place can carry its name
+            // rather than a numbered variant of it.
+            self.scene.remove(id);
+            self.scene.add_split(original, tiling, parent, index)
         };
-        let name = original.name.clone();
-        // Out first, so the split standing in its place can carry its name
-        // rather than a numbered variant of it.
-        self.scene.remove(id);
-        let split = self.scene.add_split(original, parent, index);
-        let count = parts.len();
-        for (index, part) in parts.into_iter().enumerate() {
+        let name = self.scene.node(split).name.clone();
+        for (index, piece) in pieces.into_iter().enumerate() {
             self.scene.add_mesh(
                 &format!("{name} {}", index + 1),
-                simple3d_core::mesh_data::MeshData::new(part),
+                simple3d_core::mesh_data::MeshData::new(piece),
                 split,
                 index,
             );
         }
         self.collapsed.remove(&split);
         self.select_only(split);
-        // Says the way back in the same breath as the break, because a break
-        // that cannot be seen to be reversible is one nobody tries.
+        Some((name, count))
+    }
+
+    /// How to undo a break, in the words the status line ends with. Said in the
+    /// same breath as the break itself, because a break that cannot be seen to
+    /// be reversible is one nobody tries.
+    pub(crate) fn way_back(&self) -> String {
         let shortcut = self.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
-        let back = if shortcut.is_empty() {
+        if shortcut.is_empty() {
             "they can be joined back together".to_string()
         } else {
             format!("{shortcut} joins them back together")
-        };
-        self.status = Status::Info(format!("Broke {name} into {count} separate objects -- {back}"));
+        }
     }
 
     /// Put a broken-apart shape back together (issue 82): the object returns,
@@ -3300,6 +3347,7 @@ impl eframe::App for App {
             self.dirty = false;
         }
         self.poll_export();
+        self.poll_split();
         self.poll_file_prompt();
         self.advance_camera();
         self.refresh_node_renderables();
@@ -3339,7 +3387,7 @@ impl eframe::App for App {
         // runs as fast as the machine allows.
         if self.drag.is_some() || self.camera_move.is_some() {
             ctx.request_repaint();
-        } else if self.worker.is_busy() || self.export_job.is_some() {
+        } else if self.worker.is_busy() || self.export_job.is_some() || self.split_job.is_some() {
             // Progress and the preview, at a rate a person can read rather than
             // at whatever the rasterizer can manage.
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -5567,6 +5615,48 @@ mod tests {
         }
     }
 
+    /// The split tool's window is resizable too, and it has the same two-column
+    /// problem: the numbers beside a picture of the cells, and below the width
+    /// both need, the picture is what gives way (issue 82).
+    #[test]
+    fn the_split_tool_fits_whatever_width_its_window_is_given() {
+        let mut app = headless_app();
+        app.open_split_tool();
+        assert_eq!(app.modal, Modal::SplitTool, "the tool did not open, so this measures nothing");
+
+        for kind in simple3d_geom::tiling::CellKind::ALL {
+            app.split_tool.as_mut().unwrap().tiling.kind = kind;
+            for width in [1400.0_f32, 900.0, 680.0, 560.0, 480.0, 400.0, 360.0, 320.0] {
+                let ctx = egui::Context::default();
+                crate::theme::apply(&ctx);
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 420.0))),
+                    ..Default::default()
+                };
+                let (mut room, mut used) = (0.0_f32, 0.0_f32);
+                let (mut row_room, mut row_used) = (0.0_f32, 0.0_f32);
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        room = ui.max_rect().width();
+                        crate::split_tool::body(&mut app, ui);
+                        used = ui.min_rect().width();
+                        ui.separator();
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            row_room = ui.max_rect().width();
+                            crate::split_tool::actions(&mut app, ui);
+                            row_used = ui.min_rect().width();
+                        });
+                    });
+                });
+                assert!(used <= room + 0.5, "{kind:?} at {room} px of room laid out {used} px of content");
+                assert!(row_used <= row_room + 0.5, "at {row_room} px of room the button row took {row_used} px");
+            }
+        }
+        // Drawing the tool must not have cut anything: nothing is cut until
+        // Split is pressed.
+        assert!(app.primary().is_some_and(|id| !app.scene.node(id).is_split()));
+    }
+
     #[test]
     fn the_pattern_tools_stages_keep_one_width_however_wide_the_window_is() {
         // Widening the window widens the picture and nothing else. The stages
@@ -6532,6 +6622,141 @@ mod tests {
         let after = app.evaluated.mesh.bounds().unwrap();
         assert!((moved.0 - after.0).length() < 1e-3, "joining moved the shape: {moved:?} -> {after:?}");
         assert!((moved.1 - after.1).length() < 1e-3, "joining moved the shape: {moved:?} -> {after:?}");
+    }
+
+    /// Run a split the way the application does: open the tool, choose a
+    /// pattern, press Split and wait for the thread to hand its pieces back.
+    /// The cutting is on a thread precisely so the interface does not wait for
+    /// it, so a test has to.
+    fn split_with(app: &mut App, tiling: simple3d_geom::tiling::Tiling) {
+        app.run(Command::SplitIntoPieces);
+        app.split_tool.as_mut().expect("the tool opened on the selection").tiling = tiling;
+        app.start_split();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while app.split_job.is_some() {
+            app.poll_split();
+            assert!(Instant::now() < deadline, "the split never finished");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn splitting_a_shape_cuts_it_into_a_piece_per_cell() {
+        // The half of issue 82 that cuts rather than separates: the default
+        // plate is 40 x 20, so 10 mm squares through it are eight pieces, and
+        // the eight of them are the plate.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.scene.get_mut(plate).unwrap().name = "Deck".into();
+        app.reevaluate_for_test();
+        let before = app.evaluated.mesh.bounds().unwrap();
+
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+
+        let split = app.primary().expect("the split is selected");
+        assert!(app.scene.node(split).is_split(), "the pieces did not go under a split");
+        assert_eq!(app.scene.node(split).name, "Deck", "the split is not named for what it was cut from");
+        assert_eq!(app.scene.node(split).children.len(), 8, "a 40 x 20 plate in 10 mm squares is eight pieces");
+        for &child in &app.scene.node(split).children {
+            assert!(app.scene.node(child).is_mesh());
+            assert!(app.scene.node(child).mesh().unwrap().triangle_count() > 0);
+        }
+        // The pattern is kept on the split, which is what lets the panel say
+        // what was done and the tool open again on it.
+        let tiling = app.scene.node(split).split_tiling().expect("the pattern was not kept");
+        assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Squares);
+        assert_eq!(tiling.size, 10.0);
+        // And the pieces are exactly where the shape was.
+        app.reevaluate_for_test();
+        let after = app.evaluated.mesh.bounds().unwrap();
+        assert!((before.0 - after.0).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
+        assert!((before.1 - after.1).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
+    }
+
+    #[test]
+    fn cutting_a_split_again_changes_the_pattern_rather_than_splitting_the_split() {
+        // Opening the tool on a split offers the pattern it was cut with, and
+        // cutting again replaces its pieces: the shape it was made from is
+        // still the shape it was made from, so one Join back together is still
+        // enough however many patterns have been tried.
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        assert_eq!(app.scene.node(split).children.len(), 8);
+
+        app.run(Command::SplitIntoPieces);
+        let offered = app.split_tool.as_ref().expect("the tool opened on the split").tiling;
+        assert_eq!(offered.size, 10.0, "the tool did not open on the pattern the split was cut with");
+        app.cancel_split_tool();
+
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 20.0, ..Default::default() });
+        let again = app.primary().unwrap();
+        assert_eq!(again, split, "cutting again made a different node");
+        assert!(app.scene.node(again).is_split());
+        assert_eq!(app.scene.node(again).children.len(), 2, "a 40 x 20 plate in 20 mm squares is two pieces");
+        for &child in &app.scene.node(again).children {
+            assert!(app.scene.node(child).is_mesh(), "a piece of the old pattern was left behind");
+        }
+        let original = app.scene.node(again).split_original().expect("what it was cut from");
+        assert_eq!(original.type_id, "plate", "cutting again lost the shape it was made from");
+
+        app.run(Command::Rejoin);
+        let back = app.primary().unwrap();
+        assert_eq!(app.scene.node(back).params().unwrap().num("width"), 40.0, "the plate did not come back whole");
+    }
+
+    #[test]
+    fn a_cell_bigger_than_the_shape_leaves_the_document_alone() {
+        let mut app = headless_app();
+        let before = app.history.undo_len();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 500.0, ..Default::default() });
+        assert_eq!(app.history.undo_len(), before, "a split that made one piece recorded an undo step");
+        assert!(app.primary().is_some_and(|id| !app.scene.node(id).is_split()), "a one-piece split was made anyway");
+        assert!(app.status_text().contains("one piece"), "{}", app.status_text());
+    }
+
+    #[test]
+    fn a_split_dropped_because_the_shape_changed_under_it_leaves_the_document_alone() {
+        // The cutting runs on a thread, so the shape it was cutting can be
+        // edited before the pieces land. Pieces of a shape that no longer
+        // exists are not an edit anybody asked for.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.run(Command::SplitIntoPieces);
+        app.split_tool.as_mut().unwrap().tiling = simple3d_geom::tiling::Tiling { size: 5.0, ..Default::default() };
+        app.start_split();
+        app.scene.get_mut(plate).unwrap().params_mut().unwrap().insert("width".into(), ParamValue::Length(90.0));
+        let before = app.history.undo_len();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while app.split_job.is_some() {
+            app.poll_split();
+            assert!(Instant::now() < deadline, "the split never finished");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        assert!(!app.scene.node(plate).is_split(), "pieces of the old shape were applied to the new one");
+        assert_eq!(app.history.undo_len(), before, "a dropped split recorded an undo step");
+        assert!(app.status_text().contains("changed while it was being cut"), "{}", app.status_text());
+    }
+
+    #[test]
+    fn the_pattern_a_split_was_cut_with_survives_saving_and_loading() {
+        let mut app = headless_app();
+        split_with(
+            &mut app,
+            simple3d_geom::tiling::Tiling {
+                kind: simple3d_geom::tiling::CellKind::Hexagons,
+                size: 12.0,
+                layer: 2.0,
+                ..Default::default()
+            },
+        );
+        let text = simple3d_core::project::to_string(&app.scene);
+        let scene = simple3d_core::project::from_str(&text).expect("a scene with a cut-up shape loads");
+        let split = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
+        let tiling = scene.node(split).split_tiling().expect("the pattern was not written to the file");
+        assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Hexagons);
+        assert_eq!(tiling.size, 12.0);
+        assert_eq!(tiling.layer, 2.0);
     }
 
     #[test]

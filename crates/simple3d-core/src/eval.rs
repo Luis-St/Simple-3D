@@ -506,9 +506,10 @@ impl Evaluator {
                 }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
-            // The recipe a split carries is not geometry -- nothing evaluates
-            // it until the pieces are joined back together -- so it stays out of
-            // the key, and two splits holding the same pieces share one result.
+            // Neither the recipe a split carries nor the tiling that made its
+            // pieces is geometry -- nothing evaluates either until the pieces
+            // are joined back together -- so both stay out of the key, and two
+            // splits holding the same pieces share one result.
             Body::Split { .. } => {
                 "split".hash(&mut hasher.0);
                 for &child in &node.children {

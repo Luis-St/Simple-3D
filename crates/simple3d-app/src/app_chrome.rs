@@ -292,6 +292,9 @@ impl App {
             // pieces it is actually in.
             self.command_item(ui, Command::ConvertToMesh, !self.selection.is_empty());
             self.command_item(ui, Command::BreakApart, self.selection.len() == 1);
+            // The other way to make pieces: cutting a shape that is in one
+            // piece into a pattern of them (issue 82).
+            self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
             // Enabled only on a split, because a split is the only thing it has
             // anything to say to -- everything else was never broken apart.
             self.command_item(
@@ -606,7 +609,27 @@ impl App {
                 dot(ui);
 
                 // The message area, and progress for whatever is in flight.
-                if let Some(job) = &self.export_job {
+                if let Some(job) = &self.split_job {
+                    // Honest progress, unlike an evaluation's: the cells are
+                    // counted before any of them is cut, so the bar knows how
+                    // much of the job is left.
+                    ui.add(egui::ProgressBar::new(job.fraction()).desired_width(110.0).show_percentage());
+                    ui.add(
+                        egui::Label::new(theme::value(format!(
+                            "Splitting into {} cells ({}s)",
+                            job.cells,
+                            job.elapsed().as_secs()
+                        )))
+                        .selectable(false),
+                    );
+                    if ui
+                        .small_button("Stop")
+                        .on_hover_text("Abandon the split. Nothing in the document is changed.")
+                        .clicked()
+                    {
+                        job.cancel();
+                    }
+                } else if let Some(job) = &self.export_job {
                     let fraction = job.fraction();
                     ui.add(egui::ProgressBar::new(fraction).desired_width(110.0).show_percentage());
                     ui.add(
@@ -784,6 +807,7 @@ impl App {
             Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
             Modal::PatternKind => self.pattern_kind_window(ctx),
+            Modal::SplitTool => self.split_tool_window(ctx),
         }
     }
 
@@ -958,6 +982,7 @@ impl App {
     fn dismiss_modal(&mut self) {
         match self.modal {
             Modal::SavePrimitive => self.cancel_save_primitive(),
+            Modal::SplitTool => self.cancel_split_tool(),
             Modal::ConfirmCloseTab => self.cancel_close_tab(),
             Modal::Keymap => {
                 self.recording = None;
@@ -1664,6 +1689,26 @@ impl App {
             },
             crate::pattern_tool::body,
             crate::pattern_tool::actions,
+        );
+    }
+
+    /// The tool that cuts a shape into a pattern of pieces (issue 82).
+    fn split_tool_window(&mut self, ctx: &egui::Context) {
+        // Wide enough for the numbers and a picture of the cells beside them,
+        // and no wider: unlike the pattern tool's, this preview is a flat plan
+        // rather than a viewport, and it says what it has to say small.
+        self.dialog(
+            ctx,
+            DialogSpec {
+                key: "dialog-split-tool",
+                title: "Split into smaller pieces",
+                size: egui::vec2(680.0, 420.0),
+                resizable: true,
+                fit_height: false,
+                min_size: Some(egui::vec2(320.0, 300.0)),
+            },
+            crate::split_tool::body,
+            crate::split_tool::actions,
         );
     }
 

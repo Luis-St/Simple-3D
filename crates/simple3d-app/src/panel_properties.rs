@@ -1158,6 +1158,15 @@ fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option
     field_row(ui, "Made from", "The object this was broken apart from, kept whole so it can come back.", |ui| {
         ui.add(egui::Label::new(theme::value(format!("{} ({kind})", original.name))).selectable(false));
     });
+    // How the pieces were cut, for a split that was cut into a pattern rather
+    // than separated into the pieces it was already in (issue 82). A split has
+    // no parameters of its own to edit -- the pieces are geometry -- so this is
+    // a statement of what was done, and the button below is how it is changed.
+    if let Some(tiling) = app.scene.node(id).split_tiling() {
+        field_row(ui, "Cut into", "The pattern of cells the pieces were cut out by.", |ui| {
+            ui.add(egui::Label::new(theme::value(describe_tiling(&tiling, app.unit()))).selectable(false));
+        });
+    }
     field_row(ui, "", "", |ui| {
         let shortcut = app.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
         let label = if shortcut.is_empty() {
@@ -1168,6 +1177,16 @@ fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option
         if ui.button(label).clicked() {
             *command = Some(simple3d_core::keymap::Command::Rejoin);
         }
+        // Cutting a split again replaces its pieces and keeps everything else,
+        // so changing the pattern is one gesture rather than a join, a re-split
+        // and a rename.
+        if ui
+            .button("Split differently\u{2026}")
+            .on_hover_text("Cut the same object into a different pattern of pieces. What it was made from is kept.")
+            .clicked()
+        {
+            *command = Some(simple3d_core::keymap::Command::SplitIntoPieces);
+        }
     });
     ui.add(
         egui::Label::new(theme::hint(
@@ -1177,6 +1196,31 @@ fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option
         ))
         .selectable(false),
     );
+}
+
+/// A tiling in one line: what shape the cells are, how big, which way they run
+/// and whether they were cut into layers as well.
+fn describe_tiling(tiling: &simple3d_geom::tiling::Tiling, unit: simple3d_core::unit::Unit) -> String {
+    // With the unit on the numbers, unlike a field: this is a sentence about
+    // what was done, and "in layers of 4" reads as four layers.
+    let length = |mm: f64| format!("{} {}", simple3d_core::unit::format_length(mm, unit), unit.suffix());
+    let mut text = match tiling.kind.has_depth() {
+        true => format!(
+            "{} of {} x {}",
+            tiling.kind.label(),
+            simple3d_core::unit::format_length(tiling.size, unit),
+            length(tiling.depth)
+        ),
+        false => format!("{} of {}", tiling.kind.label(), length(tiling.size)),
+    };
+    text.push_str(&format!(" through {}", ["X", "Y", "Z"][(tiling.axis as usize).min(2)]));
+    if tiling.angle != 0.0 {
+        text.push_str(&format!(", turned {}\u{b0}", simple3d_core::unit::format_angle(tiling.angle)));
+    }
+    if tiling.layer > 0.0 {
+        text.push_str(&format!(", in layers of {}", length(tiling.layer)));
+    }
+    text
 }
 
 fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {

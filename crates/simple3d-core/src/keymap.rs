@@ -44,6 +44,7 @@ pub enum Command {
     Pattern,
     ConvertToMesh,
     BreakApart,
+    SplitIntoPieces,
     Rejoin,
     Rename,
     ToggleVisibility,
@@ -129,6 +130,7 @@ impl Command {
         Command::Pattern,
         Command::ConvertToMesh,
         Command::BreakApart,
+        Command::SplitIntoPieces,
         Command::Rejoin,
         Command::Rename,
         Command::ToggleVisibility,
@@ -191,6 +193,7 @@ impl Command {
             Pattern => "Make a pattern of the selection",
             ConvertToMesh => "Convert to a mesh",
             BreakApart => "Break into separate objects",
+            SplitIntoPieces => "Split into smaller pieces",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
@@ -236,7 +239,7 @@ impl Command {
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | BreakApart
-            | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
+            | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
@@ -589,6 +592,10 @@ impl Keymap {
         // behind and makes each piece a node of its own (issue 82).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
         set(BreakApart, Chord::ctrl_shift("B"));
+        // Cutting a shape into a pattern of pieces rather than finding the ones
+        // it was already in (issue 82). K for the knife it is, which no preset
+        // spends on anything with a Ctrl and a Shift on it.
+        set(SplitIntoPieces, Chord::ctrl_shift("K"));
         // The way back from it (issue 82), beside it in every menu and one key
         // along from it: J for "join", which no preset spends on anything else.
         set(Rejoin, Chord::ctrl_shift("J"));

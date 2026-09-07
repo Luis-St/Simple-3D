@@ -166,6 +166,15 @@ impl App {
         self.measure = crate::app::Measure::default();
         self.fields.clear();
         self.export_preview = None;
+        // A split in flight is cutting the *other* document's shape and could
+        // never be applied to this one -- `poll_split` would refuse it on the
+        // tab it was started in -- so it is stopped here rather than left to
+        // finish work nothing will use. The window that starts one is modal, so
+        // there is never a tool open to put away as well.
+        if let Some(job) = self.split_job.take() {
+            job.cancel();
+        }
+        self.split_tool = None;
 
         // Nothing cached about the model on screen survives a change of model.
         self.evaluation_generation += 1;

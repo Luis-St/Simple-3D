@@ -2187,6 +2187,65 @@ fn the_split_panels_button_joins_the_pieces_back_together_without_taking_the_pan
     assert_eq!(harness.state().scene.node(back).children.len(), 2, "the operands did not come back");
 }
 
+/// The split tool end to end, through its real window: pick a cell shape, press
+/// Split, and wait for the pieces the thread cuts to land in the document
+/// (issue 82).
+#[test]
+fn the_split_tool_cuts_the_shape_into_the_cells_its_window_was_asked_for() {
+    use egui_kittest::kittest::Queryable;
+    use simple3d_core::keymap::Command;
+
+    let mut harness = harness_configured("split-tool", |app| {
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+    });
+    harness.state_mut().run(Command::SplitIntoPieces);
+    // A few frames rather than one: the window sizes itself over several, and a
+    // click aimed at where a widget was before it settled lands on nothing.
+    for _ in 0..6 {
+        harness.step();
+    }
+    assert_eq!(harness.state().modal, crate::app::Modal::SplitTool, "the tool did not open");
+
+    harness.get_by_label("Hexagons").click();
+    harness.step();
+    harness.step();
+    assert_eq!(
+        harness.state().split_tool.as_ref().unwrap().tiling.kind,
+        simple3d_geom::tiling::CellKind::Hexagons,
+        "clicking the cell shape did not choose it"
+    );
+
+    harness.get_by_label("Split").click();
+    harness.step();
+    harness.step();
+    assert!(harness.state().split_job.is_some(), "pressing Split did not start the cutting");
+    assert_eq!(harness.state().modal, crate::app::Modal::None, "the window stayed open over the cutting");
+
+    // The cutting is on a thread of its own, and the frame loop is what carries
+    // the answer back -- `App::update` in the application, and this in a harness
+    // that drives `App::ui` alone.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while harness.state().split_job.is_some() {
+        harness.state_mut().poll_split();
+        harness.step();
+        assert!(std::time::Instant::now() < deadline, "the split never landed");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+
+    let split = harness.state().primary().expect("the split is selected");
+    assert!(harness.state().scene.node(split).is_split(), "no split was made");
+    assert!(harness.state().scene.node(split).children.len() > 1, "the shape came back in one piece");
+    assert_eq!(
+        harness.state().scene.node(split).split_tiling().map(|t| t.kind),
+        Some(simple3d_geom::tiling::CellKind::Hexagons),
+        "the pattern the pieces were cut with was not kept"
+    );
+    // And the panel of the split it made offers the way to cut it again.
+    harness.step();
+    harness.step();
+    assert!(harness.query_by_label("Split differently\u{2026}").is_some(), "the split's panel offers no way to re-cut");
+}
+
 #[test]
 fn a_patterns_kind_is_clicked_from_a_row_and_its_fields_are_all_one_width() {
     use egui_kittest::kittest::Queryable;

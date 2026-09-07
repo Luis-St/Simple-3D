@@ -24,6 +24,7 @@ mod pick;
 mod raster;
 mod render;
 mod snap;
+mod split_tool;
 mod tabs;
 mod theme;
 mod ui;

@@ -21,6 +21,14 @@ use std::fmt;
 /// Version 3 added the other half of issue 82: a `split` node, holding the
 /// pieces a shape was broken into and -- in its `original` field -- the shape
 /// itself, so the break can be undone long after the fact.
+///
+/// Cutting a shape into a pattern of cells (issue 82 again) did *not* need a
+/// fourth. It writes one more optional field, `tiling`, saying which cell shape
+/// and which numbers made the pieces; a build that has never heard of it reads
+/// the same file as the split it is -- the pieces are ordinary stored meshes and
+/// the shape they came from is where it always was -- and loses only the label
+/// on it. A version is bumped for a file an older build could not read, not for
+/// one it reads with a word missing.
 pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
