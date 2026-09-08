@@ -99,9 +99,9 @@ fn main() -> eframe::Result<()> {
         // title on every frame, and `Context::send_viewport_cmd` requests a
         // repaint for every command it is handed, so the frame asked for the
         // next frame and the loop never stopped. Measured with
-        // `Context::repaint_causes`, fixed in `app.rs` by sending a title only
-        // when it changes, and the idle process now takes 0% of a core with
-        // swap interval still 0.
+        // `Context::repaint_causes`, fixed in `app/run_loop.rs` by sending a
+        // title only when it changes, and the idle process now takes 0% of
+        // a core with swap interval still 0.
         vsync: false,
         ..Default::default()
     };

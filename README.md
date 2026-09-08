@@ -222,9 +222,9 @@ Engineering highlights worth knowing about:
   See `crates/simple3d-core/tests/performance.rs`.
 - **Boolean output is retriangulated per flat region**, so a plate with a hole,
   a slot and a boss comes out at ~230 triangles rather than the ~1500 a
-  plane-clipping BSP leaves behind. See `crates/simple3d-geom/src/planar.rs`.
+  plane-clipping BSP leaves behind. See `crates/simple3d-geom/src/planar/`.
 - **Pointer gestures are executed by tests**, not only reasoned about:
-  `crates/simple3d-app/src/gestures.rs` replays real pointer events over a
+  `crates/simple3d-app/src/gestures/` replays real pointer events over a
   real frame with `egui_kittest`.
 
 ## Building
@@ -260,26 +260,26 @@ packaging/deb/build.sh target/release/simple-3d 0.1.0 dist
 
 | If you are looking for | Start at |
 |---|---|
-| A new primitive type | `simple3d-core/src/primitive.rs` — one declaration drives the Add menu, the property editor and the project file |
+| A new primitive type | `simple3d-core/src/primitive/registry/` — one declaration drives the Add menu, the property editor and the project file |
 | Boolean semantics and operand ordering | `simple3d-geom/src/lib.rs` (`evaluate_boolean`) |
-| Why a boolean result is the shape it is | `simple3d-geom/src/csg_bsp.rs`, then `repair.rs` and `planar.rs` |
-| Caching and invalidation | `simple3d-core/src/eval.rs` (`subtree_key`) |
-| Manipulator handle behaviour and modifiers | `simple3d-app/src/gizmo.rs` |
-| What a numeric field accepts | `simple3d-core/src/unit.rs` |
-| The docks, and what moves between them | `simple3d-app/src/dock.rs` |
-| Several documents open at once, and what switching a tab swaps | `simple3d-app/src/tabs.rs` |
-| The menu bar, and the dialogs that are windows of their own | `simple3d-app/src/app_chrome.rs` (`dialog`) |
-| A colour, a row height or a type size | `simple3d-app/src/theme.rs` — nothing else names one |
-| An icon, a primitive's silhouette, or the window's own icon | `simple3d-app/src/icon.rs` |
-| The ground grid, the origin axes and how they fade | `simple3d-app/src/render.rs` (`grid_levels`, `draw_axes`) |
-| Whether a value field is a slider or a text field this frame | `simple3d-app/src/ui.rs` (`FieldBuffers::scrub_field`) |
-| Keymap presets, rebinding and conflicts | `simple3d-core/src/keymap.rs` |
-| Navigation bindings taking effect without a restart | `simple3d-app/src/panel_viewport.rs` (`nav_gesture`) |
-| Driving a pointer gesture in a test | `simple3d-app/src/gestures.rs` |
+| Why a boolean result is the shape it is | `simple3d-geom/src/csg_bsp/`, then `repair/` and `planar/` |
+| Caching and invalidation | `simple3d-core/src/eval/hash.rs` (`subtree_key`) |
+| Manipulator handle behaviour and modifiers | `simple3d-app/src/gizmo/` (`mods.rs`, `drag_update.rs`) |
+| What a numeric field accepts | `simple3d-core/src/unit/entry.rs`, then `unit/expr.rs` |
+| The docks, and what moves between them | `simple3d-app/src/dock/` |
+| Several documents open at once, and what switching a tab swaps | `simple3d-app/src/tabs/swap.rs` |
+| The menu bar, and the dialogs that are windows of their own | `simple3d-app/src/app_chrome/menu.rs` and `app_chrome/dialog.rs` |
+| A colour, a row height or a type size | `simple3d-app/src/theme/palette.rs` — nothing else names one |
+| An icon, a primitive's silhouette, or the window's own icon | `simple3d-app/src/icon/paint.rs`, and `icon/app_icon.rs` for the window's |
+| The ground grid, the origin axes and how they fade | `simple3d-app/src/render/grid_extent.rs` and `render/axis_draw.rs` |
+| Whether a value field is a slider or a text field this frame | `simple3d-app/src/ui/buffers.rs` (`FieldBuffers::scrub_field`) |
+| Keymap presets, rebinding and conflicts | `simple3d-core/src/keymap/preset.rs` and `keymap/lookup.rs` |
+| Navigation bindings taking effect without a restart | `simple3d-app/src/panel_viewport/gesture.rs` (`nav_gesture`) |
+| Driving a pointer gesture in a test | `simple3d-app/src/gestures/` |
 | Whether a criterion is really covered | `tools/criteria_audit.py` |
 | What the Debian package installs, and what it depends on | `packaging/deb/build.sh` |
 | What the Windows installer puts where | `packaging/windows/simple-3d.wxs` |
-| File format and migration | `simple3d-core/src/project.rs` |
+| File format and migration | `simple3d-core/src/project/io.rs`, then `project/unknown.rs` |
 
 ## Licence
 

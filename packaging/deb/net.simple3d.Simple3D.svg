@@ -5,7 +5,7 @@
        line pushes the tag out of that window, whereupon GNOME Shell shows an
        empty tile instead of the icon. packaging/deb/build.sh checks this.
 
-       The glyph is the box the tool rail draws (crates/simple3d-app/src/icon.rs)
+       The glyph is the box the tool rail draws (crates/simple3d-app/src/icon/paint.rs)
        in the same house style: geometric strokes in the accent colour on the
        darkest surface. Written out here because a desktop entry needs an icon
        file on disk, which the single-binary build deliberately has none of. -->
