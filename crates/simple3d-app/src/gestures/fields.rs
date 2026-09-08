@@ -3,7 +3,6 @@
 use super::*;
 use crate::app::App;
 use egui_kittest::Harness;
-use simple3d_core::primitive::ParamsExt;
 
 /// Clicking a value field puts the whole number under the caret, so what is typed
 /// next replaces it.
