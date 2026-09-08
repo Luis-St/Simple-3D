@@ -2204,7 +2204,8 @@ fn the_split_tool_cuts_the_shape_into_the_cells_its_window_was_asked_for() {
     for _ in 0..6 {
         harness.step();
     }
-    assert_eq!(harness.state().modal, crate::app::Modal::SplitTool, "the tool did not open");
+    assert!(harness.state().split_tool.is_some(), "the tool did not open");
+    assert_eq!(harness.state().modal, crate::app::Modal::None, "the tool went up as a modal dialog");
 
     harness.get_by_label("Hexagons").click();
     harness.step();
@@ -2219,7 +2220,7 @@ fn the_split_tool_cuts_the_shape_into_the_cells_its_window_was_asked_for() {
     harness.step();
     harness.step();
     assert!(harness.state().split_job.is_some(), "pressing Split did not start the cutting");
-    assert_eq!(harness.state().modal, crate::app::Modal::None, "the window stayed open over the cutting");
+    assert!(harness.state().split_tool.is_none(), "the window stayed open over the cutting");
 
     // The cutting is on a thread of its own, and the frame loop is what carries
     // the answer back -- `App::update` in the application, and this in a harness

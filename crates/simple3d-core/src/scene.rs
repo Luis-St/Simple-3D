@@ -264,6 +264,17 @@ pub struct Node {
     /// What this node is in an export whose bodies the user chooses. `None`,
     /// which is nearly always, means a body of its own.
     pub export_body: Option<ExportBody>,
+    /// Whether this node has been lifted out of the collection holding it, so
+    /// that it has a row of its own in the tree (issue 82).
+    ///
+    /// Meaningless everywhere but under a [`Body::Split`], which holds its
+    /// pieces *inside* itself: a split is one row however many thousand pieces
+    /// it is in, and the ones marked here are the few that have been asked for
+    /// by name. Read through [`Scene::has_row`] rather than field by field,
+    /// because "is this drawn in the tree" is a question about the node *and*
+    /// its parent and answering half of it is how a piece ends up in two places
+    /// at once.
+    pub extracted: bool,
     pub body: Body,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
@@ -567,6 +578,7 @@ impl Scene {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             body: Body::Group { op: GroupOp::Union },
             children: Vec::new(),
             parent: None,
@@ -683,7 +695,12 @@ impl Scene {
     /// group, otherwise directly after it as a sibling (spec sections 7.2, 8.1).
     pub fn insertion_point(&self, selection: Option<NodeId>) -> (NodeId, usize) {
         match selection.and_then(|id| self.nodes.get(&id)) {
-            Some(node) if node.can_hold_children() => (node.id, node.children.len()),
+            // A collection is a container the tree does not open, so nothing is
+            // put inside one by accident: a shape added while one is selected
+            // stands beside it, the way it would beside a shape (issue 82).
+            // Dragging something in is still a drop into it, because that is
+            // aimed at rather than defaulted to.
+            Some(node) if node.can_hold_children() && !node.is_split() => (node.id, node.children.len()),
             Some(node) => {
                 let parent = node.parent.unwrap_or(self.root);
                 let index = self.nodes[&parent].children.iter().position(|&c| c == node.id).map_or(0, |i| i + 1);
@@ -724,6 +741,7 @@ impl Scene {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             body: Body::Primitive { type_id: type_id.to_string(), params: spec.default_params() },
             children: Vec::new(),
             parent: Some(parent),
@@ -747,6 +765,7 @@ impl Scene {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             body: Body::Group { op },
             children: Vec::new(),
             parent: Some(parent),
@@ -772,6 +791,7 @@ impl Scene {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             body: Body::Pattern { params: crate::pattern::default_params() },
             children: Vec::new(),
             parent: Some(parent),
@@ -797,6 +817,7 @@ impl Scene {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             body: Body::Mesh { mesh: Arc::new(mesh) },
             children: Vec::new(),
             parent: Some(parent),
@@ -837,6 +858,7 @@ impl Scene {
             colour: original.colour.as_deref().and_then(Colour::from_hex),
             segments: original.segments,
             export_body: original.export_body,
+            extracted: original.extracted,
             body: Body::Split { original: Arc::new(original), tiling },
             children: Vec::new(),
             parent: Some(parent),
@@ -880,8 +902,135 @@ impl Scene {
         node.colour = kept.colour;
         node.segments = kept.segments;
         node.export_body = kept.export_body;
+        // Including whether it had a row: a collection extracted out of another
+        // collection and then joined back together is still the piece that was
+        // extracted (issue 82).
+        node.extracted = kept.extracted;
         self.rename_subtree_uniquely(restored, true);
         Some(restored)
+    }
+
+    // -- collections (issue 82) ---------------------------------------------
+
+    /// Whether `id` holds its children *inside* itself rather than as rows of
+    /// the tree: a split, which is one object in the outliner however many
+    /// thousand pieces it is in.
+    ///
+    /// This is the whole of what makes a cut into ten thousand cells usable.
+    /// The pieces are real nodes -- they evaluate, export, take a colour and a
+    /// transform apiece -- but a tree with ten thousand rows in it is a tree
+    /// nobody can find anything in, so they are reached through the split's own
+    /// panel and only the ones asked for by name get a row.
+    pub fn is_collection(&self, id: NodeId) -> bool {
+        self.nodes.get(&id).is_some_and(Node::is_split)
+    }
+
+    /// Whether `id` is drawn as a row of the outliner at all.
+    ///
+    /// Everything is, except a piece still inside a collection. Asked of the
+    /// node *and* its parent, because a piece extracted from one collection and
+    /// dragged into another is a piece of the second one now.
+    pub fn has_row(&self, id: NodeId) -> bool {
+        let Some(node) = self.nodes.get(&id) else { return false };
+        match node.parent {
+            Some(parent) => node.extracted || !self.is_collection(parent),
+            None => true,
+        }
+    }
+
+    /// The nearest ancestor of `id` that the tree actually draws -- `id` itself
+    /// for all but a piece inside a collection, and the collection for one of
+    /// those.
+    ///
+    /// What a click in the viewport means: a click on a piece that has no row
+    /// is a click on the collection, the way a click anywhere on a pattern's
+    /// output means the pattern. A piece that *has* been extracted is a thing in
+    /// its own right and answers as itself.
+    pub fn row_for(&self, id: NodeId) -> NodeId {
+        let mut walk = id;
+        while !self.has_row(walk) {
+            match self.nodes.get(&walk).and_then(|node| node.parent) {
+                Some(parent) => walk = parent,
+                None => break,
+            }
+        }
+        walk
+    }
+
+    /// The children of `id` that the tree draws under it: all of them for
+    /// everything but a collection, and the extracted ones for a collection.
+    pub fn row_children(&self, id: NodeId) -> Vec<NodeId> {
+        let Some(node) = self.nodes.get(&id) else { return Vec::new() };
+        if !self.is_collection(id) {
+            return node.children.clone();
+        }
+        node.children.iter().copied().filter(|c| self.nodes[c].extracted).collect()
+    }
+
+    /// Lift pieces out of the collection holding them, so each gets a row of
+    /// its own under it (issue 82). Returns how many were newly marked.
+    ///
+    /// Only a child of `collection` can be extracted from it, and a piece
+    /// already extracted is left alone rather than counted twice.
+    pub fn extract_pieces(&mut self, collection: NodeId, pieces: &[NodeId]) -> usize {
+        if !self.is_collection(collection) {
+            return 0;
+        }
+        let mine: Vec<NodeId> =
+            self.nodes[&collection].children.iter().copied().filter(|c| pieces.contains(c)).collect();
+        let mut marked = 0;
+        for id in mine {
+            let node = self.nodes.get_mut(&id).expect("it was just read out of the collection");
+            if !node.extracted {
+                node.extracted = true;
+                marked += 1;
+            }
+        }
+        marked
+    }
+
+    /// Put extracted pieces back inside the collection they came from, losing
+    /// their rows again. The inverse of [`Scene::extract_pieces`].
+    pub fn return_pieces(&mut self, collection: NodeId, pieces: &[NodeId]) -> usize {
+        if !self.is_collection(collection) {
+            return 0;
+        }
+        let mine: Vec<NodeId> =
+            self.nodes[&collection].children.iter().copied().filter(|c| pieces.contains(c)).collect();
+        let mut cleared = 0;
+        for id in mine {
+            let node = self.nodes.get_mut(&id).expect("it was just read out of the collection");
+            if node.extracted {
+                node.extracted = false;
+                cleared += 1;
+            }
+        }
+        cleared
+    }
+
+    /// Turn a collection into an ordinary union group, its pieces becoming
+    /// plain children of it (issue 82).
+    ///
+    /// What extracting the last piece comes to: with nothing left inside it, a
+    /// collection is a container holding a list of objects, which is what a
+    /// union group is -- and a union group is the thing the rest of the
+    /// application already knows how to edit. The recipe the split was holding
+    /// goes with it, so this is where the break stops being reversible; the
+    /// caller is the one that says so before doing it.
+    ///
+    /// Returns false for a node that is not a collection.
+    pub fn dissolve_collection(&mut self, id: NodeId) -> bool {
+        if !self.is_collection(id) {
+            return false;
+        }
+        for child in self.nodes[&id].children.clone() {
+            if let Some(node) = self.nodes.get_mut(&child) {
+                node.extracted = false;
+            }
+        }
+        let Some(node) = self.nodes.get_mut(&id) else { return false };
+        node.body = Body::Group { op: GroupOp::Union };
+        true
     }
 
     /// Replace a node's body with stored geometry, keeping everything about the
@@ -1027,8 +1176,17 @@ impl Scene {
         for &id in &moving {
             self.unlink(id);
         }
+        // Something dropped into a collection arrives with a row, and something
+        // dragged out of one loses the mark it no longer means anything to: a
+        // collection hides its *pieces*, and a node the user carried in by hand
+        // is not one of them -- vanishing on release is not a move anybody aimed
+        // for (issue 82).
+        let into_collection = self.is_collection(new_parent);
         for (offset, &id) in moving.iter().enumerate() {
             self.link(id, new_parent, index + offset);
+            if let Some(node) = self.nodes.get_mut(&id) {
+                node.extracted = into_collection;
+            }
         }
         Ok(())
     }
@@ -1123,6 +1281,7 @@ impl Scene {
             colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
             export_body: node.export_body,
+            extracted: node.extracted,
             mesh: blob,
             original,
             tiling,
@@ -1165,6 +1324,7 @@ impl Scene {
             colour: data.colour.as_deref().and_then(Colour::from_hex),
             segments: data.segments,
             export_body: data.export_body,
+            extracted: data.extracted,
             body,
             children: Vec::new(),
             parent: Some(parent),
@@ -1351,6 +1511,13 @@ pub struct NodeData {
     /// before export bodies existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub export_body: Option<ExportBody>,
+    /// Whether a piece has been lifted out of the collection holding it, so
+    /// that it has a row of its own in the tree (issue 82). Absent from the
+    /// file for every node that is not one -- which is every node in a project
+    /// that has never split anything -- so a project written by this version
+    /// still diffs cleanly against one written before collections existed.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub extracted: bool,
     /// The geometry of a `mesh` node, and nothing else's. Present only on the
     /// one body type that owns its triangles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1467,6 +1634,143 @@ mod tests {
         let mut hollow = data.clone();
         hollow.original = None;
         assert!(other.import_subtree(&hollow, other_root, 0).is_none());
+    }
+
+    /// A collection holding `pieces` nameless mesh pieces, standing where a
+    /// two-box difference stood: the shape both halves of issue 82 leave behind.
+    fn collection_of(scene: &mut Scene, pieces: usize) -> (NodeId, Vec<NodeId>) {
+        let root = scene.root();
+        let group = scene.add_group(GroupOp::Difference, root, 0);
+        box_at(scene, group, 0.0);
+        box_at(scene, group, 5.0);
+        let original = scene.export_subtree(group).unwrap();
+        scene.remove(group);
+        let split = scene.add_split(original, None, root, 0);
+        let made = (0..pieces)
+            .map(|i| {
+                let mesh = crate::mesh_data::MeshData::new(simple3d_geom::primitives::box_mesh(1.0, 1.0, 1.0));
+                scene.add_mesh(&format!("Piece {i}"), mesh, split, i)
+            })
+            .collect();
+        (split, made)
+    }
+
+    #[test]
+    fn a_collection_keeps_its_pieces_out_of_the_tree() {
+        // The point of issue 82's rework: the pieces are real nodes -- they
+        // evaluate, export and take a transform apiece -- but the tree shows the
+        // collection as one object however many thousand it is in.
+        let mut scene = Scene::new();
+        let (split, pieces) = collection_of(&mut scene, 4);
+        assert!(scene.is_collection(split));
+        assert!(scene.has_row(split), "the collection itself must be a row");
+        assert!(scene.row_children(split).is_empty(), "the pieces were drawn in the tree");
+        for &piece in &pieces {
+            assert!(!scene.has_row(piece), "a piece inside the collection has a row");
+            assert_eq!(scene.row_for(piece), split, "a click on a piece must mean the collection");
+        }
+        // And the pieces are still there, whatever the tree draws.
+        assert_eq!(scene.node(split).children.len(), 4);
+    }
+
+    #[test]
+    fn extracting_a_piece_gives_it_a_row_and_putting_it_back_takes_it_away() {
+        let mut scene = Scene::new();
+        let (split, pieces) = collection_of(&mut scene, 4);
+
+        assert_eq!(scene.extract_pieces(split, &pieces[..2]), 2);
+        assert_eq!(scene.row_children(split), pieces[..2].to_vec(), "the extracted pieces are the rows");
+        assert!(scene.has_row(pieces[0]));
+        assert_eq!(scene.row_for(pieces[0]), pieces[0], "an extracted piece answers as itself");
+        assert_eq!(scene.row_for(pieces[2]), split, "an untouched piece still answers as the collection");
+        // Extracting the same piece twice is not two extractions.
+        assert_eq!(scene.extract_pieces(split, &pieces[..2]), 0);
+        assert!(scene.is_collection(split), "extracting some pieces dissolved the collection");
+
+        assert_eq!(scene.return_pieces(split, &pieces[..1]), 1);
+        assert_eq!(scene.row_children(split), vec![pieces[1]]);
+    }
+
+    #[test]
+    fn a_piece_that_is_not_this_collections_is_not_extracted_from_it() {
+        // The list a panel hands over is what is ticked, and what is ticked can
+        // outlive the collection it was ticked in.
+        let mut scene = Scene::new();
+        let (split, pieces) = collection_of(&mut scene, 2);
+        let root = scene.root();
+        let stranger = box_at(&mut scene, root, 20.0);
+        assert_eq!(scene.extract_pieces(split, &[stranger, pieces[0]]), 1);
+        assert!(!scene.node(stranger).extracted, "a node from elsewhere was marked");
+    }
+
+    #[test]
+    fn emptying_a_collection_leaves_an_ordinary_union_group() {
+        // What extracting the last piece comes to: with nothing left inside it a
+        // collection is a container holding a list of objects, which is a union
+        // group -- and the recipe goes with it, which is why the application
+        // asks first.
+        let mut scene = Scene::new();
+        let (split, pieces) = collection_of(&mut scene, 3);
+        assert!(scene.dissolve_collection(split));
+        assert!(!scene.is_collection(split));
+        assert_eq!(scene.node(split).group_op(), Some(GroupOp::Union));
+        assert!(scene.node(split).split_original().is_none(), "the recipe outlived the collection");
+        assert_eq!(scene.row_children(split), pieces, "the pieces did not become ordinary rows");
+        for &piece in &pieces {
+            assert!(scene.has_row(piece));
+            assert!(!scene.node(piece).extracted, "the mark outlived the collection it meant something in");
+        }
+        assert!(!scene.dissolve_collection(split), "a union group is not a collection to dissolve");
+    }
+
+    #[test]
+    fn something_dropped_into_a_collection_arrives_with_a_row() {
+        // A collection hides its *pieces*. Something the user carried in by hand
+        // is not one of them, and vanishing on release is not a move anybody
+        // aimed for.
+        let mut scene = Scene::new();
+        let (split, _) = collection_of(&mut scene, 2);
+        let root = scene.root();
+        let boxed = box_at(&mut scene, root, 20.0);
+        scene.reparent(boxed, split, 0).expect("a collection can hold children");
+        assert!(scene.node(boxed).extracted);
+        assert!(scene.has_row(boxed), "a shape dropped into a collection disappeared");
+
+        // And dragged out again it loses a mark that means nothing there.
+        scene.reparent(boxed, root, 0).expect("it can come out again");
+        assert!(!scene.node(boxed).extracted);
+        assert!(scene.has_row(boxed));
+    }
+
+    #[test]
+    fn which_pieces_are_extracted_survives_the_portable_form() {
+        let mut scene = Scene::new();
+        let (split, pieces) = collection_of(&mut scene, 3);
+        scene.extract_pieces(split, &pieces[1..2]);
+
+        let data = scene.export_subtree(split).unwrap();
+        let json = serde_json::to_string(&data).unwrap();
+        // The mark is absent from every node that does not carry one, so a
+        // project that has never split anything writes exactly what it used to.
+        assert_eq!(json.matches("\"extracted\"").count(), 1, "{json}");
+        let back: NodeData = serde_json::from_str(&json).unwrap();
+
+        let mut other = Scene::new();
+        let other_root = other.root();
+        let copy = other.import_subtree(&back, other_root, 0).expect("a collection imports");
+        assert_eq!(other.row_children(copy).len(), 1, "the extracted piece lost its row over the round trip");
+        assert_eq!(other.node(other.row_children(copy)[0]).name, "Piece 1");
+    }
+
+    #[test]
+    fn nothing_is_added_inside_a_collection_by_accident() {
+        // The tree does not open a collection, so an Add with one selected must
+        // not put a shape somewhere it cannot be seen. Dragging one in still
+        // works: that is aimed at rather than defaulted to.
+        let mut scene = Scene::new();
+        let (split, _) = collection_of(&mut scene, 2);
+        let root = scene.root();
+        assert_eq!(scene.insertion_point(Some(split)), (root, 1), "an Add landed inside the collection");
     }
 
     #[test]
@@ -1802,6 +2106,7 @@ mod tests {
             colour: None,
             segments: None,
             export_body: None,
+            extracted: false,
             mesh: None,
             original: None,
             tiling: None,
@@ -1819,6 +2124,7 @@ mod tests {
                 colour: None,
                 segments: None,
                 export_body: None,
+                extracted: false,
                 mesh: None,
                 original: None,
                 tiling: None,

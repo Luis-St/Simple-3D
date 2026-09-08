@@ -48,6 +48,7 @@ impl App {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.evaluation_generation.hash(&mut hasher);
         self.selection.hash(&mut hasher);
+        self.piece_ticks.hash(&mut hasher);
         self.ghost_generation().hash(&mut hasher);
         let key = hasher.finish();
         if key == self.renderable_key {
@@ -82,6 +83,13 @@ impl App {
                 fresh.insert(id, Renderable::prepare_outlined(&mesh));
             }
         }
+        // A ticked piece is outlined the same way, so pointing at one in the
+        // viewport is how a piece is found among thousands (issue 82).
+        for id in self.piece_ticks.clone() {
+            if let Some(mesh) = self.evaluated.result_mesh(id) {
+                fresh.insert(id, Renderable::prepare_outlined(&mesh));
+            }
+        }
         self.node_renderables = fresh;
         self.invalidate_image();
     }
@@ -98,6 +106,15 @@ impl App {
         }
         if ctx.wants_keyboard_input() {
             self.shortcut_mods.reset();
+            return;
+        }
+        // Escape puts an in-place popup away. A popup is not modal, so nothing
+        // else was going to catch the press -- and a window with no dialog
+        // machinery behind it still has to answer the key that closes windows
+        // (issue 82). Taken before the keymap, so a binding on Escape does not
+        // fire in the same breath as the tool it would be closing.
+        if self.split_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.cancel_split_tool();
             return;
         }
         let (events, modifiers, held, pointer) = ctx.input(|input| {
@@ -807,7 +824,7 @@ impl App {
             Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
             Modal::PatternKind => self.pattern_kind_window(ctx),
-            Modal::SplitTool => self.split_tool_window(ctx),
+            Modal::ConfirmExtractAll => self.confirm_extract_all_window(ctx),
         }
     }
 
@@ -982,7 +999,10 @@ impl App {
     fn dismiss_modal(&mut self) {
         match self.modal {
             Modal::SavePrimitive => self.cancel_save_primitive(),
-            Modal::SplitTool => self.cancel_split_tool(),
+            Modal::ConfirmExtractAll => {
+                self.confirm_extract = None;
+                self.modal = Modal::None;
+            }
             Modal::ConfirmCloseTab => self.cancel_close_tab(),
             Modal::Keymap => {
                 self.recording = None;
@@ -1692,24 +1712,71 @@ impl App {
         );
     }
 
-    /// The tool that cuts a shape into a pattern of pieces (issue 82).
-    fn split_tool_window(&mut self, ctx: &egui::Context) {
-        // Wide enough for the numbers and a picture of the cells beside them,
-        // and no wider: unlike the pattern tool's, this preview is a flat plan
-        // rather than a viewport, and it says what it has to say small.
+    /// Emptying a collection of every piece, which is where a break stops being
+    /// reversible (issue 82).
+    fn confirm_extract_all_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
             DialogSpec {
-                key: "dialog-split-tool",
-                title: "Split into smaller pieces",
-                size: egui::vec2(680.0, 420.0),
-                resizable: true,
-                fit_height: false,
-                min_size: Some(egui::vec2(320.0, 300.0)),
+                key: "dialog-confirm-extract-all",
+                title: "Extract every piece",
+                size: egui::vec2(460.0, 150.0),
+                resizable: false,
+                fit_height: true,
+                min_size: None,
             },
-            crate::split_tool::body,
-            crate::split_tool::actions,
+            Self::confirm_extract_all_body,
+            Self::confirm_extract_all_actions,
         );
+    }
+
+    fn confirm_extract_all_body(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.confirm_extract.filter(|&id| self.scene.is_collection(id)) else {
+            ui.label("There is nothing left to extract.");
+            return;
+        };
+        let node = self.scene.node(id);
+        let count = node.children.len();
+        let name = node.name.clone();
+        // The recipe is named, not merely referred to: "you will lose the
+        // original" is a warning about something the user cannot see, and what
+        // the shape *was* is the thing the user will look for afterwards. The
+        // collection wears the shape's own name, so naming it again would be
+        // the same word twice: it is the kind that says something new.
+        let made_from = node
+            .split_original()
+            .map(|original| {
+                let kind = simple3d_core::primitive::lookup(&original.type_id)
+                    .map_or(original.type_id.as_str(), |spec| spec.label)
+                    .to_lowercase();
+                if original.name == name {
+                    format!("the {kind} it was made from")
+                } else {
+                    format!("{} ({kind})", original.name)
+                }
+            })
+            .unwrap_or_else(|| "the object it was made from".to_string());
+        ui.label(format!("Extract all {count} {} of {name}?", if count == 1 { "piece" } else { "pieces" }));
+        ui.add_space(6.0);
+        ui.label(theme::hint(format!(
+            "With nothing left inside it, {name} becomes an ordinary union group and {made_from} is let go: the pieces can no longer be joined back together. Extracting only some of them keeps it."
+        )));
+    }
+
+    fn confirm_extract_all_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Extract all", true).clicked() {
+            let id = self.confirm_extract.take();
+            self.modal = Modal::None;
+            if let Some(id) = id {
+                self.extract_all_pieces(id);
+            }
+        }
+        cancel_at_left(ui, |ui| {
+            if ui::dialog_button(ui, "Cancel", true).clicked() {
+                self.confirm_extract = None;
+                self.modal = Modal::None;
+            }
+        });
     }
 
     fn confirm_close_tab_window(&mut self, ctx: &egui::Context) {

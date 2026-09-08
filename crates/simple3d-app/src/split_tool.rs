@@ -15,8 +15,19 @@
 //! itself happens on a thread -- see [`crate::worker::SplitJob`] -- because a
 //! hexagon tiling over a plate is hundreds of booleans and an interface that
 //! stops answering is one nobody can tell from a crashed one.
+//!
+//! It is an [in-place popup](crate::popup) rather than a dialog: it floats over
+//! the viewport, is dragged around by its own title bar and rolls up out of the
+//! way, and it does not stop the model underneath it being orbited, zoomed or
+//! selected. That is not decoration. The picture the tool draws is a plan seen
+//! down one axis, and the question it cannot answer -- which way round the
+//! shape is under the grid -- is answered by turning the model while the
+//! numbers are still on screen. Being non-modal means the shape can also change
+//! underneath it, so the tool re-bakes what it is cutting whenever the
+//! evaluation moves on, and closes itself if the shape goes away.
 
-use crate::app::{App, Modal, Status};
+use crate::app::{App, Status};
+use crate::popup::{self, PopupEvent, PopupSpec};
 use crate::worker::SplitJob;
 use crate::{theme, ui};
 use simple3d_core::scene::NodeId;
@@ -30,10 +41,17 @@ pub struct SplitTool {
     pub target: NodeId,
     /// The shape as it stands, baked in its own frame: what the cells are cut
     /// out of, what the estimate is counted over, and what the picture is drawn
-    /// from. Baked once, when the tool opens -- the window is modal, so nothing
-    /// can change underneath it.
+    /// from.
+    ///
+    /// Re-baked whenever the evaluation moves on, because the window is not
+    /// modal: the shape can be edited, hidden or moved while the tool is open,
+    /// and a plan drawn over the shape as it *was* is a plan of cuts that will
+    /// not fall there.
     pub mesh: Arc<Mesh>,
     pub bounds: (Vec3, Vec3),
+    /// Which evaluation `mesh` was baked from, so the tool can tell when what
+    /// it is drawing has gone stale.
+    pub generation: u64,
     pub tiling: Tiling,
     /// The numbers as typed, one string per field. A field is only read back
     /// into the tiling when what is in it parses, so a half-typed number is
@@ -94,17 +112,46 @@ impl App {
             target: id,
             mesh: Arc::new(mesh),
             bounds,
+            generation: self.evaluation_generation,
             tiling,
             text: Fields::from(&tiling, self.unit()),
         });
-        self.modal = Modal::SplitTool;
+    }
+
+    /// Keep the open tool honest against a document that can change underneath
+    /// it, which a non-modal window can.
+    ///
+    /// Three things can happen to the shape while the tool is up: it can be
+    /// deleted, which closes the tool; it can be edited, which re-bakes what the
+    /// picture is drawn from; and it can be left alone, which is the usual case
+    /// and costs one integer comparison.
+    pub(crate) fn refresh_split_tool(&mut self) {
+        let Some(tool) = self.split_tool.as_ref() else { return };
+        if !self.scene.contains(tool.target) {
+            self.cancel_split_tool();
+            self.status = Status::Warning("The object being split is no longer there".into());
+            return;
+        }
+        if tool.generation == self.evaluation_generation {
+            return;
+        }
+        let target = tool.target;
+        let mesh = simple3d_core::eval::baked_mesh(&self.scene, target);
+        let tool = self.split_tool.as_mut().expect("it was there a line ago");
+        tool.generation = self.evaluation_generation;
+        // A shape edited down to nothing -- hidden, or emptied of children --
+        // leaves the last picture up rather than blanking the window: the
+        // numbers are still worth reading, and Split refuses on its own.
+        if let Some(bounds) = mesh.bounds() {
+            tool.bounds = bounds;
+            tool.mesh = Arc::new(mesh);
+        }
     }
 
     /// Start cutting, and put the window away. The document is not touched until
     /// the pieces arrive.
     pub fn start_split(&mut self) {
         let Some(tool) = self.split_tool.take() else { return };
-        self.modal = Modal::None;
         if tool.tiling.refusal(tool.bounds).is_some() || !self.scene.contains(tool.target) {
             return;
         }
@@ -161,9 +208,45 @@ impl App {
 
     pub fn cancel_split_tool(&mut self) {
         self.split_tool = None;
-        self.modal = Modal::None;
     }
 }
+
+/// The tool's own window, drawn over the viewport once a frame while it is open
+/// (issue 82).
+pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
+    app.refresh_split_tool();
+    if app.split_tool.is_none() {
+        return;
+    }
+    let bounds = app.viewport_rect;
+    // The window names what it is cutting. It has to: it is not modal, so the
+    // selection can move on to something else while it is open, and a window
+    // that only says "Split into smaller pieces" would leave no way to tell
+    // which object is about to be cut.
+    let title = app
+        .split_tool
+        .as_ref()
+        .and_then(|tool| app.scene.get(tool.target))
+        .map_or_else(|| "Split into smaller pieces".to_string(), |node| format!("Split {} into pieces", node.name));
+    // Taken out of the map for the duration, so the popup may hold it mutably
+    // while its contents hold the application.
+    let mut placement = app.popups.remove(KEY).unwrap_or_default();
+    let event = popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: &title, width: WIDTH }, |ui| {
+        body(app, ui);
+        popup::action_row(ui, |ui| actions(app, ui));
+    });
+    app.popups.insert(KEY, placement);
+    if event == PopupEvent::Closed {
+        app.cancel_split_tool();
+    }
+}
+
+/// Identifies the popup, and is what remembers where it was dragged to.
+const KEY: &str = "split-tool";
+/// How wide the window is: enough for a labelled field and a plan of the cells
+/// under it, and no wider. A popup lives over the model, so every pixel of it
+/// is a pixel of the thing being cut that cannot be seen.
+const WIDTH: f32 = 340.0;
 
 /// What to call a number of pieces of a given cell shape.
 fn plural_cells(kind: CellKind, count: usize) -> String {
@@ -174,38 +257,55 @@ fn plural_cells(kind: CellKind, count: usize) -> String {
     }
 }
 
-/// The tool's contents: the pattern down the left, a picture of where the cuts
-/// will fall on the right, and what it comes to underneath both.
+/// The tool's contents: the pattern, a picture of where the cuts will fall, and
+/// what it comes to.
+///
+/// Two shapes, chosen by how much room there is. Given the width of a dialog
+/// the picture stands beside the numbers, which is the most of both at once.
+/// Given the width of a popup over the viewport it goes *under* them -- stacked
+/// rather than dropped, because the picture is the one thing in the window that
+/// a number of millimetres cannot say, and a tool that answers "what will this
+/// look like" only when it is wide enough answers it in the wrong half of the
+/// cases.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     if app.split_tool.is_none() {
         ui.label("The object this was opened on is no longer there.");
         return;
     }
-    // Two columns measured out here rather than left to a side panel: both
-    // widths are decided by one rule -- the numbers first, the picture with what
-    // is left -- and a panel would put half that rule in egui's hands.
+    // Measured out here rather than left to a side panel: both widths are
+    // decided by one rule -- the numbers first, the picture with what is left --
+    // and a panel would put half that rule in egui's hands.
     let room = ui.available_width();
     let gap = ui.spacing().item_spacing.x;
-    let wide = room >= COLUMN_MIN + PICTURE_MIN + gap;
-    // Below the width both need, the numbers keep the room: they are what the
-    // window is open for, and the picture is what gives way. Above it the
-    // numbers keep the width they need and every extra pixel goes to the
-    // picture, which is the half worth more the bigger it is.
-    let column = if wide { (room - PICTURE_MIN - gap).min(COLUMN_MAX) } else { room };
-    ui.horizontal_top(|ui| {
-        ui.allocate_ui_with_layout(
-            egui::vec2(column, ui.available_height()),
-            egui::Layout::top_down(egui::Align::Min),
-            |ui| {
-                controls(app, ui);
-                ui.add_space(6.0);
-                summary(app, ui);
-            },
-        );
-        if wide {
-            picture(app, ui);
-        }
-    });
+    let side_by_side = room >= COLUMN_MIN + PICTURE_MIN + gap;
+    if side_by_side {
+        // The numbers keep the width they need and every extra pixel goes to
+        // the picture, which is the half worth more the bigger it is.
+        let column = (room - PICTURE_MIN - gap).min(COLUMN_MAX);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(column, ui.available_height()),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    controls(app, ui);
+                    ui.add_space(6.0);
+                    summary(app, ui);
+                },
+            );
+            let size = egui::vec2(ui.available_width(), ui.available_height());
+            picture(app, ui, size);
+        });
+        return;
+    }
+    controls(app, ui);
+    ui.add_space(6.0);
+    // Roughly three parts wide to two tall, within bounds: a plan of cells is
+    // read at a glance, and one that takes half a popup is a popup that covers
+    // the model it is a plan of.
+    let height = (room * 0.62).clamp(STACKED_PICTURE_MIN, STACKED_PICTURE_MAX);
+    picture(app, ui, egui::vec2(room, height));
+    ui.add_space(6.0);
+    summary(app, ui);
 }
 
 pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
@@ -221,8 +321,13 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// The narrowest the plan of the cells is worth drawing at.
+/// The narrowest the plan of the cells is worth drawing at *beside* the
+/// numbers. Below the two together the picture goes under them instead.
 const PICTURE_MIN: f32 = 220.0;
+/// How tall the plan is when it is stacked under the numbers rather than stood
+/// beside them.
+const STACKED_PICTURE_MIN: f32 = 130.0;
+const STACKED_PICTURE_MAX: f32 = 220.0;
 /// The narrowest the fields are worth laying out at, and the widest they are
 /// worth stretching to: a row is a name and a number, and past this the two are
 /// pushed apart with nothing between them.
@@ -232,20 +337,20 @@ const COLUMN_MAX: f32 = 380.0;
 fn controls(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
     let Some(tool) = app.split_tool.as_mut() else { return };
-    egui::Grid::new("split-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label("Cells");
-        ui.horizontal_wrapped(|ui| {
-            for kind in CellKind::ALL {
-                if theme::choice(ui, tool.tiling.kind == kind, kind.label())
-                    .on_hover_text(kind.size_meaning())
-                    .clicked()
-                {
-                    tool.tiling.kind = kind;
-                }
+    // The cell shapes are a row of their own above the grid rather than a cell
+    // in it. Four chips do not fit across the width of a popup, and an
+    // `egui::Grid` does not grow its row for a wrapped one: the fourth landed
+    // on top of the row below, which is the Size field.
+    ui.label(egui::RichText::new("Cells").size(theme::font::LABEL).color(theme::token::TEXT_LO));
+    ui.horizontal_wrapped(|ui| {
+        for kind in CellKind::ALL {
+            if theme::choice(ui, tool.tiling.kind == kind, kind.label()).on_hover_text(kind.size_meaning()).clicked() {
+                tool.tiling.kind = kind;
             }
-        });
-        ui.end_row();
-
+        }
+    });
+    ui.add_space(6.0);
+    egui::Grid::new("split-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
         ui.label("Size");
         length_field(
             ui,
@@ -377,12 +482,12 @@ fn summary(app: &mut App, ui: &mut egui::Ui) {
 /// The shape seen down the axis the cells run along, with the cells drawn over
 /// it: where the cuts will fall, which is the one thing a number of millimetres
 /// cannot say on its own.
-fn picture(app: &mut App, ui: &mut egui::Ui) {
+fn picture(app: &mut App, ui: &mut egui::Ui, size: egui::Vec2) {
     let Some(tool) = app.split_tool.as_ref() else { return };
     // Space rather than a widget: the plan is painted, not interacted with, and
     // a widget laid over the room would be a widget the numbers beside it are
     // under -- which is a click on a cell shape that goes nowhere.
-    let (_, rect) = ui.allocate_space(ui.available_size());
+    let (_, rect) = ui.allocate_space(size);
     // Clipped to its own rectangle: a cell of the plan can reach past the shape,
     // and what reaches past the picture belongs to the fields beside it.
     let painter = ui.painter_at(rect);

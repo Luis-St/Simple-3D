@@ -241,7 +241,10 @@ fn push_visible(app: &App, id: NodeId, out: &mut Vec<NodeId>) {
     if app.collapsed.contains(&id) {
         return;
     }
-    for &child in &app.scene.node(id).children {
+    // `row_children` rather than `children`: a collection keeps its pieces
+    // inside itself and is one row however many thousand it is in, so only the
+    // ones extracted from it are walked (issue 82).
+    for child in app.scene.row_children(id) {
         push_visible(app, child, out);
     }
 }
@@ -450,7 +453,9 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], draggin
     // every row, childless ones included, so the glyphs and names below a
     // group still line up under the ones above it.
     let twisty_rect = egui::Rect::from_min_size(egui::pos2(x, rect.top() + 4.0), egui::Vec2::splat(14.0));
-    let has_children = !app.scene.node(id).children.is_empty();
+    // A collection with nothing extracted from it has no rows under it and so
+    // no twisty, however many pieces it holds (issue 82).
+    let has_children = !app.scene.row_children(id).is_empty();
     let mut collapsed = app.collapsed.contains(&id);
     let mut twisty_hovered = false;
     if has_children {
@@ -615,7 +620,11 @@ fn row(app: &mut App, ui: &mut egui::Ui, id: NodeId, carried: &[NodeId], draggin
         let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(band.center());
         let fraction = ((pointer.y - band.top()) / band.height().max(1.0)).clamp(0.0, 1.0);
         let root = app.scene.root();
-        let open = !app.collapsed.contains(&id) && !app.scene.node(id).children.is_empty();
+        // "Open" means rows are drawn under this one, which for a collection is
+        // the extracted pieces alone -- one holding thousands with none of them
+        // extracted has nothing under it and its gap still means "beside"
+        // (issue 82).
+        let open = !app.collapsed.contains(&id) && !app.scene.row_children(id).is_empty();
         if let Some(target) = drop_position(&app.scene, id, fraction, root, open) {
             if drop_is_legal(&app.scene, carried, &target) {
                 app.drop_target = Some(target);
@@ -953,6 +962,18 @@ fn hover_text(
                 }
             }
         }
+    } else if app.scene.is_collection(id) {
+        // The one row stands for all of them, so it has to say how many there
+        // are: the tree cannot show it and the count is the whole point of the
+        // row being one (issue 82).
+        let node = app.scene.node(id);
+        let total = node.children.len();
+        let shown = app.scene.row_children(id).len();
+        lines.push(match (total, shown) {
+            (1, _) => "1 piece, held inside".to_string(),
+            (n, 0) => format!("{n} pieces, held inside"),
+            (n, out) => format!("{n} pieces, {out} of them extracted"),
+        });
     } else if let Some(spec) = app.scene.node(id).spec() {
         lines.push(spec.label.to_string());
     }

@@ -81,8 +81,15 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         // A hidden node is hidden: no body, and no selection outline drawn
         // around the body it does not have. Selecting it still gets a
         // manipulator, so it can be put where it belongs before being shown.
-        let selected: Vec<NodeId> =
-            app.top_level_selection().into_iter().filter(|&id| app.scene.is_shown(id)).collect();
+        // Ticked pieces are outlined like a selection: they are what Extract is
+        // about to act on, and a list of two thousand names says nothing about
+        // which part of the shape each one is (issue 82).
+        let selected: Vec<NodeId> = app
+            .top_level_selection()
+            .into_iter()
+            .chain(app.piece_ticks.iter().copied())
+            .filter(|&id| app.scene.is_shown(id))
+            .collect();
 
         let mut items: Vec<Item> = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
         // Ghosts before the selection outline, so the outline stays readable.
@@ -548,16 +555,30 @@ fn measure_interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Response,
 fn select_under_cursor(app: &mut App, ui: &mut egui::Ui, view: &View) {
     let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) else { return };
     let (origin, direction) = view.ray(cursor);
+    let adding = ui.input(|i| i.modifiers.command || i.modifiers.shift);
     match pick::pick(&app.scene, &app.evaluated, origin, direction) {
-        Some(id) => {
-            if ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+        Some(hit) => {
+            // A click on a piece still held inside a collection means the
+            // collection, the way a click anywhere on a pattern's output means
+            // the pattern: the piece has no row, and selecting something the
+            // tree cannot show is selecting it out of sight (issue 82).
+            let id = app.scene.row_for(hit);
+            // Unless the collection is already what is selected. Then the click
+            // is about the piece, and it ticks it in the panel's list -- which
+            // is how a piece out of thousands is found at all: by pointing at
+            // it, rather than by reading names off a list.
+            if id != hit && app.listed_collection() == Some(id) {
+                app.tick_piece(hit, adding);
+                return;
+            }
+            if adding {
                 app.toggle_selected(id);
             } else {
                 app.select_only(id);
             }
         }
         None => {
-            if !ui.input(|i| i.modifiers.command || i.modifiers.shift) {
+            if !adding {
                 app.clear_selection();
             }
         }

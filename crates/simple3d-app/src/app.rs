@@ -62,10 +62,11 @@ pub enum Modal {
     SavePrimitive,
     /// Building a custom pattern kind out of stages (issue 67).
     PatternKind,
-    /// Choosing the pattern of cells a shape is to be cut into (issue 82).
-    SplitTool,
     /// Quitting with unsaved changes.
     ConfirmQuit,
+    /// Emptying a collection of every piece, which turns it into a union group
+    /// and lets go of the object it was made from (issue 82).
+    ConfirmExtractAll,
     /// Closing a tab with unsaved changes (issue 61).
     ConfirmCloseTab,
 }
@@ -261,6 +262,14 @@ pub struct App {
     /// The current selection, in click order. The last entry is the primary one
     /// the property editor and the manipulator act on.
     pub selection: Vec<NodeId>,
+    /// Which of a collection's pieces are ticked in its panel (issue 82).
+    ///
+    /// Not part of `selection`, and deliberately: a piece is reached *through*
+    /// the collection, so selecting one the ordinary way would swap the panel
+    /// away from the very list it was ticked in. These are marked in the
+    /// viewport like a selection and are what Extract acts on, and they are
+    /// dropped the moment the selection moves off the collection they belong to.
+    pub(crate) piece_ticks: std::collections::BTreeSet<NodeId>,
     /// The row a Shift+click measures its range from: the last outliner row
     /// clicked without Shift (issue 60).
     pub(crate) selection_anchor: Option<NodeId>,
@@ -389,6 +398,13 @@ pub struct App {
     /// lands -- see [`crate::split_tool`].
     pub split_tool: Option<crate::split_tool::SplitTool>,
     pub split_job: Option<SplitJob>,
+    /// The collection the "extract every piece" question is being asked about
+    /// (issue 82). Set only while [`Modal::ConfirmExtractAll`] is up.
+    pub(crate) confirm_extract: Option<NodeId>,
+    /// Where each in-place popup sits and whether it is rolled up (issue 82).
+    /// Keyed by the popup's own name, so a tool re-opened comes back where it
+    /// was last dragged to rather than back in the middle.
+    pub(crate) popups: std::collections::HashMap<&'static str, crate::popup::Placement>,
     pub export_format: Format,
     pub export_scale: String,
     pub export_selection_only: bool,
@@ -524,6 +540,7 @@ impl App {
             paint_run_colours: None,
             keymap,
             selection: Vec::new(),
+            piece_ticks: std::collections::BTreeSet::new(),
             selection_anchor: None,
             outliner_last_click: None,
             clipboard: None,
@@ -573,6 +590,8 @@ impl App {
             export_job: None,
             split_tool: None,
             split_job: None,
+            confirm_extract: None,
+            popups: std::collections::HashMap::new(),
             export_format: Format::ThreeMf,
             export_scale: "1".to_string(),
             export_selection_only: false,
@@ -700,8 +719,10 @@ impl App {
     }
 
     fn on_selection_changed(&mut self) {
-        // A half-typed field belongs to the node it was opened on.
+        // A half-typed field belongs to the node it was opened on, and so does
+        // a tick in a collection's list of pieces (issue 82).
         self.fields.clear();
+        self.piece_ticks.clear();
         self.history.close();
         self.rename = None;
         // Whatever is selected has to be findable: a node picked in the
@@ -2165,7 +2186,10 @@ impl App {
     fn insertion_from_row(&self, at: NodeId) -> (NodeId, usize) {
         let end_of_root = (self.scene.root(), self.scene.node(self.scene.root()).children.len());
         match self.scene.get(at) {
-            Some(node) if node.can_hold_children() => (at, self.scene.node(at).children.len()),
+            // Not into a collection: the tree does not open one, so a shape
+            // added on its row would land somewhere it cannot be seen
+            // (issue 82).
+            Some(node) if node.can_hold_children() && !node.is_split() => (at, self.scene.node(at).children.len()),
             Some(node) => match node.parent {
                 Some(parent) => {
                     let after = self.scene.node(parent).children.iter().position(|&c| c == at).map_or(0, |i| i + 1);
@@ -2323,6 +2347,113 @@ impl App {
         self.collapsed.remove(&split);
         self.select_only(split);
         Some((name, count))
+    }
+
+    // -- a collection's pieces (issue 82) -----------------------------------
+
+    /// Tick or untick one of a collection's pieces. `adding` is a click with
+    /// Ctrl or Shift held, which adds to what is ticked rather than replacing
+    /// it.
+    pub(crate) fn tick_piece(&mut self, id: NodeId, adding: bool) {
+        if !adding {
+            let only = self.piece_ticks.len() == 1 && self.piece_ticks.contains(&id);
+            self.piece_ticks.clear();
+            if only {
+                return;
+            }
+            self.piece_ticks.insert(id);
+            return;
+        }
+        if !self.piece_ticks.remove(&id) {
+            self.piece_ticks.insert(id);
+        }
+    }
+
+    /// The collection whose pieces the properties panel is listing: the one
+    /// selected node, when it is a collection at all.
+    pub(crate) fn listed_collection(&self) -> Option<NodeId> {
+        let id = self.primary()?;
+        (self.selection.len() == 1 && self.scene.is_collection(id)).then_some(id)
+    }
+
+    /// Lift the ticked pieces out of the collection, giving each a row of its
+    /// own under it (issue 82).
+    ///
+    /// Extracting every last piece is a different thing and goes through
+    /// [`App::extract_all_pieces`]: with nothing left inside it a collection is
+    /// a union group, and turning it into one throws the recipe away.
+    pub fn extract_ticked_pieces(&mut self, collection: NodeId) {
+        let ticked: Vec<NodeId> = self.piece_ticks.iter().copied().collect();
+        if ticked.is_empty() {
+            self.status = Status::Warning("Tick the pieces to extract first".into());
+            return;
+        }
+        let inside: Vec<NodeId> =
+            self.scene.node(collection).children.iter().copied().filter(|c| !self.scene.node(*c).extracted).collect();
+        if inside.iter().all(|id| ticked.contains(id)) {
+            // The last piece out empties the collection, which is the one case
+            // that has to ask before it acts.
+            self.ask_to_extract_all(collection);
+            return;
+        }
+        self.edit("Extract pieces", None);
+        let moved = self.scene.extract_pieces(collection, &ticked);
+        if moved == 0 {
+            self.history.discard_last();
+            self.status = Status::Info("Those pieces are already extracted".into());
+            return;
+        }
+        self.collapsed.remove(&collection);
+        self.piece_ticks.clear();
+        self.status = Status::Info(format!("Extracted {} {}", moved, if moved == 1 { "piece" } else { "pieces" }));
+    }
+
+    /// Put the ticked pieces back inside the collection, losing their rows.
+    pub fn return_ticked_pieces(&mut self, collection: NodeId) {
+        let ticked: Vec<NodeId> = self.piece_ticks.iter().copied().collect();
+        if ticked.is_empty() {
+            self.status = Status::Warning("Tick the pieces to put back first".into());
+            return;
+        }
+        self.edit("Put pieces back", None);
+        let moved = self.scene.return_pieces(collection, &ticked);
+        if moved == 0 {
+            self.history.discard_last();
+            self.status = Status::Info("Those pieces are already inside".into());
+            return;
+        }
+        self.piece_ticks.clear();
+        self.status = Status::Info(format!("Put {} {} back", moved, if moved == 1 { "piece" } else { "pieces" }));
+    }
+
+    /// Ask before emptying a collection, because that is where the break stops
+    /// being reversible: with every piece extracted the collection is a union
+    /// group, and the object it was made from goes with it (issue 82).
+    pub fn ask_to_extract_all(&mut self, collection: NodeId) {
+        if !self.scene.is_collection(collection) {
+            return;
+        }
+        self.confirm_extract = Some(collection);
+        self.modal = Modal::ConfirmExtractAll;
+    }
+
+    /// Extract every piece, which leaves the collection with nothing inside it
+    /// and so turns it into an ordinary union group (issue 82).
+    pub fn extract_all_pieces(&mut self, collection: NodeId) {
+        if !self.scene.is_collection(collection) {
+            return;
+        }
+        let count = self.scene.node(collection).children.len();
+        let name = self.scene.node(collection).name.clone();
+        self.edit("Extract every piece", None);
+        self.scene.dissolve_collection(collection);
+        self.collapsed.remove(&collection);
+        self.piece_ticks.clear();
+        self.select_only(collection);
+        self.status = Status::Info(format!(
+            "Extracted {count} {} -- {name} is a union group now",
+            if count == 1 { "piece" } else { "pieces" }
+        ));
     }
 
     /// How to undo a break, in the words the status line ends with. Said in the
@@ -3270,6 +3401,10 @@ impl App {
         // viewport under them, not to the window's chrome.
         crate::tabs::show(self, ctx);
         panel_viewport::show(self, ctx);
+        // Over the viewport, and drawn after it so it is the layer above: an
+        // in-place popup is part of the picture rather than a window in front of
+        // the application (issue 82).
+        crate::split_tool::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         // A dialog is modal, and it was only half of one: `handle_shortcuts`
         // hands it the keyboard, but nothing stopped the main window taking the
@@ -3911,6 +4046,11 @@ mod tests {
     impl App {
         fn reevaluate_for_test(&mut self) {
             self.evaluated = Evaluator::new().evaluate(&self.scene, &Cancel::new());
+            // The generation moves on with the result, exactly as it does when
+            // the worker hands one back: everything that watches for "the model
+            // changed" watches this, so a helper that left it alone would be a
+            // helper nothing noticed.
+            self.evaluation_generation += 1;
         }
     }
 
@@ -5622,7 +5762,7 @@ mod tests {
     fn the_split_tool_fits_whatever_width_its_window_is_given() {
         let mut app = headless_app();
         app.open_split_tool();
-        assert_eq!(app.modal, Modal::SplitTool, "the tool did not open, so this measures nothing");
+        assert!(app.split_tool.is_some(), "the tool did not open, so this measures nothing");
 
         for kind in simple3d_geom::tiling::CellKind::ALL {
             app.split_tool.as_mut().unwrap().tiling.kind = kind;
@@ -6757,6 +6897,149 @@ mod tests {
         assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Hexagons);
         assert_eq!(tiling.size, 12.0);
         assert_eq!(tiling.layer, 2.0);
+    }
+
+    #[test]
+    fn a_split_is_one_row_in_the_outliner_however_many_pieces_it_holds() {
+        // The whole of why a collection exists: a hexagon tiling over a plate is
+        // thousands of pieces, and thousands of rows is a tree nobody can find
+        // anything in (issue 82).
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        assert_eq!(app.scene.node(split).children.len(), 8);
+
+        let rows = crate::panel_outliner::visible_rows(&app);
+        assert!(rows.contains(&split), "the collection itself has no row");
+        for &piece in &app.scene.node(split).children {
+            assert!(!rows.contains(&piece), "a piece was drawn in the tree");
+        }
+    }
+
+    #[test]
+    fn ticked_pieces_are_extracted_into_rows_of_their_own() {
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        let pieces = app.scene.node(split).children.clone();
+
+        // Nothing ticked is a warning rather than an edit.
+        let before = app.history.undo_len();
+        app.extract_ticked_pieces(split);
+        assert_eq!(app.history.undo_len(), before, "extracting nothing recorded an undo step");
+
+        app.tick_piece(pieces[0], false);
+        app.tick_piece(pieces[3], true);
+        app.extract_ticked_pieces(split);
+        let rows = crate::panel_outliner::visible_rows(&app);
+        assert!(rows.contains(&pieces[0]) && rows.contains(&pieces[3]), "the extracted pieces got no rows");
+        assert!(!rows.contains(&pieces[1]), "a piece nobody asked for was extracted too");
+        assert!(app.scene.is_collection(split), "extracting two of eight dissolved the collection");
+        assert!(app.piece_ticks.is_empty(), "the ticks outlived the extraction");
+
+        // And they fold back in.
+        app.tick_piece(pieces[0], false);
+        app.return_ticked_pieces(split);
+        assert!(!crate::panel_outliner::visible_rows(&app).contains(&pieces[0]));
+
+        // One undo per step, and the first one puts both rows away again.
+        app.run(Command::Undo);
+        app.run(Command::Undo);
+        assert!(app.scene.row_children(split).is_empty(), "undo left the pieces in the tree");
+    }
+
+    #[test]
+    fn extracting_every_piece_asks_before_it_empties_the_collection() {
+        // It is the one step that is not reversible by the feature itself: with
+        // nothing left inside it the collection is a union group, and the shape
+        // it was cut from goes with it (issue 82).
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        let pieces = app.scene.node(split).children.clone();
+
+        // Ticking every one of them is the same question, however it is asked.
+        for &piece in &pieces {
+            app.tick_piece(piece, true);
+        }
+        let before = app.history.undo_len();
+        app.extract_ticked_pieces(split);
+        assert_eq!(app.modal, Modal::ConfirmExtractAll, "emptying the collection went through unasked");
+        assert_eq!(app.history.undo_len(), before, "it edited the document before the question was answered");
+        assert!(app.scene.is_collection(split));
+
+        app.extract_all_pieces(split);
+        assert!(!app.scene.is_collection(split), "the collection survived being emptied");
+        assert_eq!(app.scene.node(split).group_op(), Some(GroupOp::Union), "what is left is not a union group");
+        assert_eq!(app.scene.node(split).name, "Plate", "the group is not named what the collection was");
+        let rows = crate::panel_outliner::visible_rows(&app);
+        assert!(pieces.iter().all(|p| rows.contains(p)), "the pieces did not become ordinary rows");
+
+        // And one undo puts the collection back, recipe and all.
+        app.run(Command::Undo);
+        assert!(app.scene.node(split).is_split());
+        assert!(app.scene.node(split).split_original().is_some());
+    }
+
+    #[test]
+    fn a_tick_belongs_to_the_collection_it_was_made_in() {
+        // Ticks are not a selection, and they must not outlive the panel that
+        // shows them: extracting into a collection the user has moved on from is
+        // an edit somewhere they are not looking.
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        let piece = app.scene.node(split).children[0];
+        app.tick_piece(piece, false);
+        assert_eq!(app.listed_collection(), Some(split));
+
+        let root = app.scene.root();
+        app.select_only(root);
+        assert!(app.piece_ticks.is_empty(), "the ticks survived the selection moving off the collection");
+        assert_eq!(app.listed_collection(), None);
+    }
+
+    #[test]
+    fn clicking_a_ticked_piece_again_unticks_it() {
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        let pieces = app.scene.node(split).children.clone();
+
+        app.tick_piece(pieces[0], false);
+        assert_eq!(app.piece_ticks.len(), 1);
+        app.tick_piece(pieces[0], false);
+        assert!(app.piece_ticks.is_empty(), "a second click on the same piece left it ticked");
+        // A plain click replaces what was ticked; Ctrl adds to it.
+        app.tick_piece(pieces[0], false);
+        app.tick_piece(pieces[1], false);
+        assert_eq!(app.piece_ticks.len(), 1, "a plain click added rather than replacing");
+        app.tick_piece(pieces[2], true);
+        assert_eq!(app.piece_ticks.len(), 2);
+    }
+
+    #[test]
+    fn the_split_tool_rebakes_when_the_shape_changes_under_it() {
+        // The window is not modal, so the shape it is cutting can be edited
+        // while it is open -- and a plan drawn over the shape as it was is a
+        // plan of cuts that will not fall there (issue 82).
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.reevaluate_for_test();
+        app.open_split_tool();
+        let was = app.split_tool.as_ref().expect("the tool opened").bounds;
+
+        app.scene.get_mut(plate).unwrap().params_mut().unwrap().insert("width".into(), ParamValue::Length(120.0));
+        app.reevaluate_for_test();
+        app.refresh_split_tool();
+        let now = app.split_tool.as_ref().expect("the tool is still open").bounds;
+        assert!((now.1.x - was.1.x).abs() > 1.0, "the tool is still drawing the shape as it was: {was:?} -> {now:?}");
+
+        // And a shape deleted under it closes the tool rather than leaving a
+        // window open on nothing.
+        app.scene.remove(plate);
+        app.refresh_split_tool();
+        assert!(app.split_tool.is_none(), "the tool stayed open on an object that is gone");
     }
 
     #[test]

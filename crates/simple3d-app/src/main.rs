@@ -21,6 +21,7 @@ mod panel_toolrail;
 mod panel_viewport;
 mod pattern_tool;
 mod pick;
+mod popup;
 mod raster;
 mod render;
 mod snap;
