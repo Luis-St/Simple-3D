@@ -376,9 +376,11 @@ pub struct App {
     /// it, for as long as its grip is being dragged (issue 71). `None` when the
     /// plane is not being moved.
     pub section_grab: Option<f64>,
-    /// Whether the pointer is on the section plane's grip this frame, so the
-    /// frame can say that it can be taken hold of before it is.
-    pub section_hover: bool,
+    /// Which of the section plane's five grips the pointer is on this frame, so
+    /// the frame can say that it can be taken hold of before it is -- and so
+    /// the arrows that say which way it travels are drawn on that grip alone
+    /// (issue 72). `None` when the pointer is on none of them.
+    pub section_hover: Option<usize>,
     /// Every feature of the body the current drag is carrying, as offsets from
     /// its origin; gathered on `Begin`. See `App::drag_feature_offsets`.
     snap_sources: Vec<Vec3>,
@@ -592,7 +594,7 @@ impl App {
             snap_sources: Vec::new(),
             snap_indicator: None,
             section_grab: None,
-            section_hover: false,
+            section_hover: None,
             snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
             pending_delete: None,
             camera_move: None,
@@ -3490,6 +3492,7 @@ impl App {
         // the application (issue 82).
         crate::split_tool::show(self, ctx);
         crate::measure_tool::show(self, ctx);
+        crate::section_tool::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         // A dialog is modal, and it was only half of one: `handle_shortcuts`
         // hands it the keyboard, but nothing stopped the main window taking the
