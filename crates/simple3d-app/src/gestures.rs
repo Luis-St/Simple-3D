@@ -2069,30 +2069,32 @@ fn a_snapped_drag_can_put_two_boxes_face_to_face() {
     );
 }
 
-// -- issue 78: the measure tool's own section in the property panel ------------
+// -- issues 78 and 86: the measure tool's own window ---------------------------
 
 #[test]
-fn the_measure_section_is_there_only_while_the_tool_is_out() {
+fn the_measure_window_is_there_only_while_the_tool_is_out() {
     use egui_kittest::kittest::Queryable;
 
-    // Issue 78: the span belongs in the property panel as numbers that can be
-    // typed -- and nowhere at all once the tool is put away. The section is
-    // found by the one control only it has; a label the panel merely draws is
-    // not in the accessibility tree to ask about.
-    let mut harness = harness("measure-section");
-    assert!(harness.query_by_label("Put the tool away").is_none(), "the section was there with the tool put away");
+    // Issue 78: the span is numbers that can be typed -- and nowhere at all once
+    // the tool is put away. Issue 86: they are in the tool's own in-place popup
+    // over the viewport rather than in a section of the property panel, which
+    // describes the selection and has nothing to do with a measurement. The
+    // window is found by the button only it has; a title the popup paints is not
+    // in the accessibility tree to ask about.
+    let mut harness = harness("measure-window");
+    assert!(harness.query_by_label("Done").is_none(), "the window was there with the tool put away");
 
     harness.state_mut().run(simple3d_core::keymap::Command::MeasureTool);
     harness.step();
     harness.step();
-    assert!(harness.query_by_label("Put the tool away").is_some(), "the tool is out and its section is not");
+    assert!(harness.query_by_label("Done").is_some(), "the tool is out and its window is not");
 
-    // The section is wired to the tool, not just drawn beside it.
-    harness.get_by_label("Put the tool away").click();
+    // The window is wired to the tool, not just drawn over it.
+    harness.get_by_label("Done").click();
     harness.step();
     harness.step();
-    assert!(!harness.state().measure.active, "the section's own button did not put the tool away");
-    assert!(harness.query_by_label("Put the tool away").is_none(), "the section outlived the tool");
+    assert!(!harness.state().measure.active, "the window's own button did not put the tool away");
+    assert!(harness.query_by_label("Done").is_none(), "the window outlived the tool");
 }
 
 #[test]
@@ -2123,11 +2125,11 @@ fn a_right_click_in_the_viewport_takes_the_last_measure_point_back() {
 }
 
 #[test]
-fn the_measure_section_shows_the_span_and_takes_it_back() {
+fn the_measure_window_shows_the_span_and_takes_it_back() {
     use egui_kittest::kittest::Queryable;
 
-    // The ends are editable fields, so they are spin buttons in the panel: three
-    // for the start and three for the end, and they read what the tool holds.
+    // The ends are editable fields, so they are spin buttons: three for the
+    // start and three for the end, and they read what the tool holds.
     let mut harness = harness("measure-fields");
     harness.state_mut().run(simple3d_core::keymap::Command::MeasureTool);
     harness.state_mut().measure.set_point(0, Vec3::new(1.0, 2.0, 3.0));
@@ -2143,10 +2145,10 @@ fn the_measure_section_shows_the_span_and_takes_it_back() {
         assert!(shown.iter().any(|v| v == expected), "no field reads {expected}: {shown:?}");
     }
 
-    // Clearing from the panel takes the span away without putting the tool away.
+    // Clearing from the window takes the span away without putting the tool away.
     harness.get_by_label("Clear the span").click();
     harness.step();
-    assert!(harness.state().measure.points.is_empty(), "the panel's Clear left the span in place");
+    assert!(harness.state().measure.points.is_empty(), "the window's Clear left the span in place");
     assert!(harness.state().measure.active, "clearing the span also put the tool away");
 }
 

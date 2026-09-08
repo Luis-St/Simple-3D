@@ -3,7 +3,9 @@
 
 use simple3d_core::keymap::{Chord, Command, Keymap};
 use simple3d_core::primitive::{ParamKind, ParamValue};
-use simple3d_core::unit::{format_angle, format_length, format_number, parse_entry, parse_entry_plain, Unit};
+use simple3d_core::unit::{
+    format_angle, format_length, format_number, parse_entry, parse_entry_plain, wrap_degrees, Unit,
+};
 use std::collections::{HashMap, HashSet};
 
 /// What a text field's content should do to the model when the user commits it.
@@ -81,11 +83,16 @@ pub fn commit_length(text: &str, unit: Unit, current: f64) -> Option<f64> {
     Some(unit.to_mm(entry.resolve(unit.from_mm(current))))
 }
 
-/// A rotation component in degrees. Rotations are free, since a node may be
-/// turned any way.
+/// A rotation component in degrees. A node may be turned any way, so nothing is
+/// refused -- but what comes back is the direction it ends up facing rather than
+/// the number that was typed to get there: a turn is brought into `[0, 360)`, so
+/// 400 is 40 and -90 is 270 (issue 84).
+///
+/// The relative forms are resolved before the wrap, not after, so `+1` on a
+/// field showing 359 is a degree further round and reads 0.
 pub fn commit_angle(text: &str, current: f64) -> Option<f64> {
     let entry = parse_entry_plain(text)?;
-    Some(entry.resolve(current))
+    Some(wrap_degrees(entry.resolve(current)))
 }
 
 /// A scale factor. Unitless, and clamped to something that still produces a
@@ -713,6 +720,19 @@ mod tests {
             assert_eq!(commit_length(bad, Unit::Millimetre, 10.0), None, "{bad:?}");
             assert_eq!(commit_angle(bad, 10.0), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn a_rotation_comes_back_as_the_direction_it_faces_not_the_turn_that_got_there() {
+        // Issue 84: a field on a rotation reads [0, 360). Typing a whole turn
+        // past where the body already stands leaves it standing there.
+        assert_eq!(commit_angle("400", 0.0), Some(40.0));
+        assert_eq!(commit_angle("360", 0.0), Some(0.0));
+        assert_eq!(commit_angle("-90", 0.0), Some(270.0));
+        // The relative forms are resolved first: a degree on from 359 is 0,
+        // which is the case the issue names.
+        assert_eq!(commit_angle("+1", 359.0), Some(0.0));
+        assert_eq!(commit_angle("- 1", 0.0), Some(359.0));
     }
 
     #[test]

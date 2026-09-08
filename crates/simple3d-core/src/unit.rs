@@ -91,7 +91,34 @@ pub fn format_length(mm: f64, unit: Unit) -> String {
 /// Format an angle in degrees. Angles are always degrees regardless of the
 /// length unit (spec section 4).
 pub fn format_angle(deg: f64) -> String {
-    format_number(deg, 4)
+    format_number(deg, ANGLE_DECIMALS)
+}
+
+/// How many decimals an angle is shown to.
+const ANGLE_DECIMALS: usize = 4;
+
+/// The direction a turn of `deg` leaves a body facing: the same turn brought
+/// into `[0, 360)`, so 360 reads as 0 and -90 as 270 (issue 84).
+///
+/// A rotation is a direction, not a distance travelled to reach it: a body
+/// turned a degree past a full turn stands where an untouched one does, and a
+/// field that says 361 is describing the gesture rather than the model.
+///
+/// A hair under a full turn counts as a full turn. The field shows four
+/// decimals, so 359.99999 in it is the string "360" -- a number outside the
+/// range this promises, and one that would not survive being read back.
+pub fn wrap_degrees(deg: f64) -> f64 {
+    if !deg.is_finite() {
+        return 0.0;
+    }
+    let wrapped = deg.rem_euclid(360.0);
+    // Guarded rather than trusted: `rem_euclid` returns the divisor itself for
+    // a tiny negative input, where 360 minus a hair rounds back to 360.
+    if wrapped >= 360.0 - 0.5 * 0.1_f64.powi(ANGLE_DECIMALS as i32) {
+        0.0
+    } else {
+        wrapped
+    }
 }
 
 /// What the user typed into a numeric field, once it has been read.
@@ -356,6 +383,28 @@ pub fn parse_length(text: &str, unit: Unit) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_angle_is_wrapped_into_a_single_turn() {
+        // Issue 84: a rotation field reads the direction the body faces.
+        assert_eq!(wrap_degrees(0.0), 0.0);
+        assert_eq!(wrap_degrees(359.0), 359.0);
+        assert_eq!(wrap_degrees(360.0), 0.0);
+        assert_eq!(wrap_degrees(361.0), 1.0);
+        assert_eq!(wrap_degrees(720.0), 0.0);
+        assert_eq!(wrap_degrees(-90.0), 270.0);
+        assert_eq!(wrap_degrees(-360.0), 0.0);
+        // Never the string "360": a hair short of a full turn is one, because
+        // four decimals cannot tell them apart and the range has to hold.
+        for deg in [-1e-15, -1e-9, 359.999_99, -0.000_001] {
+            let wrapped = wrap_degrees(deg);
+            assert!((0.0..360.0).contains(&wrapped), "{deg} wrapped to {wrapped}");
+            assert_ne!(format_angle(wrapped), "360", "{deg} still reads as a full turn");
+        }
+        // Nothing to turn by is nothing turned, rather than a NaN in the scene.
+        assert_eq!(wrap_degrees(f64::NAN), 0.0);
+        assert_eq!(wrap_degrees(f64::INFINITY), 0.0);
+    }
 
     #[test]
     fn display_unit_round_trips_without_rescaling() {

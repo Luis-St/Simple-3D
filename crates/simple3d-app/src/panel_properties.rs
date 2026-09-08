@@ -14,7 +14,7 @@ use crate::ui::{self, Commit};
 use simple3d_core::config::Placement;
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
 use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId, PreviewViewport, Visibility};
-use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
+use simple3d_core::unit::{format_angle, format_length, format_number, wrap_degrees, Unit};
 use simple3d_geom::Vec3;
 
 /// A collapsible panel in the right dock: a header bar, and a padded body that
@@ -78,7 +78,7 @@ const SEGMENTS: ParamKind = ParamKind::Count { min: 3, max: 512 };
 
 /// One component of a point in space -- the 3D cursor, an end of the measure
 /// span. A length with no floor, because half of space is behind the origin.
-const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
+pub(crate) const POINT: ParamKind = ParamKind::Length { min: f64::NEG_INFINITY };
 
 /// The widest one of the three fields on a point row may be.
 ///
@@ -105,7 +105,7 @@ const POINT_FIELD_MAX: f32 = 104.0;
 /// there, so the third was drawn past the panel's edge and clipped. That is what
 /// was reported -- the 3D cursor and the view centre losing their Z field as the
 /// dock was dragged in, while the position and rotation rows above them stacked.
-fn point_fields(ui: &mut egui::Ui, name: &str, mut field: impl FnMut(&mut egui::Ui, usize)) {
+pub(crate) fn point_fields(ui: &mut egui::Ui, name: &str, mut field: impl FnMut(&mut egui::Ui, usize)) {
     // The panel's own edge decides how much there is to share out, the way it
     // does on an axis row: a row wide enough to overflow must not take the
     // others with it.
@@ -193,7 +193,7 @@ fn room_left(ui: &egui::Ui) -> f32 {
 /// and it takes a different width for every unit and for none at all -- so a
 /// column that mixed a length, an angle and a plain count had a different field
 /// width on every line of it.
-fn named(label: &str, unit: &str) -> String {
+pub(crate) fn named(label: &str, unit: &str) -> String {
     if unit.is_empty() {
         return label.to_string();
     }
@@ -256,7 +256,7 @@ pub(crate) fn row_right_edge(ui: &egui::Ui) -> f32 {
     ui.max_rect().right().min(ui.clip_rect().right() - EDGE_PAD)
 }
 
-fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
+pub(crate) fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
     if stacked(ui) {
         ui.vertical(|ui| {
             if !label.is_empty() {
@@ -326,22 +326,27 @@ fn value_field(app: &mut App, ui: &mut egui::Ui, name: &str, field_id: egui::Id,
 /// this is the frame the gesture *began*, which is the frame that records the
 /// undo step: recording on every frame would spend a whole drag's worth of
 /// history on one edit.
-struct Scalar<'a> {
+pub(crate) struct Scalar<'a> {
     /// What the scrub gesture is remembered by, named after the value rather
     /// than taken from the layout -- see [`grip_id`].
-    grip: &'a str,
+    pub(crate) grip: &'a str,
     /// What the text field it opens into is remembered by.
-    id: egui::Id,
+    pub(crate) id: egui::Id,
     /// What the number is, which decides how it is written, what a typed entry
     /// may say, and where it is clamped.
-    kind: ParamKind,
+    pub(crate) kind: ParamKind,
     /// What it holds now, in stored terms.
-    current: f64,
+    pub(crate) current: f64,
     /// How much one step of the scrub is worth, in the unit the field shows.
-    step: f64,
+    pub(crate) step: f64,
 }
 
-fn scalar_field(app: &mut App, ui: &mut egui::Ui, field: Scalar<'_>, mut apply: impl FnMut(&mut App, f64, bool)) {
+pub(crate) fn scalar_field(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    field: Scalar<'_>,
+    mut apply: impl FnMut(&mut App, f64, bool),
+) {
     let Scalar { grip, id: field_id, kind, current, step } = field;
     let unit = app.unit();
     let shown = match kind {
@@ -408,15 +413,6 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         // Everything the panel edits, primary last -- the same order the
         // selection itself is in, so "the one being edited" is unambiguous.
         let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
-        // The measure tool's own section, and only while it is out (issue 78):
-        // the span it is holding is what the panel is for at that moment, and
-        // with the tool put away there is nothing for the section to say. It
-        // comes first because it is what the user is doing, and it is here rather
-        // than in either branch below because a measurement has nothing to do
-        // with what happens to be selected.
-        if app.measure.active {
-            section(ui, "Measure", |ui| measure(app, ui));
-        }
         let Some(primary) = app.primary() else {
             document(app, ui);
             return;
@@ -777,106 +773,6 @@ fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The measure tool's span as numbers: both ends as editable fields, and the
-/// distance, per-axis delta and angles between them (issues 69, 78).
-///
-/// The ends are editable because a measurement is often *between* named places
-/// rather than between two things there is geometry to point at -- and because
-/// having clicked one end approximately, correcting it by a tenth of a
-/// millimetre should not mean clicking again and hoping.
-fn measure(app: &mut App, ui: &mut egui::Ui) {
-    let unit = app.unit();
-    let placed = app.measure.points.len();
-    for (index, label) in [(0_usize, "Start"), (1, "End")] {
-        let point = app.measure.points.get(index).copied();
-        // An end can be typed only once the start is down; before that it would
-        // be a point with nothing to measure to.
-        let enabled = index <= placed;
-        let at = point.map_or(Vec3::ZERO, |p| p.at);
-        let step = unit.from_mm(app.move_snap()).max(1e-6);
-        let hover = match point.and_then(|p| p.kind) {
-            Some(kind) => format!("Caught the {} of a body. Type here to place it exactly.", kind.label()),
-            None if point.is_some() => "Click in the viewport to move it, or type it exactly.".to_string(),
-            None => "Click in the viewport to place it, or type it here.".to_string(),
-        };
-        field_row(ui, &named(label, unit.suffix()), &hover, |ui| {
-            point_fields(ui, label, |ui, axis| {
-                let field_id = ui.id().with(("measure", index, axis));
-                let grip = format!("{label}:{axis}");
-                if !enabled {
-                    ui.disable();
-                }
-                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
-                // No undo step: the span belongs to the tool, not to the scene,
-                // so there is no snapshot for one to restore.
-                scalar_field(app, ui, field, |app, mm, _| {
-                    let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
-                    set_component(&mut p, axis, mm);
-                    app.measure.set_point(index, p);
-                });
-            });
-        });
-    }
-
-    match app.measure.span() {
-        Some((a, b)) => {
-            let m = crate::app::Measurement::between(a.at, b.at);
-            let suffix = unit.suffix();
-            field_row(ui, "Distance", "", |ui| {
-                ui.add(
-                    egui::Label::new(theme::numeric(format!("{} {suffix}", format_length(m.distance, unit))))
-                        .selectable(false)
-                        .wrap(),
-                );
-            });
-            field_row(ui, "\u{0394}", "The span, axis by axis", |ui| {
-                ui.add(
-                    egui::Label::new(theme::numeric(format!(
-                        "{}, {}, {} {suffix}",
-                        format_length(m.delta.x, unit),
-                        format_length(m.delta.y, unit),
-                        format_length(m.delta.z, unit)
-                    )))
-                    .selectable(false)
-                    .wrap(),
-                );
-            });
-            field_row(ui, "Angle", "Above the ground plane, and around it from +X towards +Y", |ui| {
-                ui.add(
-                    egui::Label::new(theme::numeric(format!(
-                        "{}\u{00B0} incline   {}\u{00B0} bearing",
-                        format_angle(m.inclination_deg),
-                        format_angle(m.bearing_deg)
-                    )))
-                    .selectable(false)
-                    .wrap(),
-                );
-            });
-        }
-        None => {
-            ui.add(
-                egui::Label::new(theme::hint(
-                    "Click two features in the viewport. The pointer catches corners, edges, face centres, the \
-                     marks the planes through zero leave on a body, and the axes themselves -- whatever the frame \
-                     shows; right-click takes the last one back.",
-                ))
-                .selectable(false),
-            );
-        }
-    }
-    field_row(ui, "", "", |ui| {
-        // Named for what it clears: the panel has another Clear in it, and a
-        // button that only says "Clear" beside a set of numbers is a question.
-        if ui.add_enabled(placed > 0, egui::Button::new("Clear the span")).clicked() {
-            app.measure.clear();
-            app.status = Status::Info("Measurement cleared".into());
-        }
-        if ui.button("Put the tool away").clicked() {
-            app.toggle_measure();
-        }
-    });
-}
-
 fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let Some(&id) = targets.last() else { return };
     let node = app.scene.node(id);
@@ -939,10 +835,20 @@ fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
             let inherited = app.scene.effective_colour(id);
             let mut rgb = inherited.map_or_else(|| unpainted_swatch(ui.visuals().dark_mode), |c| c.0);
             let mixed = targets.iter().any(|t| app.scene.effective_colour(*t) != inherited);
+            // The picker's own popup, named the way the widget names it: the id
+            // is taken before the button is added, which is the moment the
+            // widget takes it too. What it is for is below.
+            let picker_popup = ui.auto_id_with("popup");
             if ui.color_edit_button_srgb(&mut rgb).changed() {
                 // One undo step for a whole drag through the picker, the way a
                 // scrubbed field is one step.
-                app.paint(targets, Some(Colour(rgb)), Some("colour"));
+                app.paint_from_picker(targets, rgb);
+            }
+            // And one swatch on the recent row for the whole visit, put there
+            // when the picker is put away rather than while it is being dragged
+            // through: the shades a drag passes over are not choices (issue 85).
+            if !egui::Popup::is_id_open(ui.ctx(), picker_popup) {
+                app.picker_closed();
             }
             // Enabled only where clearing would do something: a node that merely
             // inherits a group's colour has none of its own to take away.
@@ -1744,9 +1650,16 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
+    // Read as a direction rather than as a running total: a rotation is brought
+    // into [0, 360) here as well as when it is typed, because the manipulator
+    // and the arrow keys turn a body too and a field that reads 725 after a
+    // couple of turns of the ring is describing the gesture, not the model
+    // (issue 84).
     axis_row(app, ui, "Rotation (deg)", |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "rot", axis));
-        let shown = ui::shared_text(targets.iter().map(|t| format_angle(component(app.scene.node(*t).rotation, axis))));
+        let shown = ui::shared_text(
+            targets.iter().map(|t| format_angle(wrap_degrees(component(app.scene.node(*t).rotation, axis)))),
+        );
         let step = app.settings.rotate_snap_deg.max(1.0);
         let outcome = value_field(app, ui, name, field_id, &shown, step);
         if let Some(scrubbed) = outcome.scrubbed {
@@ -1978,7 +1891,7 @@ fn scrub_transform(app: &mut App, targets: &[NodeId], axis: usize, delta: f64, r
         let Some(node) = app.scene.get_mut(*target) else { continue };
         let mut v = if rotation { node.rotation } else { node.position };
         let next = crate::gizmo::get_axis(v, axis) + delta;
-        set_component(&mut v, axis, next);
+        set_component(&mut v, axis, if rotation { wrap_degrees(next) } else { next });
         if rotation {
             node.rotation = v;
         } else {
@@ -2043,11 +1956,11 @@ fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selected: usize) {
     }
 }
 
-fn component(v: Vec3, axis: usize) -> f64 {
+pub(crate) fn component(v: Vec3, axis: usize) -> f64 {
     crate::gizmo::get_axis(v, axis)
 }
 
-fn set_component(v: &mut Vec3, axis: usize, value: f64) {
+pub(crate) fn set_component(v: &mut Vec3, axis: usize, value: f64) {
     crate::gizmo::set_axis(v, axis, value);
 }
 

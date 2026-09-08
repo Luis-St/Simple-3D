@@ -14,6 +14,7 @@ mod gestures;
 mod gizmo;
 mod gpu;
 mod icon;
+mod measure_tool;
 mod panel_outliner;
 mod panel_primitives;
 mod panel_properties;

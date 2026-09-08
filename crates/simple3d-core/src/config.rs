@@ -461,8 +461,12 @@ impl AppSettings {
 
     /// Remember a colour that was just applied, most recent first and without
     /// duplicates, so the row of recent swatches stays short enough to scan.
+    ///
+    /// A shade of one already on the row counts as that one: the row is eight
+    /// colours to click, and two swatches nobody can tell apart are one choice
+    /// and a wasted slot (issue 85).
     pub fn remember_colour(&mut self, colour: [u8; 3]) {
-        self.recent_colours.retain(|c| *c != colour);
+        self.recent_colours.retain(|c| !indistinguishable(*c, colour));
         self.recent_colours.insert(0, colour);
         self.recent_colours.truncate(MAX_RECENT_COLOURS);
     }
@@ -471,6 +475,20 @@ impl AppSettings {
         self.recent_files.retain(|p| p != path);
     }
 }
+
+/// Whether two colours are the same colour to look at, and so the same entry on
+/// a row of recent swatches (issue 85).
+///
+/// Ten of 255 on every channel: a twenty-fifth of the range, which is a shade of
+/// a colour rather than another colour. The point is not exactness -- it is that
+/// a row offering eight swatches nobody can tell apart offers one thing eight
+/// times.
+pub fn indistinguishable(a: [u8; 3], b: [u8; 3]) -> bool {
+    a.iter().zip(b.iter()).all(|(x, y)| x.abs_diff(*y) <= COLOUR_TOLERANCE)
+}
+
+/// How far apart two colours have to be to be worth two swatches.
+const COLOUR_TOLERANCE: u8 = 10;
 
 /// True when a marker file sits next to the executable, in which case settings
 /// live beside it and nothing is written to the user's home directory.
@@ -718,17 +736,36 @@ mod tests {
     #[test]
     fn recent_colours_are_most_recent_first_deduplicated_and_bounded() {
         let mut settings = AppSettings::default();
+        // Twenty apart, so each is a colour of its own rather than a shade of
+        // the one before it.
+        let step = 20_u8;
         for i in 0..MAX_RECENT_COLOURS + 4 {
-            settings.remember_colour([i as u8, 0, 0]);
+            settings.remember_colour([i as u8 * step, 0, 0]);
         }
         assert_eq!(settings.recent_colours.len(), MAX_RECENT_COLOURS);
-        assert_eq!(settings.recent_colours[0], [(MAX_RECENT_COLOURS + 3) as u8, 0, 0]);
+        assert_eq!(settings.recent_colours[0], [(MAX_RECENT_COLOURS + 3) as u8 * step, 0, 0]);
 
         // Using one again moves it to the front rather than repeating it.
         let again = settings.recent_colours[3];
         settings.remember_colour(again);
         assert_eq!(settings.recent_colours[0], again);
         assert_eq!(settings.recent_colours.iter().filter(|c| **c == again).count(), 1);
+    }
+
+    /// Issue 85: the row holds colours to click, not a record of where a drag
+    /// went. A shade of one already on it takes that one's slot.
+    #[test]
+    fn a_shade_of_a_remembered_colour_takes_its_slot_rather_than_another() {
+        let mut settings = AppSettings::default();
+        settings.remember_colour([0x30, 0x40, 0x50]);
+        settings.remember_colour([0x35, 0x44, 0x4A]);
+        assert_eq!(settings.recent_colours, vec![[0x35, 0x44, 0x4A]]);
+        // Far enough apart to be another colour.
+        settings.remember_colour([0x45, 0x44, 0x4A]);
+        assert_eq!(settings.recent_colours, vec![[0x45, 0x44, 0x4A], [0x35, 0x44, 0x4A]]);
+
+        assert!(indistinguishable([0, 0, 0], [9, 9, 9]), "nine of 255 on a channel is the same black");
+        assert!(!indistinguishable([0, 0, 0], [0, 0, 11]), "a channel eleven apart is another colour");
     }
     /// Dialogs are windows of the window system's own by default (issue 53).
     /// The switch that draws them inside the main window instead is a way out

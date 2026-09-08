@@ -334,10 +334,14 @@ pub struct App {
     pub path: Option<PathBuf>,
     pub(crate) saved_revision: u64,
 
-    /// The recent colours as they stood when the current painting run began, so
-    /// a drag through the colour picker leaves one entry behind and not one per
-    /// frame. `None` outside a coalescing run.
-    paint_run_colours: Option<Vec<[u8; 3]>>,
+    /// The colour the picker has reached while it is open, waiting for the
+    /// picker to be put away before it goes on the recent row (issue 85).
+    ///
+    /// A drag through the picker paints on every frame it moves, and every one
+    /// of those shades is somewhere the pointer passed through rather than a
+    /// colour anybody chose. One visit to the picker is one choice: the colour
+    /// it ends on.
+    picker_colour: Option<[u8; 3]>,
 
     pub status: Status,
     /// When the current message was set, so a message that has been read can
@@ -537,7 +541,7 @@ impl App {
             persisted_settings: settings.clone(),
             settings_written: None,
             settings,
-            paint_run_colours: None,
+            picker_colour: None,
             keymap,
             selection: Vec::new(),
             piece_ticks: std::collections::BTreeSet::new(),
@@ -2037,38 +2041,68 @@ impl App {
     /// property editor and the outliner's menu both do this and both have to
     /// remember it.
     pub(crate) fn paint(&mut self, targets: &[NodeId], colour: Option<Colour>, coalesce: Option<&str>) {
-        let coalescing = self.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, coalesce);
-        for target in targets {
-            self.scene.paint_subtree(*target, colour);
-        }
+        self.apply_paint(targets, colour, coalesce);
         if let Some(Colour(rgb)) = colour {
             // Only a colour the user picked out for themselves. The eight
             // presets are already on the palette above this row; repeating one
             // of them here spends the recent list on colours that were never
             // hard to find (issue 35).
             if !is_preset(rgb) {
-                // A drag through the picker paints on every frame it moves, and
-                // remembering each frame would fill the whole row with eight
-                // shades of the one colour. The run is one choice: put the list
-                // back the way it was when the drag began, then remember the
-                // colour the drag has reached (issue 35).
-                match (coalescing, &self.paint_run_colours) {
-                    (true, Some(before)) => self.settings.recent_colours = before.clone(),
-                    (true, None) => {}
-                    (false, _) => {
-                        self.paint_run_colours = coalesce.map(|_| self.settings.recent_colours.clone());
-                    }
-                }
                 self.settings.remember_colour(rgb);
             }
         }
     }
 
+    /// Paint from the colour picker, where the colour is still being chosen.
+    ///
+    /// Every frame of a drag through the picker comes through here, so nothing
+    /// is remembered yet: what the picker has reached is held until it is put
+    /// away, and [`App::picker_closed`] puts that one colour on the recent row
+    /// (issue 85). Before this, a drag deposited a swatch every time it paused
+    /// for longer than the undo history's coalescing window -- which is how a
+    /// single wander through the dark corner of the picker left eight shades of
+    /// black on a row meant to hold eight colours.
+    pub(crate) fn paint_from_picker(&mut self, targets: &[NodeId], rgb: [u8; 3]) {
+        self.apply_paint(targets, Some(Colour(rgb)), Some("colour"));
+        self.picker_colour = Some(rgb);
+    }
+
+    /// The picker is closed: whatever it ended on is the colour that was
+    /// chosen, and the only one of the drag worth offering again.
+    ///
+    /// Called on every frame the picker is not open, so it has to cost nothing
+    /// when there is nothing waiting.
+    pub(crate) fn picker_closed(&mut self) {
+        let Some(rgb) = self.picker_colour.take() else { return };
+        if !is_preset(rgb) {
+            self.settings.remember_colour(rgb);
+        }
+    }
+
+    /// The paint itself, without the question of what to remember.
+    fn apply_paint(&mut self, targets: &[NodeId], colour: Option<Colour>, coalesce: Option<&str>) {
+        self.edit(if colour.is_some() { "Colour" } else { "Clear colour" }, coalesce);
+        for target in targets {
+            self.scene.paint_subtree(*target, colour);
+        }
+    }
+
     /// The recent colours worth offering: the ones that are not already a
-    /// preset. Filtered on the way out as well as on the way in, so a list
-    /// saved by an earlier version stops showing them too.
+    /// preset, and not a shade of one further up the row.
+    ///
+    /// Filtered on the way out as well as on the way in, so a list saved by an
+    /// earlier version stops showing them too -- which matters here, because
+    /// the version that filled a row with eight shades of black wrote them to
+    /// the settings file and they would otherwise sit there forever (issue 85).
     pub(crate) fn custom_recent_colours(&self) -> Vec<[u8; 3]> {
-        self.settings.recent_colours.iter().copied().filter(|rgb| !is_preset(*rgb)).collect()
+        let mut kept: Vec<[u8; 3]> = Vec::new();
+        for rgb in self.settings.recent_colours.iter().copied() {
+            if is_preset(rgb) || kept.iter().any(|shown| simple3d_core::config::indistinguishable(*shown, rgb)) {
+                continue;
+            }
+            kept.push(rgb);
+        }
+        kept
     }
 
     fn toggle_visibility(&mut self) {
@@ -3427,6 +3461,7 @@ impl App {
         // in-place popup is part of the picture rather than a window in front of
         // the application (issue 82).
         crate::split_tool::show(self, ctx);
+        crate::measure_tool::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         // A dialog is modal, and it was only half of one: `handle_shortcuts`
         // hands it the keyboard, but nothing stopped the main window taking the
@@ -5121,22 +5156,50 @@ mod tests {
         assert_eq!(app.settings.recent_colours.len(), 2, "a preset was remembered as a recent colour");
         assert_eq!(app.custom_recent_colours(), vec![[0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]]);
 
-        // Issue 35 again: a drag through the picker paints on every frame it
-        // moves, and each of those frames used to take a slot -- which is how
-        // the row ended up holding eight shades of the same colour. The whole
-        // run is one choice, so only where it stopped is remembered.
-        for step in 0..6_u8 {
-            app.paint(&[id], Some(Colour([0x10 + step, 0x40, 0x90])), Some("colour"));
+        // Issues 35 and 85: a drag through the picker paints on every frame it
+        // moves, and each of those frames used to be able to take a slot --
+        // which is how the row ended up holding eight shades of black. Nothing
+        // is remembered until the picker is put away, however long the drag
+        // takes or how often it pauses: a visit to the picker is one choice.
+        for step in 0..40_u8 {
+            app.paint_from_picker(&[id], [0x10 + step, 0x40, 0x90]);
+            // The undo history's coalescing window ages out mid-drag on any
+            // drag slower than a second, which is what used to split one visit
+            // into a swatch per pause.
+            app.history.close();
         }
         assert_eq!(
             app.custom_recent_colours(),
-            vec![[0x15, 0x40, 0x90], [0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]],
+            vec![[0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]],
+            "the picker put a colour on the row before it was closed"
+        );
+        app.picker_closed();
+        assert_eq!(
+            app.custom_recent_colours(),
+            vec![[0x37, 0x40, 0x90], [0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]],
             "a single drag through the picker filled the recent row"
         );
-        // A drag that ends and a new one that begins are two choices.
-        app.history.close();
-        app.paint(&[id], Some(Colour([0x01, 0x02, 0x03])), Some("colour"));
-        assert_eq!(app.custom_recent_colours()[..2], [[0x01, 0x02, 0x03], [0x15, 0x40, 0x90]]);
+        // Closing it again is not a second choice.
+        app.picker_closed();
+        assert_eq!(app.custom_recent_colours().len(), 3);
+
+        // A second visit to the picker is a second choice.
+        app.paint_from_picker(&[id], [0x01, 0x02, 0x03]);
+        app.picker_closed();
+        assert_eq!(app.custom_recent_colours()[..2], [[0x01, 0x02, 0x03], [0x37, 0x40, 0x90]]);
+
+        // Issue 85: a shade of a colour already on the row is that colour, and
+        // takes its slot rather than a slot of its own -- both on the way in,
+        // and on the way out for a row an older version filled with them.
+        app.paint_from_picker(&[id], [0x05, 0x06, 0x07]);
+        app.picker_closed();
+        assert_eq!(app.custom_recent_colours()[..2], [[0x05, 0x06, 0x07], [0x37, 0x40, 0x90]]);
+        app.settings.recent_colours = (0..8).map(|n| [n, n, n]).collect();
+        assert_eq!(
+            app.custom_recent_colours(),
+            vec![[0, 0, 0]],
+            "a row an older version filled with shades of one black still shows eight of them"
+        );
 
         // Issue 21: the three states, and which of them the viewport is asked
         // to draw as a ghost.
