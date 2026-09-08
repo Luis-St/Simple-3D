@@ -43,7 +43,7 @@ pub enum Glyph {
     /// The body that is not a primitive: geometry a node owns outright
     /// (issue 80).
     Mesh,
-    /// A shape broken into the pieces it was actually in (issue 82).
+    /// A shape cut into smaller pieces (issue 82).
     Split,
     // Primitive silhouettes.
     Box,

@@ -1,10 +1,8 @@
 //! Cutting one solid into a tiling of smaller solids (issue 82).
 //!
-//! [`mesh_ops::connected_parts`](crate::mesh_ops::connected_parts) separates a
-//! shape into the pieces it is *already* in. This is the other half of the same
-//! issue and the harder one: the shape is in one piece, and the pieces are made
-//! by cutting it -- into squares, rectangles, triangles or hexagons, the way a
-//! plate is scored before it is broken.
+//! The shape is in one piece, and the pieces are made by cutting it -- into
+//! squares, rectangles, triangles or hexagons, the way a plate is scored before
+//! it is broken.
 //!
 //! The cells are prisms: a 2D tiling of the plane, extruded along one axis
 //! through the whole solid, and optionally cut into layers along that axis as

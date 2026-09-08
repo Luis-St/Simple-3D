@@ -1,7 +1,6 @@
 pub mod csg_bsp;
 pub mod hull;
 pub mod mesh;
-pub mod mesh_ops;
 pub mod planar;
 pub mod polyhedra;
 pub mod primitives;

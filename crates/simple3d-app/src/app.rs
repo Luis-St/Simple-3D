@@ -1076,7 +1076,6 @@ impl App {
             Group => self.group_selection(),
             Pattern => self.make_pattern(),
             ConvertToMesh => self.convert_selection_to_mesh(),
-            BreakApart => self.break_selection_apart(),
             SplitIntoPieces => self.open_split_tool(),
             Rejoin => self.rejoin_selection(),
             Rename => {
@@ -2284,53 +2283,8 @@ impl App {
         ));
     }
 
-    /// Take what a node evaluates to, find the pieces it is actually in, and
-    /// make each one a node of its own under a split (issues 80 and 82).
-    ///
-    /// What a cut leaves behind is often several disconnected solids under one
-    /// node, and this is what turns them into objects that can be moved,
-    /// painted and exported apart. A union of shapes that never touched is as
-    /// many pieces as it has operands.
-    ///
-    /// The pieces go into a [`Body::Split`], which stands where the shape stood,
-    /// wears its name and its transform, and keeps the shape itself -- so the
-    /// break is not a one-way door: [`App::rejoin_selection`] puts the object
-    /// back, with its parameters and its operands, however long afterwards.
-    pub fn break_selection_apart(&mut self) {
-        let targets = self.top_level_selection();
-        let Some(&id) = targets.first() else {
-            self.status = Status::Warning("Select something to break apart".into());
-            return;
-        };
-        if targets.len() > 1 {
-            self.status = Status::Warning("Break one object apart at a time".into());
-            return;
-        }
-        let mesh = simple3d_core::eval::baked_mesh(&self.scene, id);
-        let parts = simple3d_geom::mesh_ops::connected_parts(&mesh);
-        match parts.len() {
-            0 => {
-                self.status = Status::Warning("There is no geometry there to break apart".into());
-                return;
-            }
-            1 => {
-                self.status = Status::Info("That is one connected piece, so there is nothing to break apart".into());
-                return;
-            }
-            _ => {}
-        }
-        self.edit("Break into separate objects", None);
-        let Some((name, count)) = self.hold_pieces(id, parts, None) else {
-            self.history.discard_last();
-            return;
-        };
-        self.status = Status::Info(format!("Broke {name} into {count} separate objects -- {}", self.way_back()));
-    }
-
     /// Stand a split where a node stands, holding `pieces`, and select it
-    /// (issue 82). Both ways of making pieces end here: the separation of a
-    /// shape into the parts it was already in, and the cutting of one into a
-    /// pattern of cells.
+    /// (issue 82). The cutting of a shape into a pattern of cells ends here.
     ///
     /// A node that is *already* a split keeps its identity and the shape it was
     /// made from -- only its pieces are replaced -- which is what makes cutting
@@ -2512,8 +2466,8 @@ impl App {
         ));
     }
 
-    /// How to undo a break, in the words the status line ends with. Said in the
-    /// same breath as the break itself, because a break that cannot be seen to
+    /// How to undo a split, in the words the status line ends with. Said in the
+    /// same breath as the split itself, because a split that cannot be seen to
     /// be reversible is one nobody tries.
     pub(crate) fn way_back(&self) -> String {
         let shortcut = self.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
@@ -2524,8 +2478,8 @@ impl App {
         }
     }
 
-    /// Put a broken-apart shape back together (issue 82): the object returns,
-    /// with its parameters and its operands, and the pieces go.
+    /// Put a shape that was cut into pieces back together (issue 82): the
+    /// object returns, with its parameters and its operands, and the pieces go.
     ///
     /// The split keeps its own transform through this, so pieces that were moved
     /// about as one item come back where they now stand rather than where the
@@ -2535,17 +2489,16 @@ impl App {
     pub fn rejoin_selection(&mut self) {
         let targets = self.top_level_selection();
         let Some(&id) = targets.first() else {
-            self.status = Status::Warning("Select a broken-apart object to join back together".into());
+            self.status = Status::Warning("Select a shape that was split into pieces to join back together".into());
             return;
         };
         if targets.len() > 1 {
-            self.status = Status::Warning("Join one broken-apart object back together at a time".into());
+            self.status = Status::Warning("Join one split shape back together at a time".into());
             return;
         }
         if !self.scene.node(id).is_split() {
-            self.status = Status::Warning(
-                "Only something that was broken into separate objects can be joined back together".into(),
-            );
+            self.status =
+                Status::Warning("Only something that was split into pieces can be joined back together".into());
             return;
         }
         let pieces = self.scene.node(id).children.len();
@@ -3230,6 +3183,42 @@ impl App {
         self.persist_keymap();
     }
 
+    /// Remember how big the window is and whether it is maximized, so the next
+    /// run opens the way this one was left (issue 95).
+    ///
+    /// Nothing ever wrote these two. `main` reads `window_size` and
+    /// `window_maximized` out of the settings to build the window, and no code
+    /// path put a new value back -- so however the window was left, every run
+    /// opened at the 1400 x 880 default. They are read off the window itself
+    /// here, on every frame, and the ordinary save-on-change below writes them
+    /// out; sampling them in `on_exit` instead would lose them to exactly the
+    /// endings that setting has already been fixed for.
+    ///
+    /// The size is only taken while the window is in its ordinary state. What a
+    /// maximized or fullscreen window reports is the screen, and restoring the
+    /// screen as the *unmaximized* size is how a window comes back filling the
+    /// display with no way back to the size it used to have. Rounded to whole
+    /// points because a resize otherwise writes the file for a fraction of a
+    /// pixel of drift.
+    fn record_window_shape(&mut self, ctx: &egui::Context) {
+        let (size, maximized, fullscreen, minimized) = ctx.input(|i| {
+            let viewport = i.viewport();
+            (viewport.inner_rect.map(|rect| rect.size()), viewport.maximized, viewport.fullscreen, viewport.minimized)
+        });
+        // Only where the window system answers at all: a platform that reports
+        // nothing must not reset a maximized window to "not maximized".
+        if let Some(maximized) = maximized {
+            self.settings.window_maximized = maximized;
+        }
+        let ordinary = !maximized.unwrap_or(false) && !fullscreen.unwrap_or(false) && !minimized.unwrap_or(false);
+        if let Some(size) = size.filter(|_| ordinary) {
+            let size = [size.x.round(), size.y.round()];
+            if size.iter().all(|n| n.is_finite() && *n >= 1.0) {
+                self.settings.window_size = size;
+            }
+        }
+    }
+
     /// Write the settings out as soon as they change, rather than only when the
     /// application is closed cleanly.
     ///
@@ -3446,6 +3435,7 @@ impl App {
         // Before the panels rather than after: what they change this frame is
         // written on the next one, and a frame is drawn for every change any of
         // them makes.
+        self.record_window_shape(ctx);
         self.persist_settings_if_changed(ctx);
         self.menu_bar(ctx);
         self.status_bar(ctx);
@@ -3984,6 +3974,63 @@ mod tests {
     }
 
     #[test]
+    fn the_window_size_and_maximized_state_are_remembered_for_the_next_run() {
+        // Issue 95. `main` builds the window out of `window_size` and
+        // `window_maximized`, and nothing ever wrote either of them back: the
+        // window was resized, the application closed cleanly, and the next run
+        // opened at the 1400 x 880 default again.
+        //
+        // Driven through a real frame, because reading the window is something
+        // only a frame can do -- calling the writer directly would pass on the
+        // broken code, where no frame ever called it.
+        let dir = temp_config_dir("window-shape");
+        let ctx = egui::Context::default();
+        let mut app = app_in(dir.clone());
+        assert_eq!(app.settings.window_size, [1400.0, 880.0], "the default this test is about has changed");
+
+        let frame = |app: &mut App, size: egui::Vec2, maximized: bool| {
+            let mut viewports = egui::ViewportIdMap::default();
+            viewports.insert(
+                egui::ViewportId::ROOT,
+                egui::ViewportInfo {
+                    inner_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    maximized: Some(maximized),
+                    ..Default::default()
+                },
+            );
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                viewports,
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| app.ui(ctx));
+        };
+
+        frame(&mut app, egui::vec2(1000.0, 700.0), false);
+        assert_eq!(app.settings.window_size, [1000.0, 700.0], "the size the window was left at was not recorded");
+        assert!(!app.settings.window_maximized);
+
+        // Maximized, the size the window reports is the screen's -- and that is
+        // exactly the size it must not come back with once it is restored.
+        frame(&mut app, egui::vec2(2560.0, 1440.0), true);
+        assert!(app.settings.window_maximized, "the window being maximized was not recorded");
+        assert_eq!(app.settings.window_size, [1000.0, 700.0], "the maximized size overwrote the restored size");
+
+        // The write is rate-limited, so the frame that changed something asks
+        // for a later one to carry it to disk. That frame is what this is: the
+        // running application draws it on its own, and without it the test
+        // would be asserting against the gap rather than against the setting.
+        std::thread::sleep(Duration::from_millis(300));
+        frame(&mut app, egui::vec2(2560.0, 1440.0), true);
+        drop(app);
+
+        let next = app_in(dir.clone());
+        assert_eq!(next.settings.window_size, [1000.0, 700.0], "the size did not survive the process");
+        assert!(next.settings.window_maximized, "the maximized state did not survive the process");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn a_new_document_is_empty_and_unmodified() {
         // A shape nobody asked for is a shape they have to notice and delete,
         // and the palette is one click away. What matters as much: an untouched
@@ -4018,6 +4065,27 @@ mod tests {
         let moved = app.scene.node(id).position - before;
         assert!((moved.length() - 2.5).abs() < 1e-9, "a nudge went {} rather than the 2.5 mm step", moved.length());
         assert_eq!(app.scene.settings.grid_spacing, 10.0, "the step changed the grid spacing with it");
+    }
+
+    #[test]
+    fn the_turn_step_governs_a_rotate_nudge_rather_than_a_fixed_fifteen_degrees() {
+        // Issue 98. A move and a resize have had a step to set since the
+        // beginning; a turn was fifteen degrees with nowhere on screen to say
+        // otherwise. It is a number like every other number now, and it is what
+        // one press of a nudge key turns by.
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+        assert_eq!(app.settings.rotate_snap_deg, 15.0, "the default this test is about has changed");
+        app.run(Command::ModeRotate);
+
+        app.settings.rotate_snap_deg = 5.0;
+        let before = app.scene.node(id).rotation;
+        app.run(Command::NudgeRight);
+        let turned = (app.scene.node(id).rotation - before).length();
+        assert!((turned - 5.0).abs() < 1e-9, "a nudge turned {turned} degrees rather than the 5 degree step");
+
+        // And the step it is set to, not the one it used to be fixed at.
+        assert!((turned - 15.0).abs() > 1e-9, "the nudge is still turning by the old fixed fifteen");
     }
 
     #[test]
@@ -6746,42 +6814,10 @@ mod tests {
     }
 
     #[test]
-    fn breaking_apart_makes_one_node_per_piece_and_leaves_them_where_they_were() {
-        // Issue 82 end to end: a union of solids that never touch evaluates to
-        // one node holding several separate pieces, and this turns each of them
-        // into an object of its own.
-        let mut app = headless_app();
-        let root = app.scene.root();
-        let group = app.scene.add_group(GroupOp::Union, root, 0);
-        for i in 0..3 {
-            let id = app.scene.add_primitive("box", group, i).unwrap();
-            app.scene.get_mut(id).unwrap().position = Vec3::new(i as f64 * 60.0, 0.0, 0.0);
-        }
-        app.scene.get_mut(group).unwrap().position = Vec3::new(40.0, 10.0, 0.0);
-        app.select_only(group);
-        app.reevaluate_for_test();
-        let before = app.evaluated.mesh.bounds().unwrap();
-
-        app.run(Command::BreakApart);
-        let holder = app.primary().expect("the holder is selected");
-        assert!(app.scene.node(holder).is_split(), "the pieces went under a plain group");
-        assert_eq!(app.scene.node(holder).name, "Group", "the split is not named for what it was made from");
-        assert_eq!(app.scene.node(holder).children.len(), 3, "three boxes standing apart are three pieces");
-        for &child in &app.scene.node(holder).children {
-            assert!(app.scene.node(child).is_mesh());
-            assert!(app.scene.node(child).mesh().unwrap().triangle_count() > 0);
-        }
-        app.reevaluate_for_test();
-        let after = app.evaluated.mesh.bounds().unwrap();
-        assert!((before.0 - after.0).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
-        assert!((before.1 - after.1).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
-    }
-
-    #[test]
     fn joining_the_pieces_back_together_brings_the_original_object_back() {
-        // The other half of the rework of issue 82: a break is reversible, and
-        // what comes back is the recipe -- the difference with both its operands
-        // and their parameters -- not the triangles the pieces are.
+        // The other half of issue 82: a split is reversible, and what comes back
+        // is the recipe -- the difference with both its operands and their
+        // parameters -- not the triangles the pieces are.
         let mut app = headless_app();
         let root = app.scene.root();
         let group = app.scene.add_group(GroupOp::Difference, root, 0);
@@ -6799,10 +6835,10 @@ mod tests {
         app.reevaluate_for_test();
         let before = app.evaluated.mesh.bounds().unwrap();
 
-        app.run(Command::BreakApart);
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 40.0, ..Default::default() });
         let split = app.primary().expect("the split is selected");
         assert!(app.scene.node(split).is_split());
-        assert_eq!(app.scene.node(split).children.len(), 2, "a box cut in two is two pieces");
+        assert!(app.scene.node(split).children.len() >= 2, "the cut left the shape in one piece");
 
         app.run(Command::Rejoin);
         let back = app.primary().expect("the restored object is selected");
@@ -6832,7 +6868,7 @@ mod tests {
         app.select_only(group);
         app.reevaluate_for_test();
 
-        app.run(Command::BreakApart);
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 40.0, ..Default::default() });
         let split = app.primary().unwrap();
         app.scene.get_mut(split).unwrap().position = Vec3::new(0.0, 0.0, 25.0);
         app.scene.get_mut(split).unwrap().name = "Renamed".into();
@@ -7268,12 +7304,12 @@ mod tests {
     }
 
     #[test]
-    fn joining_something_that_was_never_broken_apart_says_so_rather_than_working() {
+    fn joining_something_that_was_never_split_says_so_rather_than_working() {
         let mut app = headless_app();
         let before = app.history.undo_len();
         app.run(Command::Rejoin);
         assert_eq!(app.history.undo_len(), before, "joining a shape that is not a split recorded an undo step");
-        assert!(app.status_text().contains("broken into separate objects"), "{}", app.status_text());
+        assert!(app.status_text().contains("split into pieces"), "{}", app.status_text());
     }
 
     #[test]
@@ -7290,12 +7326,13 @@ mod tests {
         }
         app.select_only(group);
         app.reevaluate_for_test();
-        app.run(Command::BreakApart);
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 40.0, ..Default::default() });
+        let pieces = app.scene.node(app.primary().unwrap()).children.len();
 
         let text = simple3d_core::project::to_string(&app.scene);
         let scene = simple3d_core::project::from_str(&text).expect("a scene with a split loads");
         let split = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
-        assert_eq!(scene.node(split).children.len(), 2);
+        assert_eq!(scene.node(split).children.len(), pieces, "the pieces did not survive the file");
         let original = scene.node(split).split_original().expect("the object it was made from");
         assert_eq!(original.type_id, "group");
         assert_eq!(original.children.len(), 2, "the operands were not written to the file");
@@ -7306,14 +7343,5 @@ mod tests {
         let restored = reopened.scene.restore_split(split).expect("the recipe rebuilds");
         assert_eq!(reopened.scene.node(restored).group_op(), Some(GroupOp::Union));
         assert_eq!(reopened.scene.node(restored).children.len(), 2);
-    }
-
-    #[test]
-    fn breaking_apart_one_connected_piece_says_what_to_do_instead() {
-        let mut app = headless_app();
-        let before = app.scene.len();
-        app.run(Command::BreakApart);
-        assert_eq!(app.scene.len(), before, "a single piece was taken apart anyway");
-        assert!(app.status_text().contains("one connected piece"), "{}", app.status_text());
     }
 }

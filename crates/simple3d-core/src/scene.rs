@@ -207,7 +207,7 @@ pub enum Body {
     /// a body of its own rather than a group, because a group is something the
     /// user assembles and this is something the application made *out of* one
     /// object. That is also why nothing offers to create one: it exists only
-    /// where "break into separate objects" put it.
+    /// where "split into smaller pieces" put it.
     ///
     /// `original` is the whole subtree the pieces came from, in the portable
     /// form the project file and the clipboard already use, behind an `Arc` for

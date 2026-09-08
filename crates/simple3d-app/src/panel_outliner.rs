@@ -810,24 +810,25 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         item(ui, keymap, &mut chosen, Command::Cut, !is_root);
         item(ui, keymap, &mut chosen, Command::Paste, have_clipboard);
         ui.separator();
+        // What a node can be put into: the two containers, and nothing else
+        // (issue 94 -- each block of this menu is one kind of action).
         item(ui, keymap, &mut chosen, Command::Group, !is_root);
         item(ui, keymap, &mut chosen, Command::Pattern, !is_root);
-        // Baking a shape into its triangles, and taking apart what a cut left
-        // behind (issues 80 and 82). Both act on the selection, which the click
-        // above has already made this row.
+        ui.separator();
+        // What a node can be turned into. Baking a shape into its triangles
+        // (issue 80); cutting one into a pattern of pieces, which on a split
+        // re-cuts rather than splits a split, and is why it is offered there
+        // too (issue 82); and the way back, on the split itself, which is the
+        // only row it can act on. All three act on the selection, which the
+        // click above has already made this row.
         item(ui, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
-        item(ui, keymap, &mut chosen, Command::BreakApart, !is_root && !multiple);
-        // And cutting one that is in a single piece into a pattern of them
-        // (issue 82). On a split it re-cuts, which is why it is offered there
-        // too rather than only on shapes.
         item(ui, keymap, &mut chosen, Command::SplitIntoPieces, !is_root && !multiple);
-        // The way back, offered where the break was: on the split itself, which
-        // is the only row it can act on.
         item(ui, keymap, &mut chosen, Command::Rejoin, !multiple && app.scene.node(id).is_split());
-        // Disabled where the move has nowhere to go, rather than enabled and
-        // silent: a node that is already first among its siblings used to
-        // answer a click with a status line that had faded by the time anyone
-        // looked for it (issue 41).
+        ui.separator();
+        // Where a node stands among its siblings. Disabled where the move has
+        // nowhere to go, rather than enabled and silent: a node that is already
+        // first among its siblings used to answer a click with a status line
+        // that had faded by the time anyone looked for it (issue 41).
         item(ui, keymap, &mut chosen, Command::MoveUp, app.can_reorder(-1));
         item(ui, keymap, &mut chosen, Command::MoveDown, app.can_reorder(1));
         ui.separator();

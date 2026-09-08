@@ -1,15 +1,14 @@
 //! The tool that cuts a shape into a pattern of smaller pieces (issue 82).
 //!
-//! "Break into separate objects" finds the pieces a shape is *already* in. This
-//! cuts one that is in a single piece: into squares, rectangles, triangles or
-//! hexagons, running through the shape along an axis and optionally cut into
-//! layers across it as well. A cut can be made more than once over -- each cut
-//! on its own axis, in its own cell shape, applied to what the last one left --
-//! so a plate can be scored into a grid of blocks in one gesture rather than by
-//! splitting a split. Both end in the same place -- a
+//! It cuts a shape that is in a single piece: into squares, rectangles,
+//! triangles or hexagons, running through the shape along an axis and
+//! optionally cut into layers across it as well. A cut can be made more than
+//! once over -- each cut on its own axis, in its own cell shape, applied to what
+//! the last one left -- so a plate can be scored into a grid of blocks in one
+//! gesture rather than by splitting a split. It ends in a
 //! [`Body::Split`](simple3d_core::scene::Body::Split) standing where the shape
-//! stood, holding the pieces and the shape itself -- so both are undone by the
-//! same Join back together, however long afterwards.
+//! stood, holding the pieces and the shape itself -- so it is undone by one
+//! Join back together, however long afterwards.
 //!
 //! The window is where the pattern is chosen, and the cells are drawn **over
 //! the model itself** while they are being chosen: the one question a number of

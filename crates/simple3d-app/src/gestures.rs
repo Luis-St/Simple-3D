@@ -323,6 +323,31 @@ fn a_setting_scrubs_on_one_axis_with_the_same_modifiers_as_a_dimension() {
     assert!((step(&harness) - 101.0).abs() < 1e-9, "a coarse scrub gave {} rather than 101 mm", step(&harness));
 }
 
+#[test]
+fn the_turn_step_is_a_field_beside_the_move_step_and_costs_no_undo() {
+    // Issue 98: fifteen degrees was fixed because there was nowhere to change
+    // it, so the row is what the fix is -- under the rotation fields it
+    // governs, next to the step that governs a move. It is a user setting
+    // rather than part of the document, so unlike the step beside it a scrub
+    // through it leaves the history alone.
+    let mut harness = harness("scrub-turn-step");
+    let turn = |harness: &Harness<'_, App>| harness.state().settings.rotate_snap_deg;
+    assert_eq!(turn(&harness), 15.0, "the default this test is about has changed");
+    let history = harness.state().history.undo_len();
+
+    // Sixty pixels to the right at six pixels a step is ten degrees.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Turn"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 6);
+    assert!((turn(&harness) - 25.0).abs() < 1e-9, "the scrub gave {} rather than 25 degrees", turn(&harness));
+    assert_eq!(harness.state().history.undo_len(), history, "changing a user setting left an undo step");
+
+    // And it cannot be dragged down to nothing: a step of zero is a division by
+    // zero in every snap that reads it.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("Turn"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(-600.0, 0.0), 6);
+    assert!(turn(&harness) > 0.0, "the turn step was dragged to {}", turn(&harness));
+}
+
 // -- picking and grabbing in the viewport -------------------------------------
 
 #[test]
@@ -2152,6 +2177,22 @@ fn the_measure_window_shows_the_span_and_takes_it_back() {
     assert!(harness.state().measure.active, "clearing the span also put the tool away");
 }
 
+/// Cut the selection into pieces the way the tool does, without a frame loop:
+/// open the tool, choose a pattern, press Split and wait for the thread that
+/// does the cutting.
+fn split_now(app: &mut App, tiling: simple3d_geom::tiling::Tiling) {
+    app.open_split_tool();
+    app.split_tool.as_mut().expect("the tool opened on the selection").plan =
+        simple3d_geom::tiling::SplitPlan::of(tiling);
+    app.start_split();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while app.split_job.is_some() {
+        app.poll_split();
+        assert!(std::time::Instant::now() < deadline, "the split never finished");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
 #[test]
 fn the_split_panels_button_joins_the_pieces_back_together_without_taking_the_panel_with_it() {
     use egui_kittest::kittest::Queryable;
@@ -2172,7 +2213,7 @@ fn the_split_panels_button_joins_the_pieces_back_together_without_taking_the_pan
         }
         app.select_only(group);
         app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
-        app.run(Command::BreakApart);
+        split_now(app, simple3d_geom::tiling::Tiling { size: 40.0, ..Default::default() });
     });
     let split = harness.state().primary().expect("the split is selected");
     assert!(harness.state().scene.node(split).is_split());

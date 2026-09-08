@@ -43,7 +43,6 @@ pub enum Command {
     Group,
     Pattern,
     ConvertToMesh,
-    BreakApart,
     SplitIntoPieces,
     Rejoin,
     Rename,
@@ -129,7 +128,6 @@ impl Command {
         Command::Group,
         Command::Pattern,
         Command::ConvertToMesh,
-        Command::BreakApart,
         Command::SplitIntoPieces,
         Command::Rejoin,
         Command::Rename,
@@ -192,7 +190,6 @@ impl Command {
             Group => "Group selection",
             Pattern => "Make a pattern of the selection",
             ConvertToMesh => "Convert to a mesh",
-            BreakApart => "Break into separate objects",
             SplitIntoPieces => "Split into smaller pieces",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
@@ -238,7 +235,7 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | BreakApart
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh
             | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
             | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
@@ -505,7 +502,7 @@ pub struct Keymap {
 /// not cost them the map they carry between machines. A name that was never a
 /// command of ours stays a hard error -- that file is not one this build can
 /// honour, and quietly loading half of it is the worse answer.
-const RETIRED: [&str; 2] = ["toggle_projection", "toggle_ghosts"];
+const RETIRED: [&str; 3] = ["toggle_projection", "toggle_ghosts", "break_apart"];
 
 /// Bindings an older build wrote as *its* default, which this build has moved.
 ///
@@ -587,14 +584,11 @@ impl Keymap {
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
         set(Pattern, Chord::ctrl_shift("P"));
-        // The two halves of issue 80's "convert to a mesh": one bakes a shape
-        // into the triangles it evaluates to, the other takes what a cut left
-        // behind and makes each piece a node of its own (issue 82).
+        // Baking a shape into the triangles it evaluates to (issue 80).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
-        set(BreakApart, Chord::ctrl_shift("B"));
-        // Cutting a shape into a pattern of pieces rather than finding the ones
-        // it was already in (issue 82). K for the knife it is, which no preset
-        // spends on anything with a Ctrl and a Shift on it.
+        // Cutting a shape into a pattern of pieces (issue 82). K for the knife
+        // it is, which no preset spends on anything with a Ctrl and a Shift on
+        // it.
         set(SplitIntoPieces, Chord::ctrl_shift("K"));
         // The way back from it (issue 82), beside it in every menu and one key
         // along from it: J for "join", which no preset spends on anything else.

@@ -71,6 +71,11 @@ const EDGE_PAD: f32 = 8.0;
 /// field that can be dragged has to stop somewhere.
 const MAX_LENGTH: f64 = 1e6;
 
+/// The range a rotation step may take (issue 98). It divides an angle, so it
+/// cannot be zero; and half a turn is the largest step that is still a step,
+/// since a whole one puts everything back where it started.
+const ROTATE_STEP: ParamKind = ParamKind::Angle { min: 0.1, max: 180.0 };
+
 /// The range a segment count may take, whether it is the document's default or
 /// one object's override: below three there is no curve to speak of, and above
 /// five hundred the triangles are smaller than anything that prints.
@@ -512,6 +517,7 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
             });
         });
         step_row(app, ui);
+        rotate_step_row(app, ui);
         // Where a new shape lands. It is a document question -- the same one the
         // grid, the step and the segment default answer -- and it used to sit
         // under the palette, where it read as part of the shapes rather than as
@@ -1059,7 +1065,7 @@ fn mesh_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.add(
         egui::Label::new(theme::hint(
             "Geometry with no parameters behind it. It can still be moved, painted, cut with a boolean and \
-             broken into its separate pieces.",
+             split into smaller pieces.",
         ))
         .selectable(false),
     );
@@ -1749,6 +1755,7 @@ fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     }
 
     step_row(app, ui);
+    rotate_step_row(app, ui);
     ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
     if targets.len() > 1 {
         ui.add(
@@ -1783,6 +1790,42 @@ pub fn step_row(app: &mut App, ui: &mut egui::Ui) {
             scalar_field(app, ui, field, |app, mm, started| {
                 edit_or_touch(app, started, "Step", "scene:step");
                 app.scene.settings.snap_step = mm.min(MAX_LENGTH);
+            });
+        });
+    });
+}
+
+/// How far one step of a rotation turns, in degrees (issue 98).
+///
+/// Beside the move and resize step, and there for the same reason: the amount a
+/// turn snaps to is something you change *while* bringing something round to
+/// where it belongs. One number governs all of it -- the rotate handle's ring,
+/// the nudge keys in rotate mode, the scrub on the rotation fields themselves,
+/// and an angle a pattern drives -- and until now it could only be reached by
+/// editing the settings file, which is why 15 degrees read as fixed.
+///
+/// Unlike the step above it this is a user setting, not a document one: a
+/// distance only means something against the size of what is being built, but
+/// fifteen degrees is fifteen degrees in every project.
+pub fn rotate_step_row(app: &mut App, ui: &mut egui::Ui) {
+    let hover = "How far one nudge, and one snapped step of a rotate drag, turns.";
+    field_row(ui, "Turn (deg)", hover, |ui| {
+        let width = room_left(ui).max(40.0);
+        let field_id = ui.id().with("doc-rotate-step");
+        ui.scope(|ui| {
+            ui.set_width(width);
+            let field = Scalar {
+                grip: "Turn",
+                id: field_id,
+                kind: ROTATE_STEP,
+                current: app.settings.rotate_snap_deg,
+                step: 1.0,
+            };
+            // No undo step: it is a setting of the application, not of the
+            // document, so the history has nothing to say about it. The frame
+            // loop writes it to the settings file as it does every other one.
+            scalar_field(app, ui, field, |app, degrees, _started| {
+                app.settings.rotate_snap_deg = degrees;
             });
         });
     });

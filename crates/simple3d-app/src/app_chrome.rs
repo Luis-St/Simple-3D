@@ -311,26 +311,27 @@ impl App {
             self.command_item(ui, Command::Duplicate, has_selection);
             self.command_item(ui, Command::Delete, has_selection);
             ui.separator();
+            // The same blocks the outliner's own menu is divided into, in the
+            // same order (issue 94): the two containers, then what a node can
+            // be turned into, then the row itself.
             self.command_item(ui, Command::Group, has_selection);
             // Beside Group, which is the command it is a variant of. It works
             // with nothing selected too -- an empty pattern to fill later -- so
             // unlike Group it is never disabled.
             self.command_item(ui, Command::Pattern, true);
-            // Issue 80 and issue 82's other half: baking a shape into the
-            // triangles it evaluates to, and taking a cut result apart into the
-            // pieces it is actually in.
+            ui.separator();
+            // Baking a shape into the triangles it evaluates to (issue 80), and
+            // cutting one into a pattern of pieces (issue 82).
             self.command_item(ui, Command::ConvertToMesh, !self.selection.is_empty());
-            self.command_item(ui, Command::BreakApart, self.selection.len() == 1);
-            // The other way to make pieces: cutting a shape that is in one
-            // piece into a pattern of them (issue 82).
             self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
             // Enabled only on a split, because a split is the only thing it has
-            // anything to say to -- everything else was never broken apart.
+            // anything to say to -- everything else was never cut up.
             self.command_item(
                 ui,
                 Command::Rejoin,
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_split()),
             );
+            ui.separator();
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
             self.command_item(ui, Command::MoveUp, self.can_reorder(-1));
