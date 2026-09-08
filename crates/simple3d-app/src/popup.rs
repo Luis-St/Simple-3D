@@ -30,6 +30,16 @@ pub struct Placement {
     pub pos: Option<egui::Pos2>,
     /// Rolled up to its title bar alone.
     pub collapsed: bool,
+    /// How tall the window came out last frame, which is what this frame keeps
+    /// inside the viewport.
+    ///
+    /// One frame behind, and deliberately: a window's height is not known until
+    /// it has been laid out, and the alternative -- letting the toolkit
+    /// constrain the area itself -- moves the window without saying so. That
+    /// was the bug: a tall window near the bottom edge was quietly lifted to
+    /// fit, and rolling it up removed the reason for the lift, so the title bar
+    /// dropped back down under the pointer that had just clicked it.
+    height: f32,
 }
 
 pub struct PopupSpec<'a> {
@@ -72,22 +82,18 @@ pub fn show(
     spec: PopupSpec<'_>,
     contents: impl FnOnce(&mut egui::Ui),
 ) -> PopupEvent {
-    // Opened in the top-left of the viewport, a comfortable margin in: over the
-    // corner of the picture rather than over the middle of it, which is where
-    // the thing being worked on is.
-    let pos = placement.pos.unwrap_or_else(|| bounds.left_top() + egui::vec2(16.0, 16.0));
-    // Clamped every frame, not only when it is dragged: the window it lives in
-    // can be made smaller, and a popup left off the edge of a shrunken viewport
-    // is one that cannot be reached to be dragged back.
-    let pos = clamp_into(pos, egui::vec2(spec.width, TITLE_BAR), bounds);
+    let pos = settle(placement, spec.width, bounds);
     placement.pos = Some(pos);
 
     let mut event = PopupEvent::Nothing;
+    // No `constrain_to`: the clamp above is the constraint, and two of them
+    // disagree by a frame. egui's would move the area without writing the move
+    // back into the placement, which is exactly the disagreement that made a
+    // rolled-up window jump.
     let area = egui::Area::new(egui::Id::new(("in-place-popup", spec.key)))
         .order(egui::Order::Foreground)
         .movable(false)
-        .fixed_pos(pos)
-        .constrain_to(bounds);
+        .fixed_pos(pos);
 
     let frame = egui::Frame::NONE
         .fill(token::SURFACE_1)
@@ -100,7 +106,7 @@ pub fn show(
             color: egui::Color32::from_black_alpha(90),
         });
 
-    area.show(ctx, |ui| {
+    let response = area.show(ctx, |ui| {
         frame.show(ui, |ui| {
             ui.set_width(spec.width);
             let drag = title_bar(ui, spec.key, spec.title, &mut placement.collapsed, &mut event);
@@ -120,6 +126,10 @@ pub fn show(
                 });
         });
     });
+    // What it actually came out at, for the next frame's clamp.
+    if !placement.collapsed {
+        placement.height = response.response.rect.height();
+    }
     event
 }
 
@@ -216,6 +226,26 @@ fn title_bar(ui: &mut egui::Ui, key: &str, title: &str, collapsed: &mut bool, ev
     response.drag_delta()
 }
 
+/// Where the window comes to rest this frame: where it was left, brought inside
+/// the viewport.
+///
+/// Opened in the top-left of the viewport, a comfortable margin in -- over the
+/// corner of the picture rather than over the middle of it, which is where the
+/// thing being worked on is.
+///
+/// Clamped every frame and not only when it is dragged, because the viewport
+/// can be made smaller and a popup left off the edge of a shrunken one cannot
+/// be reached to be dragged back. Clamped against the *whole* window rather
+/// than its title bar alone, so the position that gets stored is one the window
+/// already fits at -- rolling it up then loosens the clamp and moves nothing,
+/// which is what a roll-up has to do: the bar stays exactly under the chevron
+/// that was clicked.
+fn settle(placement: &Placement, width: f32, bounds: egui::Rect) -> egui::Pos2 {
+    let pos = placement.pos.unwrap_or_else(|| bounds.left_top() + egui::vec2(16.0, 16.0));
+    let tall = if placement.collapsed { TITLE_BAR } else { placement.height.max(TITLE_BAR) };
+    clamp_into(pos, egui::vec2(width, tall), bounds)
+}
+
 /// Keep a window's title bar inside `bounds`, so it can always be grabbed
 /// again. Only the bar is kept in: a tall popup near the bottom edge would
 /// otherwise be shoved upward every frame, which fights the drag.
@@ -254,6 +284,35 @@ mod tests {
             assert!(out.x + bar.x <= bounds().right() + 0.001, "the bar hangs off the right edge at {out:?}");
             assert!(out.y + bar.y <= bounds().bottom() + 0.001, "the bar hangs off the bottom edge at {out:?}");
         }
+    }
+
+    #[test]
+    fn rolling_a_window_up_leaves_its_title_bar_exactly_where_it_was() {
+        // The bug: a tall window near the bottom edge was lifted to fit, and
+        // rolling it up removed the reason for the lift -- so the bar dropped
+        // back down, out from under the chevron that had just been clicked.
+        // Against a 600 px viewport, a 500 px window dropped at y = 400 was
+        // lifted to y = 100, and collapsing it put it back at 400.
+        let mut placement = Placement { pos: None, collapsed: false, height: 500.0 };
+        placement.pos = Some(egui::pos2(300.0, 400.0));
+        let open = settle(&placement, 320.0, bounds());
+        assert!(open.y < 400.0, "a window taller than the room below it was not lifted to fit");
+        placement.pos = Some(open);
+
+        placement.collapsed = true;
+        let rolled = settle(&placement, 320.0, bounds());
+        assert_eq!(rolled, open, "rolling the window up moved its title bar");
+
+        // And unrolling it does not move it either, because it was already
+        // standing somewhere the whole window fits.
+        placement.collapsed = false;
+        assert_eq!(settle(&placement, 320.0, bounds()), open, "unrolling the window moved its title bar");
+    }
+
+    #[test]
+    fn a_window_that_fits_where_it_was_left_is_not_moved_at_all() {
+        let placement = Placement { pos: Some(egui::pos2(300.0, 200.0)), collapsed: false, height: 180.0 };
+        assert_eq!(settle(&placement, 320.0, bounds()), egui::pos2(300.0, 200.0));
     }
 
     #[test]

@@ -155,7 +155,11 @@ impl Tiling {
     }
 
     /// A point of the cell frame -- across, along, through -- in world terms.
-    fn to_world(self, u: f64, v: f64, w: f64) -> Vec3 {
+    ///
+    /// The inverse of [`Tiling::flatten`] once a distance along the axis is
+    /// named: `flatten` throws that distance away, because a plan of the cells
+    /// does not need it, and lifting an outline back into the shape does.
+    pub fn to_world(self, u: f64, v: f64, w: f64) -> Vec3 {
         let (ua, va) = self.plane_axes();
         let mut out = [0.0; 3];
         out[ua] = u;
@@ -494,6 +498,55 @@ pub fn cell_outlines(tiling: &Tiling, bounds: (Vec3, Vec3)) -> Vec<Vec<(f64, f64
     plan(&flat, bounds).into_iter().map(|cell| cell.outline).collect()
 }
 
+/// Where the cuts will fall, as loops in the frame the shape's own bounds are
+/// given in -- for drawing the tiling over the model itself rather than as a
+/// plan beside it (issue 82).
+///
+/// A cut is a surface, not a line, and drawing every one of them would be a
+/// cage nobody can see the shape through. What is drawn instead is the tiling
+/// where it meets the shape: at each end of the run along the axis, and at
+/// every layer boundary in between. Seen down the axis those coincide and read
+/// as one grid, which is the plan; seen from anywhere else they separate, and
+/// the separation is what says how deep the cuts go.
+///
+/// `limit` caps how many loops come back, because ten thousand cells at three
+/// depths is thirty thousand outlines and a preview is not worth a frame rate.
+/// The ends are laid down before the layers between them, so what survives the
+/// cap is the part of the picture that says the most.
+pub fn preview_loops(tiling: &Tiling, bounds: (Vec3, Vec3), limit: usize) -> Vec<Vec<Vec3>> {
+    let outlines = cell_outlines(tiling, bounds);
+    if outlines.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let axis = tiling.axis.min(2) as usize;
+    let (lo, hi) = ([bounds.0.x, bounds.0.y, bounds.0.z], [bounds.1.x, bounds.1.y, bounds.1.z]);
+    let (lo, hi) = (lo[axis], hi[axis]);
+    // The far end first, then the near one, then the layers between them: the
+    // order the cap eats from the back of.
+    let mut depths = vec![hi, lo];
+    if tiling.layer >= MIN_SIZE {
+        for k in 1..tiling.layer_count(hi - lo) {
+            let at = lo + k as f64 * tiling.layer;
+            if at > lo && at < hi {
+                depths.push(at);
+            }
+        }
+    }
+    let mut loops = Vec::new();
+    for depth in depths {
+        if loops.len() >= limit {
+            break;
+        }
+        for outline in &outlines {
+            if loops.len() >= limit {
+                break;
+            }
+            loops.push(outline.iter().map(|&(u, v)| tiling.to_world(u, v, depth)).collect());
+        }
+    }
+    loops
+}
+
 /// Cut a solid into the pieces one cell of the tiling each, in a stable order.
 ///
 /// `report` is called once per cell as it is finished, and `give_up` is asked
@@ -779,6 +832,85 @@ mod tests {
         for piece in &pieces {
             assert!((volume(piece) - 2250.0).abs() < 1e-6, "a quarter came out at {} mm3", volume(piece));
         }
+    }
+
+    /// The bounds of the 30 x 30 x 10 box every test here cuts.
+    fn box_bounds() -> (Vec3, Vec3) {
+        box_mesh(30.0, 30.0, 10.0).bounds().expect("a box has bounds")
+    }
+
+    #[test]
+    fn the_preview_draws_the_grid_at_both_ends_of_the_run() {
+        // The loops are what the tool draws over the model, so they have to be
+        // *on* the model: at the top face and the bottom one, in the shape's own
+        // frame, and nowhere in between when there are no layers.
+        let tiling = Tiling { size: 15.0, ..Tiling::default() };
+        let (lo, hi) = box_bounds();
+        let loops = preview_loops(&tiling, (lo, hi), 1000);
+        // Four cells across a 30 mm square at 15 mm, at each of two depths.
+        assert_eq!(loops.len(), 8, "the grid was not drawn at both ends");
+        let depths: Vec<f64> = loops.iter().map(|l| l[0].z).collect();
+        assert!(depths.iter().any(|z| (z - hi.z).abs() < 1e-9), "nothing was drawn on the top face");
+        assert!(depths.iter().any(|z| (z - lo.z).abs() < 1e-9), "nothing was drawn on the bottom face");
+        assert!(depths.iter().all(|z| (z - hi.z).abs() < 1e-9 || (z - lo.z).abs() < 1e-9), "{depths:?}");
+        // And every loop is closed, four-cornered and the size it says.
+        for outline in &loops {
+            assert_eq!(outline.len(), 4);
+            assert!((outline[0] - outline[1]).length() - 15.0 < 1e-9);
+        }
+    }
+
+    #[test]
+    fn layers_put_a_grid_at_every_cut_between_the_ends() {
+        // A 10 mm run in 4 mm layers is cut at 4 and at 8 -- two planes between
+        // the two faces, so four grids in all.
+        let tiling = Tiling { size: 15.0, layer: 4.0, ..Tiling::default() };
+        let (lo, hi) = box_bounds();
+        let loops = preview_loops(&tiling, (lo, hi), 1000);
+        let mut depths: Vec<f64> = loops.iter().map(|l| l[0].z).collect();
+        depths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        depths.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        assert_eq!(depths.len(), 4, "the layer cuts were not drawn: {depths:?}");
+        assert!((depths[1] - (lo.z + 4.0)).abs() < 1e-9, "{depths:?}");
+        assert!((depths[2] - (lo.z + 8.0)).abs() < 1e-9, "{depths:?}");
+    }
+
+    #[test]
+    fn the_preview_follows_the_axis_it_is_cut_through() {
+        // Cells running along X put their grids on the two X faces, not the Z
+        // ones: a preview that ignored the axis would draw the grid flat on the
+        // ground whichever way the cut runs.
+        let tiling = Tiling { size: 15.0, axis: 0, ..Tiling::default() };
+        let (lo, hi) = box_bounds();
+        let loops = preview_loops(&tiling, (lo, hi), 1000);
+        assert!(!loops.is_empty());
+        for outline in &loops {
+            let x = outline[0].x;
+            assert!((x - lo.x).abs() < 1e-9 || (x - hi.x).abs() < 1e-9, "a loop was drawn at x = {x}");
+            // And the loop lies in the plane, so every corner shares that x.
+            assert!(outline.iter().all(|p| (p.x - x).abs() < 1e-9));
+        }
+    }
+
+    #[test]
+    fn the_preview_is_capped_rather_than_drawing_ten_thousand_loops() {
+        // A split may ask for cells by the thousand, and a preview is not worth
+        // a frame rate. What survives the cap is the end laid down first.
+        let tiling = Tiling { size: 0.5, ..Tiling::default() };
+        let (lo, hi) = box_bounds();
+        let loops = preview_loops(&tiling, (lo, hi), 100);
+        assert_eq!(loops.len(), 100);
+        assert!(loops.iter().all(|l| (l[0].z - hi.z).abs() < 1e-9), "the cap ate the wrong end");
+        assert!(preview_loops(&tiling, (lo, hi), 0).is_empty());
+    }
+
+    #[test]
+    fn a_tiling_too_fine_to_cut_previews_nothing() {
+        // The window has to say why rather than drawing a grid for a split that
+        // will be refused; `refusal` is what says it, and the preview keeps out
+        // of the way.
+        let (lo, hi) = box_bounds();
+        assert!(preview_loops(&Tiling { size: 0.0, ..Tiling::default() }, (lo, hi), 1000).is_empty());
     }
 
     #[test]

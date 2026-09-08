@@ -8,23 +8,30 @@
 //! stood, holding the pieces and the shape itself -- so both are undone by the
 //! same Join back together, however long afterwards.
 //!
-//! The window is where the pattern is chosen, and it draws the cells over the
-//! shape's own outline while they are being chosen: the one question a number
-//! of millimetres cannot answer on its own is what it looks like against the
-//! thing being cut. Nothing is cut until Split is pressed, and the cutting
-//! itself happens on a thread -- see [`crate::worker::SplitJob`] -- because a
-//! hexagon tiling over a plate is hundreds of booleans and an interface that
-//! stops answering is one nobody can tell from a crashed one.
+//! The window is where the pattern is chosen, and the cells are drawn **over
+//! the model itself** while they are being chosen: the one question a number of
+//! millimetres cannot answer on its own is what it looks like against the thing
+//! being cut, and the honest answer to that is the thing being cut. Nothing is
+//! cut until Split is pressed, and the cutting itself happens on a thread --
+//! see [`crate::worker::SplitJob`] -- because a hexagon tiling over a plate is
+//! hundreds of booleans and an interface that stops answering is one nobody can
+//! tell from a crashed one.
 //!
 //! It is an [in-place popup](crate::popup) rather than a dialog: it floats over
 //! the viewport, is dragged around by its own title bar and rolls up out of the
 //! way, and it does not stop the model underneath it being orbited, zoomed or
-//! selected. That is not decoration. The picture the tool draws is a plan seen
-//! down one axis, and the question it cannot answer -- which way round the
-//! shape is under the grid -- is answered by turning the model while the
-//! numbers are still on screen. Being non-modal means the shape can also change
-//! underneath it, so the tool re-bakes what it is cutting whenever the
-//! evaluation moves on, and closes itself if the shape goes away.
+//! selected. That is what lets the viewport be the modelling area and the
+//! preview area at once -- the cells are drawn in it, in world space, and the
+//! way to see whether they fall where they should is to orbit the model with
+//! the numbers still on screen. What the viewport does *under* the cells while
+//! that is happening is the document's own
+//! [`PreviewViewport`](simple3d_core::scene::PreviewViewport) setting, because
+//! whether the grid, the axes or the rest of the scene is the nuisance depends
+//! on what is being cut.
+//!
+//! Being non-modal also means the shape can change underneath the tool, so it
+//! re-bakes what it is cutting whenever the evaluation moves on, and closes
+//! itself if the shape goes away.
 
 use crate::app::{App, Status};
 use crate::popup::{self, PopupEvent, PopupSpec};
@@ -32,6 +39,7 @@ use crate::worker::SplitJob;
 use crate::{theme, ui};
 use simple3d_core::scene::NodeId;
 use simple3d_core::unit::Unit;
+use simple3d_core::xform::Xform;
 use simple3d_geom::tiling::{self, CellKind, Tiling};
 use simple3d_geom::{Mesh, Vec3};
 use std::sync::Arc;
@@ -49,6 +57,11 @@ pub struct SplitTool {
     /// not fall there.
     pub mesh: Arc<Mesh>,
     pub bounds: (Vec3, Vec3),
+    /// Where the baked frame stands in the world, so the cells can be drawn on
+    /// the shape rather than beside it. The tiling is worked out in the shape's
+    /// own frame -- that is the frame a cell size in millimetres means something
+    /// in -- and this is the way back out to the viewport.
+    pub placement: Xform,
     /// Which evaluation `mesh` was baked from, so the tool can tell when what
     /// it is drawing has gone stale.
     pub generation: u64,
@@ -102,7 +115,7 @@ impl App {
             self.status = Status::Warning("A split is already running".into());
             return;
         }
-        let mesh = simple3d_core::eval::baked_mesh(&self.scene, id);
+        let (mesh, placement) = self.bake_for_split(id);
         let Some(bounds) = mesh.bounds() else {
             self.status = Status::Warning("There is no geometry there to split".into());
             return;
@@ -112,10 +125,19 @@ impl App {
             target: id,
             mesh: Arc::new(mesh),
             bounds,
+            placement,
             generation: self.evaluation_generation,
             tiling,
             text: Fields::from(&tiling, self.unit()),
         });
+    }
+
+    /// The shape to be cut, in its own frame, and where that frame stands in
+    /// the world -- one for the cutting and the numbers, the other for drawing
+    /// the cells on the model.
+    fn bake_for_split(&self, id: NodeId) -> (Mesh, Xform) {
+        let parent = self.evaluated.node_frames.get(&id).copied().unwrap_or(Xform::IDENTITY);
+        simple3d_core::eval::baked_mesh_in_place(&self.scene, id, parent)
     }
 
     /// Keep the open tool honest against a document that can change underneath
@@ -136,12 +158,16 @@ impl App {
             return;
         }
         let target = tool.target;
-        let mesh = simple3d_core::eval::baked_mesh(&self.scene, target);
+        let (mesh, placement) = self.bake_for_split(target);
         let tool = self.split_tool.as_mut().expect("it was there a line ago");
         tool.generation = self.evaluation_generation;
+        // The placement follows the shape whatever happens to the geometry: a
+        // shape merely moved is the same cut in a new place, and the cells have
+        // to move with it.
+        tool.placement = placement;
         // A shape edited down to nothing -- hidden, or emptied of children --
-        // leaves the last picture up rather than blanking the window: the
-        // numbers are still worth reading, and Split refuses on its own.
+        // leaves the last numbers up rather than blanking the window: they are
+        // still worth reading, and Split refuses on its own.
         if let Some(bounds) = mesh.bounds() {
             tool.bounds = bounds;
             tool.mesh = Arc::new(mesh);
@@ -257,53 +283,19 @@ fn plural_cells(kind: CellKind, count: usize) -> String {
     }
 }
 
-/// The tool's contents: the pattern, a picture of where the cuts will fall, and
-/// what it comes to.
+/// The tool's contents: the pattern, and what it comes to.
 ///
-/// Two shapes, chosen by how much room there is. Given the width of a dialog
-/// the picture stands beside the numbers, which is the most of both at once.
-/// Given the width of a popup over the viewport it goes *under* them -- stacked
-/// rather than dropped, because the picture is the one thing in the window that
-/// a number of millimetres cannot say, and a tool that answers "what will this
-/// look like" only when it is wide enough answers it in the wrong half of the
-/// cases.
+/// One column of fields and no picture. The picture is the viewport -- see
+/// [`preview`] -- which is the whole reason the window is a popup floating over
+/// it rather than a dialog in front of it: a plan drawn small inside the window
+/// answers "what shape are the cells", and the model behind it answers "where
+/// will they fall", which is the question actually being asked.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     if app.split_tool.is_none() {
         ui.label("The object this was opened on is no longer there.");
         return;
     }
-    // Measured out here rather than left to a side panel: both widths are
-    // decided by one rule -- the numbers first, the picture with what is left --
-    // and a panel would put half that rule in egui's hands.
-    let room = ui.available_width();
-    let gap = ui.spacing().item_spacing.x;
-    let side_by_side = room >= COLUMN_MIN + PICTURE_MIN + gap;
-    if side_by_side {
-        // The numbers keep the width they need and every extra pixel goes to
-        // the picture, which is the half worth more the bigger it is.
-        let column = (room - PICTURE_MIN - gap).min(COLUMN_MAX);
-        ui.horizontal_top(|ui| {
-            ui.allocate_ui_with_layout(
-                egui::vec2(column, ui.available_height()),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    controls(app, ui);
-                    ui.add_space(6.0);
-                    summary(app, ui);
-                },
-            );
-            let size = egui::vec2(ui.available_width(), ui.available_height());
-            picture(app, ui, size);
-        });
-        return;
-    }
     controls(app, ui);
-    ui.add_space(6.0);
-    // Roughly three parts wide to two tall, within bounds: a plan of cells is
-    // read at a glance, and one that takes half a popup is a popup that covers
-    // the model it is a plan of.
-    let height = (room * 0.62).clamp(STACKED_PICTURE_MIN, STACKED_PICTURE_MAX);
-    picture(app, ui, egui::vec2(room, height));
     ui.add_space(6.0);
     summary(app, ui);
 }
@@ -320,19 +312,6 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
         app.cancel_split_tool();
     }
 }
-
-/// The narrowest the plan of the cells is worth drawing at *beside* the
-/// numbers. Below the two together the picture goes under them instead.
-const PICTURE_MIN: f32 = 220.0;
-/// How tall the plan is when it is stacked under the numbers rather than stood
-/// beside them.
-const STACKED_PICTURE_MIN: f32 = 130.0;
-const STACKED_PICTURE_MAX: f32 = 220.0;
-/// The narrowest the fields are worth laying out at, and the widest they are
-/// worth stretching to: a row is a name and a number, and past this the two are
-/// pushed apart with nothing between them.
-const COLUMN_MIN: f32 = 300.0;
-const COLUMN_MAX: f32 = 380.0;
 
 fn controls(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
@@ -479,74 +458,57 @@ fn summary(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// The shape seen down the axis the cells run along, with the cells drawn over
-/// it: where the cuts will fall, which is the one thing a number of millimetres
-/// cannot say on its own.
-fn picture(app: &mut App, ui: &mut egui::Ui, size: egui::Vec2) {
+/// Where the cuts will fall, drawn over the model in the viewport (issue 82).
+///
+/// This is the tool's preview, and it is in the viewport rather than in the
+/// window on purpose. A plan drawn inside the window can only ever show the
+/// tiling seen straight down its own axis; the question that actually stops
+/// people -- will this cut fall through the middle of that boss, is the grid
+/// turned the way I think it is -- is a question about the *shape*, and it is
+/// answered by drawing the cells on the shape and turning the model.
+///
+/// The cells live in the shape's own frame, so every loop goes out through the
+/// tool's `placement` before it is projected. Loops entirely behind the camera
+/// are dropped; a loop crossing the eye plane is dropped too rather than drawn
+/// through infinity, which is what projecting a point behind the eye would
+/// otherwise do to it.
+pub(crate) fn preview(app: &App, painter: &egui::Painter, view: &crate::view::View) {
     let Some(tool) = app.split_tool.as_ref() else { return };
-    // Space rather than a widget: the plan is painted, not interacted with, and
-    // a widget laid over the room would be a widget the numbers beside it are
-    // under -- which is a click on a cell shape that goes nowhere.
-    let (_, rect) = ui.allocate_space(size);
-    // Clipped to its own rectangle: a cell of the plan can reach past the shape,
-    // and what reaches past the picture belongs to the fields beside it.
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 2.0, theme::token::SURFACE_1);
-
-    let outlines = tiling::cell_outlines(&tool.tiling, tool.bounds);
-    let (lo, hi) = (tool.tiling.flatten(tool.bounds.0), tool.tiling.flatten(tool.bounds.1));
-    // Fitted to the shape *and* the cells over it, not to the shape alone: a
-    // cell at the edge reaches past the shape it is cutting, and fitting the
-    // shape drew the outermost cells off the side of the picture.
-    let (mut plan_lo, mut plan_hi) = (lo, hi);
-    for point in outlines.iter().flatten() {
-        plan_lo = (plan_lo.0.min(point.0), plan_lo.1.min(point.1));
-        plan_hi = (plan_hi.0.max(point.0), plan_hi.1.max(point.1));
+    if tool.tiling.refusal(tool.bounds).is_some() {
+        return;
     }
-    let span = ((plan_hi.0 - plan_lo.0).max(1e-6), (plan_hi.1 - plan_lo.1).max(1e-6));
-    let pad = 10.0;
-    let scale = ((rect.width() - pad * 2.0) as f64 / span.0).min((rect.height() - pad * 2.0) as f64 / span.1);
-    let centre = ((plan_lo.0 + plan_hi.0) / 2.0, (plan_lo.1 + plan_hi.1) / 2.0);
-    // Y up, the way the plane's second axis runs, rather than down the screen.
-    let at = |(x, y): (f64, f64)| {
-        egui::pos2(rect.center().x + ((x - centre.0) * scale) as f32, rect.center().y - ((y - centre.1) * scale) as f32)
-    };
-
-    // The shape itself, seen down the axis: its own triangles flattened, which
-    // is the true outline rather than the box around it. A mesh too big to draw
-    // every frame gets the box instead -- the picture is about the cells.
-    let mesh = &tool.mesh;
-    if mesh.triangle_count() <= SILHOUETTE_LIMIT {
-        let mut shape = egui::epaint::Mesh::default();
-        for tri in &mesh.indices {
-            let base = shape.vertices.len() as u32;
-            for &index in tri {
-                let flat = tool.tiling.flatten(mesh.positions[index as usize]);
-                shape.vertices.push(egui::epaint::Vertex {
-                    pos: at(flat),
-                    uv: egui::epaint::WHITE_UV,
-                    color: theme::token::SURFACE_3,
-                });
-            }
-            shape.indices.extend([base, base + 1, base + 2]);
-        }
-        painter.add(egui::Shape::mesh(shape));
-    } else {
-        painter.rect_filled(egui::Rect::from_two_pos(at(lo), at(hi)), 0.0, theme::token::SURFACE_3);
-    }
-
-    // And the cells over it.
     let stroke = egui::Stroke::new(1.0_f32, theme::token::ACCENT);
-    for outline in outlines {
-        let points: Vec<egui::Pos2> = outline.iter().map(|&p| at(p)).collect();
-        if points.iter().all(|p| !rect.expand(4.0).contains(*p)) {
+    for loop_ in tiling::preview_loops(&tool.tiling, tool.bounds, PREVIEW_LOOPS) {
+        let mut points = Vec::with_capacity(loop_.len());
+        let mut whole = true;
+        for point in loop_ {
+            match view.project(tool.placement.point(point)) {
+                Some((at, _)) => points.push(at),
+                None => {
+                    whole = false;
+                    break;
+                }
+            }
+        }
+        if !whole || points.len() < 2 {
+            continue;
+        }
+        // Cheap rejection before the shape is queued: at a close zoom most of
+        // the grid is off the edges, and a closed line egui has to clip is still
+        // a closed line egui has to hold.
+        let clip = painter.clip_rect().expand(8.0);
+        if points.iter().all(|p| !clip.contains(*p)) {
             continue;
         }
         painter.add(egui::Shape::closed_line(points, stroke));
     }
 }
 
-/// The most triangles the picture will flatten and draw every frame. Past this
-/// the shape is drawn as its bounding box: the cells are what the picture is
-/// about, and a preview is not worth a frame rate.
-const SILHOUETTE_LIMIT: usize = 20_000;
+/// The most cell outlines the preview will draw in a frame.
+///
+/// A split may ask for ten thousand cells, and the preview draws them at both
+/// ends of the run and at every layer between -- which is a number of line
+/// loops that costs more per frame than the picture is worth. Past this the
+/// preview is the part of the grid that was laid down first, which is the far
+/// end and then the near one.
+const PREVIEW_LOOPS: usize = 3_000;

@@ -13,7 +13,7 @@ use crate::theme::{self, token};
 use crate::ui::{self, Commit};
 use simple3d_core::config::Placement;
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
-use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId, Visibility};
+use simple3d_core::scene::{Anchor, AxisStyle, Body, Colour, GroupOp, Node, NodeId, PreviewViewport, Visibility};
 use simple3d_core::unit::{format_angle, format_length, format_number, Unit};
 use simple3d_geom::Vec3;
 
@@ -589,6 +589,22 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                         app.scene.settings.axis_style = option;
                     }
                 }
+            },
+        );
+        field_row(
+            ui,
+            "In-place preview",
+            "What the viewport does while a tool's window is drawing a preview over it. It goes back to normal \
+                 when the tool closes.",
+            |ui| {
+                egui::ComboBox::from_id_salt("preview-viewport")
+                    .selected_text(theme::value(app.scene.settings.preview_viewport.label()))
+                    .width(fits(ui, 190.0))
+                    .show_ui(ui, |ui| {
+                        for option in PreviewViewport::ALL {
+                            ui.selectable_value(&mut app.scene.settings.preview_viewport, option, option.label());
+                        }
+                    });
             },
         );
         field_row(

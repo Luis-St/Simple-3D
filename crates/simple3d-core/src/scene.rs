@@ -462,6 +462,63 @@ impl AxisStyle {
     }
 }
 
+/// What the viewport does while a tool draws a preview over it (issue 82).
+///
+/// An in-place popup exists so that one rectangle can be the modelling area and
+/// the preview area at once. That only works if the preview can be seen, and
+/// what is in the way depends on what is being previewed: a tiling drawn flat
+/// on a plate competes with the grid it lies parallel to, a cut through a tall
+/// shape competes with the axes running through it, and a preview of one object
+/// in a crowded scene competes with the scene. Which of those is the nuisance
+/// is not something the application can know, so it is a document setting.
+///
+/// It applies only while a preview is actually being drawn, and puts everything
+/// back the moment the tool closes: this is not a way to turn the grid off.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewViewport {
+    /// The viewport carries on as it is, and the preview is drawn over it.
+    #[default]
+    NoChange,
+    /// Drop the origin axes while the preview is up.
+    HideAxes,
+    /// Drop the ground grid while the preview is up.
+    HideGrid,
+    /// Nothing but the object being previewed: every other body goes, and so do
+    /// the grid and the axes. The strongest answer, for reading a fine pattern
+    /// against one shape.
+    PreviewOnly,
+}
+
+impl PreviewViewport {
+    pub const ALL: [PreviewViewport; 4] =
+        [PreviewViewport::NoChange, PreviewViewport::HideAxes, PreviewViewport::HideGrid, PreviewViewport::PreviewOnly];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            PreviewViewport::NoChange => "No change",
+            PreviewViewport::HideAxes => "Hide the axes",
+            PreviewViewport::HideGrid => "Hide the grid",
+            PreviewViewport::PreviewOnly => "Only what is previewed",
+        }
+    }
+
+    /// Whether the grid is drawn under a preview in this mode.
+    pub fn keeps_grid(self) -> bool {
+        matches!(self, PreviewViewport::NoChange | PreviewViewport::HideAxes)
+    }
+
+    /// Whether the origin axes are drawn under a preview in this mode.
+    pub fn keeps_axes(self) -> bool {
+        matches!(self, PreviewViewport::NoChange | PreviewViewport::HideGrid)
+    }
+
+    /// Whether everything but the previewed object is drawn.
+    pub fn keeps_other_bodies(self) -> bool {
+        self != PreviewViewport::PreviewOnly
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneSettings {
     pub unit: Unit,
@@ -488,6 +545,16 @@ pub struct SceneSettings {
     /// something marks it.
     #[serde(default = "default_true")]
     pub plane_marks: bool,
+    /// What the viewport does while a tool draws a preview over it (issue 82).
+    /// Absent from the file while it is the default, so a project written by
+    /// this version still diffs cleanly against one written before in-place
+    /// previews existed.
+    #[serde(default, skip_serializing_if = "is_no_change")]
+    pub preview_viewport: PreviewViewport,
+}
+
+fn is_no_change(mode: &PreviewViewport) -> bool {
+    *mode == PreviewViewport::NoChange
 }
 
 fn default_snap_step() -> f64 {
@@ -512,6 +579,7 @@ impl Default for SceneSettings {
             axes_visible: all_axes(),
             axis_style: AxisStyle::default(),
             plane_marks: true,
+            preview_viewport: PreviewViewport::NoChange,
         }
     }
 }

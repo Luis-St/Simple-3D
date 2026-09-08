@@ -49,6 +49,7 @@ impl App {
         self.evaluation_generation.hash(&mut hasher);
         self.selection.hash(&mut hasher);
         self.piece_ticks.hash(&mut hasher);
+        self.preview_subject().hash(&mut hasher);
         self.ghost_generation().hash(&mut hasher);
         let key = hasher.finish();
         if key == self.renderable_key {
@@ -88,6 +89,17 @@ impl App {
         for id in self.piece_ticks.clone() {
             if let Some(mesh) = self.evaluated.result_mesh(id) {
                 fresh.insert(id, Renderable::prepare_outlined(&mesh));
+            }
+        }
+        // What a tool is previewing, kept ready whether or not it is selected:
+        // "only what is previewed" draws that object *as* the model, and the
+        // selection can move on to something else while the tool is open
+        // (issue 82).
+        if let Some(id) = self.preview_subject() {
+            if let std::collections::btree_map::Entry::Vacant(slot) = fresh.entry(id) {
+                if let Some(mesh) = self.evaluated.result_mesh(id) {
+                    slot.insert(Renderable::prepare_outlined(&mesh));
+                }
             }
         }
         self.node_renderables = fresh;

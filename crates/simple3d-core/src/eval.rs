@@ -698,20 +698,42 @@ pub fn subtree_bounds(scene: &Scene, id: NodeId) -> Option<(Vec3, Vec3)> {
 /// which is this same geometry, so it comes out the same. Leaving it in would
 /// apply it twice.
 pub fn baked_mesh(scene: &Scene, id: NodeId) -> Mesh {
+    baked_mesh_in_place(scene, id, Xform::IDENTITY).0
+}
+
+/// [`baked_mesh`], and the transform that puts what it returns back where the
+/// node stands in the world (issue 82).
+///
+/// A tool works in the node's own frame -- that is the frame the geometry comes
+/// back in, and the frame a cell size in millimetres means something in -- but
+/// drawing the tool's work *over the model* needs the way back out again, and
+/// the way back is the node's own transform with the anchor shift put on top.
+/// It is the same composition [`Evaluator::walk`] records the node's world
+/// placement with, which is why the preview lands exactly on the surface rather
+/// than an anchor's distance off it.
+///
+/// `parent` is the node's parent frame in world space --
+/// [`Evaluated::node_frames`] -- and [`Xform::IDENTITY`] asks only for the
+/// node's own placement within its parent, which is what a caller wanting the
+/// mesh alone passes.
+///
+/// The two come back together because the anchor shift costs a subtree
+/// evaluation to work out, and asking twice would pay for it twice.
+pub fn baked_mesh_in_place(scene: &Scene, id: NodeId, parent: Xform) -> (Mesh, Xform) {
     if !scene.contains(id) {
-        return Mesh::new();
+        return (Mesh::new(), parent);
     }
     let mut evaluator = Evaluator::new();
     let result = evaluator.subtree(scene, id, &Cancel::new());
     let node = scene.node(id);
-    let inverse =
-        Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale)).inverse();
-    let mesh = apply(&inverse, &result.mesh);
-    if result.anchor_offset == Vec3::ZERO {
-        mesh
-    } else {
-        mesh.translated(-result.anchor_offset)
-    }
+    let own = Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale));
+    // The offset is already in the subtree's mesh, and is zero for every anchor
+    // but a base one -- so one number answers both directions: the mesh has it
+    // taken back off, and the placement puts it back on.
+    let placement = parent.compose(&own).compose(&Xform::from_translation(result.anchor_offset));
+    let mesh = apply(&own.inverse(), &result.mesh);
+    let mesh = if result.anchor_offset == Vec3::ZERO { mesh } else { mesh.translated(-result.anchor_offset) };
+    (mesh, placement)
 }
 
 fn combine(
@@ -1554,6 +1576,67 @@ mod tests {
         assert!((before.0 - after.0).length() < 1e-6, "the shape moved: {before:?} -> {after:?}");
         assert!((before.1 - after.1).length() < 1e-6, "the shape moved: {before:?} -> {after:?}");
         let _ = base;
+    }
+
+    #[test]
+    fn the_baked_placement_puts_the_geometry_back_exactly_where_the_node_stands() {
+        // What a tool's preview is drawn through (issue 82). The tool works in
+        // the node's own frame; if the way back out is off by an anchor, a
+        // scale or an ancestor, the cells are drawn floating beside the shape
+        // they are cutting rather than on it -- and the split still comes out
+        // right, so nothing but the eye would catch it.
+        //
+        // Every one of those is turned on at once, and the answer is checked
+        // against the evaluation's own world mesh rather than against a repeat
+        // of the arithmetic.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let outer = scene.add_group(GroupOp::Union, root, 0);
+        {
+            let node = scene.get_mut(outer).unwrap();
+            node.position = Vec3::new(-14.0, 6.0, 3.0);
+            node.rotation = Vec3::new(0.0, 25.0, 0.0);
+        }
+        let group = scene.add_group(GroupOp::Difference, outer, 0);
+        plate(&mut scene, group);
+        let hole = cylinder(&mut scene, group, 6.0, 40.0);
+        scene.get_mut(hole).unwrap().position = Vec3::new(5.0, 0.0, 0.0);
+        {
+            let node = scene.get_mut(group).unwrap();
+            node.position = Vec3::new(30.0, -12.0, 4.0);
+            node.rotation = Vec3::new(0.0, 0.0, 35.0);
+            node.scale = Vec3::new(1.5, 1.0, 2.0);
+            node.anchor = Anchor::Base;
+        }
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let parent = out.node_frames[&group];
+        let (baked, placement) = baked_mesh_in_place(&scene, group, parent);
+        assert!(baked.triangle_count() > 0);
+
+        // Every baked point, put back, must land on the world mesh the
+        // evaluation drew -- so the two boxes agree to the last micron.
+        let placed = bounds_of(baked.positions.iter().map(|&p| placement.point(p))).expect("the baked mesh has points");
+        let world = bounds_of(out.mesh.positions.iter().copied()).expect("the scene has points");
+        assert!((placed.0 - world.0).length() < 1e-6, "the placement is off: {placed:?} against {world:?}");
+        assert!((placed.1 - world.1).length() < 1e-6, "the placement is off: {placed:?} against {world:?}");
+
+        // And the mesh itself is unchanged by asking for the placement with it.
+        let alone = baked_mesh(&scene, group);
+        assert_eq!(alone.positions, baked.positions, "asking for the placement changed the geometry");
+    }
+
+    #[test]
+    fn a_centre_anchored_node_is_placed_without_an_anchor_shift() {
+        // The other half of the same sum: an offset applied where there is none
+        // to apply would push the preview off the shape by half its height.
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let id = plate(&mut scene, root);
+        scene.get_mut(id).unwrap().position = Vec3::new(3.0, 4.0, 5.0);
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        let (_, placement) = baked_mesh_in_place(&scene, id, out.node_frames[&id]);
+        assert!((placement.point(Vec3::ZERO) - Vec3::new(3.0, 4.0, 5.0)).length() < 1e-9);
     }
 
     #[test]

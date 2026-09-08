@@ -2369,6 +2369,18 @@ impl App {
         }
     }
 
+    /// The object an in-place popup is drawing a preview over, if one is
+    /// (issue 82).
+    ///
+    /// One question with one answer, asked by everything that has to behave
+    /// differently while a preview is up: the viewport's grid and axes, what is
+    /// drawn as the model, the renderables kept ready, and the frame cache's
+    /// key. Only the split tool has a preview today; the next tool that grows
+    /// one answers here too, and nothing downstream has to learn about it.
+    pub(crate) fn preview_subject(&self) -> Option<NodeId> {
+        self.split_tool.as_ref().map(|tool| tool.target).filter(|&id| self.scene.contains(id))
+    }
+
     /// The collection whose pieces the properties panel is listing: the one
     /// selected node, when it is a collection at all.
     pub(crate) fn listed_collection(&self) -> Option<NodeId> {
@@ -7016,6 +7028,76 @@ mod tests {
         assert_eq!(app.piece_ticks.len(), 1, "a plain click added rather than replacing");
         app.tick_piece(pieces[2], true);
         assert_eq!(app.piece_ticks.len(), 2);
+    }
+
+    #[test]
+    fn a_preview_only_reaches_the_viewport_while_a_tool_is_open() {
+        // The setting says what the viewport does *while a preview is up*, and
+        // nothing at all otherwise: it is not a second way to turn the grid off.
+        let mut app = headless_app();
+        app.scene.settings.preview_viewport = simple3d_core::scene::PreviewViewport::PreviewOnly;
+        assert_eq!(app.preview_subject(), None, "something claims to be previewing with no tool open");
+
+        let plate = app.primary().unwrap();
+        app.reevaluate_for_test();
+        app.open_split_tool();
+        assert_eq!(app.preview_subject(), Some(plate));
+
+        // A shape deleted under the tool takes the preview with it rather than
+        // leaving the viewport emptied for an object that is gone.
+        app.scene.remove(plate);
+        assert_eq!(app.preview_subject(), None);
+    }
+
+    #[test]
+    fn what_the_viewport_does_under_a_preview_is_saved_with_the_document() {
+        // It is a document setting, not a preference: which of the grid, the
+        // axes and the rest of the scene is in the way is a property of what is
+        // being modelled (issue 82).
+        use simple3d_core::scene::PreviewViewport;
+        let mut app = headless_app();
+        assert_eq!(app.scene.settings.preview_viewport, PreviewViewport::NoChange, "the default is not no change");
+        // The default is absent from the file, so a project that never touched
+        // this still diffs cleanly against one written before it existed.
+        assert!(!simple3d_core::project::to_string(&app.scene).contains("preview_viewport"));
+
+        app.scene.settings.preview_viewport = PreviewViewport::PreviewOnly;
+        let text = simple3d_core::project::to_string(&app.scene);
+        let back = simple3d_core::project::from_str(&text).expect("it loads");
+        assert_eq!(back.settings.preview_viewport, PreviewViewport::PreviewOnly);
+    }
+
+    #[test]
+    fn each_preview_mode_hides_exactly_what_it_names() {
+        use simple3d_core::scene::PreviewViewport::*;
+        // Read as a table, because the four are only ever right together: a
+        // mode that hides one thing too many is a viewport with the ground gone
+        // for no reason the user asked for.
+        for (mode, grid, axes, others) in [
+            (NoChange, true, true, true),
+            (HideAxes, true, false, true),
+            (HideGrid, false, true, true),
+            (PreviewOnly, false, false, false),
+        ] {
+            assert_eq!(mode.keeps_grid(), grid, "{mode:?} grid");
+            assert_eq!(mode.keeps_axes(), axes, "{mode:?} axes");
+            assert_eq!(mode.keeps_other_bodies(), others, "{mode:?} other bodies");
+        }
+    }
+
+    #[test]
+    fn the_previewed_object_has_a_renderable_even_when_it_is_not_selected() {
+        // "Only what is previewed" draws that object as the model, so it needs
+        // a renderable of its own -- and the selection can move on to something
+        // else while the tool is open, which is what used to take it away.
+        let mut app = headless_app();
+        let plate = app.primary().unwrap();
+        app.reevaluate_for_test();
+        app.open_split_tool();
+        let root = app.scene.root();
+        app.select_only(root);
+        app.refresh_node_renderables();
+        assert!(app.node_renderables.contains_key(&plate), "the previewed object has nothing to draw");
     }
 
     #[test]

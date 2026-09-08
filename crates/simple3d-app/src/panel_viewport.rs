@@ -56,6 +56,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
         let view = app.current_view();
         overlays(app, ui, rect, &view);
+        // The tool's own preview, over everything else the viewport draws: the
+        // cells are what the window is asking about, and a manipulator handle
+        // across them is a handle the eye reads as part of the grid (issue 82).
+        crate::split_tool::preview(app, &ui.painter_at(rect), &view);
     });
 }
 
@@ -91,7 +95,19 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
             .filter(|&id| app.scene.is_shown(id))
             .collect();
 
-        let mut items: Vec<Item> = vec![Item { renderable: &app.scene_renderable, style: Style::Solid }];
+        // While a tool draws a preview, the document says what the viewport
+        // does under it: nothing, drop the axes, drop the grid, or drop
+        // everything but the object being previewed (issue 82).
+        let preview = app.preview_subject();
+        let mode = app.scene.settings.preview_viewport;
+        let solid = match preview.filter(|_| !mode.keeps_other_bodies()).and_then(|id| app.node_renderables.get(&id)) {
+            // The previewed object alone, drawn as the model rather than as an
+            // outline: everything else in the scene is out of the picture, so
+            // what is left has to be the picture.
+            Some(only) => only,
+            None => &app.scene_renderable,
+        };
+        let mut items: Vec<Item> = vec![Item { renderable: solid, style: Style::Solid }];
         // Ghosts before the selection outline, so the outline stays readable.
         let ghosts = app.ghosts();
         for (id, renderable) in &app.node_renderables {
@@ -113,9 +129,12 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
             mode: app.settings.display_mode,
             palette,
             grid: Grid {
-                visible: app.scene.settings.grid_visible,
+                visible: app.scene.settings.grid_visible && (preview.is_none() || mode.keeps_grid()),
                 spacing: app.scene.settings.grid_spacing,
-                axes: app.scene.settings.axes_visible,
+                axes: match preview.is_none() || mode.keeps_axes() {
+                    true => app.scene.settings.axes_visible,
+                    false => [false; 3],
+                },
                 style: app.scene.settings.axis_style,
                 plane_marks: app.scene.settings.plane_marks,
             },
@@ -169,6 +188,11 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.evaluation_generation.hash(&mut hasher);
     app.renderable_key.hash(&mut hasher);
     (app.settings.display_mode as u8).hash(&mut hasher);
+    // A preview opening or closing changes what is drawn under it, so the frame
+    // has to be redrawn for it -- and so does a change to the setting that says
+    // what (issue 82).
+    app.preview_subject().hash(&mut hasher);
+    app.scene.settings.preview_viewport.hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
     app.scene.settings.axes_visible.hash(&mut hasher);
