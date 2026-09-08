@@ -2337,8 +2337,14 @@ impl App {
         };
         let name = self.scene.node(split).name.clone();
         for (index, piece) in pieces.into_iter().enumerate() {
-            self.scene.add_mesh(
-                &format!("{name} {}", index + 1),
+            // "Box Piece 3", not "Box 3": a piece is not another box, and
+            // numbering it as one takes the number out of the series the
+            // objects use -- eighty pieces called "Box 1" to "Box 80" leave the
+            // next box the user adds to be called "Box 81". The name is taken
+            // as it is, since the pieces of one collection are numbered apart
+            // by construction.
+            self.scene.add_mesh_named(
+                format!("{name} Piece {}", index + 1),
                 simple3d_core::mesh_data::MeshData::new(piece),
                 split,
                 index,
@@ -6955,6 +6961,29 @@ mod tests {
         // And the tool opens on both cuts rather than on the first of them.
         app.run(Command::SplitIntoPieces);
         assert_eq!(app.split_tool.as_ref().expect("the tool opened on the split").plan, plan);
+    }
+
+    /// A piece is named after the shape it came out of and numbered in a series
+    /// of its own (issue 82).
+    ///
+    /// They used to be "Plate 1" and up, which is the series the *objects* use:
+    /// eighty pieces took eighty numbers out of it, and the next plate the user
+    /// added came out as "Plate 81".
+    #[test]
+    fn pieces_are_named_apart_from_the_objects_they_came_from() {
+        let mut app = headless_app();
+        split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
+        let split = app.primary().unwrap();
+        let names: Vec<String> =
+            app.scene.node(split).children.iter().map(|&c| app.scene.node(c).name.clone()).collect();
+        let base = app.scene.node(split).name.clone();
+        assert_eq!(names.first().map(String::as_str), Some(format!("{base} Piece 1").as_str()));
+        assert_eq!(names.last().map(String::as_str), Some(format!("{base} Piece {}", names.len()).as_str()));
+
+        // And the next object of that kind is the second one, not the ninth.
+        let root = app.scene.root();
+        let another = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+        assert_eq!(app.scene.node(another).name, format!("{base} 2"), "the pieces ate the objects' numbering");
     }
 
     #[test]
