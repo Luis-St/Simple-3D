@@ -831,11 +831,17 @@ fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: b
         // that had faded by the time anyone looked for it (issue 41).
         item(ui, keymap, &mut chosen, Command::MoveUp, app.can_reorder(-1));
         item(ui, keymap, &mut chosen, Command::MoveDown, app.can_reorder(1));
-        ui.separator();
         // A group's operator, where the group is: the property editor has the
         // same four, but pointing at the group in the tree and saying what it
         // does is one gesture rather than three (issue 37).
+        //
+        // Its divider goes with it. This is the one entry in the menu that is
+        // hidden rather than disabled where it does not apply -- an operator on
+        // something that is not a group is not a greyed-out choice, it is not a
+        // question -- so a divider drawn either side of it on every row left a
+        // block with nothing in it and two rules across a gap (issue 94).
         if is_group {
+            ui.separator();
             let current = app.scene.node(id).group_op();
             ui.menu_button("Operation", |ui| {
                 for option in GroupOp::ALL {
