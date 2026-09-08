@@ -129,11 +129,11 @@ portable.
 
 ## Status
 
-**v0.0.26.** All four crates are implemented and all 29 of the spec's acceptance
+**v0.0.27.** All four crates are implemented and all 29 of the spec's acceptance
 criteria are behaviourally met. What each release changed is on its release
 page; the commit log is the record between them.
 
-`cargo test --workspace` runs **690 tests**, none failing, and every
+`cargo test --workspace` runs **697 tests**, none failing, and every
 one of the 29 criteria is asserted by a test that cites it by name. Check that
 last claim rather than trusting it:
 
