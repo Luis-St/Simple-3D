@@ -344,6 +344,17 @@ pub struct Request<'a> {
     pub palette: Palette,
     pub grid: Grid,
     pub items: Vec<Item<'a>>,
+    /// A tool's preview, in world space: closed loops drawn over the model in
+    /// the accent colour once everything else is down (issue 82).
+    ///
+    /// It is drawn here rather than with the 2D painter over the finished
+    /// picture so that it meets the depth buffer: a cut on the far side of the
+    /// shape is behind it, and a grid that shows through the solid it lies on
+    /// reads as floating in front of it. It writes no depth of its own -- one
+    /// loop must not hide the next where they cross -- and it is biased towards
+    /// the eye, because the loops at the ends of a run lie exactly on the
+    /// surface they are drawn on and would otherwise lose the tie to it.
+    pub preview: Vec<Vec<Vec3>>,
 }
 
 /// How many rows a band must have before splitting the frame again is worth
@@ -476,6 +487,7 @@ fn prepare(request: &Request<'_>) -> Vec<Step> {
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost),
         }
     }
+    push_preview(&mut steps, &view, &request.preview, request.palette.selected);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
         // there is no surface for it to sit on.
@@ -511,8 +523,36 @@ fn draw(frame: &mut Frame, request: &Request<'_>, steps: &[Step], mine: &[u32], 
 /// parallel path re-derives the whole model for every thread, and a dense mesh
 /// in a small viewport comes out *slower* than drawing it on one core.
 pub(crate) enum Step {
-    Triangle { v: [Vertex; 3], colour: Rgba, tag: u16, write_depth: bool },
-    Line { a: Vertex, b: Vertex, colour: Rgba, bias: f32, tag: u16, write_depth: bool },
+    Triangle {
+        v: [Vertex; 3],
+        colour: Rgba,
+        tag: u16,
+        write_depth: bool,
+    },
+    Line {
+        a: Vertex,
+        b: Vertex,
+        colour: Rgba,
+        bias: f32,
+        tag: u16,
+        write_depth: bool,
+    },
+    /// A line drawn *over* the model and tested against it, claiming neither
+    /// the depth of a pixel nor its body: a tool's preview, which has to be
+    /// hidden by the solid it is drawn on the far side of and must not hide the
+    /// next loop of itself where two of them cross.
+    ///
+    /// Its own variant rather than a `Line` that writes no depth, because the
+    /// two are told apart by *when* they are drawn and only the software
+    /// renderer keeps the order it was handed: the GPU sorts the primitives
+    /// into passes, and a line that writes no depth used to mean the ground
+    /// grid, which goes under the model.
+    Overlay {
+        a: Vertex,
+        b: Vertex,
+        colour: Rgba,
+        bias: f32,
+    },
 }
 
 impl Step {
@@ -524,7 +564,7 @@ impl Step {
                 let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
                 (a.min(b).min(c), a.max(b).max(c))
             }
-            Step::Line { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
+            Step::Line { a, b, .. } | Step::Overlay { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
         }
     }
 }
@@ -568,6 +608,10 @@ fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[u32]) {
                 } else {
                     frame.line_with_depth(a, b, colour, bias, false);
                 }
+            }
+            Step::Overlay { a, b, colour, bias } => {
+                frame.set_tag(0);
+                frame.line_with_depth(a, b, colour, bias, false);
             }
         }
     }
@@ -710,6 +754,28 @@ const AXIS_BIAS: f32 = -5.0e-4;
 /// interpolated depth rounds behind the face it lies on, and an order of
 /// magnitude above this it starts showing through the far side of a solid.
 const MARK_BIAS: f32 = 3.0e-3;
+/// A preview loop sits on the surface it is drawn over exactly as a plane mark
+/// does -- the cells at the ends of a run lie in the faces the run starts and
+/// stops at -- so it needs the same bias to win that tie, and no more, or it
+/// starts showing through the far side of the solid.
+const PREVIEW_BIAS: f32 = 3.0e-3;
+
+/// A tool's preview loops, over the model and depth-tested against it.
+///
+/// Drawn as [`Step::Overlay`]: after the model, tested against it, and claiming
+/// nothing of its own -- so a loop is hidden by the solid it is behind and does
+/// not hide the next loop where two of them cross.
+fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour: Rgba) {
+    for loop_ in loops {
+        for (index, &from) in loop_.iter().enumerate() {
+            let to = loop_[(index + 1) % loop_.len()];
+            let Step::Line { a, b, bias, .. } = line_step(view, from, to, colour, PREVIEW_BIAS, 0, false) else {
+                unreachable!("a line step is a line");
+            };
+            steps.push(Step::Overlay { a, b, colour, bias });
+        }
+    }
+}
 
 fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
@@ -1522,6 +1588,7 @@ mod tests {
             palette: Palette::dark(),
             grid: Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false },
             items,
+            preview: Vec::new(),
         }
     }
 
@@ -1696,6 +1763,60 @@ mod tests {
                 frame.color[o] == colour[0] && frame.color[o + 1] == colour[1] && frame.color[o + 2] == colour[2]
             })
             .count()
+    }
+
+    /// A tool's preview is drawn *on* the model, not through it (issue 82).
+    ///
+    /// The cells at the near end of a run lie in the face turned towards the
+    /// camera and have to be drawn over it; the ones at the far end lie in the
+    /// face turned away and are behind forty millimetres of solid. A grid that
+    /// shows through the shape reads as floating in front of it, which is the
+    /// one thing the preview must not say.
+    /// The preview is a step of its own, and it comes after the model.
+    ///
+    /// The two engines are handed the same prepared steps, and only the
+    /// software one draws them in the order it was given: the GPU sorts them
+    /// into passes by kind, and a line that writes no depth meant the ground
+    /// grid, which goes *under* the model. Drawn as one, the preview was
+    /// covered by the very shape it is drawn on -- invisible in the running
+    /// application while every pixel test on this file passed.
+    #[test]
+    fn a_preview_is_its_own_kind_of_step_and_comes_after_the_model() {
+        let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+        req.preview = vec![vec![
+            Vec3::new(-15.0, -15.0, 20.0),
+            Vec3::new(15.0, -15.0, 20.0),
+            Vec3::new(15.0, 15.0, 20.0),
+            Vec3::new(-15.0, 15.0, 20.0),
+        ]];
+        let steps = prepare(&req);
+        let overlays = steps.iter().filter(|step| matches!(step, Step::Overlay { .. })).count();
+        assert_eq!(overlays, 4, "a four-cornered loop is four lines");
+        let first = steps.iter().position(|step| matches!(step, Step::Overlay { .. })).expect("it is in there");
+        let last_face = steps.iter().rposition(|step| matches!(step, Step::Triangle { .. })).expect("the box is drawn");
+        assert!(first > last_face, "the preview was prepared before the model it is drawn over");
+    }
+
+    #[test]
+    fn a_preview_loop_is_drawn_on_the_solid_and_hidden_behind_it() {
+        let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let square = |z: f64| {
+            vec![
+                Vec3::new(-15.0, -15.0, z),
+                Vec3::new(15.0, -15.0, z),
+                Vec3::new(15.0, 15.0, z),
+                Vec3::new(-15.0, 15.0, z),
+            ]
+        };
+        let drawn = |loops: Vec<Vec<Vec3>>| {
+            let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+            req.preview = loops;
+            let frame = render(&req);
+            pixels_of(&frame, req.palette.selected)
+        };
+        assert!(drawn(vec![square(20.0)]) > 0, "the cells on the face turned towards the camera were not drawn");
+        assert_eq!(drawn(vec![square(-20.0)]), 0, "the cells on the far side of the solid were drawn through it");
     }
 
     #[test]
@@ -2077,6 +2198,7 @@ mod tests {
                     plane_marks: false,
                 },
                 items,
+                preview: Vec::new(),
             }
         }
         let ball = primitives::ellipsoid_mesh(50.0, 50.0, 50.0, 32);
@@ -2609,6 +2731,7 @@ mod tests {
             palette: Palette::dark(),
             grid: Grid { visible: true, spacing: 10.0, axes: [false; 3], style: AxisStyle::Grid, plane_marks: false },
             items: Vec::new(),
+            preview: Vec::new(),
         };
         (render(&req), req.palette)
     }

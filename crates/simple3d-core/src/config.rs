@@ -412,9 +412,10 @@ pub struct AppSettings {
     /// time. Beside the export's own last-used settings, and here rather than
     /// in the project for the same reason: it is how one person is working, not
     /// a property of any one model. Newer than the settings file, so an older
-    /// one reads as the default tiling.
+    /// one reads as the default tiling -- and a settings file from before a
+    /// split could be cut more than once reads as the one cut it holds.
     #[serde(default)]
-    pub last_split: simple3d_geom::tiling::Tiling,
+    pub last_split: simple3d_geom::tiling::SplitPlan,
     pub recent_files: Vec<PathBuf>,
 }
 
@@ -444,7 +445,7 @@ impl Default for AppSettings {
             last_export_format: "3mf".to_string(),
             last_export_scale: 1.0,
             last_export_bodies: "one".to_string(),
-            last_split: simple3d_geom::tiling::Tiling::default(),
+            last_split: simple3d_geom::tiling::SplitPlan::default(),
             recent_files: Vec::new(),
         }
     }

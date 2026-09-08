@@ -402,6 +402,10 @@ struct Passes {
     /// Feature edges, selection outlines, plane marks: opaque lines, biased
     /// towards the eye, writing depth and tag.
     lines: Vec<GpuVertex>,
+    /// A tool's preview: over the model, blended, depth-tested, and claiming
+    /// neither depth nor tag. The same state as the grid and the opposite side
+    /// of the model from it, which is the whole reason it is a pass of its own.
+    overlay: Vec<GpuVertex>,
     /// Ghosts: blended, depth-tested, writing neither depth nor tag.
     ghosts: Vec<GpuVertex>,
     /// The origin axes, with their own rule.
@@ -440,6 +444,14 @@ impl Passes {
         self.saw(a.key);
         self.saw(b.key);
     }
+
+    fn overlay(&mut self, a: Vertex, b: Vertex, colour: Rgba, bias: f32) {
+        let (a, b) = (biased(a, bias), biased(b, bias));
+        self.overlay.push(GpuVertex::new(a, colour, 0, 0));
+        self.overlay.push(GpuVertex::new(b, colour, 0, 0));
+        self.saw(a.key);
+        self.saw(b.key);
+    }
 }
 
 fn biased(v: Vertex, bias: f32) -> Vertex {
@@ -463,6 +475,7 @@ impl Gpu {
                 Step::Line { a, b, colour, bias, tag, write_depth } => {
                     passes.line(a, b, colour, bias, tag, write_depth)
                 }
+                Step::Overlay { a, b, colour, bias } => passes.overlay(a, b, colour, bias),
             }
         }
         // The axes carry which segment they are, so the shader can find that
@@ -556,11 +569,15 @@ impl Gpu {
         self.batch(&gl, glow::TRIANGLES, &passes.solids);
         self.batch(&gl, glow::LINES, &passes.lines);
 
-        // Ghosts: blended over what is there, claiming nothing.
+        // Ghosts, and a tool's preview: blended over what is there, tested
+        // against the model and claiming nothing. The preview is here rather
+        // than with the grid because it is drawn *on* the model -- the grid
+        // goes under it.
         gl.enable(glow::BLEND);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.batch(&gl, glow::TRIANGLES, &passes.ghosts);
+        self.batch(&gl, glow::LINES, &passes.overlay);
 
         // The axes, in the overlay pass, where the depth and tag buffers are
         // readable rather than attached.

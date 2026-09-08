@@ -2310,7 +2310,7 @@ impl App {
         &mut self,
         id: NodeId,
         pieces: Vec<simple3d_geom::Mesh>,
-        tiling: Option<simple3d_geom::tiling::Tiling>,
+        plan: Option<simple3d_geom::tiling::SplitPlan>,
     ) -> Option<(String, usize)> {
         let count = pieces.len();
         let split = if self.scene.node(id).is_split() {
@@ -2318,8 +2318,8 @@ impl App {
                 self.scene.remove(child);
             }
             if let Some(node) = self.scene.get_mut(id) {
-                if let simple3d_core::scene::Body::Split { tiling: was, .. } = &mut node.body {
-                    *was = tiling;
+                if let simple3d_core::scene::Body::Split { plan: was, .. } = &mut node.body {
+                    *was = plan;
                 }
             }
             id
@@ -2333,7 +2333,7 @@ impl App {
             // Out first, so the split standing in its place can carry its name
             // rather than a numbered variant of it.
             self.scene.remove(id);
-            self.scene.add_split(original, tiling, parent, index)
+            self.scene.add_split(original, plan, parent, index)
         };
         let name = self.scene.node(split).name.clone();
         for (index, piece) in pieces.into_iter().enumerate() {
@@ -5777,7 +5777,7 @@ mod tests {
         assert!(app.split_tool.is_some(), "the tool did not open, so this measures nothing");
 
         for kind in simple3d_geom::tiling::CellKind::ALL {
-            app.split_tool.as_mut().unwrap().tiling.kind = kind;
+            app.split_tool.as_mut().unwrap().plan.passes[0].kind = kind;
             for width in [1400.0_f32, 900.0, 680.0, 560.0, 480.0, 400.0, 360.0, 320.0] {
                 let ctx = egui::Context::default();
                 crate::theme::apply(&ctx);
@@ -6781,8 +6781,9 @@ mod tests {
     /// The cutting is on a thread precisely so the interface does not wait for
     /// it, so a test has to.
     fn split_with(app: &mut App, tiling: simple3d_geom::tiling::Tiling) {
+        use simple3d_geom::tiling::SplitPlan;
         app.run(Command::SplitIntoPieces);
-        app.split_tool.as_mut().expect("the tool opened on the selection").tiling = tiling;
+        app.split_tool.as_mut().expect("the tool opened on the selection").plan = SplitPlan::of(tiling);
         app.start_split();
         let deadline = Instant::now() + Duration::from_secs(60);
         while app.split_job.is_some() {
@@ -6815,7 +6816,7 @@ mod tests {
         }
         // The pattern is kept on the split, which is what lets the panel say
         // what was done and the tool open again on it.
-        let tiling = app.scene.node(split).split_tiling().expect("the pattern was not kept");
+        let tiling = app.scene.node(split).split_plan().expect("the pattern was not kept").first();
         assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Squares);
         assert_eq!(tiling.size, 10.0);
         // And the pieces are exactly where the shape was.
@@ -6837,7 +6838,7 @@ mod tests {
         assert_eq!(app.scene.node(split).children.len(), 8);
 
         app.run(Command::SplitIntoPieces);
-        let offered = app.split_tool.as_ref().expect("the tool opened on the split").tiling;
+        let offered = app.split_tool.as_ref().expect("the tool opened on the split").plan.first();
         assert_eq!(offered.size, 10.0, "the tool did not open on the pattern the split was cut with");
         app.cancel_split_tool();
 
@@ -6875,7 +6876,8 @@ mod tests {
         let mut app = headless_app();
         let plate = app.primary().unwrap();
         app.run(Command::SplitIntoPieces);
-        app.split_tool.as_mut().unwrap().tiling = simple3d_geom::tiling::Tiling { size: 5.0, ..Default::default() };
+        app.split_tool.as_mut().unwrap().plan =
+            simple3d_geom::tiling::SplitPlan::of(simple3d_geom::tiling::Tiling { size: 5.0, ..Default::default() });
         app.start_split();
         app.scene.get_mut(plate).unwrap().params_mut().unwrap().insert("width".into(), ParamValue::Length(90.0));
         let before = app.history.undo_len();
@@ -6905,10 +6907,50 @@ mod tests {
         let text = simple3d_core::project::to_string(&app.scene);
         let scene = simple3d_core::project::from_str(&text).expect("a scene with a cut-up shape loads");
         let split = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
-        let tiling = scene.node(split).split_tiling().expect("the pattern was not written to the file");
+        let tiling = scene.node(split).split_plan().expect("the pattern was not written to the file").first();
         assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Hexagons);
         assert_eq!(tiling.size, 12.0);
         assert_eq!(tiling.layer, 2.0);
+    }
+
+    /// Two cuts at once, end to end and through the document: the pieces are
+    /// what both grids leave, and the plan that made them is what the tool
+    /// opens on again (issue 82).
+    #[test]
+    fn a_shape_is_cut_by_every_cut_of_the_plan_and_the_plan_is_kept() {
+        use simple3d_geom::tiling::{SplitPlan, Tiling};
+        let mut app = headless_app();
+        // The starting plate is 40 x 20 x 4. Squares of 20 through Z are two
+        // columns; slabs of 10 through X cut each of those in two across.
+        let plan = SplitPlan {
+            passes: vec![
+                Tiling { size: 20.0, axis: 2, ..Tiling::default() },
+                Tiling { size: 10.0, axis: 0, ..Tiling::default() },
+            ],
+        };
+        app.run(Command::SplitIntoPieces);
+        app.split_tool.as_mut().expect("the tool opened on the selection").plan = plan.clone();
+        app.start_split();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while app.split_job.is_some() {
+            app.poll_split();
+            assert!(Instant::now() < deadline, "the split never finished");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        let split = app.primary().expect("the split is selected");
+        assert_eq!(app.scene.node(split).children.len(), 4, "two cuts across each other are four pieces");
+        assert_eq!(app.scene.node(split).split_plan(), Some(&plan), "the plan the pieces were cut by was not kept");
+
+        // Through the file, and back out again as the plan it was.
+        let text = simple3d_core::project::to_string(&app.scene);
+        let scene = simple3d_core::project::from_str(&text).expect("a scene cut by two cuts loads");
+        let saved = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
+        assert_eq!(scene.node(saved).split_plan(), Some(&plan));
+
+        // And the tool opens on both cuts rather than on the first of them.
+        app.run(Command::SplitIntoPieces);
+        assert_eq!(app.split_tool.as_ref().expect("the tool opened on the split").plan, plan);
     }
 
     #[test]
@@ -7070,13 +7112,14 @@ mod tests {
     #[test]
     fn each_preview_mode_hides_exactly_what_it_names() {
         use simple3d_core::scene::PreviewViewport::*;
-        // Read as a table, because the four are only ever right together: a
+        // Read as a table, because the five are only ever right together: a
         // mode that hides one thing too many is a viewport with the ground gone
         // for no reason the user asked for.
         for (mode, grid, axes, others) in [
             (NoChange, true, true, true),
             (HideAxes, true, false, true),
             (HideGrid, false, true, true),
+            (HideGridAndAxes, false, false, true),
             (PreviewOnly, false, false, false),
         ] {
             assert_eq!(mode.keeps_grid(), grid, "{mode:?} grid");

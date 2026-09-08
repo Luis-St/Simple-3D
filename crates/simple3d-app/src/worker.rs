@@ -9,7 +9,7 @@
 use simple3d_core::eval::{Cancel, Evaluated, Evaluator};
 use simple3d_core::scene::{NodeData, NodeId, Scene};
 use simple3d_export::{ExportError, Options};
-use simple3d_geom::tiling::Tiling;
+use simple3d_geom::tiling::SplitPlan;
 use simple3d_geom::Mesh;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -306,7 +306,9 @@ pub struct SplitJob {
     /// The shape as it was when the cutting started, in its own frame. What the
     /// pieces are only means anything against this, so it travels with them.
     pub before: NodeData,
-    pub tiling: Tiling,
+    pub plan: SplitPlan,
+    /// How many cells will be tried, over every pass -- what the progress bar
+    /// reads against.
     pub cells: usize,
     done: Arc<AtomicU32>,
     cancelled: Arc<AtomicBool>,
@@ -315,17 +317,20 @@ pub struct SplitJob {
 }
 
 impl SplitJob {
-    pub fn spawn(node: NodeId, tab: usize, before: NodeData, mesh: Arc<Mesh>, tiling: Tiling) -> SplitJob {
+    pub fn spawn(node: NodeId, tab: usize, before: NodeData, mesh: Arc<Mesh>, plan: SplitPlan) -> SplitJob {
         // The cells that will actually be tried, so the bar reads against the
         // number the status line quoted rather than against the arithmetic
-        // bound that includes the margin around the shape.
-        let cells = mesh.bounds().map_or(0, |bounds| simple3d_geom::tiling::planned(&tiling, bounds));
+        // bound that includes the margin around the shape. A second pass is
+        // counted against the pieces the first one leaves, which is what makes
+        // the bar run at one speed across the whole cutting.
+        let cells = mesh.bounds().map_or(0, |bounds| plan.work(bounds));
         let done = Arc::new(AtomicU32::new(0));
         let cancelled = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
 
         let worker_done = done.clone();
         let worker_cancelled = cancelled.clone();
+        let plan_for_worker = plan.clone();
         std::thread::Builder::new()
             .name("simple3d-split".into())
             .spawn(move || {
@@ -333,11 +338,11 @@ impl SplitJob {
                     worker_done.fetch_add(1, Ordering::Relaxed);
                 };
                 let give_up = || worker_cancelled.load(Ordering::Relaxed);
-                let _ = tx.send(simple3d_geom::tiling::cut(&mesh, &tiling, &report, &give_up));
+                let _ = tx.send(simple3d_geom::tiling::cut_plan(&mesh, &plan_for_worker, &report, &give_up));
             })
             .expect("the platform can start a thread");
 
-        SplitJob { node, tab, before, tiling, cells, done, cancelled, result: rx, started: Instant::now() }
+        SplitJob { node, tab, before, plan, cells, done, cancelled, result: rx, started: Instant::now() }
     }
 
     /// How much of the split is done, as a fraction. The cells are counted

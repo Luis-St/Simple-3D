@@ -56,10 +56,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         }
         let view = app.current_view();
         overlays(app, ui, rect, &view);
-        // The tool's own preview, over everything else the viewport draws: the
-        // cells are what the window is asking about, and a manipulator handle
-        // across them is a handle the eye reads as part of the grid (issue 82).
-        crate::split_tool::preview(app, &ui.painter_at(rect), &view);
     });
 }
 
@@ -139,6 +135,10 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
                 plane_marks: app.scene.settings.plane_marks,
             },
             items,
+            // The split tool's cells, drawn on the model with the depth buffer
+            // rather than over the finished picture, so the far side of the
+            // shape hides the ones behind it (issue 82).
+            preview: crate::split_tool::preview_loops(app),
         };
         // One preparation, whichever engine draws it: the projection, the
         // shading, the grid's falloff and the axis rule are settled here and
@@ -192,6 +192,11 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     // has to be redrawn for it -- and so does a change to the setting that says
     // what (issue 82).
     app.preview_subject().hash(&mut hasher);
+    // The cells themselves are in the picture now, so every number that moves
+    // them is part of what the picture was drawn from.
+    if let Some(tool) = app.split_tool.as_ref() {
+        tool.hash_preview(&mut hasher);
+    }
     app.scene.settings.preview_viewport.hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);

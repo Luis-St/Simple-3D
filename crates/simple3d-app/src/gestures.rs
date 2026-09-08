@@ -2187,6 +2187,68 @@ fn the_split_panels_button_joins_the_pieces_back_together_without_taking_the_pan
     assert_eq!(harness.state().scene.node(back).children.len(), 2, "the operands did not come back");
 }
 
+/// The tool's numbers are the same control every other number in the
+/// application is: dragged to change, clicked to type into (issue 82).
+///
+/// They were plain text fields, alone among the numbers on screen -- so the one
+/// gesture that is everywhere else did nothing in the one window that is drawn
+/// over the model.
+#[test]
+fn the_split_tools_numbers_are_dragged_like_every_other_number() {
+    use simple3d_core::keymap::Command;
+
+    let mut harness = harness_configured("split-scrub", |app| {
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+    });
+    harness.state_mut().run(Command::SplitIntoPieces);
+    // A few frames rather than one: the window sizes itself over several, and a
+    // drag aimed at where a field was before it settled lands on nothing.
+    for _ in 0..6 {
+        harness.step();
+    }
+    let size =
+        |harness: &Harness<'_, App>| harness.state().split_tool.as_ref().expect("the tool is open").plan.first().size;
+    assert_eq!(size(&harness), 10.0, "the tool did not open on the default cell");
+
+    // Sixty pixels to the right at six pixels a millimetre is ten millimetres.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("split-0-size"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 6);
+    assert!((size(&harness) - 20.0).abs() < 1e-9, "the drag gave {} rather than 20 mm", size(&harness));
+
+    // And nothing was cut on the way: the model is not touched until Split.
+    assert!(harness.state().split_job.is_none(), "dragging a number started a split");
+    assert_eq!(harness.state().history.undo_len(), 0, "changing the plan left something to undo");
+}
+
+/// A cut can be made more than once over, each on its own axis and in its own
+/// cell shape, which is what "split on several axes at once" means (issue 82).
+#[test]
+fn a_second_cut_is_added_from_the_window_and_starts_across_the_first() {
+    use egui_kittest::kittest::Queryable;
+    use simple3d_core::keymap::Command;
+
+    let mut harness = harness_configured("split-two-cuts", |app| {
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+    });
+    harness.state_mut().run(Command::SplitIntoPieces);
+    for _ in 0..6 {
+        harness.step();
+    }
+    assert_eq!(harness.state().split_tool.as_ref().unwrap().plan.passes.len(), 1);
+
+    harness.get_by_label("Add another cut").click();
+    harness.step();
+    harness.step();
+    let plan = harness.state().split_tool.as_ref().expect("the tool is open").plan.clone();
+    assert_eq!(plan.passes.len(), 2, "the window did not take a second cut");
+    assert_ne!(plan.passes[1].axis, plan.passes[0].axis, "the second cut runs the same way as the first");
+
+    // Both cuts are on screen, each with its own numbers -- two Size fields, not
+    // one shared between them.
+    assert!(harness.ctx.read_response(crate::panel_properties::grip_id("split-1-size")).is_some());
+    assert!(harness.query_by_label("Cut 2").is_some(), "the second cut is not named");
+}
+
 /// The split tool end to end, through its real window: pick a cell shape, press
 /// Split, and wait for the pieces the thread cuts to land in the document
 /// (issue 82).
@@ -2211,7 +2273,7 @@ fn the_split_tool_cuts_the_shape_into_the_cells_its_window_was_asked_for() {
     harness.step();
     harness.step();
     assert_eq!(
-        harness.state().split_tool.as_ref().unwrap().tiling.kind,
+        harness.state().split_tool.as_ref().unwrap().plan.first().kind,
         simple3d_geom::tiling::CellKind::Hexagons,
         "clicking the cell shape did not choose it"
     );
@@ -2237,7 +2299,7 @@ fn the_split_tool_cuts_the_shape_into_the_cells_its_window_was_asked_for() {
     assert!(harness.state().scene.node(split).is_split(), "no split was made");
     assert!(harness.state().scene.node(split).children.len() > 1, "the shape came back in one piece");
     assert_eq!(
-        harness.state().scene.node(split).split_tiling().map(|t| t.kind),
+        harness.state().scene.node(split).split_plan().map(|plan| plan.first().kind),
         Some(simple3d_geom::tiling::CellKind::Hexagons),
         "the pattern the pieces were cut with was not kept"
     );

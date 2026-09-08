@@ -9,3 +9,8 @@ description = "Meshes, primitive generators, a BSP boolean CSG kernel and mesh r
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+# Only the tests read a plan back out of its written form; the crate itself
+# never touches a file.
+serde_json = "1"

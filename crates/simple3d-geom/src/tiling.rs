@@ -29,7 +29,7 @@ use std::f64::consts::PI;
 ///
 /// Every one of them tiles the plane exactly -- no gaps and no overlaps -- which
 /// is what makes the pieces add back up to the shape they were cut from.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellKind {
     #[default]
@@ -245,6 +245,168 @@ impl Tiling {
         }
         None
     }
+}
+
+/// Several tilings, cut one after another, so a shape can be cut on more than
+/// one axis at once and with a different cell shape on each (issue 82).
+///
+/// One tiling answers "squares through Z". Two answer "squares through Z, then
+/// slabs through X", which is the pattern a plate is scored into a grid of
+/// blocks by, and what neither a single tiling nor two separate splits can say:
+/// splitting a split cuts the *pieces* of one into a second collection, and the
+/// way back is then two joins deep.
+///
+/// The passes are applied in order, each to the pieces the last one left, so
+/// the pieces are the cells of every tiling intersected. That is also why the
+/// order does not change the answer -- intersection does not care -- and why
+/// nothing here has to reason about how two lattices meet.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct SplitPlan {
+    pub passes: Vec<Tiling>,
+}
+
+impl Default for SplitPlan {
+    fn default() -> SplitPlan {
+        SplitPlan::of(Tiling::default())
+    }
+}
+
+/// Read either a list of tilings or a single one.
+///
+/// A split used to be cut by exactly one tiling and wrote it as an object. A
+/// file or a settings file written then still says what was done, and there is
+/// no reason to lose it over a pair of brackets.
+impl<'de> Deserialize<'de> for SplitPlan {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<SplitPlan, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Read {
+            Many(Vec<Tiling>),
+            One(Box<Tiling>),
+        }
+        Ok(match Read::deserialize(deserializer)? {
+            Read::Many(passes) => SplitPlan { passes },
+            Read::One(tiling) => SplitPlan::of(*tiling),
+        })
+    }
+}
+
+/// The most passes one split may be cut by.
+///
+/// Three is not a technical limit -- the pieces of any pass can be cut again --
+/// but each pass multiplies the pieces the last one made, so a fourth is a
+/// number nobody typed and a wait nobody asked for. Two is what "on more than
+/// one axis" means; the third is there for the plate that is also cut into
+/// layers a different way.
+pub const MAX_PASSES: usize = 3;
+
+impl SplitPlan {
+    pub fn of(tiling: Tiling) -> SplitPlan {
+        SplitPlan { passes: vec![tiling] }
+    }
+
+    /// The first pass, which is the whole plan for the ordinary one-pass split
+    /// and the one a summary is named after.
+    pub fn first(&self) -> Tiling {
+        self.passes.first().copied().unwrap_or_default()
+    }
+
+    /// Whether this is a plan that can be cut at all: every pass buildable on
+    /// its own, and the pieces they come to between them a number a person can
+    /// still find in the outliner.
+    pub fn refusal(&self, bounds: (Vec3, Vec3)) -> Option<String> {
+        if self.passes.is_empty() {
+            return Some("There is nothing to cut with: add a cut.".to_string());
+        }
+        for tiling in &self.passes {
+            // A single pass is refused by its own count first, so the message
+            // names the cell that is too small rather than the total.
+            if let Some(why) = tiling.refusal(bounds) {
+                return Some(why);
+            }
+        }
+        let cells = self.cell_count(bounds);
+        if cells > MAX_CELLS {
+            return Some(format!(
+                "The cuts come to {cells} cells between them, and {MAX_CELLS} is as many as one split may make. \
+                 Use a bigger cell, or one cut fewer."
+            ));
+        }
+        None
+    }
+
+    /// How many cells the passes lay over a shape of these bounds between them,
+    /// as arithmetic -- the product, because every cell of one pass is cut by
+    /// every cell of the next.
+    pub fn cell_count(&self, bounds: (Vec3, Vec3)) -> usize {
+        self.passes.iter().fold(1usize, |total, tiling| total.saturating_mul(tiling.cell_count(bounds)))
+    }
+
+    /// How many cells the passes actually lay over the shape -- the ones that
+    /// could hold a piece of it, which is the number worth showing.
+    pub fn planned(&self, bounds: (Vec3, Vec3)) -> usize {
+        if self.refusal(bounds).is_some() {
+            return 0;
+        }
+        self.passes.iter().fold(1usize, |total, tiling| total.saturating_mul(planned(tiling, bounds)))
+    }
+
+    /// How many cells will be *tried*, which is what progress is measured
+    /// against: the first pass over the shape, then the second over each piece
+    /// the first left, and so on. Every pass but the first is counted against
+    /// the pieces before it, which is why this is a running product rather than
+    /// the last one.
+    pub fn work(&self, bounds: (Vec3, Vec3)) -> usize {
+        let mut total = 0usize;
+        let mut running = 1usize;
+        for tiling in &self.passes {
+            running = running.saturating_mul(planned(tiling, bounds));
+            total = total.saturating_add(running);
+        }
+        total
+    }
+
+    /// Where every pass's cuts will fall, for drawing them over the model. The
+    /// cap is shared out between the passes, so a second cut cannot be squeezed
+    /// off the picture by the first one filling it.
+    pub fn preview_loops(&self, bounds: (Vec3, Vec3), limit: usize) -> Vec<Vec<Vec3>> {
+        let each = limit / self.passes.len().max(1);
+        self.passes.iter().flat_map(|tiling| preview_loops(tiling, bounds, each)).collect()
+    }
+}
+
+/// Cut a solid by every pass of a plan, in order.
+///
+/// Each pass cuts what the last one left, so the pieces are the intersection of
+/// all of the tilings -- a plate cut into squares through Z and then into slabs
+/// through X comes back as the blocks the two grids make between them.
+///
+/// `report` is called once per cell tried, at every pass, which is what
+/// [`SplitPlan::work`] counts.
+pub fn cut_plan(
+    mesh: &Mesh,
+    plan: &SplitPlan,
+    report: &(dyn Fn() + Sync),
+    give_up: &(dyn Fn() -> bool + Sync),
+) -> Option<Vec<Mesh>> {
+    let Some((first, rest)) = plan.passes.split_first() else { return Some(Vec::new()) };
+    let Some(frame) = mesh.bounds() else { return Some(Vec::new()) };
+    let mut pieces = cut_within(mesh, first, frame, report, give_up)?;
+    for tiling in rest {
+        let mut next = Vec::with_capacity(pieces.len());
+        for piece in &pieces {
+            // Every pass is laid out over the whole shape, so the cuts line up
+            // across the pieces the last one made. A piece the pass leaves
+            // whole comes back as itself, so nothing is lost to a cut that
+            // misses -- and the order is the order the cells were planned in,
+            // at every level, so the same plan on the same shape always names
+            // the same piece.
+            next.extend(cut_within(piece, tiling, frame, report, give_up)?);
+        }
+        pieces = next;
+    }
+    Some(pieces)
 }
 
 /// One cell of the tiling: the prism a piece is cut out by.
@@ -563,10 +725,32 @@ pub fn cut(
     give_up: &(dyn Fn() -> bool + Sync),
 ) -> Option<Vec<Mesh>> {
     let Some(bounds) = mesh.bounds() else { return Some(Vec::new()) };
-    if tiling.refusal(bounds).is_some() {
+    cut_within(mesh, tiling, bounds, report, give_up)
+}
+
+/// Cut a solid by a tiling laid out over `frame` rather than over the solid
+/// itself.
+///
+/// The two are the same thing for a shape being cut on its own, and they are
+/// not for the second cut of a plan: that one cuts the *pieces* the first left,
+/// and a lattice anchored on each piece in turn is a different lattice for
+/// every piece -- nine columns of a plate would each be cut into a grid centred
+/// on themselves, and the cuts would not line up across the shape. The frame is
+/// the whole shape, so every piece is cut by the same grid.
+fn cut_within(
+    mesh: &Mesh,
+    tiling: &Tiling,
+    frame: (Vec3, Vec3),
+    report: &(dyn Fn() + Sync),
+    give_up: &(dyn Fn() -> bool + Sync),
+) -> Option<Vec<Mesh>> {
+    let Some(bounds) = mesh.bounds() else { return Some(Vec::new()) };
+    if tiling.refusal(frame).is_some() {
         return Some(Vec::new());
     }
-    let cells = plan(tiling, bounds);
+    // Planned over the whole frame, kept where it reaches this solid: what is
+    // left is this piece's share of the one grid.
+    let cells: Vec<Cell> = plan(tiling, frame).into_iter().filter(|cell| reaches(cell.bounds, bounds)).collect();
     // The box of every triangle, once. A cell that overlaps none of them holds
     // no surface at all, which is the question asked of every cell and the one
     // that keeps the inside of a large shape free.
@@ -925,5 +1109,82 @@ mod tests {
             let total: f64 = pieces.iter().map(volume).sum();
             assert!((total - 9000.0).abs() < 1.0);
         }
+    }
+
+    /// The whole of the second half of the feature: two cuts, on two axes,
+    /// leave the blocks their grids come to between them -- and they still add
+    /// back up to the shape they were cut from.
+    #[test]
+    fn two_cuts_leave_the_pieces_both_of_them_make() {
+        // A 30 x 30 x 10 plate in 10 mm squares through Z is nine columns of
+        // 10 x 10 x 10. The second cut runs across the first -- through X, so
+        // its cells lie in the Y-Z plane -- and cuts each of those columns into
+        // the four a 5 mm grid makes of a 10 x 10 face.
+        let plan = SplitPlan {
+            passes: vec![
+                Tiling { size: 10.0, axis: 2, ..Tiling::default() },
+                Tiling { size: 5.0, axis: 0, ..Tiling::default() },
+            ],
+        };
+        let pieces = cut_plan(&box_mesh(30.0, 30.0, 10.0), &plan, &|| {}, &never).expect("nothing abandoned it");
+        assert_eq!(pieces.len(), 36, "nine columns cut four ways each are thirty-six blocks");
+        let total: f64 = pieces.iter().map(volume).sum();
+        assert!((total - 9000.0).abs() < 1.0, "the blocks hold {total} mm3 of the 9000 they were cut from");
+        for piece in &pieces {
+            assert!((volume(piece) - 250.0).abs() < 1e-6, "a block came out at {} mm3", volume(piece));
+        }
+    }
+
+    /// A pass that cannot cut what it is given must not lose it: the pieces of
+    /// the cut before it come through whole.
+    #[test]
+    fn a_cut_that_misses_leaves_the_pieces_it_was_given() {
+        let plan = SplitPlan {
+            passes: vec![
+                Tiling { size: 10.0, axis: 2, ..Tiling::default() },
+                Tiling { size: 100.0, axis: 0, ..Tiling::default() },
+            ],
+        };
+        let pieces = cut_plan(&box_mesh(30.0, 30.0, 10.0), &plan, &|| {}, &never).expect("nothing abandoned it");
+        assert_eq!(pieces.len(), 9);
+        let total: f64 = pieces.iter().map(volume).sum();
+        assert!((total - 9000.0).abs() < 1.0);
+    }
+
+    /// What the two cuts come to between them is what is counted and what is
+    /// refused -- one cut that is fine on its own and a second that multiplies
+    /// it past the limit is a split nobody can find the pieces of.
+    #[test]
+    fn a_plan_is_counted_and_refused_by_what_its_cuts_come_to_together() {
+        let bounds = (Vec3::new(-50.0, -50.0, -5.0), Vec3::new(50.0, 50.0, 5.0));
+        let one = Tiling { size: 5.0, axis: 2, ..Tiling::default() };
+        let plan = SplitPlan { passes: vec![one, Tiling { axis: 0, ..one }] };
+        assert!(one.refusal(bounds).is_none(), "one cut this size is fine on its own");
+        assert!(plan.refusal(bounds).is_some(), "two of them are far past the limit and were let through");
+        // Progress is measured against every cell that will be tried, which is
+        // the first cut over the shape plus the second over each piece it left.
+        let pair = SplitPlan {
+            passes: vec![
+                Tiling { size: 25.0, axis: 2, ..Tiling::default() },
+                Tiling { size: 25.0, axis: 0, ..Tiling::default() },
+            ],
+        };
+        let (first, both) = (planned(&pair.passes[0], bounds), pair.planned(bounds));
+        assert_eq!(pair.work(bounds), first + both, "the bar would run at two speeds");
+    }
+
+    /// A split written before a split could be cut more than once says its one
+    /// tiling as an object, and there is no reason to lose it over a pair of
+    /// brackets.
+    #[test]
+    fn a_plan_reads_both_a_list_of_cuts_and_the_single_one_that_came_before_it() {
+        let plan = SplitPlan { passes: vec![Tiling::default(), Tiling { axis: 0, ..Tiling::default() }] };
+        let text = serde_json::to_string(&plan).expect("it writes");
+        assert!(text.starts_with('['), "a plan is written as the list of cuts it is: {text}");
+        assert_eq!(serde_json::from_str::<SplitPlan>(&text).expect("it reads"), plan);
+
+        let one = Tiling { size: 12.0, ..Tiling::default() };
+        let older = serde_json::to_string(&one).expect("it writes");
+        assert_eq!(serde_json::from_str::<SplitPlan>(&older).expect("it reads"), SplitPlan::of(one));
     }
 }

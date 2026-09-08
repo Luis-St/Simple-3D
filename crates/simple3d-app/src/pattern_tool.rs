@@ -669,6 +669,9 @@ fn paint_preview(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect) {
                     plane_marks: app.scene.settings.plane_marks,
                 },
                 items,
+                // The pattern's own preview is the picture itself, not a set of
+                // loops drawn over it.
+                preview: Vec::new(),
             };
             let prepared = render::prepare_frame(&request);
             render::render_prepared(&request, &prepared).to_color_image()

@@ -1182,10 +1182,16 @@ fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option
     // than separated into the pieces it was already in (issue 82). A split has
     // no parameters of its own to edit -- the pieces are geometry -- so this is
     // a statement of what was done, and the button below is how it is changed.
-    if let Some(tiling) = app.scene.node(id).split_tiling() {
-        field_row(ui, "Cut into", "The pattern of cells the pieces were cut out by.", |ui| {
-            ui.add(egui::Label::new(theme::value(describe_tiling(&tiling, app.unit()))).selectable(false));
-        });
+    if let Some(plan) = app.scene.node(id).split_plan().cloned() {
+        // One row per cut, numbered when there is more than one: two cuts are
+        // two patterns, and a single line naming both reads as one pattern
+        // nobody can find the numbers of.
+        for (index, tiling) in plan.passes.iter().enumerate() {
+            let label = if plan.passes.len() > 1 { format!("Cut {}", index + 1) } else { "Cut into".to_string() };
+            field_row(ui, &label, "The pattern of cells the pieces were cut out by.", |ui| {
+                ui.add(egui::Label::new(theme::value(describe_tiling(tiling, app.unit()))).selectable(false));
+            });
+        }
     }
     field_row(ui, "", "", |ui| {
         let shortcut = app.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
@@ -1208,14 +1214,6 @@ fn split_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, command: &mut Option
             *command = Some(simple3d_core::keymap::Command::SplitIntoPieces);
         }
     });
-    ui.add(
-        egui::Label::new(theme::hint(
-            "The pieces are stored geometry, so what is done to them is not written back to the object they came \
-             from. Joining them back together brings that object back as it was, wherever the pieces have been \
-             moved to since.",
-        ))
-        .selectable(false),
-    );
 }
 
 /// A tiling in one line: what shape the cells are, how big, which way they run
@@ -1268,10 +1266,14 @@ fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.add_space(theme::metric::GAP);
     let ticked = app.piece_ticks.len();
     ui.horizontal_wrapped(|ui| {
-        if ui.add_enabled(ticked < pieces.len(), egui::Button::new("Tick all")).clicked() {
+        // Select, not tick: the box on a row is what the pointer ticks, and a
+        // button called "Tick all" reads as one that ticks every box rather
+        // than as one that selects every piece -- which is what it does, and
+        // what the viewport shows outlined while it holds.
+        if ui.add_enabled(ticked < pieces.len(), egui::Button::new("Select all")).clicked() {
             app.piece_ticks = pieces.iter().copied().collect();
         }
-        if ui.add_enabled(ticked > 0, egui::Button::new("Tick none")).clicked() {
+        if ui.add_enabled(ticked > 0, egui::Button::new("Select none")).clicked() {
             app.piece_ticks.clear();
         }
     });
@@ -1301,13 +1303,6 @@ fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
             app.ask_to_extract_all(id);
         }
     });
-    ui.add(
-        egui::Label::new(theme::hint(
-            "Clicking a piece in the viewport ticks it, which is how one out of thousands is found. An extracted \
-             piece is an object like any other: it can be renamed, moved, painted and dragged out.",
-        ))
-        .selectable(false),
-    );
 }
 
 /// How many pieces the list shows without scrolling.

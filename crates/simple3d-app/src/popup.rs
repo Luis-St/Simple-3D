@@ -133,6 +133,18 @@ pub fn show(
     event
 }
 
+/// How tall a popup's body may be before it has to scroll: the room in
+/// `bounds` -- the viewport -- less the window's own chrome, which is the title
+/// bar, the padding and the action row along the foot.
+///
+/// A popup is as tall as what is in it, which is the right answer until what is
+/// in it is taller than the viewport: then the foot of the window goes off the
+/// bottom of the screen, and the buttons that finish the job go with it. The
+/// body scrolls instead, and the buttons stay where they are.
+pub fn body_room(bounds: egui::Rect) -> f32 {
+    (bounds.height() - TITLE_BAR - PAD * 3.0 - theme::metric::DIALOG_BUTTON - theme::metric::GAP * 2.0).max(120.0)
+}
+
 /// The buttons along the foot of a popup, under a rule: right-aligned and laid
 /// out right to left, so the closure names the rightmost -- the one that goes
 /// through with the command -- first. The same shape as a dialog's row, because

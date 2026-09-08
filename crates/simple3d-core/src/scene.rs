@@ -9,7 +9,7 @@ use crate::mesh_data::{MeshBlob, MeshData};
 use crate::primitive::{self, Params, PrimitiveSpec};
 use crate::unit::Unit;
 use serde::{Deserialize, Serialize};
-use simple3d_geom::tiling::Tiling;
+use simple3d_geom::tiling::SplitPlan;
 use simple3d_geom::{BooleanOp, Vec3};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -214,15 +214,15 @@ pub enum Body {
     /// the same reason a stored mesh is: undo snapshots the scene, and the
     /// recipe must not be copied into every snapshot that never touched it.
     ///
-    /// `tiling` is how the pieces were made: the cell shape and its numbers for
-    /// a shape cut into a pattern of them, and `None` for one merely separated
-    /// into the pieces it was already in. It is a label and an offer, not a
-    /// recipe -- the pieces are geometry and nothing re-derives them from it --
-    /// but it is what lets the panel say what was done and lets the tool open
-    /// again on the numbers that did it.
+    /// `plan` is how the pieces were made: the cell shapes and their numbers,
+    /// one entry per cut, for a shape cut into a pattern of them -- and `None`
+    /// for one merely separated into the pieces it was already in. It is a
+    /// label and an offer, not a recipe -- the pieces are geometry and nothing
+    /// re-derives them from it -- but it is what lets the panel say what was
+    /// done and lets the tool open again on the numbers that did it.
     Split {
         original: Arc<NodeData>,
-        tiling: Option<Tiling>,
+        plan: Option<SplitPlan>,
     },
 }
 
@@ -357,9 +357,9 @@ impl Node {
     /// How a split's pieces were cut, for one cut into a pattern of cells.
     /// `None` for a node that is not a split, and for a split that was
     /// separated into the pieces it was already in rather than cut.
-    pub fn split_tiling(&self) -> Option<Tiling> {
+    pub fn split_plan(&self) -> Option<&SplitPlan> {
         match &self.body {
-            Body::Split { tiling, .. } => *tiling,
+            Body::Split { plan, .. } => plan.as_ref(),
             _ => None,
         }
     }
@@ -484,6 +484,10 @@ pub enum PreviewViewport {
     HideAxes,
     /// Drop the ground grid while the preview is up.
     HideGrid,
+    /// Drop both: the ground the tiling lies parallel to and the axes running
+    /// through the shape are the same nuisance twice, and a tiling drawn flat
+    /// on a plate meets both at once.
+    HideGridAndAxes,
     /// Nothing but the object being previewed: every other body goes, and so do
     /// the grid and the axes. The strongest answer, for reading a fine pattern
     /// against one shape.
@@ -491,14 +495,20 @@ pub enum PreviewViewport {
 }
 
 impl PreviewViewport {
-    pub const ALL: [PreviewViewport; 4] =
-        [PreviewViewport::NoChange, PreviewViewport::HideAxes, PreviewViewport::HideGrid, PreviewViewport::PreviewOnly];
+    pub const ALL: [PreviewViewport; 5] = [
+        PreviewViewport::NoChange,
+        PreviewViewport::HideAxes,
+        PreviewViewport::HideGrid,
+        PreviewViewport::HideGridAndAxes,
+        PreviewViewport::PreviewOnly,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             PreviewViewport::NoChange => "No change",
             PreviewViewport::HideAxes => "Hide the axes",
             PreviewViewport::HideGrid => "Hide the grid",
+            PreviewViewport::HideGridAndAxes => "Hide the grid and axes",
             PreviewViewport::PreviewOnly => "Only what is previewed",
         }
     }
@@ -903,13 +913,13 @@ impl Scene {
     /// shows one item called what it was called. `original` is kept whole, and
     /// is what [`Scene::restore_split`] puts back.
     ///
-    /// `tiling` says how the pieces were made, for a shape cut into a pattern
+    /// `plan` says how the pieces were made, for a shape cut into a pattern
     /// of cells (issue 82); a shape merely separated into the pieces it was
     /// already in passes `None`.
     ///
     /// The caller adds the pieces as children afterwards; a split with none is
     /// as empty as a group with none, and evaluates to nothing.
-    pub fn add_split(&mut self, original: NodeData, tiling: Option<Tiling>, parent: NodeId, index: usize) -> NodeId {
+    pub fn add_split(&mut self, original: NodeData, plan: Option<SplitPlan>, parent: NodeId, index: usize) -> NodeId {
         let id = self.fresh_id();
         let node = Node {
             id,
@@ -927,7 +937,7 @@ impl Scene {
             segments: original.segments,
             export_body: original.export_body,
             extracted: original.extracted,
-            body: Body::Split { original: Arc::new(original), tiling },
+            body: Body::Split { original: Arc::new(original), plan },
             children: Vec::new(),
             parent: Some(parent),
         };
@@ -1321,7 +1331,7 @@ impl Scene {
         let node = self.nodes.get(&id)?;
         let mut blob: Option<MeshBlob> = None;
         let mut original: Option<Box<NodeData>> = None;
-        let mut tiling: Option<Tiling> = None;
+        let mut tiling: Option<SplitPlan> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -1330,9 +1340,9 @@ impl Scene {
                 blob = Some(mesh.to_blob());
                 ("mesh".to_string(), None, Params::new())
             }
-            Body::Split { original: was, tiling: cut } => {
+            Body::Split { original: was, plan } => {
                 original = Some(Box::new((**was).clone()));
-                tiling = *cut;
+                tiling = plan.clone();
                 ("split".to_string(), None, Params::new())
             }
         };
@@ -1373,7 +1383,9 @@ impl Scene {
             // same reason: what the node *is* is missing. Its pieces would still
             // draw, but it would be a shape broken apart with no way back, which
             // is not the node the file says it is.
-            "split" => Body::Split { original: Arc::new((**data.original.as_ref()?).clone()), tiling: data.tiling },
+            "split" => {
+                Body::Split { original: Arc::new((**data.original.as_ref()?).clone()), plan: data.tiling.clone() }
+            }
             type_id => {
                 let spec = primitive::lookup(type_id)?;
                 Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -1595,13 +1607,14 @@ pub struct NodeData {
     /// shape with its operands and its parameters intact (issue 82).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original: Option<Box<NodeData>>,
-    /// How a `split` node's pieces were cut, and nothing else's: the cell shape
-    /// and its numbers (issue 82). Absent for a split that merely separated a
-    /// shape into the pieces it was already in, and for every other node -- so a
-    /// project written by this version still diffs cleanly against one written
-    /// before a split could be a pattern of cells.
+    /// How a `split` node's pieces were cut, and nothing else's: one entry per
+    /// cut, each naming a cell shape and its numbers (issue 82). Absent for a
+    /// split that merely separated a shape into the pieces it was already in,
+    /// and for every other node -- so a project written by this version still
+    /// diffs cleanly against one written before a split could be a pattern of
+    /// cells.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tiling: Option<Tiling>,
+    pub tiling: Option<SplitPlan>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
