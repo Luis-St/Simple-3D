@@ -23,7 +23,7 @@ use simple3d_core::keymap::Command;
 use simple3d_core::primitive::{AxisDriver, ParamValue, Params};
 use simple3d_core::scene::{Node, NodeId, Scene};
 use simple3d_core::undo::History;
-use simple3d_core::unit::{format_angle, format_length, Unit};
+use simple3d_core::unit::{format_angle, format_length, wrap_degrees, Unit};
 use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
 
@@ -490,11 +490,19 @@ impl Drag {
                 self.last_angle = angle;
                 let delta = mods.snap(self.turns, rotate_snap);
                 let mut rotation = self.start_rotation;
-                set_axis(&mut rotation, axis, get_axis(self.start_rotation, axis) + delta);
+                // Where the body ends up, which is a direction and so lives in
+                // one turn (issue 84): the ring counts turns without end, but a
+                // body two and a bit turns round stands where a body a bit round
+                // stands, and that is what the rotation field reads.
+                set_axis(&mut rotation, axis, wrap_degrees(get_axis(self.start_rotation, axis) + delta));
                 if let Some(node) = scene.get_mut(self.node) {
                     node.rotation = rotation;
                 }
-                self.readout = format!("{} {}deg", axis_name(axis), format_angle(delta));
+                // The readout is how far the ring has been turned, so it keeps
+                // its sign -- which way is half of what it says. Only the whole
+                // turns come off: "725deg" beside a body standing at 5 is the
+                // gesture's own bookkeeping, not anything about the model.
+                self.readout = format!("{} {}deg", axis_name(axis), format_angle(delta % 360.0));
             }
             Handle::ResizeFace(axis, positive) => {
                 let anchor = gizmo.own.point(gizmo.face_centre(axis, positive));
@@ -777,7 +785,11 @@ impl Nudge {
             Nudge::Rotate { axis, degrees } => {
                 if let Some(node) = scene.get_mut(id) {
                     let mut rotation = node.rotation;
-                    let turned = get_axis(rotation, axis) + degrees;
+                    // Brought back into one turn, the way the ring and the
+                    // rotation field both do it (issue 84): holding an arrow key
+                    // down would otherwise wind the number up past 360 and leave
+                    // it there.
+                    let turned = wrap_degrees(get_axis(rotation, axis) + degrees);
                     set_axis(&mut rotation, axis, turned);
                     node.rotation = rotation;
                 }
@@ -1340,6 +1352,40 @@ mod tests {
         assert!((z % 15.0).abs() < 1e-9, "not snapped to 15 degrees: {z}");
         assert!(z > 0.0, "rotated the wrong way: {z}");
         assert!(drag.readout.contains("deg"), "{}", drag.readout);
+    }
+
+    /// Issue 84: the ring counts turns without end -- that is what makes a drag
+    /// across the seam keep going the way it was going -- but neither the model
+    /// nor the readout beside the pointer is a count of turns. Dragged twice
+    /// round, the rotation used to read 725 in the property panel and "Z 725deg"
+    /// at the cursor.
+    #[test]
+    fn a_rotate_drag_of_more_than_a_turn_leaves_a_rotation_inside_one() {
+        let mut f = Fixture::new("box");
+        let gizmo = f.gizmo(Mode::Rotate);
+        let ring = gizmo.ring_points(2, &f.view, 72);
+        let from = f.view.project(ring[0]).expect("the ring is off screen").0;
+        let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
+        // Twice round the ring, and fifteen degrees more: 735 degrees of turn.
+        for step in 1..=(72 * 2 + 3) {
+            let to = f.view.project(ring[step % 72]).expect("the ring is off screen").0;
+            drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
+        }
+
+        let z = f.scene.node(f.node).rotation.z;
+        assert!((0.0..360.0).contains(&z), "a drag of more than a turn left the rotation at {z}");
+        assert!((z - 15.0).abs() < 1e-6, "735 degrees of turn is 15 degrees of rotation, not {z}");
+
+        // And the readout says how far the ring went, less the whole turns --
+        // signed, because which way it went is half of what it says.
+        let turned: f64 = drag
+            .readout
+            .trim_start_matches("Z ")
+            .trim_end_matches("deg")
+            .parse()
+            .unwrap_or_else(|_| panic!("the readout is not a number: {}", drag.readout));
+        assert!(turned.abs() < 360.0, "the readout counts whole turns: {}", drag.readout);
+        assert!((turned - 15.0).abs() < 1e-6, "{}", drag.readout);
     }
 
     #[test]
