@@ -163,10 +163,19 @@ impl Mesh {
         Mesh { positions, indices, tags }
     }
 
-    /// Manifoldness check on the welded mesh: every undirected edge must be
-    /// shared by exactly two triangles, used with opposite winding by those
-    /// two (each directed edge appears exactly once). Returns a description
-    /// of the first problem found, if any.
+    /// Closedness check on the welded mesh: every directed edge must be
+    /// answered by the same number of edges running the other way, so the
+    /// surface has no boundary and every face is backed by its neighbour.
+    /// Returns a description of the first problem found, if any.
+    ///
+    /// It used to insist on *exactly one* of each directed edge, which is the
+    /// rule for a single closed surface -- and a mesh here is not always one.
+    /// A scene holds several bodies, and two bodies may touch: four cells of a
+    /// split meet along one line, so that line's welded edge is used four times
+    /// each way and the mesh was called broken for being exactly what a split
+    /// is. What the rule is really for is finding a surface with a hole in it,
+    /// a face left in twice the same way round, or three faces meeting at one
+    /// edge, and each of those still shows up as a count that does not balance.
     pub fn manifold_issue(&self) -> Option<String> {
         use std::collections::HashMap;
         let welded = self.weld();
@@ -179,11 +188,9 @@ impl Mesh {
             }
         }
         for (&(a, b), &count) in directed.iter() {
-            if count != 1 {
-                return Some(format!("edge ({a},{b}) used {count} times, expected 1"));
-            }
-            if !directed.contains_key(&(b, a)) {
-                return Some(format!("edge ({a},{b}) has no opposite twin ({b},{a})"));
+            let back = directed.get(&(b, a)).copied().unwrap_or(0);
+            if back != count {
+                return Some(format!("edge ({a},{b}) used {count} times and ({b},{a}) {back}"));
             }
         }
         None

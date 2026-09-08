@@ -2416,7 +2416,10 @@ impl App {
             return;
         }
         self.collapsed.remove(&collection);
-        self.piece_ticks.clear();
+        // The ticks stay. Extract and Put back are the two directions of one
+        // gesture, and clearing them left Put back greyed out the moment
+        // anything had been extracted -- the way back was to find the same
+        // pieces in the list and tick them again.
         self.status = Status::Info(format!("Extracted {} {}", moved, if moved == 1 { "piece" } else { "pieces" }));
     }
 
@@ -2434,7 +2437,8 @@ impl App {
             self.status = Status::Info("Those pieces are already inside".into());
             return;
         }
-        self.piece_ticks.clear();
+        // Still ticked, so they can go straight back out again -- and so the
+        // viewport keeps saying which pieces were just put away.
         self.status = Status::Info(format!("Put {} {} back", moved, if moved == 1 { "piece" } else { "pieces" }));
     }
 
@@ -6989,12 +6993,16 @@ mod tests {
         assert!(rows.contains(&pieces[0]) && rows.contains(&pieces[3]), "the extracted pieces got no rows");
         assert!(!rows.contains(&pieces[1]), "a piece nobody asked for was extracted too");
         assert!(app.scene.is_collection(split), "extracting two of eight dissolved the collection");
-        assert!(app.piece_ticks.is_empty(), "the ticks outlived the extraction");
+        // The ticks survive the extraction, so Put back is the way straight
+        // back: clearing them left that button greyed out the moment anything
+        // had been extracted, and the way back was to find the same pieces in
+        // the list and tick them again.
+        assert_eq!(app.piece_ticks.len(), 2, "the extraction cleared the ticks");
 
-        // And they fold back in.
-        app.tick_piece(pieces[0], false);
+        // And they fold back in, without having to be found again.
         app.return_ticked_pieces(split);
-        assert!(!crate::panel_outliner::visible_rows(&app).contains(&pieces[0]));
+        let rows = crate::panel_outliner::visible_rows(&app);
+        assert!(!rows.contains(&pieces[0]) && !rows.contains(&pieces[3]), "the pieces kept their rows");
 
         // One undo per step, and the first one puts both rows away again.
         app.run(Command::Undo);

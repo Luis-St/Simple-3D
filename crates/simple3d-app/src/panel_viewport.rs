@@ -84,12 +84,13 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         // Ticked pieces are outlined like a selection: they are what Extract is
         // about to act on, and a list of two thousand names says nothing about
         // which part of the shape each one is (issue 82).
-        let selected: Vec<NodeId> = app
-            .top_level_selection()
-            .into_iter()
-            .chain(app.piece_ticks.iter().copied())
-            .filter(|&id| app.scene.is_shown(id))
-            .collect();
+        let selected: Vec<NodeId> =
+            app.top_level_selection().into_iter().filter(|&id| app.scene.is_shown(id)).collect();
+        // A ticked piece is outlined like a selection and *glows through*
+        // whatever is in front of it: a piece of a split usually sits inside
+        // the shape it was cut from, where an outline has nothing on screen to
+        // draw itself around (issue 82).
+        let ticked: Vec<NodeId> = app.piece_ticks.iter().copied().filter(|&id| app.scene.is_shown(id)).collect();
 
         // While a tool draws a preview, the document says what the viewport
         // does under it: nothing, drop the axes, drop the grid, or drop
@@ -116,6 +117,11 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
         for id in &selected {
             if let Some(renderable) = app.node_renderables.get(id) {
                 items.push(Item { renderable, style: Style::Selected });
+            }
+        }
+        for id in &ticked {
+            if let Some(renderable) = app.node_renderables.get(id) {
+                items.push(Item { renderable, style: Style::Glow });
             }
         }
 

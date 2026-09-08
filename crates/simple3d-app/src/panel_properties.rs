@@ -1250,17 +1250,18 @@ fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     // without the list taking the panel over from the transform below it.
     let rows = pieces.len().min(VISIBLE_PIECE_ROWS);
     egui::Frame::NONE.fill(token::SURFACE_0B).corner_radius(3.0).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
-        egui::ScrollArea::vertical().id_salt(("pieces", id)).max_height(rows as f32 * row).show_rows(
-            ui,
-            row,
-            pieces.len(),
-            |ui, range| {
-                ui.set_width(ui.available_width());
-                for index in range {
-                    piece_row(app, ui, pieces[index], row);
-                }
-            },
-        );
+        // The panel's own scroll area, not a bare one: the handle takes its
+        // colour from the style, and the default leaves it invisible until it
+        // is being dragged -- a list of a thousand pieces with no sign that it
+        // scrolls at all.
+        let (area, restore) = theme::list_scroll_area(ui);
+        area.id_salt(("pieces", id)).max_height(rows as f32 * row).show_rows(ui, row, pieces.len(), |ui, range| {
+            ui.set_style(restore);
+            ui.set_width(ui.available_width());
+            for index in range {
+                piece_row(app, ui, pieces[index], row);
+            }
+        });
     });
 
     ui.add_space(theme::metric::GAP);

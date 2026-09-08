@@ -19,10 +19,16 @@ use std::collections::HashMap;
 pub struct BorderEdge {
     pub ends: [u32; 2],
     /// The two triangles either side of it, or the same one twice when the edge
-    /// has only one -- an open boundary, or a non-manifold junction. Those are
-    /// drawn whatever the camera is doing: there is no surface on the far side
-    /// for the silhouette test to ask about.
+    /// has only one -- an open boundary. Those are drawn whatever the camera is
+    /// doing: there is no surface on the far side for the silhouette test to
+    /// ask about.
     pub faces: [u32; 2],
+    /// More than two triangles meet along this edge, which is what happens
+    /// where two bodies of the same mesh touch: the seam between two pieces of
+    /// a split has each piece's own face and the face they share. It is inside
+    /// the shape, not on its outline, and drawing it lit every cut of an
+    /// eighty-piece split as a cage over the model.
+    pub junction: bool,
 }
 
 /// A mesh prepared for drawing: welded, so edges can be found, together with
@@ -176,12 +182,13 @@ fn border_edges(mesh: &Mesh) -> Vec<BorderEdge> {
     let mut out: Vec<BorderEdge> = faces
         .into_iter()
         .map(|(key, mut pair)| {
-            if counts[&key] != 2 {
+            let count = counts[&key];
+            if count != 2 {
                 // Always drawn: `push_selection` reads a repeated triangle as
                 // "there is no far side to ask about".
                 pair[1] = pair[0];
             }
-            BorderEdge { ends: [key.0, key.1], faces: pair }
+            BorderEdge { ends: [key.0, key.1], faces: pair, junction: count > 2 }
         })
         .collect();
     out.sort_unstable_by_key(|edge| edge.ends);
@@ -208,6 +215,9 @@ pub struct Palette {
     pub axis_z: Rgba,
     pub wire: Rgba,
     pub edge: Rgba,
+    /// The fill a body glowing through another one is drawn in: the selection
+    /// colour, translucent enough that the shape in front of it still reads.
+    pub glow: Rgba,
 }
 
 impl Palette {
@@ -231,6 +241,7 @@ impl Palette {
             axis_z: rgba(token::AXIS_Z),
             wire: [0xC2, 0xCA, 0xD6, 255],
             edge: [0x11, 0x13, 0x17, 255],
+            glow: fade(token::ACCENT, 110),
         }
     }
 
@@ -248,6 +259,7 @@ impl Palette {
             axis_z: [46, 96, 200, 255],
             wire: [64, 70, 80, 255],
             edge: [70, 76, 86, 255],
+            glow: [226, 122, 12, 120],
         }
     }
 
@@ -335,6 +347,12 @@ pub enum Style {
     /// A hidden node, so a subtracted tool body can be seen while it is being
     /// positioned.
     Ghost,
+    /// Outlined like a selection *and* filled with a glow that whatever is in
+    /// front of it does not hide: a body that has to be found inside another
+    /// one, which is what a piece of a split usually is (issue 82). An outline
+    /// alone cannot say where a piece is when the piece is buried -- there is
+    /// nothing of it on screen to outline.
+    Glow,
 }
 
 pub struct Request<'a> {
@@ -485,7 +503,15 @@ fn prepare(request: &Request<'_>) -> Vec<Step> {
                 push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base);
             }
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost),
+            // The outline here; the glow itself comes last, after everything
+            // that could be standing in front of it.
+            Style::Glow => push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base),
         }
+    }
+    // Last of all, over the finished model: what a buried body is pointed out
+    // with, and the cells of a tool's preview.
+    for item in request.items.iter().filter(|item| item.style == Style::Glow) {
+        push_glow(&mut steps, &view, item.renderable, request.palette.glow);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
@@ -553,6 +579,12 @@ pub(crate) enum Step {
         colour: Rgba,
         bias: f32,
     },
+    /// A face blended over whatever is already drawn, depth ignored both ways:
+    /// the glow of a body inside another one.
+    Glow {
+        v: [Vertex; 3],
+        colour: Rgba,
+    },
 }
 
 impl Step {
@@ -565,6 +597,10 @@ impl Step {
                 (a.min(b).min(c), a.max(b).max(c))
             }
             Step::Line { a, b, .. } | Step::Overlay { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
+            Step::Glow { v, .. } => {
+                let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
+                (a.min(b).min(c), a.max(b).max(c))
+            }
         }
     }
 }
@@ -613,6 +649,7 @@ fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[u32]) {
                 frame.set_tag(0);
                 frame.line_with_depth(a, b, colour, bias, false);
             }
+            Step::Glow { v, colour } => frame.triangle_over(v, colour),
         }
     }
 }
@@ -777,6 +814,24 @@ fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour:
     }
 }
 
+/// A body's faces, blended over the finished picture whatever is in front of
+/// them (issue 82).
+///
+/// Every triangle, not only the ones facing the eye: a solid seen through
+/// another solid reads as a shape, and half a shell reads as a hole in one.
+/// The colour is translucent, so what it is inside is still visible through the
+/// glow -- which is how the glow says *where* rather than merely *that*.
+fn push_glow(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba) {
+    for tri in &item.mesh.indices {
+        let v = [
+            to_vertex(view, view.to_view(item.mesh.positions[tri[0] as usize])),
+            to_vertex(view, view.to_view(item.mesh.positions[tri[1] as usize])),
+            to_vertex(view, view.to_view(item.mesh.positions[tri[2] as usize])),
+        ];
+        steps.push(Step::Glow { v, colour });
+    }
+}
+
 fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
@@ -800,6 +855,11 @@ fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgb
 /// past the threshold around its tube, so selecting one scribbled concentric
 /// rings over the whole surface. A silhouette is the same picture for both, and
 /// it is what the word outline means.
+/// How far a face has to be turned towards the eye before the outline counts it
+/// as facing it. Anything flatter than this is edge-on, where the sign of the
+/// dot product is arithmetic noise rather than an answer.
+const EDGE_ON: f64 = 1e-6;
+
 fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
     // Drawn a second time, one pixel out from the shape, and that is what makes
     // it a line rather than a row of dots.
@@ -855,8 +915,18 @@ fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour:
         return;
     }
     let towards = view.forward();
+    // Edge-on counts as turned away, and by a margin. A face exactly
+    // perpendicular to the view -- every side face of a box seen straight on --
+    // has a dot product of zero, and which side of zero the arithmetic lands on
+    // is noise: the two triangles of one face can disagree, and neighbouring
+    // faces of the same box certainly do. Tested against plain zero, a box in
+    // the front view had the right-hand side face come out as facing the eye,
+    // which made the front face's own right edge no silhouette at all and the
+    // *back* face's right edge one instead -- so the line was drawn at the far
+    // side of the box, lost the depth test against the box's own front face,
+    // and the shape came back outlined on three sides out of four.
     let front: Vec<bool> =
-        item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri).dot(towards) < 0.0).collect();
+        item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri).dot(towards) < -EDGE_ON).collect();
     let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
     let centroid = |face: u32| -> Option<Vec3> {
         let tri = item.mesh.indices.get(face as usize)?;
@@ -868,6 +938,9 @@ fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour:
         )
     };
     for edge in &item.outline {
+        if edge.junction {
+            continue;
+        }
         let [near, far] = edge.faces;
         if near != far && faces_the_eye(near) == faces_the_eye(far) {
             continue;
@@ -1765,13 +1838,157 @@ mod tests {
             .count()
     }
 
-    /// A tool's preview is drawn *on* the model, not through it (issue 82).
+    /// Two boxes standing side by side, one of them selected, seen straight on.
     ///
-    /// The cells at the near end of a run lie in the face turned towards the
-    /// camera and have to be drawn over it; the ones at the far end lie in the
-    /// face turned away and are behind forty millimetres of solid. A grid that
-    /// shows through the shape reads as floating in front of it, which is the
-    /// one thing the preview must not say.
+    /// Every side face of a box in this view is exactly edge-on, where the sign
+    /// of the dot product against the view direction is arithmetic noise -- and
+    /// the silhouette used to be picked out of that noise. The right-hand side
+    /// face came out as facing the eye, so the front face's own right edge was
+    /// no silhouette and the *back* face's right edge was one instead: the line
+    /// was drawn at the far side of the box, lost the depth test against the
+    /// box's own front face, and the selection came back outlined on three
+    /// sides out of four. The missing one is the edge against the box beside
+    /// it, where there is no background for the outline's second pass to land
+    /// on.
+    #[test]
+    fn a_selection_seen_straight_on_is_outlined_on_every_side() {
+        let (left, right) = (shifted_box(-10.0), shifted_box(10.0));
+        let mut both = left.clone();
+        both.append(&right);
+        let (scene, selected) = (Renderable::prepare(&both), Renderable::prepare_outlined(&left));
+        let frame = straight_on(vec![
+            Item { renderable: &scene, style: Style::Solid },
+            Item { renderable: &selected, style: Style::Selected },
+        ]);
+        let accent = Palette::dark().selected;
+        // The outline reaches from the box's left edge to the seam it shares
+        // with its neighbour, and both of those are vertical lines: they have
+        // to be there between the top and bottom of the outline, not merely at
+        // the corners where the horizontal edges end.
+        let (left_edge, seam) = accent_span(&frame, accent);
+        let (top, bottom) = accent_rows(&frame, accent);
+        let (from, to) = (top + 4, bottom - 4);
+        assert!(
+            column_has_between(&frame, left_edge, accent, from, to),
+            "the outer edge of the selected box was not outlined"
+        );
+        assert!(
+            column_has_between(&frame, seam, accent, from, to),
+            "the edge against the neighbouring box was not outlined"
+        );
+        assert!(seam - left_edge > 30, "the outline spans {} pixels, which is not a whole box", seam - left_edge);
+        // And it is the *near* edge that is drawn, at the seam in the middle of
+        // the pair, not the far one -- which projects to the same column but
+        // loses the depth test to the box's own front face.
+        assert!(seam.abs_diff(frame.width / 2) <= 2, "the outline's right edge is at {seam}, not at the seam");
+    }
+
+    /// Where two bodies of one mesh touch, the seam is inside the shape and no
+    /// part of its outline.
+    ///
+    /// Four triangles meet along such an edge, which used to be read as "no far
+    /// side to ask about" and drawn whatever the camera was doing. Every piece
+    /// of a split touches its neighbours, so selecting an eighty-piece one lit
+    /// every cut in it and drew a cage over the model.
+    #[test]
+    fn a_seam_between_two_touching_bodies_is_not_part_of_the_outline() {
+        let mut both = shifted_box(-10.0);
+        both.append(&shifted_box(10.0));
+        let prepared = Renderable::prepare_outlined(&both);
+        assert!(prepared.outline.iter().any(|edge| edge.junction), "the seam was not seen as a junction at all");
+
+        let frame = straight_on(vec![
+            Item { renderable: &prepared, style: Style::Solid },
+            Item { renderable: &prepared, style: Style::Selected },
+        ]);
+        let accent = Palette::dark().selected;
+        let (first, last) = accent_span(&frame, accent);
+        let seam = (first + last) / 2;
+        let (top, bottom) = accent_rows(&frame, accent);
+        let (from, to) = (top + 4, bottom - 4);
+        assert!(
+            !(seam.saturating_sub(1)..=seam + 1).any(|x| column_has_between(&frame, x, accent, from, to)),
+            "the seam inside the shape was drawn as part of its outline"
+        );
+        assert!(last - first > 60, "the two boxes were not outlined as one shape");
+    }
+
+    /// A body inside another one is filled with a glow that whatever is in
+    /// front of it does not hide -- an outline has nothing on screen to draw
+    /// itself around when the shape it belongs to is buried (issue 82).
+    #[test]
+    fn a_glowing_body_is_seen_through_whatever_is_in_front_of_it() {
+        let outer = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let inner = Renderable::prepare_outlined(&primitives::box_mesh(10.0, 10.0, 10.0));
+        // Measured as the difference the buried body makes to the frame rather
+        // than as a count of its own colour: the glow is blended over the solid
+        // in front of it, so no pixel of it is ever exactly the colour it was
+        // drawn in.
+        let frame_with = |items: Vec<Item<'_>>| render(&request(items, DisplayMode::Shaded));
+        let plain = frame_with(vec![Item { renderable: &outer, style: Style::Solid }]);
+        let changed = |style: Style| {
+            let frame =
+                frame_with(vec![Item { renderable: &outer, style: Style::Solid }, Item { renderable: &inner, style }]);
+            (0..frame.width * frame.height)
+                .filter(|&i| frame.color[i * 4..i * 4 + 3] != plain.color[i * 4..i * 4 + 3])
+                .count()
+        };
+        // Outlined alone it is invisible: every line of it is behind fifteen
+        // millimetres of solid.
+        assert_eq!(changed(Style::Selected), 0, "the buried body showed through without being asked to");
+        assert!(changed(Style::Glow) > 100, "the glow of the buried body did not reach the frame");
+    }
+
+    fn shifted_box(x: f64) -> simple3d_geom::Mesh {
+        let mut mesh = primitives::box_mesh(20.0, 20.0, 20.0);
+        for p in &mut mesh.positions {
+            p.x += x;
+        }
+        mesh
+    }
+
+    /// The scene from straight in front, where every side face is edge-on.
+    fn straight_on(items: Vec<Item<'_>>) -> Image {
+        let mut req = request(items, DisplayMode::Shaded);
+        req.view = View::new(
+            Camera { yaw: -90.0, pitch: 0.0, distance: 90.0, ..Camera::default() },
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)),
+        );
+        render(&req)
+    }
+
+    fn column_has(frame: &Image, x: usize, colour: Rgba) -> bool {
+        rows_of(frame, x, colour, 0..frame.height)
+    }
+
+    /// Whether a column carries the colour anywhere in the *middle* of the
+    /// shape, away from the rows the top and bottom of an outline run along --
+    /// a vertical line is only a vertical line if it is there between them.
+    fn column_has_between(frame: &Image, x: usize, colour: Rgba, from: usize, to: usize) -> bool {
+        rows_of(frame, x, colour, from..to)
+    }
+
+    fn rows_of(frame: &Image, x: usize, colour: Rgba, rows: std::ops::Range<usize>) -> bool {
+        rows.into_iter().any(|y| {
+            let o = (y * frame.width + x) * 4;
+            frame.color[o] == colour[0] && frame.color[o + 1] == colour[1] && frame.color[o + 2] == colour[2]
+        })
+    }
+
+    /// The first and last column carrying the outline's colour.
+    fn accent_span(frame: &Image, colour: Rgba) -> (usize, usize) {
+        let columns: Vec<usize> = (0..frame.width).filter(|&x| column_has(frame, x, colour)).collect();
+        (*columns.first().expect("nothing was outlined at all"), *columns.last().unwrap())
+    }
+
+    /// The first and last row carrying it, so a test can keep away from the
+    /// horizontal parts of the outline.
+    fn accent_rows(frame: &Image, colour: Rgba) -> (usize, usize) {
+        let rows: Vec<usize> =
+            (0..frame.height).filter(|&y| (0..frame.width).any(|x| rows_of(frame, x, colour, y..y + 1))).collect();
+        (*rows.first().expect("nothing was outlined at all"), *rows.last().unwrap())
+    }
+
     /// The preview is a step of its own, and it comes after the model.
     ///
     /// The two engines are handed the same prepared steps, and only the
@@ -1798,6 +2015,13 @@ mod tests {
         assert!(first > last_face, "the preview was prepared before the model it is drawn over");
     }
 
+    /// A tool's preview is drawn *on* the model, not through it (issue 82).
+    ///
+    /// The cells at the near end of a run lie in the face turned towards the
+    /// camera and have to be drawn over it; the ones at the far end lie in the
+    /// face turned away and are behind forty millimetres of solid. A grid that
+    /// shows through the shape reads as floating in front of it, which is the
+    /// one thing the preview must not say.
     #[test]
     fn a_preview_loop_is_drawn_on_the_solid_and_hidden_behind_it() {
         let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));

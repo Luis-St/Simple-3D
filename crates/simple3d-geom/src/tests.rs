@@ -988,3 +988,41 @@ fn round_bodies_meeting_at_an_angle_come_out_closed() {
         assert_manifold(&format!("sphere {op:?} cap"), &result);
     }
 }
+
+/// What the closedness check is for, and what it must not refuse.
+///
+/// A mesh here is not always one surface: a scene holds several bodies, and two
+/// of them may touch. Four cells of a split meet along one line, so that line's
+/// welded edge is used four times each way -- and the rule used to be "exactly
+/// once each way", which called a perfectly ordinary split broken. What the
+/// check is really for is a surface with a hole in it, and that still shows up
+/// as a count that does not balance.
+#[test]
+fn two_touching_bodies_are_closed_and_a_hole_is_not() {
+    let mut apart = primitives::box_mesh(20.0, 20.0, 20.0);
+    let mut beside = primitives::box_mesh(20.0, 20.0, 20.0);
+    for p in &mut beside.positions {
+        p.x += 20.0;
+    }
+    apart.append(&beside);
+    assert!(apart.manifold_issue().is_none(), "two bodies meeting face to face: {:?}", apart.manifold_issue());
+
+    // Four of them around one line, which is the arrangement every grid of
+    // cells makes and the one the old rule refused.
+    let mut grid = Mesh::new();
+    for (x, y) in [(0.0, 0.0), (20.0, 0.0), (0.0, 20.0), (20.0, 20.0)] {
+        let mut cell = primitives::box_mesh(20.0, 20.0, 20.0);
+        for p in &mut cell.positions {
+            p.x += x;
+            p.y += y;
+        }
+        grid.append(&cell);
+    }
+    assert!(grid.manifold_issue().is_none(), "four cells around one line: {:?}", grid.manifold_issue());
+
+    // And a body with a face taken out of it is still refused.
+    let mut holed = primitives::box_mesh(20.0, 20.0, 20.0);
+    holed.indices.pop();
+    holed.tags.pop();
+    assert!(holed.manifold_issue().is_some(), "a mesh with a hole in it passed");
+}

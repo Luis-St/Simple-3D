@@ -408,6 +408,9 @@ struct Passes {
     overlay: Vec<GpuVertex>,
     /// Ghosts: blended, depth-tested, writing neither depth nor tag.
     ghosts: Vec<GpuVertex>,
+    /// The glow of a body inside another one: blended over everything, with the
+    /// depth test off in both directions.
+    glow: Vec<GpuVertex>,
     /// The origin axes, with their own rule.
     axes: Vec<GpuVertex>,
     /// The smallest and largest depth key in the frame, so the whole scene can
@@ -445,6 +448,13 @@ impl Passes {
         self.saw(b.key);
     }
 
+    fn glow(&mut self, v: [Vertex; 3], colour: Rgba) {
+        for vertex in v {
+            self.glow.push(GpuVertex::new(vertex, colour, 0, 0));
+            self.saw(vertex.key);
+        }
+    }
+
     fn overlay(&mut self, a: Vertex, b: Vertex, colour: Rgba, bias: f32) {
         let (a, b) = (biased(a, bias), biased(b, bias));
         self.overlay.push(GpuVertex::new(a, colour, 0, 0));
@@ -476,6 +486,7 @@ impl Gpu {
                     passes.line(a, b, colour, bias, tag, write_depth)
                 }
                 Step::Overlay { a, b, colour, bias } => passes.overlay(a, b, colour, bias),
+                Step::Glow { v, colour } => passes.glow(v, colour),
             }
         }
         // The axes carry which segment they are, so the shader can find that
@@ -578,6 +589,15 @@ impl Gpu {
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.batch(&gl, glow::TRIANGLES, &passes.ghosts);
         self.batch(&gl, glow::LINES, &passes.overlay);
+
+        // The glow of a body inside another one, over everything and tested
+        // against nothing: what is in front of it is exactly what it has to be
+        // seen through.
+        if !passes.glow.is_empty() {
+            gl.disable(glow::DEPTH_TEST);
+            self.batch(&gl, glow::TRIANGLES, &passes.glow);
+            gl.enable(glow::DEPTH_TEST);
+        }
 
         // The axes, in the overlay pass, where the depth and tag buffers are
         // readable rather than attached.

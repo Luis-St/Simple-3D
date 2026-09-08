@@ -146,13 +146,7 @@ impl Frame<'_> {
         if rgba[3] == 255 {
             self.color[o..o + 4].copy_from_slice(&rgba);
         } else {
-            let a = rgba[3] as u32;
-            for c in 0..3 {
-                let src = rgba[c] as u32 * a;
-                let dst = self.color[o + c] as u32 * (255 - a);
-                self.color[o + c] = ((src + dst) / 255) as u8;
-            }
-            self.color[o + 3] = 255;
+            self.blend(o, rgba);
         }
         if write_depth {
             self.key[i] = key;
@@ -160,10 +154,42 @@ impl Frame<'_> {
         }
     }
 
+    /// Blend over a pixel whatever its depth, and leave the depth alone. The
+    /// glow that says a body is there when something else is in front of it.
+    fn put_over(&mut self, x: usize, y: usize, rgba: Rgba) {
+        if y < self.row_lo || y >= self.row_hi {
+            return;
+        }
+        self.blend(((y - self.row_lo) * self.width + x) * 4, rgba);
+    }
+
+    /// Straight-alpha blend of one colour over the pixel at byte offset `o`.
+    fn blend(&mut self, o: usize, rgba: Rgba) {
+        let a = rgba[3] as u32;
+        for (c, &value) in rgba.iter().enumerate().take(3) {
+            let src = value as u32 * a;
+            let dst = self.color[o + c] as u32 * (255 - a);
+            self.color[o + c] = ((src + dst) / 255) as u8;
+        }
+        self.color[o + 3] = 255;
+    }
+
     /// Fill a screen-space triangle. Vertices may be in either winding order;
     /// back-face culling is the caller's decision, made in world space where it
     /// is meaningful.
     pub fn triangle(&mut self, v: [Vertex; 3], rgba: Rgba, write_depth: bool) {
+        self.triangle_inner(v, rgba, write_depth, true);
+    }
+
+    /// A triangle drawn over whatever is already there, depth ignored in both
+    /// directions: it is not hidden by what is in front of it and it claims
+    /// nothing of its own. What a body being pointed out *inside* another one
+    /// is filled with, so it can be seen at all.
+    pub fn triangle_over(&mut self, v: [Vertex; 3], rgba: Rgba) {
+        self.triangle_inner(v, rgba, false, false);
+    }
+
+    fn triangle_inner(&mut self, v: [Vertex; 3], rgba: Rgba, write_depth: bool, test_depth: bool) {
         let (p0, p1, p2) = (v[0].pos, v[1].pos, v[2].pos);
         let area = edge(p0, p1, p2);
         if area.abs() < 1e-9 {
@@ -228,7 +254,11 @@ impl Frame<'_> {
                     continue;
                 }
                 let key = (w0 * v[0].key + w1 * v[1].key + w2 * v[2].key) * inv_area;
-                self.put(x, y, key, rgba, write_depth);
+                if test_depth {
+                    self.put(x, y, key, rgba, write_depth);
+                } else {
+                    self.put_over(x, y, rgba);
+                }
             }
         }
     }

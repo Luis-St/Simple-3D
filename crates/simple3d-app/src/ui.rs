@@ -361,6 +361,16 @@ impl FieldBuffers {
         self.errors.contains(&id)
     }
 
+    /// Forget one field's in-progress edit, for when something else has just
+    /// written the value it was holding a draft of -- a Reset, say. Without it
+    /// the draft is committed over the new value the moment the field is left.
+    pub fn forget(&mut self, id: egui::Id) {
+        self.buffers.remove(&id);
+        self.errors.remove(&id);
+        self.editing.remove(&id);
+        self.opening.remove(&id);
+    }
+
     /// Forget every in-progress edit, for when the selection changes underneath.
     pub fn clear(&mut self) {
         self.buffers.clear();

@@ -218,10 +218,7 @@ impl Evaluator {
                 mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                 mesh
             }
-            // A group and a split are one arm: both are their children
-            // combined, and they differ only in the operation, which for a
-            // split is always the union its pieces already stood in (issue 82).
-            Body::Group { .. } | Body::Split { .. } => {
+            Body::Group { .. } => {
                 let op = node.combine_op().unwrap_or_default();
                 let mut child_meshes: Vec<Mesh> = Vec::new();
                 for &child in &node.children {
@@ -238,6 +235,42 @@ impl Evaluator {
                     return Arc::new(SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors });
                 }
                 combine(op, &child_meshes, id, &node.name, &mut errors, cancel)
+            }
+            // A split is its pieces, side by side -- appended, not unioned
+            // (issue 82).
+            //
+            // The pieces were cut out of one solid by cells that do not
+            // overlap, so they are disjoint by construction and a union has
+            // nothing to resolve. What it does instead is undo the split: every
+            // pair of them meets along a whole face, the kernel welds the pair
+            // into one body, and what comes back out is the shape they were cut
+            // from -- a plate cut into 378 squares evaluated to the twelve
+            // triangles of the plate, in a tenth of a second in release and
+            // seconds in a debug build, on every edit of the scene.
+            //
+            // Appending is what a pattern does with its unit for the same
+            // reason, and it keeps each piece a body of its own: its own
+            // colour, its own tag, its own shell for the exporter to write.
+            // Nothing is welded, so nothing shares an edge between two pieces
+            // and the result stays manifold shell by shell.
+            Body::Split { .. } => {
+                let mut pieces = Mesh::new();
+                for &child in &node.children {
+                    if !scene.node(child).visible {
+                        continue;
+                    }
+                    let child_result = self.subtree(scene, child, cancel);
+                    errors.extend(child_result.errors.iter().cloned());
+                    pieces.append(&child_result.mesh);
+                    if cancel.is_cancelled() {
+                        return Arc::new(SubtreeResult {
+                            mesh: Arc::new(Mesh::new()),
+                            anchor_offset: Vec3::ZERO,
+                            errors,
+                        });
+                    }
+                }
+                pieces
             }
             Body::Pattern { params } => {
                 // The unit the pattern repeats: its children, placed by their own
@@ -1420,6 +1453,40 @@ mod tests {
         // The whole repeated mesh is pickable under the pattern's own id, so a
         // click on any copy reaches the pattern.
         assert!(out.node_meshes.contains_key(&pat), "the pattern has no pickable mesh");
+    }
+
+    /// A split evaluates to its pieces standing side by side, not to a union of
+    /// them (issue 82).
+    ///
+    /// The pieces were cut out of one solid by cells that do not overlap, so a
+    /// union has nothing to resolve -- what it does instead is undo the split:
+    /// every pair of pieces meets along a whole face, the kernel welds them,
+    /// and what comes back is the shape they were cut from. A plate cut into
+    /// 378 squares evaluated to the twelve triangles of the plate, and it took
+    /// a tenth of a second in release and seconds in a debug build, on every
+    /// edit of the scene.
+    #[test]
+    fn a_split_is_its_pieces_side_by_side_rather_than_a_union_of_them() {
+        let mut scene = Scene::new();
+        let root = scene.root();
+        let shape = scene.add_primitive("box", root, 0).unwrap();
+        let original = scene.export_subtree(shape).unwrap();
+        scene.remove(shape);
+        let split = scene.add_split(original, None, root, 0);
+        // Two ten-millimetre cells meeting along a whole face, which is what
+        // every pair of pieces of a real split does.
+        for (index, x) in [-5.0_f64, 5.0].into_iter().enumerate() {
+            let mut mesh = simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0);
+            for p in &mut mesh.positions {
+                p.x += x;
+            }
+            scene.add_mesh(&format!("Piece {index}"), crate::mesh_data::MeshData::new(mesh), split, index);
+        }
+
+        let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+        assert!(out.errors.is_empty(), "a split reported {:?}", out.errors);
+        assert_eq!(out.mesh.triangle_count(), 24, "the pieces were welded back into the shape they came from");
+        assert!(out.mesh.manifold_issue().is_none(), "the pieces side by side are not closed");
     }
 
     #[test]
