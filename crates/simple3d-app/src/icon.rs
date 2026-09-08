@@ -35,6 +35,8 @@ pub enum Glyph {
     ShadedEdges,
     Wireframe,
     Grid,
+    /// The section plane cutting the model (issue 71).
+    Section,
     // Outliner marks.
     Eye,
     EyeOff,
@@ -282,6 +284,16 @@ fn paint(pen: &Pen<'_>, glyph: Glyph) {
                 pen.line(&[(0.1 + t * 0.8, 0.1), (0.1 + t * 0.8, 0.9)]);
             }
             pen.closed(&[(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9)]);
+        }
+        // A solid with a slice taken off it: the body, the plane that took the
+        // slice, and the hatch on the face the cut left behind.
+        Glyph::Section => {
+            pen.closed(&[(0.16, 0.24), (0.60, 0.24), (0.60, 0.84), (0.16, 0.84)]);
+            pen.line(&[(0.60, 0.10), (0.60, 0.94)]);
+            for i in 0..3 {
+                let t = 0.32 + i as f32 * 0.17;
+                pen.line(&[(0.22, t + 0.16), (0.38, t)]);
+            }
         }
         Glyph::Eye => {
             pen.ellipse(0.5, 0.5, 0.42, 0.26, 0.0, TAU);

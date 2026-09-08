@@ -63,6 +63,7 @@ pub enum Command {
     ToggleAxisX,
     ToggleAxisY,
     ToggleAxisZ,
+    ToggleSection,
     DisplayShaded,
     DisplayShadedEdges,
     DisplayWireframe,
@@ -147,6 +148,7 @@ impl Command {
         Command::ToggleAxisX,
         Command::ToggleAxisY,
         Command::ToggleAxisZ,
+        Command::ToggleSection,
         Command::DisplayShaded,
         Command::DisplayShadedEdges,
         Command::DisplayWireframe,
@@ -209,6 +211,7 @@ impl Command {
             ToggleAxisX => "Show the X axis",
             ToggleAxisY => "Show the Y axis",
             ToggleAxisZ => "Show the Z axis",
+            ToggleSection => "Section view",
             DisplayShaded => "Display: shaded",
             DisplayShadedEdges => "Display: shaded with edges",
             DisplayWireframe => "Display: wireframe",
@@ -238,7 +241,7 @@ impl Command {
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh
             | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
-            | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | DisplayShaded
+            | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection | DisplayShaded
             | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
             ModeMove | ModeRotate | ModeResize | ModeScale | ToggleHandleFrame | MeasureTool | SnapToGeometry
             | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
@@ -613,6 +616,9 @@ impl Keymap {
         set(ToggleAxisX, Chord::alt("X"));
         set(ToggleAxisY, Chord::alt("Y"));
         set(ToggleAxisZ, Chord::alt("Z"));
+        // The one number left on the row the view switches live on, beside the
+        // grid it is a companion to.
+        set(ToggleSection, Chord::key("4"));
         set(DisplayShaded, Chord::key("8"));
         set(DisplayShadedEdges, Chord::key("9"));
         set(DisplayWireframe, Chord::key("6"));

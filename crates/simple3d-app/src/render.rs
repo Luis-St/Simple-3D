@@ -7,6 +7,7 @@ use crate::snap::MARK_AXIS;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::{AxisStyle, Colour};
+use simple3d_geom::section::{self, Plane};
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 
@@ -218,6 +219,11 @@ pub struct Palette {
     /// The fill a body glowing through another one is drawn in: the selection
     /// colour, translucent enough that the shape in front of it still reads.
     pub glow: Rgba,
+    /// The face a section leaves behind (issue 71): the inside of the material,
+    /// which is the one surface in the frame that is not a surface of the
+    /// model. Darker than a solid on purpose -- a cut that reads in the same
+    /// colour as the outside says nothing about where the wall ends.
+    pub cut: Rgba,
 }
 
 impl Palette {
@@ -242,6 +248,7 @@ impl Palette {
             wire: [0xC2, 0xCA, 0xD6, 255],
             edge: [0x11, 0x13, 0x17, 255],
             glow: fade(token::ACCENT, 110),
+            cut: [0x5E, 0x66, 0x73, 255],
         }
     }
 
@@ -260,6 +267,7 @@ impl Palette {
             wire: [64, 70, 80, 255],
             edge: [70, 76, 86, 255],
             glow: [226, 122, 12, 120],
+            cut: [104, 112, 124, 255],
         }
     }
 
@@ -373,6 +381,12 @@ pub struct Request<'a> {
     /// the eye, because the loops at the ends of a run lie exactly on the
     /// surface they are drawn on and would otherwise lose the tie to it.
     pub preview: Vec<Vec<Vec3>>,
+    /// The plane the model is cut with, or `None` for the whole of it
+    /// (issue 71). Everything drawn from the model goes through it -- faces,
+    /// edges, outlines, ghosts, marks, the stretches of an axis that run
+    /// through material -- and the opening it leaves is closed with a cap, so
+    /// that a wall reads as a wall rather than as a shell seen from inside.
+    pub section: Option<Plane>,
 }
 
 /// How many rows a band must have before splitting the frame again is worth
@@ -423,7 +437,7 @@ pub struct Prepared {
 }
 
 pub fn prepare_frame(request: &Request<'_>) -> Prepared {
-    let material = axis_material(&request.items, &request.grid);
+    let material = axis_material(&request.items, &request.grid, request.section);
     let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
     Prepared { steps: prepare(request), axes }
 }
@@ -483,16 +497,22 @@ fn prepare(request: &Request<'_>) -> Vec<Step> {
     if request.grid.visible {
         push_grid(&mut steps, &view, &request.grid, &request.palette);
     }
+    let cut = request.section;
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         match item.style {
             Style::Solid => match request.mode {
-                DisplayMode::Wireframe => push_wireframe(&mut steps, &view, item.renderable, request.palette.wire),
+                DisplayMode::Wireframe => {
+                    push_wireframe(&mut steps, &view, item.renderable, request.palette.wire, cut);
+                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                }
                 DisplayMode::Shaded => {
-                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base)
+                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
                 DisplayMode::ShadedWithEdges => {
-                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base);
-                    push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base);
+                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                    push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base, cut);
+                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
             },
             Style::Selected => {
@@ -500,26 +520,40 @@ fn prepare(request: &Request<'_>) -> Vec<Step> {
                 // be visible, and an outline reads clearly over a shaded body.
                 // A larger bias than the solid's own edges, or the two would tie
                 // at equal depth and the outline would lose.
-                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base, request.mode);
+                push_selection(
+                    &mut steps,
+                    &view,
+                    item.renderable,
+                    request.palette.selected,
+                    tag_base,
+                    request.mode,
+                    cut,
+                );
             }
-            Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost),
+            Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost, cut),
             // The outline here; the glow itself comes last, after everything
             // that could be standing in front of it.
-            Style::Glow => {
-                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base, request.mode)
-            }
+            Style::Glow => push_selection(
+                &mut steps,
+                &view,
+                item.renderable,
+                request.palette.selected,
+                tag_base,
+                request.mode,
+                cut,
+            ),
         }
     }
     // Last of all, over the finished model: what a buried body is pointed out
     // with, and the cells of a tool's preview.
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {
-        push_glow(&mut steps, &view, item.renderable, request.palette.glow);
+        push_glow(&mut steps, &view, item.renderable, request.palette.glow, cut);
     }
-    push_preview(&mut steps, &view, &request.preview, request.palette.selected);
+    push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
         // there is no surface for it to sit on.
-        push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid);
+        push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid, cut);
     }
     steps
 }
@@ -713,7 +747,36 @@ fn triangle_base(item: &Renderable, index: usize, base: Rgba) -> Rgba {
     }
 }
 
-fn push_shaded(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour_base: Rgba, alpha: u8, tag_base: u16) {
+/// What is left of one triangle: the whole of it while there is no section,
+/// and what the plane leaves of it otherwise.
+///
+/// Every path that draws a face goes through this, so a section cannot cut the
+/// shading and miss the ghosts, or cut the model and miss the glow.
+fn kept(section: Option<Plane>, world: [Vec3; 3]) -> section::Clipped {
+    match section {
+        Some(plane) => section::clip_triangle(&plane, world),
+        None => section::Clipped::untouched(world),
+    }
+}
+
+/// The same question for a line: the stretch of it on the kept side, or nothing
+/// when the cut took all of it.
+fn kept_line(section: Option<Plane>, a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
+    match section {
+        Some(plane) => section::clip_segment(&plane, a, b),
+        None => Some((a, b)),
+    }
+}
+
+fn push_shaded(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    colour_base: Rgba,
+    alpha: u8,
+    tag_base: u16,
+    section: Option<Plane>,
+) {
     let forward = view.forward();
     for (index, tri) in item.mesh.indices.iter().enumerate() {
         let world = [
@@ -733,19 +796,78 @@ fn push_shaded(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour_bas
             continue;
         }
         let colour = shade(triangle_base(item, index, colour_base), normal, forward, alpha);
-        let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
-        steps.push(Step::Triangle {
-            v: [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
-            colour,
-            tag: item.tag(index, tag_base),
-            write_depth: true,
-        });
+        for piece in kept(section, world).triangles() {
+            steps.push(Step::Triangle {
+                v: piece.map(|at| to_vertex(view, view.to_view(at))),
+                colour,
+                tag: item.tag(index, tag_base),
+                write_depth: true,
+            });
+        }
+    }
+}
+
+/// The cap: the cut filled in, so that a sectioned solid still reads as solid
+/// and the thickness of a wall can be seen (issue 71).
+///
+/// Drawn without back-face culling. The cap faces the material that went away,
+/// which is where the camera usually is, but a shell can be looked into from
+/// the other side as well and a cap that vanished there would put a hole back
+/// in the picture the cut was made to remove.
+///
+/// A cut the geometry cannot close contributes nothing rather than a guess: the
+/// section then reads as it did before caps existed, which is a fair way to
+/// fail and never a wrong wall.
+fn push_cap(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    palette: &Palette,
+    section: Option<Plane>,
+    mode: DisplayMode,
+) {
+    let Some(plane) = section else { return };
+    let outlines = section::loops(&item.mesh, &plane);
+    if outlines.is_empty() {
+        return;
+    }
+    // Filled in every mode that fills anything. Wireframe fills nothing, so
+    // there the cut is its outline alone -- without which a wireframe section
+    // is a shape that stops for no stated reason.
+    if mode != DisplayMode::Wireframe {
+        let colour = shade(palette.cut, plane.normal, view.forward(), 255);
+        for piece in section::fill(&outlines, plane.normal) {
+            steps.push(Step::Triangle {
+                v: piece.map(|at| to_vertex(view, view.to_view(at))),
+                colour,
+                // No body: the cap is not a solid an origin axis can be inside
+                // of, and the axis rule is asked about the model, not the cut.
+                tag: 0,
+                write_depth: true,
+            });
+        }
+    }
+    // The line round the cut wherever the mode draws the model's own lines: the
+    // edge the cut made is one of them, and the only one with no crease behind
+    // it for the edge pass to find.
+    if mode == DisplayMode::Shaded {
+        return;
+    }
+    let colour = match mode {
+        DisplayMode::Wireframe => palette.wire,
+        _ => palette.edge,
+    };
+    for outline in &outlines {
+        for (index, &from) in outline.iter().enumerate() {
+            let to = outline[(index + 1) % outline.len()];
+            steps.push(line_step(view, from, to, colour, MARK_BIAS, 0, true));
+        }
     }
 }
 
 /// Ghosts are drawn without back-face culling and without writing depth, so a
 /// hidden tool body reads as a translucent volume rather than a flat patch.
-fn push_ghost(steps: &mut Vec<Step>, view: &View, item: &Renderable, base: Rgba) {
+fn push_ghost(steps: &mut Vec<Step>, view: &View, item: &Renderable, base: Rgba, section: Option<Plane>) {
     let forward = view.forward();
     for tri in &item.mesh.indices {
         let world = [
@@ -758,15 +880,16 @@ fn push_ghost(steps: &mut Vec<Step>, view: &View, item: &Renderable, base: Rgba)
             continue;
         }
         let colour = shade(base, normal.normalized(), forward, base[3]);
-        let in_view = [view.to_view(world[0]), view.to_view(world[1]), view.to_view(world[2])];
         // A ghost writes no depth, so the tag it would have written is never
         // read; it carries the one a solid would have had for form's sake.
-        steps.push(Step::Triangle {
-            v: [to_vertex(view, in_view[0]), to_vertex(view, in_view[1]), to_vertex(view, in_view[2])],
-            colour,
-            tag: 0,
-            write_depth: false,
-        });
+        for piece in kept(section, world).triangles() {
+            steps.push(Step::Triangle {
+                v: piece.map(|at| to_vertex(view, view.to_view(at))),
+                colour,
+                tag: 0,
+                write_depth: false,
+            });
+        }
     }
 }
 
@@ -804,10 +927,11 @@ const PREVIEW_BIAS: f32 = 3.0e-3;
 /// Drawn as [`Step::Overlay`]: after the model, tested against it, and claiming
 /// nothing of its own -- so a loop is hidden by the solid it is behind and does
 /// not hide the next loop where two of them cross.
-fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour: Rgba) {
+fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour: Rgba, section: Option<Plane>) {
     for loop_ in loops {
         for (index, &from) in loop_.iter().enumerate() {
             let to = loop_[(index + 1) % loop_.len()];
+            let Some((from, to)) = kept_line(section, from, to) else { continue };
             let Step::Line { a, b, bias, .. } = line_step(view, from, to, colour, PREVIEW_BIAS, 0, false) else {
                 unreachable!("a line step is a line");
             };
@@ -823,21 +947,31 @@ fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour:
 /// another solid reads as a shape, and half a shell reads as a hole in one.
 /// The colour is translucent, so what it is inside is still visible through the
 /// glow -- which is how the glow says *where* rather than merely *that*.
-fn push_glow(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba) {
+fn push_glow(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, section: Option<Plane>) {
     for tri in &item.mesh.indices {
-        let v = [
-            to_vertex(view, view.to_view(item.mesh.positions[tri[0] as usize])),
-            to_vertex(view, view.to_view(item.mesh.positions[tri[1] as usize])),
-            to_vertex(view, view.to_view(item.mesh.positions[tri[2] as usize])),
+        let world = [
+            item.mesh.positions[tri[0] as usize],
+            item.mesh.positions[tri[1] as usize],
+            item.mesh.positions[tri[2] as usize],
         ];
-        steps.push(Step::Glow { v, colour });
+        for piece in kept(section, world).triangles() {
+            steps.push(Step::Glow { v: piece.map(|at| to_vertex(view, view.to_view(at))), colour });
+        }
     }
 }
 
-fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
+fn push_edges(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    colour: Rgba,
+    tag_base: u16,
+    section: Option<Plane>,
+) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
+        let Some((a, b)) = kept_line(section, a, b) else { continue };
         // Tagged like the faces it creases, so an edge of the solid an axis
         // goes into does not hide that axis where the faces either side of it
         // do not.
@@ -876,6 +1010,7 @@ const EDGE_ON: f64 = 1e-6;
 /// corners worth pointing at.
 const SELECTION_CREASE: f64 = 35.0;
 
+#[allow(clippy::too_many_arguments)]
 fn push_selection(
     steps: &mut Vec<Step>,
     view: &View,
@@ -883,6 +1018,7 @@ fn push_selection(
     colour: Rgba,
     tag_base: u16,
     mode: DisplayMode,
+    section: Option<Plane>,
 ) {
     // Drawn a second time, one pixel out from the shape, and that is what makes
     // it a line rather than a row of dots.
@@ -905,6 +1041,10 @@ fn push_selection(
     let mut push = |edge: [u32; 2], away: Option<Vec3>| {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
+        // The outline is cut with the shape it outlines: an accent line left
+        // hanging in the air where the model has been cut away says the
+        // selection is somewhere it no longer is.
+        let Some((a, b)) = kept_line(section, a, b) else { return };
         let tag = item.body_tag(edge[0] as usize, tag_base);
         steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
         let Some(away) = away else { return };
@@ -1024,10 +1164,11 @@ impl Creases {
     }
 }
 
-fn push_wireframe(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba) {
+fn push_wireframe(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, section: Option<Plane>) {
     for edge in &item.edges {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
+        let Some((a, b)) = kept_line(section, a, b) else { continue };
         // No depth bias and no filled faces, so the whole wireframe is visible
         // including the far side -- which is the point of wireframe.
         // The tag is the wireframe's own: nothing is filled, so nothing owns a
@@ -1350,7 +1491,7 @@ fn tag_bases(items: &[Item<'_>]) -> Vec<u16> {
         .collect()
 }
 
-fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
+fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Plane>) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
         through: [Vec::new(), Vec::new(), Vec::new()],
@@ -1370,6 +1511,12 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
                 continue;
             }
             for (span, tag) in axis_inside_spans(item, axis, tag_base) {
+                // Material the section took away is no longer in the axis's
+                // way: the line is drawn through the space the cut opened, the
+                // way it is drawn through empty space anywhere else.
+                let Some(span) = section.map_or(Some(span), |plane| trim_span(span, axis, &plane)) else {
+                    continue;
+                };
                 material.inside[axis].push(span);
                 material.through[axis].push((span.0, span.1, tag));
                 material.tags = material.tags.max(tag as usize + 1);
@@ -1377,6 +1524,28 @@ fn axis_material(items: &[Item<'_>], grid: &Grid) -> AxisMaterial {
         }
     }
     material
+}
+
+/// What is left of a stretch of material along `axis` once the section has had
+/// it, as the coordinate along that axis.
+///
+/// The axis runs through the origin, so a point on it is `t` along the axis and
+/// zero elsewhere and the plane's own test comes down to one number: the axis
+/// crosses it where the normal's component along the axis carries it there, and
+/// an axis lying *in* the plane is either wholly kept or wholly gone.
+fn trim_span(span: (f64, f64), axis: usize, plane: &Plane) -> Option<(f64, f64)> {
+    let slope = component(plane.normal, axis);
+    let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
+    let (lo, hi) = if slope > 1e-12 {
+        (lo, hi.min(plane.offset / slope))
+    } else if slope < -1e-12 {
+        (lo.max(plane.offset / slope), hi)
+    } else if plane.depth(Vec3::ZERO) <= 0.0 {
+        (lo, hi)
+    } else {
+        return None;
+    };
+    (hi - lo > 1e-9).then_some((lo, hi))
 }
 
 /// One arm of an axis: faded along its length like the grid, and drawn over the
@@ -1691,7 +1860,14 @@ fn mark_colours(palette: &Palette) -> [Rgba; 3] {
 /// A mark answers to the switch of the axis it is *drawn as* rather than to the
 /// one its plane is perpendicular to, because its colour is the only thing there
 /// is to recognise it by (issue 75).
-fn push_plane_marks(steps: &mut Vec<Step>, view: &View, items: &[Item<'_>], palette: &Palette, grid: &Grid) {
+fn push_plane_marks(
+    steps: &mut Vec<Step>,
+    view: &View,
+    items: &[Item<'_>],
+    palette: &Palette,
+    grid: &Grid,
+    section: Option<Plane>,
+) {
     let colours = mark_colours(palette);
     for item in items.iter().filter(|i| i.style == Style::Solid) {
         for (axis, colour) in colours.into_iter().enumerate() {
@@ -1704,9 +1880,11 @@ fn push_plane_marks(steps: &mut Vec<Step>, view: &View, items: &[Item<'_>], pale
                     item.renderable.mesh.positions[tri[1] as usize],
                     item.renderable.mesh.positions[tri[2] as usize],
                 ];
-                if let Some((a, b)) = crate::snap::plane_crossing(world, axis) {
-                    steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
-                }
+                let Some((a, b)) = crate::snap::plane_crossing(world, axis) else { continue };
+                // A mark lies on a surface, so it goes wherever that surface
+                // does.
+                let Some((a, b)) = kept_line(section, a, b) else { continue };
+                steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
             }
         }
     }
@@ -1734,6 +1912,7 @@ mod tests {
             grid: Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false },
             items,
             preview: Vec::new(),
+            section: None,
         }
     }
 
@@ -1747,6 +1926,134 @@ mod tests {
         let pixel: Rgba =
             [frame.color[offset], frame.color[offset + 1], frame.color[offset + 2], frame.color[offset + 3]];
         pixel == palette.background_at(index / frame.width, frame.height)
+    }
+
+    /// The plane through the origin perpendicular to `axis`, cutting the
+    /// material past it away.
+    fn section_at(axis: usize, offset: f64) -> Plane {
+        Plane::on_axis(axis, offset, false)
+    }
+
+    /// How many pixels the cap was drawn on: it is filled flat, in one colour
+    /// worked out once, so counting that colour is counting the cut.
+    fn cap_pixels(frame: &Image, palette: &Palette, plane: &Plane, view: &View) -> usize {
+        let colour = shade(palette.cut, plane.normal, view.forward(), 255);
+        (0..frame.width * frame.height).filter(|i| frame.color[i * 4..i * 4 + 4] == colour[..]).count()
+    }
+
+    #[test]
+    fn a_section_takes_the_material_past_the_plane_out_of_the_picture() {
+        // Two boxes far enough apart to project to their own corners of the
+        // frame, so what is drawn where can be asked of one of them at a time.
+        let mut mesh = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(-60.0, 0.0, 0.0));
+        mesh.append(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(60.0, 0.0, 0.0)));
+        let prepared = Renderable::prepare(&mesh);
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+        req.section = Some(section_at(0, 0.0));
+        // The axes off: both boxes are centred on X, and an axis drawn through
+        // where one of them was would answer the question for it.
+        req.grid.axes = [false; 3];
+        let frame = render(&req);
+        let palette = Palette::dark();
+
+        let pixel = |at: Vec3| {
+            let (screen, _) = req.view.project(at).expect("the box is in the frame");
+            (screen.y as usize) * frame.width + screen.x as usize
+        };
+        assert!(!is_background(&frame, pixel(Vec3::new(-60.0, 0.0, 0.0)), &palette), "the kept box is not drawn");
+        assert!(
+            is_background(&frame, pixel(Vec3::new(60.0, 0.0, 0.0)), &palette),
+            "the box past the plane is still in the picture"
+        );
+    }
+
+    #[test]
+    fn the_cut_is_capped_so_a_sectioned_solid_still_reads_as_solid() {
+        let mesh = primitives::box_mesh(40.0, 40.0, 40.0);
+        let prepared = Renderable::prepare(&mesh);
+        let plane = section_at(2, 0.0);
+        let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+        req.section = Some(plane);
+        let frame = render(&req);
+        let palette = Palette::dark();
+        assert!(
+            cap_pixels(&frame, &palette, &plane, &req.view) > 200,
+            "the cut was left open: the inside of the box is a hole in the picture"
+        );
+    }
+
+    #[test]
+    fn a_wall_reads_as_a_wall_and_not_as_a_full_face() {
+        // What the feature is for. A tube cut across shows a ring of material
+        // and a hole through the middle of it, so the cap has to cover less
+        // than the solid cylinder of the same size would.
+        let plane = section_at(2, 0.0);
+        let solid = Renderable::prepare(&primitives::cylinder_mesh(40.0, 40.0, 40.0, 48));
+        let tube = Renderable::prepare(&primitives::tube_mesh(40.0, 28.0, 40.0, 48));
+        let palette = Palette::dark();
+        let covered = |item: &Renderable| {
+            let mut req = request(vec![Item { renderable: item, style: Style::Solid }], DisplayMode::Shaded);
+            req.section = Some(plane);
+            let frame = render(&req);
+            cap_pixels(&frame, &palette, &plane, &req.view)
+        };
+        let (whole, walled) = (covered(&solid), covered(&tube));
+        assert!(walled > 0, "the tube was not capped at all");
+        assert!(walled < whole, "the tube's cut covers {walled} pixels, the same as a solid rod's {whole}");
+    }
+
+    #[test]
+    fn a_wireframe_section_says_where_the_shape_was_cut() {
+        // Wireframe fills nothing, so a cut with no line round it is a shape
+        // whose edges simply stop in mid-air. The probe is the middle of one
+        // side of the cut, where the box has no edge of its own: it is drawn
+        // only if the cut brought its own outline.
+        let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+        let items = || vec![Item { renderable: &prepared, style: Style::Solid }];
+        let palette = Palette::dark();
+        let probe = Vec3::new(20.0, 0.0, 0.0);
+        let drawn = |section: Option<Plane>| {
+            let mut req = request(items(), DisplayMode::Wireframe);
+            req.grid.axes = [false; 3];
+            req.section = section;
+            let frame = render(&req);
+            let (at, _) = req.view.project(probe).expect("the box is in the frame");
+            let index = (at.y as usize) * frame.width + at.x as usize;
+            !is_background(&frame, index, &palette)
+        };
+        assert!(!drawn(None), "the box already draws a line at the middle of its side, so the probe proves nothing");
+        assert!(drawn(Some(section_at(2, 0.0))), "a wireframe section left no line where the shape was cut");
+    }
+
+    #[test]
+    fn what_the_cut_removed_no_longer_hides_an_origin_axis() {
+        // The axis rule asks the model where it runs through material. With the
+        // top of a box cut away, the stretch of Z that ran through it is in
+        // open air and the line has to be drawn there again.
+        let mesh = primitives::box_mesh(40.0, 40.0, 40.0);
+        let prepared = Renderable::prepare(&mesh);
+        let items = vec![Item { renderable: &prepared, style: Style::Solid }];
+        let grid =
+            Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+        let whole = axis_material(&items, &grid, None);
+        let cut = axis_material(&items, &grid, Some(section_at(2, 0.0)));
+        let top = |material: &AxisMaterial| material.inside[2].iter().fold(f64::MIN, |m: f64, span| m.max(span.1));
+        assert!((top(&whole) - 20.0).abs() < 1e-6, "the box fills Z up to 20, got {}", top(&whole));
+        assert!((top(&cut)).abs() < 1e-6, "the axis is still blocked up to {} above the cut", top(&cut));
+    }
+
+    #[test]
+    fn a_line_of_the_model_is_cut_with_the_faces() {
+        // Edges, outlines and marks all go through one place, so one of them
+        // standing for the rest is fair -- what would break is a path that
+        // forgot to ask at all, and this is the check that it asked.
+        let plane = section_at(2, 0.0);
+        assert_eq!(kept_line(Some(plane), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 9.0)), None);
+        let kept = kept_line(Some(plane), Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, 5.0)).expect("half of it");
+        assert!((kept.1.z).abs() < 1e-9, "the line was not trimmed at the plane: {kept:?}");
+        // And with no section, every line is left exactly as it was.
+        let (a, b) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
+        assert_eq!(kept_line(None, a, b), Some((a, b)));
     }
 
     #[test]
@@ -2643,6 +2950,7 @@ mod tests {
                 },
                 items,
                 preview: Vec::new(),
+                section: None,
             }
         }
         let ball = primitives::ellipsoid_mesh(50.0, 50.0, 50.0, 32);
@@ -2802,7 +3110,7 @@ mod tests {
         let prepared = Renderable::prepare(&between);
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
         assert!(
-            axis_material(&items, &req.grid).inside.iter().all(|spans| spans.is_empty()),
+            axis_material(&items, &req.grid, None).inside.iter().all(|spans| spans.is_empty()),
             "the solid was placed on an axis, so this proves nothing"
         );
 
@@ -2875,7 +3183,7 @@ mod tests {
         assert_eq!(prepared.body_count, 2, "the two shapes welded into one body, so this proves nothing");
 
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
-        let material = axis_material(&items, &req.grid);
+        let material = axis_material(&items, &req.grid, None);
         for axis in 0..3 {
             let seen = material.through[axis].len();
             assert_eq!(seen, 1, "axis {axis} is seen through {seen} of the two bodies");
@@ -2979,7 +3287,7 @@ mod tests {
         let items =
             vec![Item { renderable: &centred, style: Style::Solid }, Item { renderable: &beside, style: Style::Solid }];
         let grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-        let material = axis_material(&items, &grid);
+        let material = axis_material(&items, &grid, None);
 
         let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
         let spans = &material.inside[0];
@@ -2999,7 +3307,7 @@ mod tests {
         // A solid the axes miss is an ordinary occluder, and cuts nothing.
         let away = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(40.0, 40.0, 0.0)));
         let items = vec![Item { renderable: &away, style: Style::Solid }];
-        let material = axis_material(&items, &grid);
+        let material = axis_material(&items, &grid, None);
         assert!(material.inside.iter().all(|spans| spans.is_empty()), "a solid off the axes cut one of them");
         assert!(
             material.through.iter().all(|bodies| bodies.is_empty()),
@@ -3008,14 +3316,14 @@ mod tests {
 
         // A ghost hides nothing: it is see-through, and so is the axis in it.
         let ghosted = vec![Item { renderable: &centred, style: Style::Ghost }];
-        let material = axis_material(&ghosted, &grid);
+        let material = axis_material(&ghosted, &grid, None);
         assert!(material.through.iter().all(|bodies| bodies.is_empty()), "a ghost was marked see-through");
         assert!(material.inside[0].is_empty(), "a ghost cut the axis");
 
         // An axis that is switched off is not looked for at all.
         let items = vec![Item { renderable: &centred, style: Style::Solid }];
         let off = Grid { axes: [false, true, true], ..grid };
-        assert!(axis_material(&items, &off).inside[0].is_empty(), "a switched-off axis was cut out of the model");
+        assert!(axis_material(&items, &off, None).inside[0].is_empty(), "a switched-off axis was cut out of the model");
     }
 
     #[test]
@@ -3176,6 +3484,7 @@ mod tests {
             grid: Grid { visible: true, spacing: 10.0, axes: [false; 3], style: AxisStyle::Grid, plane_marks: false },
             items: Vec::new(),
             preview: Vec::new(),
+            section: None,
         };
         (render(&req), req.palette)
     }

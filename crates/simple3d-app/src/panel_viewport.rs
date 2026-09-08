@@ -42,7 +42,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 // manipulator, so dragging one lays the copies out rather than
                 // moving the whole pattern (issue 67).
                 let grips_owned = pattern_grips_interact(app, ui, &view);
-                let owned = grips_owned || manipulate(app, ui, &response, &view);
+                // The section plane's grip, on the same terms: a drag on it
+                // slides the cut rather than selecting what is behind it
+                // (issue 71).
+                let section_owned = crate::section_tool::interact(app, ui, &view);
+                let owned = grips_owned || section_owned || manipulate(app, ui, &response, &view);
                 // Picking is *outside* the manipulator, because it has to work when
                 // there is no manipulator: with nothing selected there is no primary
                 // node and no gizmo, and while this lived inside `manipulate` the
@@ -145,6 +149,8 @@ fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
             // rather than over the finished picture, so the far side of the
             // shape hides the ones behind it (issue 82).
             preview: crate::split_tool::preview_loops(app),
+            // The plane the model is cut with, while there is one (issue 71).
+            section: app.scene.settings.section.plane(),
         };
         // One preparation, whichever engine draws it: the projection, the
         // shading, the grid's falloff and the axis rule are settled here and
@@ -209,6 +215,8 @@ fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.axes_visible.hash(&mut hasher);
     app.scene.settings.axis_style.hash(&mut hasher);
     app.scene.settings.plane_marks.hash(&mut hasher);
+    // The cut is part of the picture, so every number that moves it redraws it.
+    crate::section_tool::hash_section(&app.scene.settings.section, &mut hasher);
     let camera = app.scene.camera;
     for value in
         [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]
@@ -481,7 +489,7 @@ fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool
 
 /// Which way a world direction runs on screen, at `at`. A zero vector where the
 /// line does not project -- behind the eye, or edge on.
-fn screen_direction(view: &View, at: Vec3, dir: Vec3) -> egui::Vec2 {
+pub(crate) fn screen_direction(view: &View, at: Vec3, dir: Vec3) -> egui::Vec2 {
     // A millimetre along the line is enough to take its bearing and short
     // enough that the answer is about the line at `at` rather than about where
     // it ends up.
@@ -620,7 +628,7 @@ fn select_under_cursor(app: &mut App, ui: &mut egui::Ui, view: &View) {
     }
 }
 
-fn mods_from(ui: &egui::Ui) -> Mods {
+pub(crate) fn mods_from(ui: &egui::Ui) -> Mods {
     let (ctrl, shift, alt) = ui.input(|i| (i.modifiers.command, i.modifiers.shift, i.modifiers.alt));
     Mods { free: alt, coarse: shift, symmetric: ctrl }
 }
@@ -668,6 +676,11 @@ fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     // A pattern's lay-out grips: a diamond on each of the numbers that place its
     // copies, dragged to lay them out by eye rather than by typing (issue 67).
     draw_pattern_grips(app, &painter, view);
+
+    // Where the section plane stands, and the grip that slides it (issue 71).
+    // Over the image rather than in it: everything the cut keeps is behind the
+    // plane, so there is nothing here that could hide the frame.
+    crate::section_tool::draw(app, &painter, view);
 
     if app.measure.active {
         draw_measure(app, ui, &painter, view);

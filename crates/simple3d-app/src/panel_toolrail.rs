@@ -138,6 +138,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             {
                 app.run(Command::ToggleGrid);
             }
+            // The section plane belongs here rather than with the tools: it
+            // cuts the picture, never the model (issue 71).
+            let sectioned = app.scene.settings.section.enabled;
+            if icon::button(ui, Glyph::Section, size, sectioned, true)
+                .on_hover_text(format!(
+                    "Section view  {}\nDrag the grip in the plane to slide it",
+                    app.keymap.shortcut_text(Command::ToggleSection)
+                ))
+                .clicked()
+            {
+                app.run(Command::ToggleSection);
+            }
             separator(ui);
             for (mode, glyph, command) in [
                 (DisplayMode::Wireframe, Glyph::Wireframe, Command::DisplayWireframe),

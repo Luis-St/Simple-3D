@@ -432,6 +432,7 @@ impl App {
                 (self.scene.settings.axes_visible[0], Command::ToggleAxisX, "X axis"),
                 (self.scene.settings.axes_visible[1], Command::ToggleAxisY, "Y axis"),
                 (self.scene.settings.axes_visible[2], Command::ToggleAxisZ, "Z axis"),
+                (self.scene.settings.section.enabled, Command::ToggleSection, "Section view"),
                 (self.settings.show_bounding_box, Command::ToggleBoundingBox, "Bounding box"),
                 (!self.settings.layout.docks_hidden, Command::ToggleDocks, "Side docks"),
             ] {

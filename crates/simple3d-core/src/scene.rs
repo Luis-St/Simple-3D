@@ -561,6 +561,55 @@ pub struct SceneSettings {
     /// previews existed.
     #[serde(default, skip_serializing_if = "is_no_change")]
     pub preview_viewport: PreviewViewport,
+    /// The plane the model is cut with on screen (issue 71). Off, and absent
+    /// from the file, until it is asked for.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub section: SectionView,
+}
+
+/// A plane that cuts the model on screen so its inside can be seen and a wall
+/// can be measured by eye (issue 71).
+///
+/// It belongs to the document rather than to the application: the offset is a
+/// place in the model, and "40mm along X" means nothing in the next project.
+/// Nothing about it reaches the geometry -- the model, what is exported and
+/// what is picked are what they were, and only the picture changes -- so
+/// moving the plane is not an edit and there is nothing to undo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SectionView {
+    pub enabled: bool,
+    /// Which axis the plane stands perpendicular to: 0 for X, 1 for Y, 2 for Z.
+    #[serde(default)]
+    pub axis: usize,
+    /// Where along that axis it sits, in millimetres.
+    #[serde(default)]
+    pub offset: f64,
+    /// Which side of it goes: the material past the plane along the axis, or
+    /// the material before it.
+    #[serde(default)]
+    pub flipped: bool,
+}
+
+impl SectionView {
+    /// The axis it stands on, clamped: a file naming a fourth axis reads as Z
+    /// rather than as a panic.
+    pub fn axis(&self) -> usize {
+        self.axis.min(2)
+    }
+
+    /// The half-space the renderer cuts with, or `None` while the section is
+    /// off -- which is the one question every drawing path asks.
+    pub fn plane(&self) -> Option<simple3d_geom::section::Plane> {
+        self.enabled.then(|| simple3d_geom::section::Plane::on_axis(self.axis(), self.offset, self.flipped))
+    }
+
+    pub fn axis_label(&self) -> &'static str {
+        ["X", "Y", "Z"][self.axis()]
+    }
+}
+
+fn is_off(section: &SectionView) -> bool {
+    *section == SectionView::default()
 }
 
 fn is_no_change(mode: &PreviewViewport) -> bool {
@@ -590,6 +639,7 @@ impl Default for SceneSettings {
             axis_style: AxisStyle::default(),
             plane_marks: true,
             preview_viewport: PreviewViewport::NoChange,
+            section: SectionView::default(),
         }
     }
 }

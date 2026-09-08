@@ -372,6 +372,13 @@ pub struct App {
     /// The geometry feature the current drag is snapped onto, for the viewport to
     /// mark. `None` when nothing is snapped this frame.
     pub snap_indicator: Option<Vec3>,
+    /// How far the section plane stood from the point the pointer took hold of
+    /// it, for as long as its grip is being dragged (issue 71). `None` when the
+    /// plane is not being moved.
+    pub section_grab: Option<f64>,
+    /// Whether the pointer is on the section plane's grip this frame, so the
+    /// frame can say that it can be taken hold of before it is.
+    pub section_hover: bool,
     /// Every feature of the body the current drag is carrying, as offsets from
     /// its origin; gathered on `Begin`. See `App::drag_feature_offsets`.
     snap_sources: Vec<Vec3>,
@@ -584,6 +591,8 @@ impl App {
             snap_requested: false,
             snap_sources: Vec::new(),
             snap_indicator: None,
+            section_grab: None,
+            section_hover: false,
             snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
             pending_delete: None,
             camera_move: None,
@@ -1097,6 +1106,7 @@ impl App {
             ViewRight => self.set_view(ViewPreset::Right),
             ViewIsometric => self.set_view(ViewPreset::Isometric),
             ToggleGrid => self.scene.settings.grid_visible = !self.scene.settings.grid_visible,
+            ToggleSection => self.toggle_section(),
             ToggleAxisX => self.toggle_axis(0),
             ToggleAxisY => self.toggle_axis(1),
             ToggleAxisZ => self.toggle_axis(2),
@@ -1136,6 +1146,34 @@ impl App {
             SnapToGeometry => {}
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
+    }
+
+    /// Switch the section plane on or off (issue 71).
+    ///
+    /// Switching it on puts it in the middle of the model along its axis unless
+    /// it has already been placed somewhere. A plane left at zero cuts nothing
+    /// at all for a part that stands beside the origin, and a section that
+    /// appears to do nothing reads as a broken one rather than as a plane that
+    /// needs sliding.
+    fn toggle_section(&mut self) {
+        let on = !self.scene.settings.section.enabled;
+        self.scene.settings.section.enabled = on;
+        if on && self.scene.settings.section.offset == 0.0 {
+            let axis = self.scene.settings.section.axis();
+            self.scene.settings.section.offset = crate::section_tool::middle_of(self.evaluated.mesh.bounds(), axis);
+        }
+        self.status = Status::Info(match on {
+            true => crate::section_tool::readout(self),
+            false => "Section off".to_string(),
+        });
+    }
+
+    /// Slide the section plane to `offset`, in millimetres along its own axis.
+    /// Nothing about the model changes, so this is not an edit and there is no
+    /// undo step for it -- see [`crate::section_tool`].
+    pub fn set_section_offset(&mut self, offset: f64) {
+        self.scene.settings.section.offset = offset;
+        self.status = Status::Info(crate::section_tool::readout(self));
     }
 
     fn toggle_axis(&mut self, axis: usize) {
@@ -4086,6 +4124,41 @@ mod tests {
 
         // And the step it is set to, not the one it used to be fixed at.
         assert!((turned - 15.0).abs() > 1e-9, "the nudge is still turning by the old fixed fifteen");
+    }
+
+    #[test]
+    fn the_section_plane_lands_in_the_middle_of_the_model_and_moves_without_an_edit() {
+        // Issue 71. Switched on at zero it would cut nothing at all for a part
+        // standing beside the origin, and a section that appears to do nothing
+        // reads as broken rather than as one that needs sliding.
+        let mut app = headless_app();
+        let id = app.primary().unwrap();
+        app.scene.get_mut(id).unwrap().position = Vec3::new(40.0, 0.0, 0.0);
+        app.reevaluate_for_test();
+        let (lo, hi) = app.evaluated.mesh.bounds().expect("the plate is in the scene");
+        // The plane stands on X to begin with, so that is the coordinate it
+        // has to find the middle of.
+        let middle = (lo.x + hi.x) / 2.0;
+
+        assert!(!app.scene.settings.section.enabled, "a document starts whole");
+        app.run(Command::ToggleSection);
+        assert!(app.scene.settings.section.enabled);
+        assert!(
+            (app.scene.settings.section.offset - middle).abs() < 1e-9,
+            "the plane opened at {} rather than the model's middle at {middle}",
+            app.scene.settings.section.offset
+        );
+
+        // Moving it is not an edit: nothing about the model changed, so there
+        // is nothing for undo to take back.
+        let revision = app.history.revision();
+        app.set_section_offset(middle + 5.0);
+        assert_eq!(app.history.revision(), revision, "sliding the section wrote an undo step");
+        assert!(!app.unsaved(), "sliding the section marked the document as changed");
+
+        app.run(Command::ToggleSection);
+        assert!(!app.scene.settings.section.enabled, "the switch does not switch off");
+        assert!((app.scene.settings.section.offset - middle - 5.0).abs() < 1e-9, "the plane forgot where it stood");
     }
 
     #[test]

@@ -672,6 +672,10 @@ fn paint_preview(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect) {
                 // The pattern's own preview is the picture itself, not a set of
                 // loops drawn over it.
                 preview: Vec::new(),
+                // The document's section, like every other view setting here:
+                // a preview of a model that is being looked into should be
+                // looked into as well.
+                section: app.scene.settings.section.plane(),
             };
             let prepared = render::prepare_frame(&request);
             render::render_prepared(&request, &prepared).to_color_image()
@@ -710,6 +714,7 @@ fn preview_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.axes_visible.hash(&mut hasher);
     app.scene.settings.axis_style.hash(&mut hasher);
     app.scene.settings.plane_marks.hash(&mut hasher);
+    crate::section_tool::hash_section(&app.scene.settings.section, &mut hasher);
     let camera = app.pattern_preview_camera;
     for value in
         [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]

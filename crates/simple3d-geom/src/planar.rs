@@ -175,6 +175,16 @@ fn signed_area(points: &[Point]) -> f64 {
     sum * 0.5
 }
 
+/// Triangulate closed loops that lie in one plane: outer boundaries wound
+/// counter-clockwise about `normal`, holes wound the other way.
+///
+/// Public because the section view fills the outlines a cut leaves in the model
+/// with exactly this, and a cap that reads a hole differently from the way this
+/// pass reads one would show a wall where there is none (issue 71).
+pub fn triangulate_loops(positions: &[Vec3], normal: Vec3, loops: Vec<Vec<u32>>) -> Option<Vec<[u32; 3]>> {
+    triangulate_region(positions, normal, loops)
+}
+
 fn triangulate_region(positions: &[Vec3], normal: Vec3, loops: Vec<Vec<u32>>) -> Option<Vec<[u32; 3]>> {
     let (u, v) = plane_basis(normal);
     let flatten = |ids: &[u32]| -> Vec<Point> {

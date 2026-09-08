@@ -609,6 +609,11 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
                     });
             },
         );
+        // The section plane (issue 71): what it cuts, where it stands and which
+        // side of it goes. It sits with the other view settings because that is
+        // all it is -- nothing here reaches the model, and what is exported is
+        // the whole of it whatever the plane is doing.
+        section_rows(app, ui);
         field_row(
             ui,
             "Plane marks",
@@ -653,6 +658,65 @@ fn document(app: &mut App, ui: &mut egui::Ui) {
         ui.add(
             egui::Label::new(theme::hint("Select a shape to edit it, or pick one from the palette.")).selectable(false),
         );
+    });
+}
+
+/// The section plane: on or off, the axis it stands on, where along that axis
+/// it sits, and which side of it is cut away (issue 71).
+///
+/// The offset is a scalar field like any other, so it can be typed exactly and
+/// scrubbed with the pointer -- and the grip in the viewport slides the same
+/// number. A plane that can only be dragged cannot be put at 12.5 mm, and one
+/// that can only be typed cannot be swept through a part to find where the wall
+/// gets thin.
+fn section_rows(app: &mut App, ui: &mut egui::Ui) {
+    let unit = app.unit();
+    field_row(ui, "Section", "Cut the model on screen with a plane, so its inside can be seen", |ui| {
+        let mut on = app.scene.settings.section.enabled;
+        if ui.checkbox(&mut on, "").changed() {
+            // Through the command, so the plane lands in the middle of the
+            // model here exactly as it does from the menu or the key.
+            app.run(simple3d_core::keymap::Command::ToggleSection);
+        }
+    });
+    if !app.scene.settings.section.enabled {
+        return;
+    }
+    field_row(ui, "Plane", "The axis the section plane stands perpendicular to", |ui| {
+        for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
+            let showing = app.scene.settings.section.axis() == axis;
+            if theme::choice(ui, showing, name).clicked() && !showing {
+                app.scene.settings.section.axis = axis;
+                // The old offset is a place on a different axis, so the plane
+                // goes back to the middle of the model rather than to wherever
+                // that number happens to land on this one.
+                let middle = crate::section_tool::middle_of(app.evaluated.mesh.bounds(), axis);
+                app.set_section_offset(middle);
+            }
+        }
+    });
+    field_row(ui, &named("At", unit.suffix()), "Where the plane sits along its axis", |ui| {
+        let step = unit.from_mm(app.move_snap()).max(1e-6);
+        let width = room_left(ui).max(40.0);
+        let id = ui.id().with("section-offset");
+        ui.scope(|ui| {
+            ui.set_width(width);
+            let field = Scalar { grip: "Section", id, kind: POINT, current: app.scene.settings.section.offset, step };
+            // No undo step: moving the plane is not an edit -- see
+            // `crate::section_tool`.
+            scalar_field(app, ui, field, |app, mm, _| app.set_section_offset(mm));
+        });
+    });
+    field_row(ui, "Keeps", "Which side of the plane stays in the picture", |ui| {
+        // Named by the coordinate, not by the camera: which side is nearer
+        // depends on where the model has been orbited to.
+        for (flipped, label) in [(false, "Below"), (true, "Above")] {
+            let showing = app.scene.settings.section.flipped == flipped;
+            if theme::choice(ui, showing, label).clicked() && !showing {
+                app.scene.settings.section.flipped = flipped;
+                app.status = Status::Info(crate::section_tool::readout(app));
+            }
+        }
     });
 }
 
