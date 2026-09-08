@@ -498,11 +498,13 @@ impl Drag {
                 if let Some(node) = scene.get_mut(self.node) {
                     node.rotation = rotation;
                 }
-                // The readout is how far the ring has been turned, so it keeps
-                // its sign -- which way is half of what it says. Only the whole
-                // turns come off: "725deg" beside a body standing at 5 is the
-                // gesture's own bookkeeping, not anything about the model.
-                self.readout = format!("{} {}deg", axis_name(axis), format_angle(delta % 360.0));
+                // Through the same wrap the field uses, and not merely stripped
+                // of its whole turns: one rule for what an angle in this
+                // application reads as. A field on a rotation cannot show a
+                // negative, so a turn backwards is 345 here as well -- the
+                // readout and the row it will land in say the same kind of
+                // number, which they did not while this one kept its sign.
+                self.readout = format!("{} {}deg", axis_name(axis), format_angle(wrap_degrees(delta)));
             }
             Handle::ResizeFace(axis, positive) => {
                 let anchor = gizmo.own.point(gizmo.face_centre(axis, positive));
@@ -1376,16 +1378,36 @@ mod tests {
         assert!((0.0..360.0).contains(&z), "a drag of more than a turn left the rotation at {z}");
         assert!((z - 15.0).abs() < 1e-6, "735 degrees of turn is 15 degrees of rotation, not {z}");
 
-        // And the readout says how far the ring went, less the whole turns --
-        // signed, because which way it went is half of what it says.
+        // And the readout says how far the ring went, through the same wrap.
         let turned: f64 = drag
             .readout
             .trim_start_matches("Z ")
             .trim_end_matches("deg")
             .parse()
             .unwrap_or_else(|_| panic!("the readout is not a number: {}", drag.readout));
-        assert!(turned.abs() < 360.0, "the readout counts whole turns: {}", drag.readout);
+        assert!((0.0..360.0).contains(&turned), "the readout is outside a single turn: {}", drag.readout);
         assert!((turned - 15.0).abs() < 1e-6, "{}", drag.readout);
+    }
+
+    /// The readout and the rotation field have to say the same kind of number.
+    /// The field cannot show a negative -- a rotation is a direction, and a
+    /// direction is written as one turn from zero -- so neither does this.
+    #[test]
+    fn a_rotate_drag_backwards_reads_the_way_the_rotation_field_does() {
+        let mut f = Fixture::new("box");
+        let gizmo = f.gizmo(Mode::Rotate);
+        let ring = gizmo.ring_points(2, &f.view, 72);
+        let from = f.view.project(ring[0]).expect("the ring is off screen").0;
+        let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
+        // Three points the other way round the ring: fifteen degrees back.
+        for step in [71, 70, 69] {
+            let to = f.view.project(ring[step]).expect("the ring is off screen").0;
+            drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
+        }
+
+        let z = f.scene.node(f.node).rotation.z;
+        assert!((z - 345.0).abs() < 1e-6, "a turn backwards from zero is 345 degrees, not {z}");
+        assert_eq!(drag.readout, "Z 345deg", "the readout went negative where the field cannot");
     }
 
     #[test]
