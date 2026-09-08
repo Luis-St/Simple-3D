@@ -500,12 +500,14 @@ fn prepare(request: &Request<'_>) -> Vec<Step> {
                 // be visible, and an outline reads clearly over a shaded body.
                 // A larger bias than the solid's own edges, or the two would tie
                 // at equal depth and the outline would lose.
-                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base);
+                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base, request.mode);
             }
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost),
             // The outline here; the glow itself comes last, after everything
             // that could be standing in front of it.
-            Style::Glow => push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base),
+            Style::Glow => {
+                push_selection(&mut steps, &view, item.renderable, request.palette.selected, tag_base, request.mode)
+            }
         }
     }
     // Last of all, over the finished model: what a buried body is pointed out
@@ -860,7 +862,28 @@ fn push_edges(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgb
 /// dot product is arithmetic noise rather than an answer.
 const EDGE_ON: f64 = 1e-6;
 
-fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, tag_base: u16) {
+/// How sharp a crease has to be before the highlight reads it as a corner of
+/// the shape rather than as a step in how the shape happens to be tessellated.
+///
+/// Higher than the twenty degrees the edge pass draws at, and deliberately so.
+/// A torus at the stock 32 segments has a sixteen-sided tube, so its rings meet
+/// at 22.5 degrees and are feature edges by that measure: highlighted, they
+/// scribbled concentric rings across the whole visible surface of a selected
+/// torus -- the very picture an earlier pass at the outline was rejected for.
+/// Thirty-five degrees clears that by a wide margin and still keeps every real
+/// corner: ninety for a box or a cylinder's rim, sixty for a hexagonal prism,
+/// forty-five for an octagonal one. A shape faceted coarser than that has
+/// corners worth pointing at.
+const SELECTION_CREASE: f64 = 35.0;
+
+fn push_selection(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    colour: Rgba,
+    tag_base: u16,
+    mode: DisplayMode,
+) {
     // Drawn a second time, one pixel out from the shape, and that is what makes
     // it a line rather than a row of dots.
     //
@@ -925,9 +948,17 @@ fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour:
     // *back* face's right edge one instead -- so the line was drawn at the far
     // side of the box, lost the depth test against the box's own front face,
     // and the shape came back outlined on three sides out of four.
-    let front: Vec<bool> =
-        item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri).dot(towards) < -EDGE_ON).collect();
+    let normals: Vec<Vec3> = item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri)).collect();
+    let front: Vec<bool> = normals.iter().map(|normal| normal.dot(towards) < -EDGE_ON).collect();
     let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
+    // Whether the surface really turns a corner across an edge, measured from
+    // the faces themselves rather than read out of the feature edges the edge
+    // pass draws -- those are a different question asked at a different angle.
+    let cos_limit = SELECTION_CREASE.to_radians().cos();
+    let is_corner = |a: u32, b: u32| match (normals.get(a as usize), normals.get(b as usize)) {
+        (Some(a), Some(b)) => a.dot(*b) < cos_limit,
+        _ => false,
+    };
     let centroid = |face: u32| -> Option<Vec3> {
         let tri = item.mesh.indices.get(face as usize)?;
         Some(
@@ -937,18 +968,59 @@ fn push_selection(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour:
                 / 3.0,
         )
     };
+    // The creases inside the contour, in the accent as well (issue 89).
+    //
+    // The silhouette says where a shape ends; on anything with corners it is
+    // the edges *within* that contour -- the three meeting at the near corner
+    // of a box -- that say which shape it is, and they stayed in the ordinary
+    // edge colour, so a selected box read as an orange ring drawn around a grey
+    // box rather than as an orange box.
+    //
+    // Only the ones facing the camera. The three creases at the *far* corner of
+    // a box project inside the same contour, and drawing those is how an
+    // earlier attempt at this scribbled a cage over the model: what is hidden
+    // by the shape is not part of what the shape looks like. Wireframe is the
+    // exception -- it shows the far side of everything on purpose, so a
+    // selection that stopped at the near side would be orange in front and grey
+    // behind.
+    //
+    // Every mode, not only the ones that draw edges. In plain shaded the body
+    // has no lines of its own and these are the only ones on it, which is
+    // exactly the point: they say which shape is selected. In shaded-with-edges
+    // they are the very edges already on screen, recoloured.
+    //
+    // A crease inside the contour gets no outward pass: it has the shape on
+    // both sides, so there is no "out" to step to, and stepping either way
+    // would only thicken it.
+    let creases = if mode == DisplayMode::Wireframe { Creases::All } else { Creases::Facing };
     for edge in &item.outline {
         if edge.junction {
             continue;
         }
         let [near, far] = edge.faces;
-        if near != far && faces_the_eye(near) == faces_the_eye(far) {
-            continue;
+        if near == far || faces_the_eye(near) != faces_the_eye(far) {
+            // The face on the shape's own side of this edge, whose centre says
+            // which way is inward.
+            let inside = if faces_the_eye(near) { near } else { far };
+            push(edge.ends, centroid(inside));
+        } else if creases.wanted(faces_the_eye(near)) && is_corner(near, far) {
+            push(edge.ends, None);
         }
-        // The face on the shape's own side of this edge, whose centre says
-        // which way is inward.
-        let inside = if faces_the_eye(near) { near } else { far };
-        push(edge.ends, centroid(inside));
+    }
+}
+
+/// Which of a selected shape's creases the highlight takes, which is decided by
+/// the display mode -- see [`push_selection`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Creases {
+    /// Only those on the side facing the camera.
+    Facing,
+    All,
+}
+
+impl Creases {
+    fn wanted(self, facing: bool) -> bool {
+        self == Creases::All || facing
     }
 }
 
@@ -1883,6 +1955,140 @@ mod tests {
         assert!(seam.abs_diff(frame.width / 2) <= 2, "the outline's right edge is at {seam}, not at the seam");
     }
 
+    /// The creases inside the contour carry the selection colour too (issue 89).
+    ///
+    /// A box seen from a corner shows three faces and nine of its edges: six
+    /// make the silhouette, and three meet at the near vertical corner. Only
+    /// the six were coloured, so a selected box read as an orange ring drawn
+    /// around a grey box rather than as an orange box.
+    ///
+    /// Both halves are measured, because the obvious fix breaks the second: the
+    /// three creases at the *far* corner project inside the same contour, and
+    /// drawing those is how an earlier pass at this scribbled a cage over the
+    /// model. Shaded is the mode used here deliberately -- it draws no edges of
+    /// its own, so every accent pixel inside the contour came from the
+    /// highlight and from nothing else.
+    #[test]
+    fn the_creases_facing_the_camera_are_part_of_the_selection() {
+        let mesh = primitives::box_mesh(20.0, 20.0, 20.0);
+        let (scene, selected) = (Renderable::prepare(&mesh), Renderable::prepare_outlined(&mesh));
+        let accent = Palette::dark().selected;
+        let items = || {
+            vec![
+                Item { renderable: &scene, style: Style::Solid },
+                Item { renderable: &selected, style: Style::Selected },
+            ]
+        };
+
+        // The vertical edges nearest to and furthest from the camera, halfway
+        // down their run: view-space z grows with distance.
+        let req = request(items(), DisplayMode::Shaded);
+        let corners = |far: bool| {
+            [(-10.0, -10.0), (-10.0, 10.0), (10.0, -10.0), (10.0, 10.0)]
+                .into_iter()
+                .map(|(x, y)| Vec3::new(x, y, 0.0))
+                .max_by(|a, b| {
+                    let (a, b) = (req.view.to_view(*a).z, req.view.to_view(*b).z);
+                    if far {
+                        a.total_cmp(&b)
+                    } else {
+                        b.total_cmp(&a)
+                    }
+                })
+                .expect("four corners")
+        };
+        let at = |point: Vec3| {
+            let p = req.view.project(point).expect("the box is in frame").0;
+            (p.x.round() as usize, p.y.round() as usize)
+        };
+        let (near, far) = (at(corners(false)), at(corners(true)));
+
+        let frame = render(&req);
+        let (left, right) = accent_span(&frame, accent);
+        let (top, bottom) = accent_rows(&frame, accent);
+        // It really is inside the contour: an assertion about it is an
+        // assertion about the creases and not about the silhouette.
+        let (x, y) = near;
+        assert!(x > left + 4 && x + 4 < right, "the near edge is at column {x}, not between {left} and {right}");
+        assert!(y > top + 4 && y + 4 < bottom, "the near edge is at row {y}, not between {top} and {bottom}");
+
+        let lit = |frame: &Image, (x, y): (usize, usize)| {
+            (y - 2..=y + 2).any(|row| (x - 2..=x + 2).any(|col| rows_of(frame, col, accent, row..row + 1)))
+        };
+        assert!(lit(&frame, near), "the edge facing the camera was not part of the highlight");
+        // And with the shape's own edges on screen too, where the highlight
+        // recolours them rather than adding to them.
+        assert!(
+            lit(&render(&request(items(), DisplayMode::ShadedWithEdges)), near),
+            "the facing crease lost its colour once the edge pass drew it as well"
+        );
+
+        // The hidden half cannot be ruled out by looking at a pixel: seen from
+        // a corner, a cube's near and far vertical edges project within a few
+        // pixels of each other, which is what `far` is worked out here to show.
+        // So the lines are counted instead. Six silhouette edges, each drawn
+        // twice -- once on the shape and once a pixel outside it -- and three
+        // creases drawn once: eighteen would mean the far corner's three had
+        // been drawn too, which is the cage an earlier attempt at this left
+        // over the model.
+        assert!(near.0.abs_diff(far.0) < 8, "the two corners are far enough apart to test by eye after all");
+        let lines =
+            prepare(&req).iter().filter(|step| matches!(step, Step::Line { colour, .. } if *colour == accent)).count();
+        assert_eq!(lines, 6 * 2 + 3, "the highlight is {lines} lines, not six silhouette edges and three creases");
+    }
+
+    /// A selected round shape shows its contours and nothing across them
+    /// (issue 89, the other half).
+    ///
+    /// The creases the highlight follows have to be the shape's own corners and
+    /// not the steps in how it is tessellated. A torus at the stock 32 segments
+    /// has a sixteen-sided tube, so its rings meet at 22.5 degrees -- real
+    /// feature edges by the twenty the edge pass draws at, and once they were
+    /// highlighted a selected torus came back with concentric rings in accent
+    /// across its whole visible surface. That is the picture an earlier attempt
+    /// at the outline was rejected for, and it is what this holds back.
+    ///
+    /// Measured through the middle of the shape both ways: a torus crosses its
+    /// own outline four times over -- the outside and the hole, on each side --
+    /// and a sphere twice. Drawn at the tube's own threshold instead, the same
+    /// two lines crossed it eleven and fourteen times.
+    ///
+    /// `a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over`
+    /// asks the same of the picture as a ratio against what the feature edges
+    /// draw. This says it as a number of lines instead, which is the form the
+    /// answer is actually wanted in: four, and which four.
+    #[test]
+    fn a_selected_round_shape_shows_its_contours_and_nothing_across_them() {
+        let accent = Palette::dark().selected;
+        for (name, mesh, crossings) in [
+            ("torus", primitives::torus_mesh(30.0, 6.0, 360.0, 32), 4),
+            ("sphere", primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 32), 2),
+        ] {
+            let (scene, selected) = (Renderable::prepare(&mesh), Renderable::prepare_outlined(&mesh));
+            // Larger than the other tests draw at: at 160 by 120 a torus is
+            // thirty rows tall and its rings run together, which is a picture
+            // nothing can be concluded from.
+            let req = Request {
+                view: view(400, 300),
+                size: [400, 300],
+                ..request(
+                    vec![
+                        Item { renderable: &scene, style: Style::Solid },
+                        Item { renderable: &selected, style: Style::Selected },
+                    ],
+                    DisplayMode::Shaded,
+                )
+            };
+            let frame = render(&req);
+            let (top, bottom) = accent_rows(&frame, accent);
+            let (left, right) = accent_span(&frame, accent);
+            let across = runs(&frame, accent, (left..right).map(|x| (x, (top + bottom) / 2)));
+            let down = runs(&frame, accent, (top..bottom).map(|y| ((left + right) / 2, y)));
+            assert_eq!(across, crossings, "a line across the middle of the {name} met its outline {across} times");
+            assert_eq!(down, crossings, "a line down the middle of the {name} met its outline {down} times");
+        }
+    }
+
     /// Where two bodies of one mesh touch, the seam is inside the shape and no
     /// part of its outline.
     ///
@@ -1973,6 +2179,20 @@ mod tests {
             let o = (y * frame.width + x) * 4;
             frame.color[o] == colour[0] && frame.color[o + 1] == colour[1] && frame.color[o + 2] == colour[2]
         })
+    }
+
+    /// How many separate stretches of `colour` a walk over `path` crosses. A
+    /// count of the lines met, rather than of the pixels they cover.
+    fn runs(frame: &Image, colour: Rgba, path: impl Iterator<Item = (usize, usize)>) -> usize {
+        let (mut count, mut on) = (0, false);
+        for (x, y) in path {
+            let here = rows_of(frame, x, colour, y..y + 1);
+            if here && !on {
+                count += 1;
+            }
+            on = here;
+        }
+        count
     }
 
     /// The first and last column carrying the outline's colour.
