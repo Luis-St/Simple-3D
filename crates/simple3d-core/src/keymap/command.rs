@@ -60,7 +60,6 @@ pub enum Command {
     ModeRotate,
     ModeResize,
     ModeScale,
-    ToggleHandleFrame,
     MeasureTool,
     SnapToGeometry,
     NudgeLeft,

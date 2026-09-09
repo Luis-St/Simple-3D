@@ -1,4 +1,4 @@
-//! What a drag snaps to, and the frame its handles stand in.
+//! What a drag snaps to.
 
 use serde::{Deserialize, Serialize};
 
@@ -40,31 +40,6 @@ impl SnapMode {
             }
             SnapMode::Always => "Snap every drag onto whatever body feature the pointer is over.",
             SnapMode::Never => "Snap drags to the document's step and nothing else.",
-        }
-    }
-}
-
-/// Which frame the manipulator handles work in (spec section 6.2).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HandleFrame {
-    #[default]
-    Object,
-    World,
-}
-
-impl HandleFrame {
-    pub fn label(self) -> &'static str {
-        match self {
-            HandleFrame::Object => "Object",
-            HandleFrame::World => "World",
-        }
-    }
-
-    pub fn toggled(self) -> HandleFrame {
-        match self {
-            HandleFrame::Object => HandleFrame::World,
-            HandleFrame::World => HandleFrame::Object,
         }
     }
 }

@@ -47,7 +47,7 @@ impl Fixture {
     }
 
     pub(super) fn gizmo(&self, mode: Mode) -> Gizmo {
-        Gizmo::build(&self.scene, &self.evaluated, self.node, mode, false).unwrap()
+        Gizmo::build(&self.scene, &self.evaluated, self.node, mode).unwrap()
     }
 
     pub(super) fn param(&self, key: &str) -> f64 {

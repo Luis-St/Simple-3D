@@ -3,7 +3,6 @@
 use super::*;
 use crate::gizmo::Gizmo;
 use crate::view::{frame_bounds, CameraMove, ViewPreset};
-use simple3d_core::config::HandleFrame;
 use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
@@ -107,7 +106,7 @@ impl App {
 
 impl App {
     pub fn gizmo_for(&self, id: NodeId) -> Option<Gizmo> {
-        Gizmo::build(&self.scene, &self.evaluated, id, self.mode, self.settings.handle_frame == HandleFrame::World)
+        Gizmo::build(&self.scene, &self.evaluated, id, self.mode)
     }
 
     pub fn current_view(&self) -> crate::view::View {

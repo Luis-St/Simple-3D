@@ -98,19 +98,19 @@ pub(crate) fn a_rotate_ring_is_grabbable_along_its_whole_circumference() {
 }
 
 #[test]
-pub(crate) fn the_handle_frame_follows_the_nodes_own_rotation_or_the_world() {
+pub(crate) fn the_handle_frame_follows_the_nodes_own_rotation() {
+    // There is one frame now, the node's own: the switch to the world's axes
+    // went with the rail button that worked it (issue 100).
     let mut f = Fixture::new("box");
     f.scene.get_mut(f.node).unwrap().rotation = Vec3::new(0.0, 0.0, 90.0);
     f.reevaluate();
-    let object = Gizmo::build(&f.scene, &f.evaluated, f.node, Mode::Move, false).unwrap();
-    let world = Gizmo::build(&f.scene, &f.evaluated, f.node, Mode::Move, true).unwrap();
-    // The node's local X now points along world +Y.
-    assert!((object.axes[0] - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9, "{:?}", object.axes[0]);
-    assert!((world.axes[0] - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-9);
+    let gizmo = Gizmo::build(&f.scene, &f.evaluated, f.node, Mode::Move).unwrap();
+    // The node's local X now points along world +Y, and so does its handle.
+    assert!((gizmo.axes[0] - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9, "{:?}", gizmo.axes[0]);
 }
 
 #[test]
 pub(crate) fn the_gizmo_is_not_offered_for_the_scene_root() {
     let f = Fixture::new("box");
-    assert!(Gizmo::build(&f.scene, &f.evaluated, f.scene.root(), Mode::Move, false).is_none());
+    assert!(Gizmo::build(&f.scene, &f.evaluated, f.scene.root(), Mode::Move).is_none());
 }

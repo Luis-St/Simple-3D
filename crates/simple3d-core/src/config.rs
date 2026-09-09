@@ -10,7 +10,7 @@
 mod display;
 pub use display::{DisplayMode, RenderEngine};
 mod snap;
-pub use snap::{HandleFrame, SnapMode};
+pub use snap::SnapMode;
 mod layout;
 pub use layout::{Layout, Panel, Placement, Side};
 mod settings;

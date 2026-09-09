@@ -53,7 +53,6 @@ impl Command {
         Command::ModeRotate,
         Command::ModeResize,
         Command::ModeScale,
-        Command::ToggleHandleFrame,
         Command::MeasureTool,
         Command::SnapToGeometry,
         Command::NudgeLeft,

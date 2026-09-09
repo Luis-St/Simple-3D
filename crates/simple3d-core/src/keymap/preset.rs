@@ -78,7 +78,6 @@ impl Keymap {
         set(NudgeDown, Chord::key("Down"));
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
-        set(ToggleHandleFrame, Chord::key("X"));
         // Held during a drag to snap to geometry. Ctrl on its own (issue 77):
         // it is the modifier a hand already rests on for a precise gesture, it
         // needs no letter key to be free in any preset, and a chord that is

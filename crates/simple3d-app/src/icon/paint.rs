@@ -28,11 +28,6 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.closed(&[(0.44, 0.12), (0.88, 0.12), (0.88, 0.56), (0.44, 0.56)]);
             pen.arrow((0.30, 0.72), (0.66, 0.34));
         }
-        Glyph::Frame => {
-            pen.line(&[(0.16, 0.84), (0.16, 0.16)]);
-            pen.line(&[(0.16, 0.84), (0.84, 0.84)]);
-            pen.line(&[(0.16, 0.84), (0.70, 0.34)]);
-        }
         // A ruler laid across the tile with its ticks: the tool measures, it
         // does not change the model.
         Glyph::Measure => {

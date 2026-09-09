@@ -105,7 +105,7 @@ pub(crate) fn a_nudge_coalesces_across_directions_but_not_across_nodes_or_modes(
 
     let move_gizmo = f.gizmo(Mode::Move);
     let rotate_gizmo = f.gizmo(Mode::Rotate);
-    let other_gizmo = Gizmo::build(&f.scene, &f.evaluated, other, Mode::Move, false).unwrap();
+    let other_gizmo = Gizmo::build(&f.scene, &f.evaluated, other, Mode::Move).unwrap();
 
     // Left then right then left: one gesture, whatever the direction.
     let mut history = History::new();

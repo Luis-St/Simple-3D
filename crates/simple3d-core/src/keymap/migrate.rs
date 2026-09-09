@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 /// not cost them the map they carry between machines. A name that was never a
 /// command of ours stays a hard error -- that file is not one this build can
 /// honour, and quietly loading half of it is the worse answer.
-pub(crate) const RETIRED: [&str; 3] = ["toggle_projection", "toggle_ghosts", "break_apart"];
+pub(crate) const RETIRED: [&str; 4] = ["toggle_projection", "toggle_ghosts", "break_apart", "toggle_handle_frame"];
 
 /// Bindings an older build wrote as *its* default, which this build has moved.
 ///

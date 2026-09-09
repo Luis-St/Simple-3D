@@ -25,23 +25,13 @@ impl App {
                 }
             }
             ui.separator();
-            let text = format!(
-                "Handle frame: {}\t{}",
-                self.settings.handle_frame.label(),
-                self.keymap.shortcut_text(Command::ToggleHandleFrame)
-            );
-            if ui::menu_entry(ui, &text, true).clicked() {
-                self.run(Command::ToggleHandleFrame);
-                ui.close();
-            }
-            ui.separator();
             // Geometry snapping's mode (issue 68). It lived only in the document
             // settings, which the property panel shows *with nothing selected* --
             // and snapping needs something selected to have a manipulator at all,
             // so the one control and the one state were mutually exclusive and
             // the setting could not be found while doing the thing it governs.
-            // It belongs here beside the handle frame, which is the same kind of
-            // setting: how the manipulator behaves, not what the document holds.
+            // It belongs here rather than there: it is how the manipulator
+            // behaves, not what the document holds.
             let snap_key = self.keymap.shortcut_text(Command::SnapToGeometry);
             ui.menu_button("Snap to geometry", |ui| {
                 for mode in SnapMode::ALL {

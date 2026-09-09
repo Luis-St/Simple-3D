@@ -14,7 +14,7 @@ pub struct Gizmo {
     pub mode: Mode,
     /// The node's origin in world space -- where move and rotate handles centre.
     pub origin: Vec3,
-    /// The handle frame's world axes: the node's own axes, or the world axes.
+    /// The node's own axes in world space, which the handles stand along.
     pub axes: [Vec3; 3],
     /// The node's own frame, for turning local box corners into world points.
     pub own: Xform,
@@ -35,7 +35,7 @@ pub struct Gizmo {
 }
 
 impl Gizmo {
-    pub fn build(scene: &Scene, evaluated: &Evaluated, id: NodeId, mode: Mode, world_frame: bool) -> Option<Gizmo> {
+    pub fn build(scene: &Scene, evaluated: &Evaluated, id: NodeId, mode: Mode) -> Option<Gizmo> {
         let node = scene.get(id)?;
         if id == scene.root() {
             return None;
@@ -43,11 +43,12 @@ impl Gizmo {
         let parent = *evaluated.node_frames.get(&id)?;
         let own =
             parent.compose(&Xform::from_pos_rot_scale(node.position, node.rotation, Node::sane_scale(node.scale)));
-        let axes = if world_frame {
-            [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)]
-        } else {
-            [own.axis(0), own.axis(1), own.axis(2)]
-        };
+        // Always the node's own axes. The rail used to carry a switch between
+        // these and the world's, which is gone (issue 100): a handle that does
+        // not point along the thing it is attached to is the surprising one,
+        // and an unrotated node -- which is most of them -- cannot tell the two
+        // frames apart anyway.
+        let axes = [own.axis(0), own.axis(1), own.axis(2)];
         let (local_lo, local_hi) = evaluated.node_local_bounds.get(&id).copied().unwrap_or((Vec3::ZERO, Vec3::ZERO));
         let drivers = match (node.spec(), node.params()) {
             (Some(spec), Some(params)) => (spec.axes)(params),

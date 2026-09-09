@@ -9,7 +9,6 @@ pub enum Glyph {
     Rotate,
     Resize,
     Scale,
-    Frame,
     Measure,
     Pattern,
     // Object actions.

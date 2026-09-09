@@ -47,7 +47,6 @@ pub struct AppSettings {
     pub render_engine: RenderEngine,
     pub show_grid: bool,
     pub show_bounding_box: bool,
-    pub handle_frame: HandleFrame,
     /// Where a new shape lands.
     #[serde(default)]
     pub placement: Placement,
@@ -106,7 +105,6 @@ impl Default for AppSettings {
             render_engine: RenderEngine::Cpu,
             show_grid: true,
             show_bounding_box: false,
-            handle_frame: HandleFrame::Object,
             placement: Placement::Origin,
             geometry_snap: SnapMode::default(),
             lock_view_centre: false,

@@ -10,9 +10,8 @@ impl App {
     ///
     /// Empty for anything that is not a pattern, and for a mirror, which has no
     /// distance and no count to lay out. The pattern's own frame is what places
-    /// them -- not the handle frame, which the user may have switched to world:
-    /// a grip marks a copy the pattern actually makes, and those turn with the
-    /// node.
+    /// them: a grip marks a copy the pattern actually makes, and those turn
+    /// with the node.
     pub fn pattern_grips(&self, id: NodeId) -> Vec<PatternGrip> {
         let Some(node) = self.scene.get(id) else { return Vec::new() };
         if !node.is_pattern() {

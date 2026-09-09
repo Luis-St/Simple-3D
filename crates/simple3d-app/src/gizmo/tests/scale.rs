@@ -50,10 +50,10 @@ pub(crate) fn a_group_can_be_scaled_although_it_cannot_be_resized() {
     let view = View::new(scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
 
     assert!(
-        Gizmo::build(&scene, &evaluated, group, Mode::Resize, false).unwrap().handles(true).is_empty(),
+        Gizmo::build(&scene, &evaluated, group, Mode::Resize).unwrap().handles(true).is_empty(),
         "resize offered a group handles"
     );
-    let gizmo = Gizmo::build(&scene, &evaluated, group, Mode::Scale, false).unwrap();
+    let gizmo = Gizmo::build(&scene, &evaluated, group, Mode::Scale).unwrap();
     assert!(!gizmo.handles(true).is_empty(), "scale offered a group no handles");
 
     let handle = Handle::ResizeFace(0, true);

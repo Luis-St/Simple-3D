@@ -97,10 +97,6 @@ impl App {
             ModeRotate => self.pick_transform(Mode::Rotate),
             ModeResize => self.pick_transform(Mode::Resize),
             ModeScale => self.pick_transform(Mode::Scale),
-            ToggleHandleFrame => {
-                self.settings.handle_frame = self.settings.handle_frame.toggled();
-                self.status = Status::Info(format!("Handles: {} frame", self.settings.handle_frame.label()));
-            }
             MeasureTool => self.toggle_measure(),
             // A hold key, read live while a drag runs rather than acted on when
             // pressed, so pressing it on its own does nothing (issue 68).

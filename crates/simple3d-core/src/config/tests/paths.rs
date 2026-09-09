@@ -1,4 +1,4 @@
-//! Where the configuration directory is, and the toggles beside it.
+//! Where the configuration directory is.
 
 use super::*;
 
@@ -9,10 +9,4 @@ pub(crate) fn the_config_directory_is_absolute_and_named_for_the_app() {
     // named after the application, not how a platform likes to spell it.
     let text = dir.to_string_lossy().to_lowercase().replace(' ', "");
     assert!(text.contains("simple3d"), "{dir:?}");
-}
-
-#[test]
-pub(crate) fn the_handle_frame_toggles_both_ways() {
-    assert_eq!(HandleFrame::Object.toggled(), HandleFrame::World);
-    assert_eq!(HandleFrame::World.toggled(), HandleFrame::Object);
 }

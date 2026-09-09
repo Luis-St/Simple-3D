@@ -9,7 +9,7 @@ use crate::app::{App, Status};
 use crate::gizmo::Mode;
 use crate::icon::{self, Glyph};
 use crate::theme::{metric, token};
-use simple3d_core::config::{DisplayMode, HandleFrame};
+use simple3d_core::config::DisplayMode;
 use simple3d_core::keymap::Command;
 use simple3d_core::scene::GroupOp;
 
@@ -57,18 +57,19 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
         separator(ui);
 
-        // Which frame the handles work in: a mode, so it is marked the same
-        // way the tools are.
-        let world = app.settings.handle_frame == HandleFrame::World;
-        let shortcut = app.keymap.shortcut_text(Command::ToggleHandleFrame);
-        if icon::button(ui, Glyph::Frame, size, world, true)
-            .on_hover_text(format!(
-                "Handles work in the {} frame  {shortcut}",
-                app.settings.handle_frame.label().to_lowercase()
-            ))
+        // The section plane, in the slot the handle-frame toggle used to hold
+        // (issue 100). It sits with the tools rather than with the view state
+        // at the foot of the rail because it is used like one: a plane is put
+        // where the cut is wanted and then dragged, which is a gesture in the
+        // viewport and not a switch. It still only cuts the picture, never the
+        // model (issue 71).
+        let sectioned = app.scene.settings.section.enabled;
+        let shortcut = app.keymap.shortcut_text(Command::ToggleSection);
+        if icon::button(ui, Glyph::Section, size, sectioned, true)
+            .on_hover_text(format!("Section view  {shortcut}\nDrag the grip in the plane to slide it"))
             .clicked()
         {
-            app.run(Command::ToggleHandleFrame);
+            app.run(Command::ToggleSection);
         }
 
         // The measure tool: a mode of its own, so it takes the active fill while
@@ -137,18 +138,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 .clicked()
             {
                 app.run(Command::ToggleGrid);
-            }
-            // The section plane belongs here rather than with the tools: it
-            // cuts the picture, never the model (issue 71).
-            let sectioned = app.scene.settings.section.enabled;
-            if icon::button(ui, Glyph::Section, size, sectioned, true)
-                .on_hover_text(format!(
-                    "Section view  {}\nDrag the grip in the plane to slide it",
-                    app.keymap.shortcut_text(Command::ToggleSection)
-                ))
-                .clicked()
-            {
-                app.run(Command::ToggleSection);
             }
             separator(ui);
             for (mode, glyph, command) in [

@@ -59,13 +59,17 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
         draw_measure(app, ui, &painter, view);
     }
 
-    // The two things about this viewport that can differ from one moment to the
-    // next. The projection was named here as well, and it is always orthographic
-    // (`scene::Camera`, where a saved file's `orthographic` flag is read and
-    // ignored) -- a word that cannot change is not information, and it was the
-    // widest part of a strip whose whole job is to be read at a glance.
-    let hud = format!("{} \u{00B7} {} frame", app.mode.label(), app.settings.handle_frame.label().to_lowercase());
-    let galley = painter.layout_no_wrap(hud, egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
+    // The one thing about this viewport that can differ from one moment to the
+    // next: which tool is held. The projection was named here too, and it is
+    // always orthographic (`scene::Camera`, where a saved file's `orthographic`
+    // flag is read and ignored); the handle frame was named here after that,
+    // and there is one frame now (issue 100). A word that cannot change is not
+    // information, and this strip's whole job is to be read at a glance.
+    let galley = painter.layout_no_wrap(
+        app.mode.label().to_string(),
+        egui::FontId::proportional(theme::font::SMALL),
+        token::TEXT_LO,
+    );
     let at = rect.left_top() + egui::vec2(10.0, 8.0);
     painter.rect_filled(
         egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0)),
