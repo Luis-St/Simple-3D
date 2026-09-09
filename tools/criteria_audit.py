@@ -28,8 +28,11 @@ import re
 import sys
 
 CRITERIA = 29
+# The visibility prefix matters: since the tests were split into their own
+# modules they are `pub(crate) fn`, and a pattern that only knew `pub fn`
+# found no owning test for half of the citations.
 CITATION = re.compile(r"criteri\w*\s+((?:\d+\s*(?:,|and|/)?\s*)+)")
-FN = re.compile(r"\s*(?:pub )?fn (\w+)")
+FN = re.compile(r"\s*(?:pub(?:\([\w:]+\))?\s+)?(?:const\s+|async\s+|unsafe\s+|extern\s+\"[^\"]*\"\s+)*fn (\w+)")
 
 
 def owning_test(lines, i):
