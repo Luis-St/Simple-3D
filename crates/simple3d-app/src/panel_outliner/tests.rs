@@ -1,5 +1,6 @@
 use super::drag::*;
 use super::row_parts::*;
+use super::tree::{drop_zone, row_run};
 use crate::app::DropTarget;
 use crate::icon::Glyph;
 use simple3d_core::scene::{NodeId, Scene};
@@ -161,4 +162,42 @@ fn a_child_of_a_union_carries_no_mark_of_its_own() {
     // would be noise down the whole tree.
     let (scene, _, _, inner, _) = tree();
     assert_eq!(operator_badge(&scene, inner), None);
+}
+
+// -- the tree's own size (issue 101) -----------------------------------------
+
+#[test]
+fn a_tree_that_fits_is_laid_out_strictly_inside_its_viewport() {
+    // Rows exactly as wide as the viewport, and a drop zone that overflows it,
+    // are what made the outliner blink: each scrollbar cost the other's
+    // dimension ten points, so the pair took turns causing each other. Neither
+    // dimension may sit on its threshold.
+    let viewport = 340.0;
+    assert!(
+        row_run(viewport, 136.0) < viewport,
+        "rows exactly fill the viewport, which decides a scrollbar on a rounding step"
+    );
+    assert!(drop_zone(32.0) <= 32.0, "the drop zone claims more height than is left, which raises a scrollbar");
+    // And the run is still wide enough to hold the widest row plus its eye.
+    assert!(row_run(viewport, 136.0) >= 136.0);
+    // A panel rolled up to nothing is not a negative row.
+    assert_eq!(row_run(0.0, 0.0), 0.0);
+}
+
+#[test]
+fn a_row_wider_than_the_viewport_still_gets_its_own_width() {
+    // The point of scrolling sideways (issue 50): a long name is reached by
+    // scrolling to it, not by cutting it off at the panel edge.
+    assert_eq!(row_run(200.0, 460.0), 460.0);
+}
+
+#[test]
+fn the_drop_zone_only_claims_its_own_height_once_the_tree_is_already_scrolling() {
+    // With the rows past the bottom there is no slack to divide and the area
+    // scrolls whatever this returns, so the strip is worth having; with slack
+    // left it takes exactly that and no more.
+    assert_eq!(drop_zone(0.0), 24.0);
+    assert_eq!(drop_zone(-40.0), 24.0);
+    assert_eq!(drop_zone(9.0), 9.0);
+    assert_eq!(drop_zone(120.0), 120.0);
 }

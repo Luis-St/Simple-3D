@@ -48,7 +48,8 @@ pub(crate) fn tree(app: &mut App, ui: &mut egui::Ui) {
         let ids = visible_rows(app);
         // Every row is as wide as the widest one, so the eye and the operator
         // badge stay in a column and the selection tint covers a whole row.
-        let width = ids.iter().map(|&id| row_width(app, ui, id)).fold(ui.available_width(), f32::max);
+        let widest = ids.iter().map(|&id| row_width(app, ui, id)).fold(0.0_f32, f32::max);
+        let width = row_run(ui.available_width(), widest);
         for &id in &ids {
             // The list was taken before any of it was drawn, and a row can
             // delete nodes while the loop is still running: its own context menu
@@ -75,7 +76,7 @@ pub(crate) fn tree(app: &mut App, ui: &mut egui::Ui) {
         // Dropping in the empty space below the tree means "at the end of the
         // root", which is otherwise awkward to reach.
         let (rect, response) =
-            ui.allocate_exact_size(egui::vec2(width, ui.available_height().max(24.0)), egui::Sense::hover());
+            ui.allocate_exact_size(egui::vec2(width, drop_zone(ui.available_height())), egui::Sense::hover());
         // `contains_pointer`, not `hovered`: egui reserves hovering for a frame
         // where nothing is being dragged, which is every frame of a drag but the
         // one it ends on. Asking the wrong question is why the drop indicator
@@ -95,6 +96,45 @@ pub(crate) fn tree(app: &mut App, ui: &mut egui::Ui) {
     // Finish the drag on release, wherever the pointer ended up.
     if dragging.is_some() && ctx.input(|i| i.pointer.any_released()) {
         finish_drag(app);
+    }
+}
+
+/// How wide every row in the tree is drawn: the widest of them when one needs
+/// more room than there is, and otherwise the viewport, less a pixel.
+///
+/// The missing pixel is the point (issue 101). Content laid out exactly as wide
+/// as the viewport sits on the knife edge of egui's "is a horizontal scrollbar
+/// needed" test, and which side of it a rounding step in the panel's geometry
+/// lands on decided whether a bar appeared under a tree whose rows all fit. That
+/// bar then took ten points of height off the viewport, which was enough to push
+/// the rows past its bottom and bring the vertical bar out too -- and that one
+/// took ten points of width back off, re-deciding the horizontal bar. Each was
+/// the other's cause, and the pair blinked on and off frame after frame, walking
+/// the rows ten pixels sideways and back: the "bobbeling" in the report. A row
+/// run that is strictly inside the viewport, or honestly wider than it, cannot
+/// straddle the test. Nothing is lost to the shaved pixel: a row reserves 28 px
+/// at its right edge for the eye.
+pub(crate) fn row_run(available: f32, widest: f32) -> f32 {
+    if widest > available {
+        widest
+    } else {
+        (available - 1.0).max(0.0)
+    }
+}
+
+/// How tall the strip below the last row is: whatever height is left over, and
+/// a fixed 24 px only once the rows have filled the viewport and the tree is
+/// scrolling anyway.
+///
+/// It used to be `available.max(24.0)`, which manufactured height a tree that
+/// fits does not have -- a 24 px strip under rows with 20 px of slack overflows
+/// the viewport by 4 px and raises a vertical scrollbar for a tree that visibly
+/// fits. That was the other half of the loop in `row_run` (issue 101).
+pub(crate) fn drop_zone(available: f32) -> f32 {
+    if available > 0.0 {
+        available
+    } else {
+        24.0
     }
 }
 
