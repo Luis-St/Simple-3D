@@ -18,13 +18,20 @@ pub(crate) fn a_boolean_in_flight_can_be_cancelled() {
     // A union of finely tessellated spheres that all overlap is the easiest
     // way to reach a boolean that costs seconds. Cancelled a moment in, it
     // must stop in a moment rather than run to the end.
+    //
+    // Five spheres at 128 segments, rather than the four at 96 this started
+    // with: those cost 240 ms here and the floor below wants 250, so the test
+    // failed on its own precondition without ever reaching the cancellation.
+    // Measured on the same machine, the fixture now costs ~640 ms, which is
+    // 2.5x the floor -- room for a faster machine before it needs raising
+    // again.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
-    for i in 0..4 {
+    for i in 0..5 {
         let id = scene.add_primitive("sphere", group, i).expect("the sphere is in the registry");
         let node = scene.get_mut(id).unwrap();
-        node.segments = Some(96);
+        node.segments = Some(128);
         node.position = Vec3::new(i as f64 * 12.0, 0.0, 0.0);
     }
 
