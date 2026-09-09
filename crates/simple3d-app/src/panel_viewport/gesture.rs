@@ -45,6 +45,15 @@ pub fn apply_gesture(camera: &mut Camera, gesture: Gesture, delta: egui::Vec2, v
             camera.pitch = (camera.pitch + delta.y as f64 * 0.4).clamp(-89.9, 89.9);
         }
         Gesture::Pan => {
+            // A viewport with no height has no millimetres per pixel to
+            // measure the drag in: `mm_per_pixel_at` divides by a half-height
+            // floored at 1e-9 and hands back 1e9, so a three-pixel pan throws
+            // the target some 3.5e9 mm away and the model is gone with no way
+            // back but Frame all. The zoom guards the same arithmetic the same
+            // way; this is the other half of it.
+            if !(view.size.x > 0.0 && view.size.y > 0.0) {
+                return;
+            }
             let (right, up) = view.basis();
             let scale = view.mm_per_pixel_at(camera.target);
             camera.target = camera.target - right * (delta.x as f64 * scale) + up * (delta.y as f64 * scale);

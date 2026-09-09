@@ -185,3 +185,30 @@ fn zooming_keeps_whatever_is_under_the_pointer_under_it() {
     apply_zoom(&mut sized, &keymap.nav, 120.0, Some((egui::Rect::NOTHING, cursor)));
     assert_eq!(sized.target, start.target, "an empty panel moved the camera to {:?}", sized.target);
 }
+
+/// A pan needs a viewport with some area, and says nothing when it has none.
+///
+/// `mm_per_pixel_at` floors the half-height at 1e-9 rather than dividing by
+/// zero, so a viewport of no height reports 1e9 mm to the pixel. Unguarded, a
+/// three-by-two-pixel pan then moved the target to
+/// (-2996011784, -951592128, 1765895185) -- the model gone, the grid still
+/// drawn because it is drawn about the target, and nothing but Frame all to
+/// get back. The zoom already refused the same arithmetic; this is the pan.
+#[test]
+fn a_pan_with_no_viewport_to_measure_in_leaves_the_camera_alone() {
+    for size in [egui::vec2(900.0, 0.0), egui::vec2(0.0, 700.0), egui::Vec2::ZERO] {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, size);
+        let start = Camera::default();
+        let mut camera = start;
+        apply_gesture(&mut camera, Gesture::Pan, egui::vec2(3.0, 2.0), &View::new(start, rect));
+        assert_eq!(camera.target, start.target, "a pan across a {size:?} viewport moved the view centre");
+    }
+
+    // The guard is on the degenerate case only: a pan across a real viewport
+    // still pans.
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+    let start = Camera::default();
+    let mut camera = start;
+    apply_gesture(&mut camera, Gesture::Pan, egui::vec2(3.0, 2.0), &View::new(start, rect));
+    assert_ne!(camera.target, start.target, "a pan across a real viewport moved nothing");
+}
