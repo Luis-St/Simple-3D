@@ -7,8 +7,19 @@ use crate::view::View;
 use simple3d_core::scene::NodeId;
 
 /// Rasterize the scene into a texture, reusing the last image while nothing that
-/// affects it has changed.
-pub(crate) fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, dark: bool) {
+/// affects it has changed, and paint it into the place `slot` reserved for it
+/// earlier in the frame.
+///
+/// The slot is why this runs at the *end* of the viewport's frame rather than at
+/// the start: the picture is made from the camera the frame's own gestures have
+/// left behind, so nothing drawn over it is a frame ahead of it (issue 102).
+pub(crate) fn paint_scene(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    dark: bool,
+    slot: egui::layers::ShapeIdx,
+) {
     let pixels_per_point = ui.ctx().pixels_per_point();
     let size = [
         (rect.width() * pixels_per_point).round().max(1.0) as usize,
@@ -127,11 +138,14 @@ pub(crate) fn paint_scene(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, da
     // a texture painted over the panel.
     let drawn = app.gpu_texture.or_else(|| app.texture.as_ref().map(|texture| texture.id()));
     if let Some(id) = drawn {
-        ui.painter().image(
-            id,
-            rect,
-            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-            egui::Color32::WHITE,
+        ui.painter().set(
+            slot,
+            egui::Shape::image(
+                id,
+                rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            ),
         );
     }
 }

@@ -119,6 +119,68 @@ pub(crate) fn a_scroll_over_the_viewport_zooms_about_the_pointer() {
     assert!((landed - at).length() < 1.0, "the point under the pointer slid from {at:?} to {landed:?}");
 }
 
+/// Which way an orbit drag turns the picture. Nothing pinned this before, which
+/// is how it came to be argued over rather than read off: the drag carries the
+/// model with the pointer, so the eye goes the other way along the screen's own
+/// axes -- the same rule the pan is asserted by just above. The assertion is on
+/// the *eye*, in the basis the drag was measured in, so it says what the gesture
+/// means rather than which way a number happened to move.
+#[test]
+pub(crate) fn an_orbit_drag_carries_the_model_with_the_pointer() {
+    let mut harness = harness("viewport-orbit-direction");
+    let rect = harness.state().viewport_rect;
+    // Clear of the view cube in the corner, which takes the pointer first.
+    let from = rect.center() + egui::vec2(-40.0, 40.0);
+    let before = harness.state().scene.camera;
+
+    // Left, and a little down.
+    drag_button(&mut harness, egui::PointerButton::Secondary, from, from + egui::vec2(-120.0, 40.0), 6);
+
+    let after = harness.state().scene.camera;
+    let view = crate::view::View::new(before, rect);
+    let (right, up) = view.basis();
+    let moved = crate::view::View::new(after, rect).eye() - view.eye();
+    assert!(moved.dot(right) > 0.0, "dragging left did not turn the model left: {moved:?}");
+    assert!(moved.dot(up) > 0.0, "dragging down did not lift the camera over the model: {moved:?}");
+    assert_eq!(after.target, before.target, "orbiting moved the camera over the ground");
+}
+
+/// Issue 102: the manipulator wobbled around the shape while the camera turned,
+/// because the picture was rasterized at the top of the viewport's frame and the
+/// overlay drawn at the bottom of it -- one frame of orbit apart, and a frame is
+/// however long the rasterizer happened to take. What is on screen cannot be
+/// measured from here, but the cause can: at the end of a frame that orbited,
+/// the picture the panel is showing must already be the one this camera asks
+/// for. The drag is left *running*, because the frame after a release orbits
+/// nothing and would agree either way.
+#[test]
+pub(crate) fn the_picture_is_drawn_from_the_camera_the_frames_own_orbit_left_behind() {
+    let mut harness = harness("viewport-frame-camera");
+    let rect = harness.state().viewport_rect;
+    // Clear of the view cube in the corner, which takes the pointer first.
+    let from = rect.center() + egui::vec2(-120.0, 40.0);
+    let before = harness.state().scene.camera;
+
+    move_to(&mut harness, from);
+    button(&mut harness, from, egui::PointerButton::Secondary, true);
+    move_to(&mut harness, from + egui::vec2(50.0, 30.0));
+    move_to(&mut harness, from + egui::vec2(100.0, 60.0));
+    assert_ne!(harness.state().scene.camera.yaw, before.yaw, "the drag did not orbit at all");
+
+    let pixels_per_point = harness.ctx.pixels_per_point();
+    let size = [
+        (rect.width() * pixels_per_point).round().max(1.0) as usize,
+        (rect.height() * pixels_per_point).round().max(1.0) as usize,
+    ];
+    let dark = harness.ctx.style().visuals.dark_mode;
+    let app = harness.state();
+    assert_eq!(
+        app.image_key,
+        crate::panel_viewport::image_key(app, size, dark),
+        "the picture on screen was rasterized from a camera this frame's own orbit has already moved"
+    );
+}
+
 /// The pattern tool's preview is a viewport too, and it navigates on the very
 /// same bindings -- so it moves off the origin with the same drag (issue 72).
 #[test]

@@ -9,20 +9,30 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         let rect = ui.available_rect_before_wrap();
         app.viewport_rect = rect;
         let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
+        // The rasterized frame's place in the paint list, claimed now and filled
+        // in at the end of the frame.
+        //
+        // The picture has to be made *after* this frame's navigation, or the
+        // model is drawn from the camera the frame opened with while the
+        // manipulator over it is drawn from the camera the drag has just moved:
+        // a frame of orbit between the two, varying with however long the frame
+        // took, which on screen is a handle wobbling around the shape it is
+        // attached to (issue 102). Reserving a slot is what lets the picture be
+        // painted late and still come out underneath everything drawn over it.
+        let scene = ui.painter().add(egui::Shape::Noop);
 
-        let dark = ui.visuals().dark_mode;
-        paint_scene(app, ui, rect, dark);
-        let view = app.current_view();
         // The cube gets the pointer before the viewport does, or a click on a
         // face would also orbit the camera it just turned.
-        let taken = view_cube(app, ui, rect, &view);
-        if !taken {
+        let cube = view_cube_interact(app, ui, rect);
+        if !cube.taken {
             navigate(app, ui, &response);
             // The measure tool owns the pointer while it is out: clicks pick
             // features to measure between rather than selecting or manipulating.
             if app.measure.active {
+                let view = app.current_view();
                 measure_interact(app, ui, &response, &view);
             } else {
+                let view = app.current_view();
                 place_cursor(app, ui, &response, &view);
                 let view = app.current_view();
                 // A pattern's lay-out grips take the pointer before the
@@ -45,7 +55,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
             }
         }
+        // One camera for the whole picture: the model, the cube in the corner
+        // and every overlay are drawn from where the camera stands now that the
+        // frame's gestures have been read.
+        let dark = ui.visuals().dark_mode;
+        paint_scene(app, ui, rect, dark, scene);
         let view = app.current_view();
+        view_cube_paint(app, ui, &cube);
         overlays(app, ui, rect, &view);
     });
 }

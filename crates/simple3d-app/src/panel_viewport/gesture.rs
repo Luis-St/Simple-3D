@@ -41,6 +41,12 @@ pub fn nav_gesture(nav: &NavMap, held: [bool; 3], ctrl: bool, shift: bool, alt: 
 pub fn apply_gesture(camera: &mut Camera, gesture: Gesture, delta: egui::Vec2, view: &View) {
     match gesture {
         Gesture::Orbit => {
+            // Both ways about, the drag carries the *model* with the pointer:
+            // dragging left turns the model left and walks the eye round to its
+            // right, and pulling down tips the top of it towards the viewer.
+            // The same thing a pan does, and the same thing the cube in the
+            // corner does when it is grabbed directly -- one rule for every
+            // drag over the picture, whichever of them the hand is on.
             camera.yaw -= delta.x as f64 * 0.4;
             camera.pitch = (camera.pitch + delta.y as f64 * 0.4).clamp(-89.9, 89.9);
         }
