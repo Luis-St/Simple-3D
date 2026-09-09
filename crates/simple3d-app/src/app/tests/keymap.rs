@@ -17,6 +17,10 @@ pub(crate) fn a_modifier_alone_can_be_bound_in_the_editor_and_held_afterwards() 
     // Something with no modifier in it to begin with, so what is recorded
     // cannot be what was already there.
     app.keymap.set(Command::ToggleBoundingBox, Chord::key("B"), true).unwrap();
+    // Alt on its own is the zoom hold's default (issue 97), and a recording
+    // that lands on a taken chord opens the conflict prompt instead of binding.
+    // What is under test here is the recorder, so the chord is freed first.
+    app.keymap.unbind(Command::ZoomToPointer);
     app.modal = Modal::Keymap;
     app.recording = Some(Command::ToggleBoundingBox);
 

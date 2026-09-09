@@ -9,6 +9,26 @@ use simple3d_core::keymap::Command;
 impl App {
     // -- commands -----------------------------------------------------------
 
+    /// Whether the chord bound to `command` is being held down right now.
+    ///
+    /// What a *hold* binding asks, as against a press: the chord's modifiers
+    /// count as much as its keys, so a hold rebound to Ctrl+V does not fire on
+    /// a bare V, and a chord that is modifiers alone -- which is what both of
+    /// the holds default to (issue 77) -- has no key to ask about and is
+    /// nothing but the modifier state. One of several keys wants all of them
+    /// down. `key_down` answers whether a toolkit key is currently pressed,
+    /// which only a panel with the input in reach can see.
+    pub fn holding(&self, command: Command, key_down: impl Fn(egui::Key) -> bool, mods: egui::Modifiers) -> bool {
+        self.keymap.binding(command).is_some_and(|chord| {
+            chord.satisfied_by(
+                |name| crate::ui::key_from_name(name).is_some_and(&key_down),
+                mods.command,
+                mods.shift,
+                mods.alt,
+            )
+        })
+    }
+
     pub fn run(&mut self, command: Command) {
         use Command::*;
         match command {
@@ -101,6 +121,9 @@ impl App {
             // A hold key, read live while a drag runs rather than acted on when
             // pressed, so pressing it on its own does nothing (issue 68).
             SnapToGeometry => {}
+            // The other hold key, read live by the wheel rather than acted on
+            // when pressed (issue 97).
+            ZoomToPointer => {}
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
     }

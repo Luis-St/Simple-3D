@@ -82,21 +82,7 @@ impl App {
         match self.settings.geometry_snap {
             SnapMode::Never => false,
             SnapMode::Always => true,
-            SnapMode::WhileHeld => self.keymap.binding(Command::SnapToGeometry).is_some_and(|chord| {
-                // The chord's modifiers count too. Matching on the key name alone
-                // meant a hold rebound to Ctrl+V also fired on a bare V -- and on
-                // Ctrl+V, which is Paste.
-                //
-                // A chord that is modifiers alone -- Ctrl, the default since
-                // issue 77 -- has no key to ask about, and the modifier state is
-                // the whole of it. One of several keys wants all of them down.
-                chord.satisfied_by(
-                    |name| crate::ui::key_from_name(name).is_some_and(&key_down),
-                    mods.command,
-                    mods.shift,
-                    mods.alt,
-                )
-            }),
+            SnapMode::WhileHeld => self.holding(Command::SnapToGeometry, key_down, mods),
         }
     }
 }

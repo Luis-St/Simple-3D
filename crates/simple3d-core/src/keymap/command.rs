@@ -37,6 +37,7 @@ pub enum Command {
 
     FrameSelection,
     FrameAll,
+    ZoomToPointer,
     ViewTop,
     ViewBottom,
     ViewFront,

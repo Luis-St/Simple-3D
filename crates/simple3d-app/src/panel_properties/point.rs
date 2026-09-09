@@ -108,11 +108,11 @@ pub(crate) fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
 /// origin.
 ///
 /// The viewport is the usual way to move it -- a middle drag carries it across
-/// the ground and the wheel walks it towards the pointer -- but no gesture says
-/// *exactly* here, and once the view has wandered off the model none of them
-/// says "back to the middle of everything" either. It is a number the document
-/// already works from: `Add at` places a new shape at the view centre, and this
-/// is the row that says where that is.
+/// the ground, and the wheel walks it towards the pointer while the zoom hold is
+/// down (issue 97) -- but no gesture says *exactly* here, and once the view has
+/// wandered off the model none of them says "back to the middle of everything"
+/// either. It is a number the document already works from: `Add at` places a new
+/// shape at the view centre, and this is the row that says where that is.
 ///
 /// Read as well as written: it follows a pan or a zoom live, so it is also the
 /// answer to "where am I looking?".
@@ -120,11 +120,21 @@ pub(crate) fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
     let at = app.scene.camera.target;
     let step = unit.from_mm(app.move_snap()).max(1e-6);
+    // The wheel leaves this point alone unless the zoom hold is down (issue 97),
+    // and a gesture nobody can find is a gesture nobody has: the hint names the
+    // key, the way the snap hold's does.
+    let zoom_key = app.keymap.shortcut_text(simple3d_core::keymap::Command::ZoomToPointer);
+    let towards = match zoom_key.is_empty() {
+        true => String::new(),
+        false => format!(" Hold {zoom_key} while zooming to walk it towards the pointer."),
+    };
     field_row(
         ui,
         &named("View centre", unit.suffix()),
-        "What the camera looks at: the point a pan carries about and an orbit turns around. \
-             A new shape lands here when \u{201C}Add at\u{201D} is the view centre.",
+        &format!(
+            "What the camera looks at: the point a pan carries about and an orbit turns around. \
+             A new shape lands here when \u{201C}Add at\u{201D} is the view centre.{towards}"
+        ),
         |ui| {
             // Laid out like the 3D cursor's row above, narrow row included: they
             // are the same kind of thing and read as a pair.
@@ -161,8 +171,8 @@ pub(crate) fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
         let mut locked = app.settings.lock_view_centre;
         if theme::toggle(ui, &mut locked, "Lock")
             .on_hover_text(
-                "Pin what the camera looks at. Orbit and zoom still work; a pan, a zoom about the pointer \
-                 and these fields leave the view centre where it is.",
+                "Pin what the camera looks at. Orbit and zoom still work; a pan, a zoom held towards the \
+                 pointer and these fields leave the view centre where it is.",
             )
             .changed()
         {

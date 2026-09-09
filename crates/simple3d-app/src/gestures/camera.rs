@@ -71,8 +71,11 @@ pub(crate) fn wheel(harness: &mut Harness<'_, App>, at: egui::Pos2, delta: egui:
 
 /// The other half of issue 72: the wheel zooms about the pointer rather than
 /// about the middle of the frame, so what is under the cursor stays under it and
-/// the wheel alone carries the view across the grid. Driven through the real
-/// panel, wheel event and all, rather than by calling `apply_zoom`.
+/// the wheel alone carries the view across the grid -- and, since issue 97, only
+/// while the zoom hold is down, because a wheel that moves the view centre by
+/// itself is a view centre that drifts off whatever it was set to. Driven
+/// through the real panel, wheel event and all, rather than by calling
+/// `apply_zoom`.
 #[test]
 pub(crate) fn a_scroll_over_the_viewport_zooms_about_the_pointer() {
     let mut harness = harness("viewport-zoom");
@@ -80,11 +83,27 @@ pub(crate) fn a_scroll_over_the_viewport_zooms_about_the_pointer() {
     // Clear of the view cube in the corner, which takes the pointer first.
     let at = rect.center() + egui::vec2(-150.0, 90.0);
     let before = harness.state().scene.camera;
+
+    // Nothing held: the frame closes in on its own centre and leaves it alone.
+    wheel(&mut harness, at, egui::vec2(0.0, 60.0));
+    let plain = harness.state().scene.camera;
+    assert!(
+        plain.distance < before.distance,
+        "scrolling up did not zoom in: {} -> {}",
+        before.distance,
+        plain.distance
+    );
+    assert_eq!(plain.target, before.target, "the plain wheel walked the view centre towards the pointer");
+
+    // Held, it walks towards the pointer. Alt is the default hold; the binding
+    // is read live, so this is the same thing a rebound key would do.
+    let before = plain;
     // The world point the cursor is over. Parallel projection, so any point
     // along its ray is the same pixel and this needs nothing to be there.
     let under = crate::view::View::new(before, rect).ray(at).0;
-
+    modifiers(&mut harness, egui::Modifiers::ALT);
     wheel(&mut harness, at, egui::vec2(0.0, 60.0));
+    modifiers(&mut harness, egui::Modifiers::NONE);
 
     let after = harness.state().scene.camera;
     assert!(
@@ -94,7 +113,7 @@ pub(crate) fn a_scroll_over_the_viewport_zooms_about_the_pointer() {
         after.distance
     );
     assert_eq!((after.yaw, after.pitch), (before.yaw, before.pitch), "the wheel turned the camera as well");
-    assert_ne!(after.target, before.target, "the zoom held the frame centre still instead of the pointer");
+    assert_ne!(after.target, before.target, "the held zoom held the frame centre still instead of the pointer");
 
     let landed = crate::view::View::new(after, rect).project(under).unwrap().0;
     assert!((landed - at).length() < 1.0, "the point under the pointer slid from {at:?} to {landed:?}");

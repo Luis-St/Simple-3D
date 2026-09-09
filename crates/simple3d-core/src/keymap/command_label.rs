@@ -33,6 +33,7 @@ impl Command {
             MoveDown => "Move down among siblings",
             FrameSelection => "Frame selection",
             FrameAll => "Frame all",
+            ZoomToPointer => "Zoom towards the pointer (hold)",
             ViewTop => "View: top",
             ViewBottom => "View: bottom",
             ViewFront => "View: front",
@@ -72,9 +73,11 @@ impl Command {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh
             | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
-            FrameSelection | FrameAll | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft | ViewRight
-            | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection | DisplayShaded
-            | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => Area::View,
+            FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
+            | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
+            | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
+                Area::View
+            }
             ModeMove | ModeRotate | ModeResize | ModeScale | MeasureTool | SnapToGeometry | NudgeLeft | NudgeRight
             | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }

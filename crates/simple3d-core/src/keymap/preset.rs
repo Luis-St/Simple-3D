@@ -48,6 +48,11 @@ impl Keymap {
 
         set(FrameSelection, Chord::key("F"));
         set(FrameAll, Chord::shift("F"));
+        // Held for the wheel to walk the view towards whatever is under the
+        // pointer (issue 97). Alt on its own: Ctrl is the snap hold and Shift
+        // is the coarse-snap modifier, and a wheel gesture wants a modifier a
+        // hand can hold without also arming something a drag would use.
+        set(ZoomToPointer, Chord::modifiers(false, false, true));
         set(ViewTop, Chord::key("7"));
         set(ViewBottom, Chord::ctrl("7"));
         set(ViewFront, Chord::key("1"));

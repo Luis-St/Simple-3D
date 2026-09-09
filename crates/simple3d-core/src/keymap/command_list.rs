@@ -31,6 +31,7 @@ impl Command {
         Command::MoveDown,
         Command::FrameSelection,
         Command::FrameAll,
+        Command::ZoomToPointer,
         Command::ViewTop,
         Command::ViewBottom,
         Command::ViewFront,
