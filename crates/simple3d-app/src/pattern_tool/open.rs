@@ -23,23 +23,16 @@ impl App {
             self.status = Status::Warning("That selection cannot be made into a pattern".into());
             return;
         };
-        // The tool only ever builds a custom rule, so the node is switched to
-        // one on the way in -- and it starts from what the pattern was already
-        // laying out rather than from the stage defaults (issue 79). Opening the
-        // tool on a ring of six used to replace it with a stock run of three,
-        // which threw away the layout on the way to editing it.
-        //
-        // Switching kinds writes no numbers of any *other* kind -- every kind
-        // keeps its own -- so the six fixed kinds are still there, unchanged, if
-        // the user picks one again afterwards.
+        // A pattern that is already custom has a rule, so the window opens on
+        // it. Anything else has a *layout* but not yet a rule, and the first
+        // thing the window asks is what to start that rule from (issue 79):
+        // one of the six fixed kinds -- which are laid out as stages that say
+        // exactly what the kind says, so nothing is thrown away -- or nothing
+        // at all. Nothing is written to the node until that is answered, so a
+        // window opened by accident and closed again changes no numbers.
         let kind = self.scene.node(id).params().map(|p| p.int("kind"));
-        if kind != Some(pattern::CUSTOM) {
-            self.edit("Custom pattern", None);
-            if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-                pattern::use_as_template(params, kind.unwrap_or(0));
-            }
-        }
         self.pattern_tool = Some(id);
+        self.pattern_tool_started = kind == Some(pattern::CUSTOM);
         self.pattern_tool_name = self.scene.node(id).name.clone();
         self.refresh_pattern_kinds();
     }
@@ -51,18 +44,32 @@ impl App {
         self.pattern_tool = None;
     }
 
-    /// Start the rule again from what one of the fixed kinds lays out
-    /// (issue 79).
+    /// Start the rule from what one of the fixed kinds lays out, or -- for
+    /// [`pattern::CUSTOM`] -- from nothing at all (issue 79).
+    ///
+    /// The numbers come from the kind as the pattern is currently holding it,
+    /// not from the kind's defaults: a ring laid out by eye and then opened in
+    /// the tool starts as *that* ring.
     pub(crate) fn start_rule_from(&mut self, id: NodeId, kind: u32) {
         if !self.scene.get(id).is_some_and(|n| n.is_pattern()) {
             return;
         }
         self.edit("Pattern rule", None);
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            pattern::use_as_template(params, kind);
+            if kind == pattern::CUSTOM {
+                pattern::clear_stages(params);
+            } else {
+                pattern::use_as_template(params, kind);
+            }
         }
-        let name = pattern::KINDS.get(kind as usize).copied().unwrap_or("that kind");
-        self.status = Status::Info(format!("The rule now says what {} said", name.to_lowercase()));
+        self.pattern_tool_started = true;
+        self.status = Status::Info(match kind {
+            pattern::CUSTOM => "The rule starts empty".to_string(),
+            _ => {
+                let name = pattern::KINDS.get(kind as usize).copied().unwrap_or("that kind");
+                format!("The rule now says what {} said", name.to_lowercase())
+            }
+        });
     }
 
     /// Where the rule would put a copy, in world space. These are the

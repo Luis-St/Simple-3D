@@ -238,6 +238,13 @@ pub struct App {
     /// The name the rule would be saved under, and the one the last applied kind
     /// came by.
     pub pattern_tool_name: String,
+    /// Whether the rule has been started yet (issue 79).
+    ///
+    /// The tool opens by asking what to start from -- one of the six fixed
+    /// layouts, or nothing -- and shows the stages only once that is answered.
+    /// A pattern that is already custom has a rule, so the question is already
+    /// answered and the stages are what the window opens on.
+    pub(crate) pattern_tool_started: bool,
     /// The saved kinds, read when the tool opens rather than every frame -- the
     /// shelf is a directory and the dialog draws sixty times a second.
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,

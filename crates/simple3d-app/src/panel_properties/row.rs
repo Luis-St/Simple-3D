@@ -116,6 +116,34 @@ pub(crate) fn row_right_edge(ui: &egui::Ui) -> f32 {
     ui.max_rect().right().min(ui.clip_rect().right() - EDGE_PAD)
 }
 
+/// The same row, with its controls kept in a column of their own.
+///
+/// [`field_row`] wraps its controls back under the name, which is right for a
+/// field and a unit chip that only just overflow. It is wrong for a long row of
+/// choices: the second line starts at the panel's left edge, under the name,
+/// and the row stops reading as "this name, these options". Here the controls
+/// get their own column beside the name and wrap inside it, so every option
+/// stands where the first one does however many lines they take.
+pub(crate) fn field_row_boxed(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
+    // Too narrow for a name column at all: the name is on its own line and the
+    // controls already have the full width under it, which is this same shape.
+    if stacked(ui) {
+        field_row(ui, label, hover, contents);
+        return;
+    }
+    let right = row_right_edge(ui);
+    // Top-aligned, so a name beside two lines of options sits against the first
+    // of them rather than floating half way down the pair.
+    ui.horizontal_top(|ui| {
+        ui.set_max_width((right - ui.max_rect().left()).max(LABEL_WIDTH));
+        let name = row_label(ui, label);
+        if !hover.is_empty() {
+            name.on_hover_text(hover);
+        }
+        ui.vertical(|ui| ui.horizontal_wrapped(contents));
+    });
+}
+
 pub(crate) fn field_row(ui: &mut egui::Ui, label: &str, hover: &str, contents: impl FnOnce(&mut egui::Ui)) {
     if stacked(ui) {
         ui.vertical(|ui| {

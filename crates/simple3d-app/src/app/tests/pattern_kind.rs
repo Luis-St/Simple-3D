@@ -21,6 +21,9 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool should have a pattern to work on");
     assert!(app.scene.node(pattern).is_pattern());
+    // The window opens by asking what the rule starts from; a run is the
+    // answer this one builds on.
+    app.start_rule_from(pattern, 0);
     assert_eq!(app.scene.node(pattern).params().unwrap().int("kind"), simple3d_core::pattern::CUSTOM);
     draw_one_frame(&mut app);
 
@@ -73,6 +76,7 @@ pub(crate) fn a_custom_rule_survives_undo_and_a_round_trip_through_the_project_f
     app.select_only(shape);
     app.open_pattern_tool();
     let pattern = app.pattern_tool.unwrap();
+    app.start_rule_from(pattern, 0);
 
     app.edit("Pattern stages", None);
     {

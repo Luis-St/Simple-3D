@@ -18,6 +18,7 @@ pub(crate) fn the_cross_that_drops_a_stage_lines_up_with_the_fields_under_it() {
     let mut app = headless_app();
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool opened on a pattern");
+    app.start_rule_from(pattern, 0);
     // The cross is only on the last stage, and only when there is more than
     // one -- the others are what it repeats.
     if let Some(params) = app.scene.get_mut(pattern).and_then(|n| n.params_mut()) {

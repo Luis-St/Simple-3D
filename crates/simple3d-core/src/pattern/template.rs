@@ -70,6 +70,22 @@ pub fn use_as_template(params: &mut Params, kind: u32) {
     params.insert("kind".to_string(), ParamValue::Choice(CUSTOM));
 }
 
+/// Start the rule from nothing: one stage that does not move, turn or mirror,
+/// and the other three cleared behind it.
+///
+/// The seventh answer to "what do I start from" (issue 79). The six kinds are
+/// the layouts worth starting from; this is for the rule that is none of them,
+/// and it is a blank sheet rather than the numbers whichever kind the pattern
+/// happened to be holding -- which is the whole difference between it and the
+/// six.
+pub fn clear_stages(params: &mut Params) {
+    for index in 0..MAX_STAGES {
+        set_stage(params, index, Stage::run(1, Vec3::ZERO));
+    }
+    params.insert("stages".to_string(), ParamValue::Count(1));
+    params.insert("kind".to_string(), ParamValue::Choice(CUSTOM));
+}
+
 fn axis_of(params: &Params, key: &str) -> usize {
     params.int(key).min(2) as usize
 }

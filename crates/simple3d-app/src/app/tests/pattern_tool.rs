@@ -46,7 +46,9 @@ pub(crate) fn the_pattern_tool_wraps_the_selection_and_the_editor_draws() {
 pub(crate) fn the_pattern_tool_fits_whatever_width_its_window_is_given() {
     let mut app = headless_app();
     app.open_pattern_tool();
-    assert!(app.pattern_tool.is_some(), "the tool did not open, so this measures nothing");
+    let pattern = app.pattern_tool.expect("the tool did not open, so this measures nothing");
+    // Past the question the window opens on, so the stages are measured too.
+    app.start_rule_from(pattern, 0);
     app.reevaluate_for_test();
 
     for width in [1400.0_f32, 900.0, 640.0, 470.0, 400.0, 360.0, 320.0, 300.0, 280.0] {

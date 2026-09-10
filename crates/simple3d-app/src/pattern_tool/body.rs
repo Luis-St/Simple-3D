@@ -7,6 +7,14 @@ use crate::theme;
 use simple3d_core::pattern;
 use simple3d_core::scene::NodeId;
 
+/// The id one of the "start from" chips answers to. Named rather than found by
+/// the word on it: the properties panel behind the window carries a Kind row
+/// with the very same seven words, so a test that went looking for "Linear"
+/// found two of them.
+pub(crate) fn template_id(kind: u32) -> egui::Id {
+    egui::Id::new(("pattern-start-from", kind))
+}
+
 /// The id the cross that drops the last stage answers to. Named rather than
 /// found by where it sits, so a test can ask the context where it was drawn --
 /// the bargain every other grip in the application makes.
@@ -47,40 +55,70 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// The tool's contents: where a rule can be started from, the shelf it can be
-/// taken off, and the stages themselves.
+/// The tool's contents: where a rule is started from, the shelf it can be taken
+/// off, and the stages themselves.
+///
+/// The first question is what to start from, and until it is answered it is the
+/// only thing in the window (issue 79). A rule built out of stages is a blank
+/// form otherwise -- four stage numbers at nothing in particular -- and every
+/// rule anyone actually wants is one of the six fixed layouts with something
+/// added to it. Answering the question is what fills the form in.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
         return;
     };
     templates(app, ui, id);
+    if !app.pattern_tool_started {
+        ui.add(
+            egui::Label::new(theme::hint(
+                "Pick what the rule starts from. Each of the six lays its copies out exactly as that kind does, \
+                 with the numbers this pattern is already holding.",
+            ))
+            .selectable(false),
+        );
+        return;
+    }
     if shelf(app, ui) {
         ui.separator();
     }
     stages(app, ui, id);
 }
 
-/// The six fixed kinds, offered as the layout a rule starts from (issue 79).
+/// The six fixed kinds and a blank sheet, offered as what a rule starts from
+/// (issue 79).
 ///
-/// Every one of them is one or two stages spelled out, so any of them can be
+/// Every fixed kind is one or two stages spelled out, so any of them can be
 /// written back into the stages that say the same thing -- with the numbers the
 /// pattern is already holding, not with a stock 20 mm step. Lay a ring of six
-/// out with the Circular kind, open this, press Circular, and the rule starts
-/// as that ring with three stages left to add to it.
+/// out with the Circular kind, open this, press Circular, and the rule starts as
+/// that ring with three stages left to add to it. Custom is the seventh answer:
+/// none of the six, so a blank stage to fill in.
+///
+/// The options keep a column of their own and wrap inside it, rather than the
+/// second line starting back under the word "Start from" -- see
+/// [`field_row_boxed`](crate::panel_properties::field_row_boxed).
 pub(crate) fn templates(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let mut start_from = None;
-    crate::panel_properties::field_row(
+    crate::panel_properties::field_row_boxed(
         ui,
         "Start from",
-        "Begin the rule from what one of the fixed kinds lays out",
+        "Begin the rule from what one of the fixed kinds lays out, or from nothing",
         |ui| {
-            for (index, name) in pattern::KINDS.iter().enumerate().take(pattern::CUSTOM as usize) {
-                // Never shown as chosen: this is an action, not a state. The rule
-                // *is* the stages once one has been pressed, and a highlighted
-                // "Grid" would claim the stages under it are still a grid however
-                // far they have since been edited.
-                if theme::choice(ui, false, name).clicked() {
+            for (index, name) in pattern::KINDS.iter().enumerate() {
+                // Never shown as chosen: this is an action, not a state. The
+                // rule *is* the stages once one has been pressed, and a
+                // highlighted "Grid" would claim the stages under it are still a
+                // grid however far they have since been edited.
+                let chip = theme::choice(ui, false, name);
+                // It senses nothing; the chip itself answers the pointer.
+                ui.interact(chip.rect, template_id(index as u32), egui::Sense::hover());
+                let chip = if index == pattern::CUSTOM as usize {
+                    chip.on_hover_text("Start from nothing: one stage, to be filled in")
+                } else {
+                    chip
+                };
+                if chip.clicked() {
                     start_from = Some(index as u32);
                 }
             }

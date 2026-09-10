@@ -33,7 +33,7 @@ mod custom;
 pub(crate) use custom::*;
 pub use custom::{custom_keys, is_custom_key, Drive};
 mod template;
-pub use template::{template_stages, use_as_template};
+pub use template::{clear_stages, template_stages, use_as_template};
 mod noise;
 pub use noise::{noise_keys, Noise};
 mod grip;
