@@ -108,6 +108,16 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
     harness.step();
     assert_eq!(harness.state().scene.node(id).params().unwrap().int("kind"), pattern::CUSTOM);
     assert!(stage_shown(&harness).is_some(), "answering the question did not bring the stages up");
+    // And the question goes with the answer: a row of seven layouts left
+    // standing over the stages they produced is seven buttons that throw the
+    // editing away, at the top of the window.
+    for kind in 0..=pattern::CUSTOM {
+        assert!(
+            harness.ctx.read_response(crate::pattern_tool::template_id(kind)).is_none(),
+            "{} was still offered after the question had been answered",
+            pattern::KINDS[kind as usize]
+        );
+    }
     // From nothing, which is what Custom means here: one stage, and it does not
     // move the copy it makes.
     let params = harness.state().scene.node(id).params().cloned().expect("a pattern");

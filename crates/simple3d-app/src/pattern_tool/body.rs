@@ -63,13 +63,17 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
 /// form otherwise -- four stage numbers at nothing in particular -- and every
 /// rule anyone actually wants is one of the six fixed layouts with something
 /// added to it. Answering the question is what fills the form in.
+///
+/// Answered, the question goes: it was asked, and a row of seven layouts left
+/// standing over the stages they produced is a set of buttons that throw the
+/// editing away, sitting where the window is read from top to bottom.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
         return;
     };
-    templates(app, ui, id);
     if !app.pattern_tool_started {
+        templates(app, ui, id);
         ui.add(
             egui::Label::new(theme::hint(
                 "Pick what the rule starts from. Each of the six lays its copies out exactly as that kind does, \
@@ -95,8 +99,9 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
 /// that ring with three stages left to add to it. Custom is the seventh answer:
 /// none of the six, so a blank stage to fill in.
 ///
-/// The options keep a column of their own and wrap inside it, rather than the
-/// second line starting back under the word "Start from" -- see
+/// Drawn only while the question is still open. The options keep a column of
+/// their own and wrap inside it, rather than the second line starting back under
+/// the word "Start from" -- see
 /// [`field_row_boxed`](crate::panel_properties::field_row_boxed).
 pub(crate) fn templates(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let mut start_from = None;
