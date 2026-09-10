@@ -72,6 +72,7 @@ impl App {
         crate::split_tool::show(self, ctx);
         crate::measure_tool::show(self, ctx);
         crate::section_tool::show(self, ctx);
+        crate::pattern_tool::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         // A dialog is modal, and it was only half of one: `handle_shortcuts`
         // hands it the keyboard, but nothing stopped the main window taking the

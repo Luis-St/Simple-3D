@@ -15,7 +15,7 @@ use simple3d_core::config::{AppSettings, Side};
 use simple3d_core::eval::Evaluated;
 use simple3d_core::keymap::{Chord, Command, Keymap};
 use simple3d_core::library;
-use simple3d_core::scene::{Camera, NodeId, Scene};
+use simple3d_core::scene::{NodeId, Scene};
 use simple3d_core::undo::History;
 use simple3d_export::Format;
 use simple3d_geom::Vec3;
@@ -241,24 +241,6 @@ pub struct App {
     /// The saved kinds, read when the tool opens rather than every frame -- the
     /// shelf is a directory and the dialog draws sixty times a second.
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
-    /// The camera the tool's preview looks through: its own, so turning the
-    /// pattern round to see what a rule made does not move the viewport behind
-    /// the window, and so it can be framed on the pattern rather than on
-    /// whatever the scene happens to be showing.
-    pub pattern_preview_camera: Camera,
-    /// Whether the preview's camera has been framed on the pattern yet. Framing
-    /// needs the aspect the picture is actually drawn at, so it cannot happen
-    /// where it is asked for -- opening the tool and the Frame button both clear
-    /// this, and `pattern_tool::preview` does the framing on the next frame.
-    ///
-    /// Nothing else clears it. Once the picture is framed, where it is looking
-    /// from is the user's, and typing a number must not take it off them.
-    pub(crate) pattern_preview_framed: bool,
-    /// The last image the preview drew, and what it was drawn from. The preview
-    /// is a full render of the scene, so it is kept between frames exactly the
-    /// way the viewport's own image is.
-    pub(crate) pattern_preview_texture: Option<egui::TextureHandle>,
-    pub(crate) pattern_preview_key: u64,
 
     pub keymap_search: String,
     pub recording: Option<Command>,

@@ -14,7 +14,6 @@ mod gesture;
 pub(crate) use gesture::*;
 pub use gesture::{apply_gesture, nav_gesture, Gesture};
 mod navigate;
-pub use navigate::apply_zoom;
 pub(crate) use navigate::*;
 mod manipulate;
 pub(crate) use manipulate::*;

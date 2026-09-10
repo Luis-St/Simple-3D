@@ -53,19 +53,33 @@ pub(crate) fn helix_grips(params: &Params) -> Vec<Grip> {
     out
 }
 
-/// A custom rule's handles: the run and the radius of every stage in use.
+/// A custom rule's handles: the run of every stage that moves, and the radius
+/// of every stage that turns.
 ///
-/// One stage's numbers are laid out exactly as a linear pattern's are, because
-/// that is what a stage stepping along a line is. The turn is left as a number:
-/// a stage may step *and* turn at once, and a handle riding a curve that its own
-/// neighbour is also moving is one nobody can aim at.
+/// A moving stage's numbers are laid out exactly as a linear pattern's are,
+/// because that is what a stage stepping along a line is. A turning stage offers
+/// its radius and leaves the turn as a number: a handle riding a curve that its
+/// own neighbour is also moving is one nobody can aim at. A mirror is a plane
+/// and two copies, so it has nothing to drag.
 pub(crate) fn custom_grips(params: &Params) -> Vec<Grip> {
     let mut out = Vec::new();
     for (index, k) in STAGES.iter().enumerate().take(stage_count(params)) {
         let stage = stage(params, index);
-        if stage.mirror {
-            // A mirror is a plane and two copies: no distance, nothing to drag.
-            continue;
+        match stage.mode {
+            StageMode::Mirror => continue,
+            StageMode::Turn => {
+                if stage.radius.abs() > 1e-9 {
+                    let radial = unit(radial_axis(stage.axis));
+                    out.push(Grip::slide(
+                        k.grip_radius,
+                        radial * stage.radius,
+                        radial,
+                        Drive::Length { keys: std::slice::from_ref(&k.radius), base: 0.0, per: 1.0, min: POSITIVE },
+                    ));
+                }
+                continue;
+            }
+            StageMode::Move => {}
         }
         let length = stage.step.length();
         let dir = if length > 1e-9 { stage.step * (1.0 / length) } else { unit(0) };
@@ -83,15 +97,6 @@ pub(crate) fn custom_grips(params: &Params) -> Vec<Grip> {
                 dir * (length * stage.count as f64),
                 dir,
                 Drive::Count { key: k.count, base: 0.0, per: length },
-            ));
-        }
-        if stage.radius.abs() > 1e-9 {
-            let radial = unit(radial_axis(stage.axis));
-            out.push(Grip::slide(
-                k.grip_radius,
-                radial * stage.radius,
-                radial,
-                Drive::Length { keys: std::slice::from_ref(&k.radius), base: 0.0, per: 1.0, min: POSITIVE },
             ));
         }
     }

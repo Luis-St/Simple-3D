@@ -180,27 +180,3 @@ pub(crate) fn the_picture_is_drawn_from_the_camera_the_frames_own_orbit_left_beh
         "the picture on screen was rasterized from a camera this frame's own orbit has already moved"
     );
 }
-
-/// The pattern tool's preview is a viewport too, and it navigates on the very
-/// same bindings -- so it moves off the origin with the same drag (issue 72).
-#[test]
-pub(crate) fn a_middle_drag_on_the_pattern_previews_picture_moves_it_over_the_ground() {
-    let mut harness = harness("pattern-preview-pan");
-    harness.state_mut().open_pattern_tool();
-    harness.step();
-    harness.step();
-    assert_eq!(harness.state().modal, crate::app::Modal::PatternKind, "the tool did not open");
-
-    let rect = rect_of(&harness, crate::pattern_tool::preview_id());
-    let from = rect.center() + egui::vec2(-40.0, 0.0);
-    let to = from + egui::vec2(80.0, 50.0);
-    let before = harness.state().pattern_preview_camera;
-    let viewport = harness.state().scene.camera;
-
-    drag_button(&mut harness, egui::PointerButton::Middle, from, to, 6);
-
-    let after = harness.state().pattern_preview_camera;
-    assert_ne!(after.target, before.target, "a middle drag did not move the preview over the ground");
-    assert_eq!((after.yaw, after.pitch), (before.yaw, before.pitch), "the preview orbited as well");
-    assert_eq!(harness.state().scene.camera, viewport, "moving the preview moved the viewport behind it");
-}

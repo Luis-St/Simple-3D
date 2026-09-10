@@ -51,8 +51,13 @@ pub const PARAMS: &[ParamSpec] = &[
     // stage repeats whatever the stages before it made, so one stage is a run,
     // two are a grid, and a run repeated round a turn is something none of the
     // fixed kinds above can say at all.
+    //
+    // A stage says first what it *does* -- move, turn or mirror -- and then only
+    // the numbers that choice needs (issue 79). The numeric labels carry the
+    // stage's number because a value field is remembered by its label; the tool
+    // draws them without it, under the stage they belong to.
     count("stages", "Stages", 1, ("kind", CUSTOM)),
-    flag("stage1_mirror", "1 Mirror", ("kind", CUSTOM)),
+    does("stage1_mode", 0),
     axis("stage1_axis", ("kind", CUSTOM)),
     count("stage1_count", "1 Copies", 3, ("kind", CUSTOM)),
     length("stage1_step_x", "1 Step X", 20.0, ("kind", CUSTOM)),
@@ -61,7 +66,8 @@ pub const PARAMS: &[ParamSpec] = &[
     angle("stage1_turn", "1 Turn per copy", 0.0, ("kind", CUSTOM)),
     length("stage1_radius", "1 Radius", 0.0, ("kind", CUSTOM)),
     length("stage1_growth", "1 Radius per copy", 0.0, ("kind", CUSTOM)),
-    flag("stage2_mirror", "2 Mirror", ("kind", CUSTOM)),
+    length("stage1_rise", "1 Rise per copy", 0.0, ("kind", CUSTOM)),
+    does("stage2_mode", 0),
     axis("stage2_axis", ("kind", CUSTOM)),
     count("stage2_count", "2 Copies", 2, ("kind", CUSTOM)),
     length("stage2_step_x", "2 Step X", 0.0, ("kind", CUSTOM)),
@@ -70,7 +76,8 @@ pub const PARAMS: &[ParamSpec] = &[
     angle("stage2_turn", "2 Turn per copy", 0.0, ("kind", CUSTOM)),
     length("stage2_radius", "2 Radius", 0.0, ("kind", CUSTOM)),
     length("stage2_growth", "2 Radius per copy", 0.0, ("kind", CUSTOM)),
-    flag("stage3_mirror", "3 Mirror", ("kind", CUSTOM)),
+    length("stage2_rise", "2 Rise per copy", 0.0, ("kind", CUSTOM)),
+    does("stage3_mode", 0),
     axis("stage3_axis", ("kind", CUSTOM)),
     count("stage3_count", "3 Copies", 2, ("kind", CUSTOM)),
     length("stage3_step_x", "3 Step X", 0.0, ("kind", CUSTOM)),
@@ -79,7 +86,10 @@ pub const PARAMS: &[ParamSpec] = &[
     angle("stage3_turn", "3 Turn per copy", 0.0, ("kind", CUSTOM)),
     length("stage3_radius", "3 Radius", 0.0, ("kind", CUSTOM)),
     length("stage3_growth", "3 Radius per copy", 0.0, ("kind", CUSTOM)),
-    flag("stage4_mirror", "4 Mirror", ("kind", CUSTOM)),
+    length("stage3_rise", "3 Rise per copy", 0.0, ("kind", CUSTOM)),
+    // The fourth opens as a turn, so a rule that has grown three runs long
+    // offers the one thing the three before it cannot do next.
+    does("stage4_mode", 1),
     axis("stage4_axis", ("kind", CUSTOM)),
     count("stage4_count", "4 Copies", 4, ("kind", CUSTOM)),
     length("stage4_step_x", "4 Step X", 0.0, ("kind", CUSTOM)),
@@ -88,6 +98,40 @@ pub const PARAMS: &[ParamSpec] = &[
     angle("stage4_turn", "4 Turn per copy", 90.0, ("kind", CUSTOM)),
     length("stage4_radius", "4 Radius", 40.0, ("kind", CUSTOM)),
     length("stage4_growth", "4 Radius per copy", 0.0, ("kind", CUSTOM)),
+    length("stage4_rise", "4 Rise per copy", 0.0, ("kind", CUSTOM)),
+    // Noise (issue 79): how far each copy may wander off where the rule puts
+    // it. Not gated on a kind -- planks laid out in a run want a little
+    // randomness as much as a rule built out of stages does.
+    jitter("noise_x", "Jitter X"),
+    jitter("noise_y", "Jitter Y"),
+    jitter("noise_z", "Jitter Z"),
+    ParamSpec {
+        key: "noise_turn",
+        label: "Jitter turn",
+        kind: ParamKind::Angle { min: 0.0, max: 180.0 },
+        default: ParamValue::Angle(0.0),
+        lock_group: 0,
+        shown_when: None,
+    },
+    ParamSpec {
+        key: "noise_axis",
+        label: "Jitter axis",
+        kind: ParamKind::Choice { options: AXES },
+        default: ParamValue::Choice(2),
+        lock_group: 0,
+        shown_when: None,
+    },
+    // The seed is what makes the scatter a *choice* rather than an accident:
+    // the same seed lays the same copies down every time the file is opened,
+    // and the next number is a different scatter of the same size.
+    ParamSpec {
+        key: "noise_seed",
+        label: "Seed",
+        kind: ParamKind::Count { min: 1, max: 9999 },
+        default: ParamValue::Count(1),
+        lock_group: 0,
+        shown_when: None,
+    },
 ];
 
 /// The most copies one pattern will ever lay down.

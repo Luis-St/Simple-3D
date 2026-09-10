@@ -112,3 +112,31 @@ pub(crate) fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View
         ));
     }
 }
+
+/// Orange dots where the rule would put a copy, while the creation tool is open
+/// on a pattern with nothing in it yet (issues 67, 96).
+///
+/// A pattern is *built* empty: the tool makes one out of the selection, and a
+/// selection of nothing makes a pattern with nothing in it. That pattern has no
+/// geometry, so there is nothing in the viewport to show what the rule is doing
+/// and the window reads as a set of numbers with no effect. The rule still has
+/// placements, and while the shape is missing they are the whole of what there
+/// is to show. The original is the one every other copy is a copy *of*, so it is
+/// the one drawn brightest.
+pub(crate) fn draw_pattern_placements(app: &App, painter: &egui::Painter, view: &View) {
+    if !app.pattern_tool_is_empty() {
+        return;
+    }
+    for (index, at) in app.pattern_placements().iter().enumerate() {
+        // Orthographic, so there is no behind-the-camera to test for: every
+        // placement lands somewhere, and the clip takes the ones off the
+        // picture.
+        let Some((screen, _)) = view.project(*at) else { continue };
+        let (radius, colour) = if index == 0 {
+            (5.0, crate::theme::token::ACCENT)
+        } else {
+            (3.5, crate::theme::token::ACCENT.gamma_multiply(0.7))
+        };
+        painter.circle_filled(screen, radius, colour);
+    }
+}

@@ -19,7 +19,6 @@ mod measure_hidden;
 mod nudge;
 mod paint;
 mod pattern_grips;
-mod pattern_preview;
 mod pattern_tool;
 mod pattern_tool_layout;
 mod tabs;

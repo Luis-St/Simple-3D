@@ -3,5 +3,6 @@
 mod lifetime;
 mod shelf;
 mod stages;
+mod window;
 
 use super::*;

@@ -47,7 +47,6 @@ impl App {
             Modal::ConfirmQuit => self.confirm_quit_window(ctx),
             Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
-            Modal::PatternKind => self.pattern_kind_window(ctx),
             Modal::ConfirmExtractAll => self.confirm_extract_all_window(ctx),
         }
     }

@@ -20,6 +20,28 @@ pub(crate) fn param_field(
     unit: Unit,
     style: RowStyle,
 ) {
+    param_field_as(app, ui, targets, id, param, param.label, unit, style);
+}
+
+/// The same row, drawn under a name of the caller's choosing.
+///
+/// A parameter's label is two things at once: what the row reads as, and what
+/// its value field answers to across a relayout (see [`grip_id`]). Those pull
+/// apart in exactly one place -- the pattern tool's stages, where four stages
+/// each have a "Copies" and the labels must therefore carry a stage number that
+/// the stage's own heading has already said (issue 79). The grip goes on using
+/// `param.label`; only what is drawn changes.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn param_field_as(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    targets: &[NodeId],
+    id: NodeId,
+    param: &simple3d_core::primitive::ParamSpec,
+    shown_as: &str,
+    unit: Unit,
+    style: RowStyle,
+) {
     let value = param_value(app, id, param.key, param.default);
     match param.kind {
         // Radio-style choices where a measurement is ambiguous.
@@ -30,7 +52,7 @@ pub(crate) fn param_field(
         // the panel. Wrapped, a narrow panel still ends up with one per line,
         // which is the layout this replaces, so nothing is lost at any width.
         ParamKind::Choice { options } => {
-            field_row(ui, param.label, "", |ui| {
+            field_row(ui, shown_as, "", |ui| {
                 let mut chosen = value.as_u32();
                 for (index, option) in options.iter().enumerate() {
                     if theme::choice(ui, chosen == index as u32, option).clicked() && chosen != index as u32 {
@@ -45,7 +67,7 @@ pub(crate) fn param_field(
             });
         }
         ParamKind::Bool => {
-            field_row(ui, param.label, "", |ui| {
+            field_row(ui, shown_as, "", |ui| {
                 let mut on = value.as_bool();
                 if ui.checkbox(&mut on, "").changed() {
                     app.edit("Set flag", None);
@@ -59,7 +81,7 @@ pub(crate) fn param_field(
             // Worked out before the row is laid out, because the unit is part
             // of the row's name.
             let name = named(
-                param.label,
+                shown_as,
                 match kind {
                     ParamKind::Length { .. } => unit.suffix(),
                     ParamKind::Angle { .. } => "deg",

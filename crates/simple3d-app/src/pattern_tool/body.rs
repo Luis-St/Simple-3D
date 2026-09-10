@@ -1,71 +1,94 @@
-//! The tool's window: the rule on one side, the picture on the other.
+//! The tool's window: the templates, the shelf and the stages, in one column.
 
 use super::*;
 use crate::app::App;
+use crate::popup::{self, PopupEvent, PopupSpec};
 use crate::theme;
+use simple3d_core::pattern;
 use simple3d_core::scene::NodeId;
 
-/// The tool's contents: the rule down the left, and a viewport on what it lays
-/// out taking everything else.
-///
-/// The divider between them is draggable, and the width it is dragged to is the
-/// width the stages keep -- through a resize of the window and through the next
-/// time the tool is opened, since it is kept with the dock widths. Widening the
-/// window therefore widens the picture and nothing else, which is the point: a
-/// stage row is a name and a number, and a hundred more pixels only push the
-/// two apart, while the viewport is worth more the bigger it is.
-///
-/// Narrowed past what both need, the stages give width up before the picture
-/// disappears, and narrower still the picture is the column that goes: the
-/// viewport behind this window is showing the same scene, and the numbers are
-/// what the window is open for.
+/// The id the cross that drops the last stage answers to. Named rather than
+/// found by where it sits, so a test can ask the context where it was drawn --
+/// the bargain every other grip in the application makes.
+pub(crate) fn drop_stage_id() -> egui::Id {
+    egui::Id::new("pattern-drop-stage")
+}
+
+/// The tool's own window, drawn over the viewport once a frame while it is open
+/// (issues 67, 96).
+pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
+    // The pattern can go while the window is up -- the tool is not modal, and
+    // the outliner behind it can delete what it is working on.
+    if app.pattern_tool.is_some() && app.pattern_tool_target().is_none() {
+        app.close_pattern_tool();
+    }
+    let Some(id) = app.pattern_tool_target() else { return };
+    let bounds = app.viewport_rect;
+    // The window names what it is building a rule for. It has to: the selection
+    // can move on to something else while it is open.
+    let title = format!("Rule for {}", app.scene.node(id).name);
+    // Taken out of the map for the duration, so the popup may hold it mutably
+    // while its contents hold the application.
+    let mut placement = app.popups.remove(KEY).unwrap_or_default();
+    let event = popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: &title, width: WIDTH }, |ui| {
+        // Four stages is four columns of fields, which is taller than a short
+        // viewport: the body scrolls rather than pushing the buttons off the
+        // bottom of the screen where nothing can reach them.
+        let (area, restore) = theme::list_scroll_area(ui);
+        area.auto_shrink([false, true]).max_height(popup::body_room(bounds)).show(ui, |ui| {
+            ui.set_style(restore);
+            body(app, ui);
+        });
+        popup::action_row(ui, |ui| actions(app, ui));
+    });
+    app.popups.insert(KEY, placement);
+    if event == PopupEvent::Closed {
+        app.close_pattern_tool();
+    }
+}
+
+/// The tool's contents: where a rule can be started from, the shelf it can be
+/// taken off, and the stages themselves.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(id) = app.pattern_tool_target() else {
         ui.label("The pattern this was opened on is no longer there.");
         return;
     };
-    let room = ui.available_width();
-    // What the divider itself costs, so the widest the stages may be still
-    // leaves the picture its minimum.
-    let rule = ui.spacing().item_spacing.x * 2.0 + 6.0;
-    let widest = (room - PREVIEW_MIN - rule).min(STAGES_MAX);
-
-    if widest < STAGES_MIN {
-        rule_column(app, ui, id);
-        return;
-    }
-    let wanted = app.settings.pattern_stages_width.clamp(STAGES_MIN, widest);
-    let mut width = wanted;
-    egui::SidePanel::left("pattern-stages-column")
-        .frame(egui::Frame::NONE)
-        .resizable(true)
-        .default_width(wanted)
-        // egui remembers a panel's width itself, so a window narrowed past what
-        // the remembered width leaves the picture has to be told the new
-        // ceiling -- otherwise the stages keep a width the window no longer has.
-        .width_range(STAGES_MIN..=widest)
-        .show_inside(ui, |ui| {
-            width = ui.available_width();
-            // Claim the column's full width up front. egui remembers a panel by
-            // the rectangle its *content* filled, and a property row pins its
-            // right edge `EDGE_PAD` inside that -- so the column came back eight
-            // pixels narrower every frame, and being remembered, kept coming
-            // back narrower until it hit its own minimum. The docks have to do
-            // exactly this, for exactly this reason.
-            ui.expand_to_include_rect(ui.max_rect());
-            ui.set_min_width(width);
-            rule_column(app, ui, id);
-        });
-    app.settings.pattern_stages_width = width.clamp(STAGES_MIN, STAGES_MAX);
-    preview(app, ui);
-}
-
-/// The shelf and the stages, in that order down one column.
-pub(crate) fn rule_column(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    templates(app, ui, id);
     if shelf(app, ui) {
         ui.separator();
     }
     stages(app, ui, id);
+}
+
+/// The six fixed kinds, offered as the layout a rule starts from (issue 79).
+///
+/// Every one of them is one or two stages spelled out, so any of them can be
+/// written back into the stages that say the same thing -- with the numbers the
+/// pattern is already holding, not with a stock 20 mm step. Lay a ring of six
+/// out with the Circular kind, open this, press Circular, and the rule starts
+/// as that ring with three stages left to add to it.
+pub(crate) fn templates(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    let mut start_from = None;
+    crate::panel_properties::field_row(
+        ui,
+        "Start from",
+        "Begin the rule from what one of the fixed kinds lays out",
+        |ui| {
+            for (index, name) in pattern::KINDS.iter().enumerate().take(pattern::CUSTOM as usize) {
+                // Never shown as chosen: this is an action, not a state. The rule
+                // *is* the stages once one has been pressed, and a highlighted
+                // "Grid" would claim the stages under it are still a grid however
+                // far they have since been edited.
+                if theme::choice(ui, false, name).clicked() {
+                    start_from = Some(index as u32);
+                }
+            }
+        },
+    );
+    if let Some(kind) = start_from {
+        app.start_rule_from(id, kind);
+    }
 }
 
 /// The saved kinds, as one row: pick one to put it on the pattern, and the

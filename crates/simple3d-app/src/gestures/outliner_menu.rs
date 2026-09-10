@@ -77,7 +77,7 @@ pub(crate) fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     harness.get_by_label("Custom pattern").click();
     harness.step();
     harness.step();
-    assert_eq!(harness.state().modal, crate::app::Modal::PatternKind, "the entry did not open the tool");
+    assert!(harness.state().pattern_tool.is_some(), "the entry did not open the tool");
     let opened = harness.state().pattern_tool.expect("the tool opened on nothing");
     assert!(harness.state().scene.node(opened).is_pattern(), "the tool opened on something that is not a pattern");
 }

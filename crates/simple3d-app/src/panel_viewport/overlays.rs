@@ -50,6 +50,10 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // copies, dragged to lay them out by eye rather than by typing (issue 67).
     draw_pattern_grips(app, &painter, view);
 
+    // And, while the creation tool is open on a pattern that has nothing in it
+    // to repeat, a mark on every place the rule would put a copy (issue 96).
+    draw_pattern_placements(app, &painter, view);
+
     // Where the section plane stands, and the grip that slides it (issue 71).
     // Over the image rather than in it: everything the cut keeps is behind the
     // plane, so there is nothing here that could hide the frame.

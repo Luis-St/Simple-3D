@@ -19,12 +19,17 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     // tool draws beside them. Here they were only a wall to scroll past on the
     // way to the button that opens it.
     let custom = params.int("kind") == simple3d_core::pattern::CUSTOM;
+    let noise_keys = simple3d_core::pattern::noise_keys();
     for param in simple3d_core::pattern::PARAMS {
         if !simple3d_core::pattern::param_visible(param, &params) {
             continue;
         }
         // The kind itself stays: it is how a pattern stops being custom again.
         if custom && param.shown_when == Some(("kind", simple3d_core::pattern::CUSTOM)) {
+            continue;
+        }
+        // The scatter is a group of its own, under the rule rather than in it.
+        if noise_keys.contains(&param.key) {
             continue;
         }
         param_field(app, ui, &targets, id, param, unit, PATTERN_ROW);
@@ -91,6 +96,8 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         }
     }
 
+    noise(app, ui, id, &params);
+
     let (wanted, copies) = simple3d_core::pattern::instance_count(&params);
     let children = app.scene.node(id).children.len();
     let note = if children == 0 {
@@ -123,5 +130,48 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
             )))
             .selectable(false),
         );
+    }
+}
+
+/// How far each copy may wander off where the rule puts it (issue 79).
+///
+/// Under the rule rather than in it, and offered whatever the kind is: a run of
+/// planks wants a little randomness as much as a rule built out of stages does,
+/// and an exact pattern is the thing being departed from rather than a seventh
+/// kind of one.
+///
+/// Rolled up to a single line until there is some, because the usual answer is
+/// none and four fields saying zero are four rows of nothing on the way to the
+/// numbers that matter. The line itself says whether there is any, so a scatter
+/// is never hidden behind a closed section.
+pub(crate) fn noise(app: &mut App, ui: &mut egui::Ui, id: NodeId, params: &simple3d_core::primitive::Params) {
+    let unit = app.unit();
+    let scatter = simple3d_core::pattern::Noise::of(params);
+    let summary = if scatter.wanted() {
+        format!(
+            "up to {} {}, {}\u{00B0}",
+            simple3d_core::unit::format_length(scatter.offset.x.max(scatter.offset.y).max(scatter.offset.z), unit),
+            unit.suffix(),
+            simple3d_core::unit::format_number(scatter.turn, 1)
+        )
+    } else {
+        "none".to_string()
+    };
+    let open = ui.id().with(("pattern-noise", id));
+    let mut showing = ui.ctx().data(|d| d.get_temp::<bool>(open)).unwrap_or(scatter.wanted());
+    field_row(ui, "Noise", "Nudge and turn every copy a little off where the rule puts it", |ui| {
+        if theme::choice(ui, showing, if showing { "Hide" } else { "Set" }).clicked() {
+            showing = !showing;
+            ui.ctx().data_mut(|d| d.insert_temp(open, showing));
+        }
+        ui.add(egui::Label::new(theme::hint(summary)).selectable(false));
+    });
+    if !showing {
+        return;
+    }
+    let targets = [id];
+    for key in simple3d_core::pattern::noise_keys() {
+        let Some(spec) = simple3d_core::pattern::PARAMS.iter().find(|p| p.key == *key) else { continue };
+        param_field(app, ui, &targets, id, spec, unit, PATTERN_ROW);
     }
 }

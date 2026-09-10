@@ -48,7 +48,6 @@ pub(crate) fn every_modal_draws_and_so_does_a_palette_with_saved_primitives_on_i
         Modal::ConfirmQuit,
         Modal::ConfirmCloseTab,
         Modal::SavePrimitive,
-        Modal::PatternKind,
     ] {
         app.modal = modal;
         draw_one_frame(&mut app);

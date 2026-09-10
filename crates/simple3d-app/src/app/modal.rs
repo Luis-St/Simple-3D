@@ -13,8 +13,6 @@ pub enum Modal {
     Error,
     /// Naming a group, or a whole project, to keep on the palette.
     SavePrimitive,
-    /// Building a custom pattern kind out of stages (issue 67).
-    PatternKind,
     /// Quitting with unsaved changes.
     ConfirmQuit,
     /// Emptying a collection of every piece, which turns it into a union group

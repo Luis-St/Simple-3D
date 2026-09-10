@@ -8,19 +8,19 @@ use simple3d_core::scene::NodeId;
 
 impl App {
     /// Re-read the shelf. Done when the tool opens and after it is written to,
-    /// rather than every frame: the shelf is a directory and the dialog draws
+    /// rather than every frame: the shelf is a directory and the window draws
     /// sixty times a second.
     pub(crate) fn refresh_pattern_kinds(&mut self) {
         self.pattern_kinds = pattern_library::list(self.config_dir());
     }
 
-    /// The pattern the tool is working on, if it is still there: the outliner
-    /// behind the dialog can delete it while the dialog is open.
-    pub(super) fn pattern_tool_target(&self) -> Option<NodeId> {
+    /// The pattern the tool is working on, if it is still there: the tool is not
+    /// modal, so the outliner behind it can delete what it is working on.
+    pub(crate) fn pattern_tool_target(&self) -> Option<NodeId> {
         self.pattern_tool.filter(|id| self.scene.get(*id).is_some_and(|n| n.is_pattern()))
     }
 
-    pub(super) fn pattern_tool_params(&self) -> Params {
+    pub(crate) fn pattern_tool_params(&self) -> Params {
         self.pattern_tool_target().and_then(|id| self.scene.node(id).params().cloned()).unwrap_or_default()
     }
 }
@@ -29,7 +29,7 @@ impl App {
     /// How many stages the rule uses. Adding one starts it from the defaults it
     /// was born with, so a stage that has just appeared does something visible
     /// rather than sitting at zero and looking broken.
-    pub(super) fn set_stage_count(&mut self, wanted: usize) {
+    pub(crate) fn set_stage_count(&mut self, wanted: usize) {
         let Some(id) = self.pattern_tool_target() else { return };
         let wanted = wanted.clamp(1, pattern::MAX_STAGES) as u32;
         self.edit("Pattern stages", None);

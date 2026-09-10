@@ -14,6 +14,11 @@ pub fn custom_keys() -> Vec<&'static str> {
     keys
 }
 
+/// Whether a key is one of a custom rule's own.
+pub fn is_custom_key(key: &str) -> bool {
+    key == "stages" || stage_of(key).is_some()
+}
+
 pub(crate) fn custom(params: &Params) -> Vec<Instance> {
     // Start with the shape itself, and let each stage repeat everything that
     // came before it. The outer transform is the later stage's, so "a row of

@@ -50,17 +50,6 @@ pub(crate) const fn angle(
     }
 }
 
-pub(crate) const fn flag(key: &'static str, label: &'static str, when: (&'static str, u32)) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Bool,
-        default: ParamValue::Bool(false),
-        lock_group: 0,
-        shown_when: Some(when),
-    }
-}
-
 /// The axis a turning pattern turns about, and whose perpendicular a radius is
 /// measured in.
 pub(crate) const AXES: &[&str] = &["X", "Y", "Z"];
@@ -75,5 +64,34 @@ pub(crate) const fn axis(key: &'static str, when: (&'static str, u32)) -> ParamS
         default: ParamValue::Choice(2),
         lock_group: 0,
         shown_when: Some(when),
+    }
+}
+
+/// What one stage of a custom rule does (issue 79). A choice like the axis, and
+/// like the axis it carries no unit and no number, so every stage's may share
+/// one label.
+pub(crate) const fn does(key: &'static str, default: u32) -> ParamSpec {
+    ParamSpec {
+        key,
+        label: "Does",
+        kind: ParamKind::Choice { options: super::STAGE_MODES },
+        default: ParamValue::Choice(default),
+        lock_group: 0,
+        shown_when: Some(("kind", super::CUSTOM)),
+    }
+}
+
+/// How far a copy may be nudged off where the rule puts it (issue 79). Never
+/// negative: it is a distance either way, not a direction.
+pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Length { min: 0.0 },
+        default: ParamValue::Length(0.0),
+        lock_group: 0,
+        // Every kind, not one: a run of planks wants a little randomness as much
+        // as a rule built out of stages does.
+        shown_when: None,
     }
 }

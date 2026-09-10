@@ -6,7 +6,7 @@ use crate::render::Renderable;
 use crate::ui::{self, FieldBuffers};
 use crate::worker::EvalWorker;
 use simple3d_core::config::{self};
-use simple3d_core::scene::{Camera, Scene};
+use simple3d_core::scene::Scene;
 use simple3d_core::undo::History;
 use simple3d_export::Format;
 use std::collections::BTreeMap;
@@ -108,10 +108,6 @@ impl App {
             pattern_tool: None,
             pattern_tool_name: String::new(),
             pattern_kinds: Vec::new(),
-            pattern_preview_camera: Camera::default(),
-            pattern_preview_framed: false,
-            pattern_preview_texture: None,
-            pattern_preview_key: u64::MAX,
             keymap_search: String::new(),
             recording: None,
             shortcut_mods: ui::ChordHold::default(),

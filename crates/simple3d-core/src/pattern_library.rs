@@ -86,6 +86,10 @@ pub fn load(path: &Path) -> Option<Params> {
             .or_else(|| defaults.get(key).copied())?;
         out.insert(key.to_string(), value);
     }
+    // A rule kept before a stage said what it *does* has to go on laying its
+    // copies down where it always did, which is what the old numbers are read
+    // for (issue 79).
+    pattern::migrate_stage_modes(&stored, &mut out);
     Some(out)
 }
 

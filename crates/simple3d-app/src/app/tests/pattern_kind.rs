@@ -22,15 +22,14 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     let pattern = app.pattern_tool.expect("the tool should have a pattern to work on");
     assert!(app.scene.node(pattern).is_pattern());
     assert_eq!(app.scene.node(pattern).params().unwrap().int("kind"), simple3d_core::pattern::CUSTOM);
-    assert_eq!(app.modal, Modal::PatternKind);
     draw_one_frame(&mut app);
 
     // A row of three, turned four times about Z: two stages, and twelve
     // copies that no single fixed kind lays out.
     let mut stage = simple3d_core::pattern::stage(app.scene.node(pattern).params().unwrap(), 1);
+    stage.mode = simple3d_core::pattern::StageMode::Turn;
     stage.count = 4;
     stage.turn = 90.0;
-    stage.step = simple3d_geom::Vec3::ZERO;
     {
         let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
         params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(2));

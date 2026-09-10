@@ -58,6 +58,10 @@ pub fn instances(params: &Params) -> Vec<Instance> {
         CUSTOM => custom(params),
         _ => linear(params),
     };
+    // A little randomness on top of whatever the rule said, so a run of planks
+    // is not wallpaper (issue 79). After the cap is worked out but before it
+    // bites, so which copies survive a capped pattern does not depend on it.
+    noise::scatter(params, &mut out);
     // The cap is applied here rather than in each kind so no kind can forget it,
     // and by truncation rather than by refusing: the pattern still shows what it
     // makes, just not more of it than anything can draw. `instance_count` says
