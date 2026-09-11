@@ -190,14 +190,22 @@ pub(crate) fn presets(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     }
 }
 
+/// The id the "Your kinds" dropdown answers to. Named rather than found by the
+/// word on it: a combo box carries no label of its own, only the text it is
+/// showing, and the properties panel behind the window has one reading the same.
+pub(crate) fn saved_start_id() -> egui::Id {
+    egui::Id::new("pattern-start-saved")
+}
+
 /// The kinds the user has saved, as the third answer to the same question
 /// (issue 79): a rule of their own is as much a thing to start from as a fixed
-/// kind or a ready-made one, and the shelf used to be a dropdown of its own
-/// beside the stages -- a second place to start a rule from, below the rule it
-/// would replace.
+/// kind or a ready-made one.
 ///
-/// Each carries the cross that asks to delete it, on the chip's own row, so
-/// deleting one never means picking it first.
+/// The same dropdown the properties panel's Rule row offers, drawn from the same
+/// rows (see [`crate::pattern_tool::items`]): each one applies that kind or, by
+/// its cross, asks to delete it. It is one shelf, and a list of chips here beside
+/// a dropdown there made it look like two -- and a chip for every kind grows the
+/// window by a line for every few kinds kept.
 ///
 /// Nothing saved, nothing drawn: the row appears with the first kind kept.
 pub(crate) fn saved_kinds(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
@@ -205,61 +213,23 @@ pub(crate) fn saved_kinds(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         return;
     }
     let mut picked = None;
-    crate::panel_properties::field_row_boxed(ui, "Your kinds", "Rules you have saved, to start from again", |ui| {
-        // What a chip may take of the column once its cross has had its share.
-        let room = (ui.max_rect().width() - SAVED_CROSS).max(24.0);
-        for entry in &app.pattern_kinds {
-            // The name and its cross are one unit on the row, so a wrap never
-            // leaves a cross at the start of a line under someone else's name.
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 2.0;
-                let shown = fitted(ui, &entry.name, room);
-                let chip = theme::choice(ui, false, &shown);
-                let chip = if shown == entry.name { chip } else { chip.on_hover_text(&entry.name) };
-                if chip.clicked() {
-                    picked = Some(ShelfPick::Apply(entry.clone()));
-                }
-                if ui
-                    .add(egui::Button::new(theme::hint("\u{00d7}")).small())
-                    .on_hover_text(format!("Delete \u{201C}{}\u{201D} from the shelf", entry.name))
-                    .clicked()
-                {
-                    picked = Some(ShelfPick::Delete(entry.clone()));
-                }
+    crate::panel_properties::field_row(ui, "Your kinds", "Rules you have saved, to start from again", |ui| {
+        // Nothing is chosen yet: the question is what to start from, so no
+        // kind is on the rule until one is picked here.
+        let shelf = egui::ComboBox::from_id_salt("pattern-tool-saved-kind")
+            .selected_text(theme::value("Pick one"))
+            .width(crate::panel_properties::fits(ui, 150.0))
+            .show_ui(ui, |ui| {
+                picked = crate::pattern_tool::items(ui, &app.pattern_kinds, None);
             });
-        }
+        // It senses nothing; the box itself answers the pointer.
+        ui.interact(shelf.response.rect, saved_start_id(), egui::Sense::hover());
     });
     match picked {
         Some(ShelfPick::Apply(entry)) => app.apply_saved_kind_to(id, &entry),
         Some(ShelfPick::Delete(entry)) => app.ask_delete_saved_kind(entry),
         None => {}
     }
-}
-
-/// The width a saved kind's cross and the gap before it take out of its row.
-const SAVED_CROSS: f32 = 24.0;
-
-/// A saved kind's name, cut short with an ellipsis where the whole of it would
-/// not fit `room`.
-///
-/// A kind is named by whoever saved it, and a chip is one line that cannot
-/// wrap: a long name ran the chip, and the cross after it, off the side of the
-/// window. The whole name is still what the chip's tooltip says.
-fn fitted(ui: &egui::Ui, name: &str, room: f32) -> String {
-    let font = egui::TextStyle::Button.resolve(ui.style());
-    let padding = ui.spacing().button_padding.x * 2.0 + 2.0;
-    let width = |text: &str| {
-        ui.painter().layout_no_wrap(text.to_string(), font.clone(), egui::Color32::WHITE).size().x + padding
-    };
-    if width(name) <= room {
-        return name.to_string();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    (1..chars.len())
-        .rev()
-        .map(|keep| chars[..keep].iter().collect::<String>().trim_end().to_string() + "\u{2026}")
-        .find(|short| width(short) <= room)
-        .unwrap_or_else(|| "\u{2026}".to_string())
 }
 
 /// Whether Save keeps the pattern's scatter with the rule (issue 79). Only
