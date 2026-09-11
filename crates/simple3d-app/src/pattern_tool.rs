@@ -27,8 +27,14 @@
 //! Two of the things a rule needed most are here as well (issue 79): any of the
 //! six fixed kinds can be used as the template a rule starts from, rather than
 //! the tool throwing the layout away on the way in, and a stage says what it
-//! *does* before it says its numbers, so a run offers a run's four fields
+//! *does* before it says its numbers, so a run offers a run's few fields
 //! instead of all nine.
+//!
+//! And it is laid out as a builder rather than a form (issue 79). Each stage is
+//! a card, each variation on a stage a card inside it, and the scatter the last
+//! card of all; a stage, a variation and a part of the scatter are each *added*
+//! as the thing they are, from a row of chips, and taken off by their own
+//! cross. What is on screen is what the rule does, and nothing else.
 
 mod body;
 mod kinds;
@@ -44,12 +50,31 @@ pub(crate) use actions::*;
 /// Identifies the popup, and is what remembers where it was dragged to.
 const KEY: &str = "pattern-tool";
 
-/// How wide the window is: a stage's name and its field side by side, and no
-/// wider. A popup lives over the model, so every pixel of it is a pixel of the
-/// pattern being laid out that cannot be seen.
-const WIDTH: f32 = 320.0;
+/// How wide the window is: a stage's name and three fields side by side inside
+/// a variation's card inside a stage's, and no wider. A popup lives over the
+/// model, so every pixel of it is a pixel of the pattern being laid out that
+/// cannot be seen.
+const WIDTH: f32 = 340.0;
 
 /// The cross that drops a stage: twice the height egui's small button comes out
 /// at, and square, because it is a mark rather than a word and a wide one reads
 /// as a button with its label missing.
 const DROP_STAGE: f32 = 28.0;
+
+/// The cross that takes a variation or a part of the scatter off: smaller than
+/// a stage's, which throws away more.
+const CARD_CROSS: f32 = 22.0;
+
+/// How round a card's corners are.
+const CARD_ROUNDING: f32 = 4.0;
+
+/// The frame a card of the builder is drawn in: a stage, a variation on it, a
+/// part of the scatter. Each nests in the one it belongs to, filled a shade
+/// apart so the nesting reads without a heading having to say it.
+pub(crate) fn card(fill: egui::Color32) -> egui::Frame {
+    egui::Frame::NONE
+        .fill(fill)
+        .stroke(egui::Stroke::new(1.0_f32, crate::theme::token::SURFACE_3))
+        .corner_radius(CARD_ROUNDING)
+        .inner_margin(egui::Margin::same(6))
+}

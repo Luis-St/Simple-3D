@@ -148,3 +148,42 @@ pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec 
         shown_when: None,
     }
 }
+
+/// What one variation of a stage changes (issue 79). A choice, like a stage's
+/// mode, so every variation's may share one label.
+pub(crate) const fn vary_what(key: &'static str) -> ParamSpec {
+    ParamSpec {
+        key,
+        label: "Varies",
+        kind: ParamKind::Choice { options: super::VARIES },
+        default: ParamValue::Choice(0),
+        lock_group: 0,
+        shown_when: Some(("kind", super::CUSTOM)),
+    }
+}
+
+/// Whether a variation's amount builds up copy by copy or comes round on a
+/// cycle (issue 79).
+pub(crate) const fn vary_steps(key: &'static str) -> ParamSpec {
+    ParamSpec {
+        key,
+        label: "Steps",
+        kind: ParamKind::Choice { options: super::STEPS },
+        default: ParamValue::Choice(0),
+        lock_group: 0,
+        shown_when: Some(("kind", super::CUSTOM)),
+    }
+}
+
+/// How many of a fixed number of slots are in use -- a stage's variations
+/// (issue 79). Unlike a count of copies it can be none.
+pub(crate) const fn tally(key: &'static str, label: &'static str, max: u32) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Count { min: 0, max },
+        default: ParamValue::Count(0),
+        lock_group: 0,
+        shown_when: Some(("kind", super::CUSTOM)),
+    }
+}

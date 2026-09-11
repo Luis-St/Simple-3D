@@ -4,6 +4,7 @@ mod customise;
 mod lifetime;
 mod shelf;
 mod stages;
+mod variations;
 mod window;
 
 use super::*;

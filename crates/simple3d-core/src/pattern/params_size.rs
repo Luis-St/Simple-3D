@@ -57,8 +57,19 @@ pub fn migrate_params(stored: &Params) -> Params {
             (p.key.to_string(), value)
         })
         .collect();
-    migrate_stage_modes(stored, &mut out);
+    migrate_stages(stored, &mut out);
     out
+}
+
+/// Bring an older rule's stages up to date: what each one does, and what it
+/// varies its copies by.
+///
+/// Reads `stored` and writes `out` -- so it works both for a project's
+/// parameters and for a saved kind on the shelf, which are filled in from
+/// different defaults.
+pub fn migrate_stages(stored: &Params, out: &mut Params) {
+    migrate_stage_modes(stored, out);
+    migrate_stage_variations(stored, out);
 }
 
 /// Work out what each stage of an older rule was doing, and say so (issue 79).
@@ -71,10 +82,7 @@ pub fn migrate_params(stored: &Params) -> Params {
 /// is a run. A turning stage's rise used to be its step along its own axis,
 /// which is where the rise comes from.
 ///
-/// Reads `stored` and writes `out` -- so it works both for a project's
-/// parameters and for a saved kind on the shelf, which are filled in from
-/// different defaults.
-pub fn migrate_stage_modes(stored: &Params, out: &mut Params) {
+fn migrate_stage_modes(stored: &Params, out: &mut Params) {
     for k in &STAGES {
         if stored.contains_key(k.mode) {
             continue;
@@ -92,6 +100,50 @@ pub fn migrate_stage_modes(stored: &Params, out: &mut Params) {
         if mode == StageMode::Turn {
             let rise = stored.get(k.step[axis]).map_or(0.0, |v| v.as_f64());
             out.insert(k.rise.to_string(), ParamValue::Length(rise));
+        }
+    }
+}
+
+/// Turn what an older stage varied its copies by into variations of its own
+/// (issue 79).
+///
+/// A stage used to carry one of each -- a gap that grew, a shift on a cycle, a
+/// spin and a size that built up copy by copy -- under a single "Vary"
+/// heading. It now holds a list, and each of those that was set becomes one
+/// entry of it, stepping the way it always did. They are listed in the order
+/// the old stage applied them -- the gap places the copy, and it is then
+/// shifted, spun and resized where it stands -- so a rule saved before lays
+/// its copies down where it always did. A mirror never varied anything, and a
+/// turn never had gaps, so neither is given what it did not use.
+fn migrate_stage_variations(stored: &Params, out: &mut Params) {
+    for k in &STAGES {
+        if stored.contains_key(k.varied) {
+            continue;
+        }
+        let old = &k.legacy;
+        let num = |key: &str| stored.get(key).map_or(0.0, |v| v.as_f64());
+        let mode = StageMode::from_index(out.int(k.mode));
+        let axis = stored.get(k.axis).map_or(2, |v| v.as_u32()).min(2) as usize;
+        let mut list: Vec<Variation> = Vec::new();
+        if num(old.gap_growth).abs() > 1e-9 {
+            list.push(Variation::widen(num(old.gap_growth)));
+        }
+        let shift = Vec3::new(num(old.shift[0]), num(old.shift[1]), num(old.shift[2]));
+        if shift.length() > 1e-9 {
+            list.push(Variation::shift(shift).repeating(stored.get(old.shift_every).map_or(2, |v| v.as_u32())));
+        }
+        if num(old.spin).abs() > 1e-9 {
+            list.push(Variation::spin(num(old.spin), axis));
+        }
+        let scale = stored.get(old.scale).map_or(100, |v| v.as_u32()).clamp(10, 1000);
+        if scale != 100 {
+            list.push(Variation::resize(scale as f64 / 100.0));
+        }
+        list.retain(|variation| variation.what.fits(mode));
+        out.insert(k.varied.to_string(), ParamValue::Count(list.len() as u32));
+        for (slot, keys) in k.vary.iter().enumerate() {
+            let blank = Variation::blank(Vary::Shift);
+            write_variation(out, keys, list.get(slot).unwrap_or(&blank));
         }
     }
 }
@@ -122,18 +174,31 @@ pub(crate) fn stage_param_visible(key: &str, values: &Params) -> bool {
     if key == k.mode {
         return true;
     }
-    // What varies the copies (issue 79) belongs to a run and a turn alike, but
-    // two of its numbers only mean something once another one is set: a cycle
-    // is how often a shift comes round, and a run spins its copies about an
-    // axis it otherwise has no use for.
-    let shifted = k.shift.iter().any(|axis| values.num(axis).abs() > 1e-9);
-    let spinning = values.num(k.spin).abs() > 1e-9;
-    let varies = k.shift.contains(&key) || key == k.spin || key == k.scale || (key == k.shift_every && shifted);
-    match StageMode::from_index(values.int(k.mode)) {
-        StageMode::Move => {
-            key == k.count || k.step.contains(&key) || key == k.gap_growth || varies || (key == k.axis && spinning)
+    let mode = StageMode::from_index(values.int(k.mode));
+    // A variation's numbers (issue 79): only while the variation is one the
+    // stage uses and one its mode has a use for, then only the numbers its own
+    // kind reads -- and its cycle only once it repeats.
+    if let Some(slot) = k.vary.iter().position(|v| v.all().contains(&key)) {
+        let v = &k.vary[slot];
+        let what = Vary::from_index(values.int(v.what));
+        if slot >= variation_count(values, stage) || !what.fits(mode) {
+            return false;
         }
-        StageMode::Turn => varies || [k.count, k.axis, k.turn, k.radius, k.growth, k.rise].contains(&key),
+        return match what {
+            _ if key == v.what || key == v.steps => true,
+            _ if key == v.every => values.int(v.steps) == 1,
+            Vary::Shift => v.offset.contains(&key),
+            Vary::Spin => key == v.angle || key == v.axis,
+            Vary::Size => key == v.size,
+            Vary::Gap => key == v.gap,
+        };
+    }
+    if key == k.varied {
+        return mode != StageMode::Mirror;
+    }
+    match mode {
+        StageMode::Move => key == k.count || k.step.contains(&key),
+        StageMode::Turn => [k.count, k.axis, k.turn, k.radius, k.growth, k.rise].contains(&key),
         StageMode::Mirror => key == k.axis,
     }
 }

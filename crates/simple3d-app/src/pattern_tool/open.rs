@@ -75,15 +75,11 @@ impl App {
         self.refresh_pattern_kinds();
     }
 
-    /// Unfold every stage, and open the "Vary" section of each one that varies
-    /// anything -- done whenever a whole rule arrives at once, so nothing a
-    /// stage does is folded out of sight of someone who has not seen it yet.
+    /// Unfold every stage -- done whenever a whole rule arrives at once, so
+    /// nothing a stage does is folded out of sight of someone who has not seen
+    /// it yet.
     pub(crate) fn sync_pattern_tool_sections(&mut self) {
-        let params = self.pattern_tool_params();
-        for index in 0..pattern::MAX_STAGES {
-            self.pattern_tool_folded[index] = false;
-            self.pattern_tool_vary_open[index] = pattern::stage(&params, index).varies();
-        }
+        self.pattern_tool_folded = [false; pattern::MAX_STAGES];
     }
 
     /// Put the start question back up over the rule (issue 79).

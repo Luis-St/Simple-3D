@@ -259,9 +259,11 @@ pub struct App {
     /// Four stages unfolded are taller than most viewports, and the one being
     /// worked on is usually the only one whose numbers are wanted.
     pub(crate) pattern_tool_folded: [bool; simple3d_core::pattern::MAX_STAGES],
-    /// Which stages have their "Vary" section open. Opened by itself for a
-    /// stage that varies anything, so nothing a stage does is out of sight.
-    pub(crate) pattern_tool_vary_open: [bool; simple3d_core::pattern::MAX_STAGES],
+    /// Which parts of a pattern's scatter the builder is showing although
+    /// they are still at nothing -- one just added, or typed back to zero -- so
+    /// a part does not vanish from under the field it is being typed into
+    /// (issue 79). For one pattern at a time; any other shows the parts it uses.
+    pub(crate) noise_parts_open: (Option<NodeId>, [bool; 3]),
     /// The stage the pointer is over in the tool, whose copies the viewport
     /// marks: what the rule has made by the end of it.
     pub(crate) pattern_tool_hover: Option<usize>,

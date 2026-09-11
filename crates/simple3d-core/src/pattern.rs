@@ -16,16 +16,23 @@
 mod keys;
 pub(crate) use keys::*;
 mod params;
-pub use params::{default_params, MAX_INSTANCES, MAX_STAGES, PARAMS};
+pub use params::{default_params, MAX_INSTANCES, MAX_STAGES, MAX_VARIATIONS, PARAMS};
 mod params_size;
-pub use params_size::{migrate_params, migrate_stage_modes, param_visible, params_for_size};
+pub use params_size::{migrate_params, migrate_stages, param_visible, params_for_size};
 mod stage_keys;
 pub(crate) use stage_keys::*;
-pub use stage_keys::{stage_count, stage_keys, vary_keys, StageKeys, STAGES, STAGE_KEY_COUNT};
+pub use stage_keys::{
+    stage_count, stage_keys, variation_count, vary_keys, StageKeys, VaryKeys, STAGES, STAGE_KEY_COUNT, VARY_KEY_COUNT,
+};
 mod stage;
 pub use stage::{set_stage, stage, Stage, StageMode, STAGE_MODES};
+mod variation;
+pub(crate) use variation::*;
+pub use variation::{Variation, Vary, STEPS, VARIES};
 mod stage_edit;
-pub use stage_edit::{fresh_stage, remove_stage, swap_stages};
+pub use stage_edit::{
+    add_variation, fresh_stage, fresh_stage_doing, fresh_variation, remove_stage, remove_variation, swap_stages,
+};
 mod instance;
 pub(crate) use instance::*;
 pub use instance::{instance_count, instances, instances_through, radial_axis, rule_stages, Instance};

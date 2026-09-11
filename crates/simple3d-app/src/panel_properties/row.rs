@@ -23,6 +23,14 @@ pub(crate) struct RowStyle {
     pub(super) grip_scope: &'static str,
 }
 
+impl RowStyle {
+    /// What tells this row's gestures apart from the same rows drawn somewhere
+    /// else -- for the controls drawn beside them, which need telling apart too.
+    pub(crate) fn scope(self) -> &'static str {
+        self.grip_scope
+    }
+}
+
 /// A shape's dimensions.
 pub(crate) const DIMENSION_ROW: RowStyle = RowStyle { edit_label: "Set measurement", grip_scope: "" };
 

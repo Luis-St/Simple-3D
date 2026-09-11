@@ -31,7 +31,7 @@ fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primiti
 pub(crate) fn a_stage_that_is_added_runs_along_a_free_axis_clear_of_the_shape() {
     let (mut app, pattern) = with_rule();
     let size = app.pattern_content_size(pattern).expect("the pattern holds the starting shape");
-    app.set_stage_count(2);
+    app.add_stage_doing(pattern::StageMode::Move);
     let second = pattern::stage(&params(&app, pattern), 1);
     assert_eq!(second.mode, pattern::StageMode::Move);
     assert!(
@@ -44,7 +44,7 @@ pub(crate) fn a_stage_that_is_added_runs_along_a_free_axis_clear_of_the_shape() 
 
     // After a blank rule too: the one stage goes nowhere, so the new one takes X.
     app.start_rule_from(pattern, pattern::CUSTOM);
-    app.set_stage_count(2);
+    app.add_stage_doing(pattern::StageMode::Move);
     let fresh = pattern::stage(&params(&app, pattern), 1);
     assert!(fresh.step.x > 0.0 && fresh.count >= 2, "after a blank rule the new stage was {fresh:?}");
 }
@@ -54,7 +54,8 @@ pub(crate) fn a_stage_that_is_added_runs_along_a_free_axis_clear_of_the_shape() 
 #[test]
 pub(crate) fn a_stage_can_be_dropped_or_moved_from_anywhere_and_undone() {
     let (mut app, pattern) = with_rule();
-    app.set_stage_count(3);
+    app.add_stage_doing(pattern::StageMode::Move);
+    app.add_stage_doing(pattern::StageMode::Move);
     let before = params(&app, pattern);
     let third = pattern::stage(&before, 2);
     app.pattern_tool_folded = [false, false, true, false];
@@ -83,7 +84,7 @@ pub(crate) fn a_stage_can_be_dropped_or_moved_from_anywhere_and_undone() {
 #[test]
 pub(crate) fn starting_over_asks_again_and_changes_nothing_until_answered() {
     let (mut app, pattern) = with_rule();
-    app.set_stage_count(2);
+    app.add_stage_doing(pattern::StageMode::Move);
     let rule = params(&app, pattern);
 
     app.start_rule_over();
@@ -103,9 +104,9 @@ pub(crate) fn starting_over_asks_again_and_changes_nothing_until_answered() {
     assert_eq!(pattern::stage_count(&planks), 2);
     assert!(pattern::stage(&planks, 0).step.x > size.x, "the planks were not laid out clear of the shape");
     assert!(pattern::Noise::of(&planks).wanted(), "the planks came without their scatter");
-    // And the stage that staggers them has its "Vary" section open, since that
-    // is where the stagger is.
-    assert!(app.pattern_tool_vary_open[1], "the stagger was folded out of sight");
+    // And the stage that staggers them does it with a variation of its own,
+    // which is the card the builder draws the stagger on.
+    assert!(pattern::stage(&planks, 1).varies(), "the planks' rows are not staggered");
 }
 
 /// Saved with its noise, a kind brings the noise back wherever it is used;
@@ -152,7 +153,7 @@ pub(crate) fn a_saved_kind_keeps_the_noise_only_when_it_was_saved_with_it() {
 #[test]
 pub(crate) fn the_copies_through_a_stage_are_where_the_viewport_marks_them() {
     let (mut app, pattern) = with_rule();
-    app.set_stage_count(2);
+    app.add_stage_doing(pattern::StageMode::Move);
     app.reevaluate_for_test();
     let rule = params(&app, pattern);
     assert_eq!(app.pattern_placements_through(0).len(), pattern::stage(&rule, 0).copies());
@@ -160,9 +161,9 @@ pub(crate) fn the_copies_through_a_stage_are_where_the_viewport_marks_them() {
 }
 
 /// The window fits whatever width it is given with everything a stage can
-/// show open at once -- the arrows and cross on every heading, the "Vary"
-/// section with a shift and a spin in it -- and so does the question, with the
-/// ready-made layouts and a saved kind on it.
+/// show open at once -- the arrows and cross on every heading, a card for each
+/// of several variations, a shift's three fields on one row, the noise card --
+/// and so does the question, with the ready-made layouts and a saved kind on it.
 #[test]
 pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
     let dir = temp_config_dir("pattern-tool-fit-vary");
@@ -176,11 +177,14 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
     app.start_rule_from(pattern, 0);
     app.save_current_kind();
     app.start_rule_from_preset(pattern, 0);
-    app.set_stage_count(3);
+    app.add_stage_doing(pattern::StageMode::Move);
+    app.add_stage_doing(pattern::StageMode::Move);
     {
         let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
-        params.insert("stage1_spin".into(), ParamValue::Angle(5.0));
-        params.insert("stage1_scale".into(), ParamValue::Count(95));
+        pattern::add_variation(params, 0, pattern::Variation::spin(5.0, 2));
+        pattern::add_variation(params, 0, pattern::Variation::resize(0.95));
+        pattern::add_variation(params, 0, pattern::Variation::shift(Vec3::new(1.0, 0.0, 2.0)).repeating(3));
+        params.insert("noise_turn".into(), ParamValue::Angle(4.0));
     }
     app.sync_pattern_tool_sections();
     app.reevaluate_for_test();
@@ -211,10 +215,12 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
                 for index in 0..3 {
                     assert!(ctx.read_response(crate::pattern_tool::drop_stage_id(index)).is_some());
                 }
-                assert!(
-                    ctx.read_response(crate::panel_properties::grip_id("tool:1 Spin per copy")).is_some(),
-                    "the open Vary section did not draw its spin"
-                );
+                for grip in ["tool:1.1 Spin", "tool:1.3 Shift Z", "tool:Jitter X", "tool:Jitter turn"] {
+                    assert!(
+                        ctx.read_response(crate::panel_properties::grip_id(grip)).is_some(),
+                        "the builder did not draw {grip}"
+                    );
+                }
             }
         }
     }

@@ -89,7 +89,6 @@ pub(crate) fn param_field_as(
                 },
             );
             field_row(ui, &name, "", |ui| {
-                let step = ui::scrub_increment(kind, unit);
                 // A lock toggle where the type offers one: a sphere's three
                 // diameters, a cylinder's two.
                 if param.lock_group != 0 {
@@ -110,32 +109,83 @@ pub(crate) fn param_field_as(
                 // and the field takes the whole column.
                 let field_width = room_left(ui).max(40.0);
                 let field_id = ui.id().with((id, param.key));
-                // With several nodes selected, a field shows the value they
-                // agree on and an em dash when they do not.
-                let shown = ui::shared_text(
-                    targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)),
-                );
-                // The field is the grip: dragging it changes the value
-                // without going near the keyboard, and clicking it opens it
-                // for typing.
-                let grip_name = if style.grip_scope.is_empty() {
-                    param.label.to_string()
-                } else {
-                    format!("{}:{}", style.grip_scope, param.label)
-                };
-                let outcome = ui
-                    .scope(|ui| {
-                        ui.set_width(field_width);
-                        value_field(app, ui, &grip_name, field_id, &shown, step)
-                    })
-                    .inner;
-                if let Some(scrubbed) = outcome.scrubbed {
-                    scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
-                }
-                if let Some(text) = outcome.committed {
-                    set_shared_param(app, targets, param, kind, unit, field_id, text);
-                }
+                ui.scope(|ui| {
+                    ui.set_width(field_width);
+                    number_field(app, ui, targets, param, unit, style, field_id);
+                });
             });
         }
     }
+}
+
+/// Just the value field of a number parameter, as wide as the ui it is given,
+/// with no row around it.
+///
+/// For rows that put several numbers side by side under one name -- a pattern
+/// stage's step, a shift, the scatter's nudge (issue 79) -- as well as for the
+/// ordinary row above, which is this field after a name and a lock.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn number_field(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    targets: &[NodeId],
+    param: &simple3d_core::primitive::ParamSpec,
+    unit: Unit,
+    style: RowStyle,
+    field_id: egui::Id,
+) {
+    let kind = param.kind;
+    let step = ui::scrub_increment(kind, unit);
+    // With several nodes selected, a field shows the value they agree on and
+    // an em dash when they do not.
+    let shown =
+        ui::shared_text(targets.iter().map(|t| ui::show_param(param_value(app, *t, param.key, param.default), unit)));
+    // The field is the grip: dragging it changes the value without going near
+    // the keyboard, and clicking it opens it for typing.
+    let grip_name = if style.grip_scope.is_empty() {
+        param.label.to_string()
+    } else {
+        format!("{}:{}", style.grip_scope, param.label)
+    };
+    let outcome = value_field(app, ui, &grip_name, field_id, &shown, step);
+    if let Some(scrubbed) = outcome.scrubbed {
+        scrub_param(app, targets, param, kind, unit, scrubbed.delta, scrubbed.started);
+    }
+    if let Some(text) = outcome.committed {
+        set_shared_param(app, targets, param, kind, unit, field_id, text);
+    }
+}
+
+/// Three of a pattern's numbers on one row under one name -- a stage's step,
+/// a shift, the scatter's nudge -- the way a position's three are, and one to a
+/// line where the row is too narrow for three (issue 79).
+///
+/// They were three rows each, "Step X", "Step Y", "Step Z", which is three
+/// names for one thing and a column three times as tall as what it says.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn vector_row(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    id: NodeId,
+    keys: [&'static str; 3],
+    name: &str,
+    hover: &str,
+    style: RowStyle,
+) {
+    let unit = app.unit();
+    let specs: Vec<&'static simple3d_core::primitive::ParamSpec> =
+        keys.iter().filter_map(|key| simple3d_core::pattern::PARAMS.iter().find(|p| p.key == *key)).collect();
+    if specs.len() != 3 {
+        return;
+    }
+    field_row(ui, &named(name, unit.suffix()), hover, |ui| {
+        point_fields(ui, name, |ui, axis| {
+            let spec = specs[axis];
+            // Named after the value rather than where it sits, and told apart
+            // by the scope, so the tool and the noise window can show the same
+            // number in one frame.
+            let field_id = egui::Id::new(("pattern-vector", id, spec.key, style.grip_scope));
+            number_field(app, ui, &[id], spec, unit, style, field_id);
+        });
+    });
 }

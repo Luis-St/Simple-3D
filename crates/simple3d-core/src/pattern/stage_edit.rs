@@ -16,24 +16,125 @@ pub fn fresh_stage(params: &Params, index: usize, size: Vec3) -> Stage {
     let mut taken = [false; 3];
     for above in (0..index.min(MAX_STAGES)).map(|i| stage(params, i)) {
         if above.mode == StageMode::Move && above.step.length() > 1e-9 {
-            let s = above.step;
-            let along = if s.x.abs() >= s.y.abs() && s.x.abs() >= s.z.abs() {
-                0
-            } else if s.y.abs() >= s.z.abs() {
-                1
-            } else {
-                2
-            };
-            taken[along] = true;
+            taken[along_axis(above.step)] = true;
         }
     }
-    // Half the shape again, the spacing `params_for_size` gives a new
-    // pattern: a visible gap whatever the size.
-    let clear = |extent: f64| if extent > 1e-9 { extent * 1.5 } else { 20.0 };
     let extents = [size.x, size.y, size.z];
     match (0..3).find(|axis| !taken[*axis]) {
         Some(axis) => Stage::run(2, unit(axis) * clear(extents[axis])),
-        None => Stage::turning(4, 90.0, clear(size.x.max(size.y)) * 2.0, 0.0, 0.0, 2),
+        None => fresh_turn(size),
+    }
+}
+
+/// The numbers a stage that has just been added starts with when what it is to
+/// do was chosen with it -- the tool's "Add a stage" offers the three modes
+/// rather than one button (issue 79).
+///
+/// A run is what [`fresh_stage`] would make, along an axis nothing above it
+/// runs along yet, or along X once all three are taken; a turn is a ring round
+/// the shape; a mirror reflects across X, beside the copies the stages above
+/// it laid out along that axis rather than on top of them.
+pub fn fresh_stage_doing(params: &Params, index: usize, size: Vec3, mode: StageMode) -> Stage {
+    match mode {
+        StageMode::Move => match fresh_stage(params, index, size) {
+            run if run.mode == StageMode::Move => run,
+            _ => Stage::run(2, unit(0) * clear(size.x)),
+        },
+        StageMode::Turn => fresh_turn(size),
+        StageMode::Mirror => Stage::mirrored(0),
+    }
+}
+
+/// The variation a stage is given when one of `what` is added to it (issue
+/// 79): something visible, sized to the shape and to the stage it is on, so
+/// adding one shows what it does before any number is typed.
+///
+/// A shift staggers: every other copy moved on by half the step of the nearest
+/// run above -- the brick bond -- or, with no run above to stagger against, a
+/// zigzag across the stage's own run, half the shape wide. A spin builds up a
+/// fifteenth of a right angle a copy, a size a tenth smaller a copy, and a gap
+/// a quarter of the step wider a copy.
+pub fn fresh_variation(params: &Params, index: usize, what: Vary, size: Vec3) -> Variation {
+    let own = stage(params, index);
+    let extents = [size.x, size.y, size.z];
+    let half_shape = |axis: usize| if extents[axis] > 1e-9 { extents[axis] / 2.0 } else { 10.0 };
+    match what {
+        Vary::Shift => {
+            let above = (0..index)
+                .rev()
+                .map(|i| stage(params, i))
+                .find(|s| s.mode == StageMode::Move && s.step.length() > 1e-9);
+            let offset = match above {
+                Some(run) => run.step * 0.5,
+                None => {
+                    let across = match own.mode {
+                        StageMode::Turn => radial_axis(own.axis),
+                        _ if own.step.length() > 1e-9 && along_axis(own.step) == 0 => 1,
+                        _ => 0,
+                    };
+                    unit(across) * half_shape(across)
+                }
+            };
+            Variation::shift(offset).repeating(2)
+        }
+        Vary::Spin => Variation::spin(15.0, if own.mode == StageMode::Turn { own.axis } else { 2 }),
+        Vary::Size => Variation::resize(0.9),
+        Vary::Gap => {
+            let length = own.step.length();
+            Variation::widen(if length > 1e-9 { length * 0.25 } else { clear(size.x) * 0.25 })
+        }
+    }
+}
+
+/// Put `variation` on the end of stage `index`'s list. False, and nothing
+/// written, where the list is already full.
+pub fn add_variation(params: &mut Params, index: usize, variation: Variation) -> bool {
+    let mut stage = stage(params, index);
+    if stage.varied >= MAX_VARIATIONS {
+        return false;
+    }
+    stage = stage.with(variation);
+    set_stage(params, index, stage);
+    true
+}
+
+/// Take variation `slot` off stage `index`; the ones after it move up, and go
+/// on being applied in the order they were.
+pub fn remove_variation(params: &mut Params, index: usize, slot: usize) {
+    let mut stage = stage(params, index);
+    if slot >= stage.varied {
+        return;
+    }
+    stage.vary.copy_within(slot + 1..stage.varied, slot);
+    stage.varied -= 1;
+    stage.vary[stage.varied] = Variation::blank(Vary::Shift);
+    set_stage(params, index, stage);
+}
+
+/// A ring round the shape: four copies a right angle apart, far enough out to
+/// stand clear of each other.
+fn fresh_turn(size: Vec3) -> Stage {
+    Stage::turning(4, 90.0, clear(size.x.max(size.y)) * 2.0, 0.0, 0.0, 2)
+}
+
+/// Half the shape again, the spacing `params_for_size` gives a new pattern: a
+/// visible gap whatever the size.
+fn clear(extent: f64) -> f64 {
+    if extent > 1e-9 {
+        extent * 1.5
+    } else {
+        20.0
+    }
+}
+
+/// The axis a vector mostly points along.
+fn along_axis(v: Vec3) -> usize {
+    if v.x.abs() >= v.y.abs() && v.x.abs() >= v.z.abs() {
+        0
+    } else if v.y.abs() >= v.z.abs() {
+        1
+    } else {
+        2
     }
 }
 

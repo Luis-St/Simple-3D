@@ -2,6 +2,7 @@ mod custom;
 mod grips;
 mod kinds;
 mod noise;
+mod variations;
 mod vary;
 
 use super::*;

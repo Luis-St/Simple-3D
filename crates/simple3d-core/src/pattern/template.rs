@@ -107,7 +107,7 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
     let joint = long.min(wide) * 0.05;
     let (pitch, row) = (long + joint, wide + joint);
     let half =
-        |across: f64| Stage { shift: Vec3::new(across / 2.0, 0.0, 0.0), shift_every: 2, ..Stage::run(1, Vec3::ZERO) };
+        |across: f64| Stage::run(1, Vec3::ZERO).with(Variation::shift(Vec3::new(across / 2.0, 0.0, 0.0)).repeating(2));
     let stages = match preset {
         // Planks end to end along X, rows of them across Y, every other row
         // moved on by half a plank so no two joints line up.

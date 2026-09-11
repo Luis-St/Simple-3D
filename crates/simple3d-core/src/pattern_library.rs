@@ -91,10 +91,10 @@ pub fn load(path: &Path) -> Option<Params> {
             .or_else(|| defaults.get(key).copied())?;
         out.insert(key.to_string(), value);
     }
-    // A rule kept before a stage said what it *does* has to go on laying its
-    // copies down where it always did, which is what the old numbers are read
-    // for (issue 79).
-    pattern::migrate_stage_modes(&stored, &mut out);
+    // A rule kept before a stage said what it *does*, or before it could vary
+    // its copies more than one way, has to go on laying its copies down where
+    // it always did, which is what the old numbers are read for (issue 79).
+    pattern::migrate_stages(&stored, &mut out);
     // The scatter only where the file has one. A kind saved without it leaves
     // whatever scatter the pattern it is applied to already has, rather than
     // taking it off: "no noise was kept" is not "keep no noise".
@@ -209,6 +209,28 @@ mod tests {
         target.insert("noise_y".to_string(), ParamValue::Length(3.0));
         apply(&mut target, &without);
         assert_eq!(target.num("noise_y"), 3.0, "a kind with no noise took the pattern's own off it");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
+    /// A kind kept while a stage carried one of each variation comes off the
+    /// shelf with that one as a variation of its own, staggering its rows the
+    /// way it did when it was saved (issue 79).
+    #[test]
+    fn a_kind_saved_before_a_stage_held_a_list_keeps_its_stagger() {
+        let config = temp_dir("legacy-vary");
+        std::fs::create_dir_all(dir(&config)).unwrap();
+        let mut old = Params::new();
+        old.insert("stages".to_string(), ParamValue::Count(2));
+        old.insert("stage2_mode".to_string(), ParamValue::Choice(0));
+        old.insert("stage2_shift_x".to_string(), ParamValue::Length(7.0));
+        old.insert("stage2_shift_every".to_string(), ParamValue::Count(2));
+        std::fs::write(dir(&config).join("Old.json"), serde_json::to_string(&old).unwrap()).unwrap();
+        let back = load(&dir(&config).join("Old.json")).expect("an older kind should still load");
+        assert_eq!(
+            pattern::stage(&back, 1).variations(),
+            [pattern::Variation::shift(simple3d_geom::Vec3::new(7.0, 0.0, 0.0)).repeating(2)],
+            "the older kind lost its stagger"
+        );
         let _ = std::fs::remove_dir_all(&config);
     }
 

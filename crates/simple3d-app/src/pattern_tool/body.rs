@@ -4,7 +4,7 @@
 use super::*;
 use crate::app::App;
 use crate::popup::{self, PopupEvent, PopupSpec};
-use crate::theme;
+use crate::theme::{self, token};
 use simple3d_core::pattern;
 use simple3d_core::scene::NodeId;
 
@@ -38,9 +38,19 @@ pub(crate) fn fold_stage_id(index: usize) -> egui::Id {
     egui::Id::new(("pattern-fold-stage", index))
 }
 
-/// The id of the line that opens or shuts stage `index`'s "Vary" section.
-pub(crate) fn vary_id(index: usize) -> egui::Id {
-    egui::Id::new(("pattern-vary", index))
+/// The id of the chip that adds a stage doing `mode` (issue 79).
+pub(crate) fn add_stage_id(mode: pattern::StageMode) -> egui::Id {
+    egui::Id::new(("pattern-add-stage", mode.index()))
+}
+
+/// The id of the chip that adds a variation of `what` to stage `index`.
+pub(crate) fn add_variation_id(index: usize, what: pattern::Vary) -> egui::Id {
+    egui::Id::new(("pattern-add-variation", index, what.index()))
+}
+
+/// The id of the cross that takes variation `slot` off stage `index`.
+pub(crate) fn drop_variation_id(index: usize, slot: usize) -> egui::Id {
+    egui::Id::new(("pattern-drop-variation", index, slot))
 }
 
 /// The tool's own window, drawn over the viewport once a frame while it is open
@@ -119,7 +129,18 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
     stages(app, ui, id);
-    keep_noise(app, ui, id);
+    // The scatter is the last thing a rule is built from, so it is the last
+    // card in the same builder (issue 79). It used to be a window of its own,
+    // opened from the properties panel behind this one -- two windows over the
+    // model for one pattern, and a "Save the noise with the rule" box here
+    // about numbers that were set somewhere else.
+    ui.add_space(8.0);
+    card(token::SURFACE_0B).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.add(egui::Label::new(theme::header_text("Noise")).selectable(false));
+        crate::noise_popup::builder(app, ui, id, crate::panel_properties::PATTERN_TOOL_ROW);
+        keep_noise(app, ui, id);
+    });
 }
 
 /// The six fixed kinds and a blank sheet, offered as what a rule starts from

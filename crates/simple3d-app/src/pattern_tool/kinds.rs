@@ -27,35 +27,6 @@ impl App {
 }
 
 impl App {
-    /// How many stages the rule uses.
-    ///
-    /// A stage that is added starts as the next thing the rule is missing -- a
-    /// run along an axis nothing above it runs along, spaced clear of what the
-    /// pattern repeats -- rather than as whatever its slot last held (issue 79).
-    /// The slot used to decide: after a grid that was stage 4's stock turn, and
-    /// after a blank rule it was one copy in place, so pressing "Add a stage"
-    /// appeared to do nothing at all.
-    pub(crate) fn set_stage_count(&mut self, wanted: usize) {
-        let Some(id) = self.pattern_tool_target() else { return };
-        let wanted = wanted.clamp(1, pattern::MAX_STAGES);
-        let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
-        self.edit("Pattern stages", None);
-        let mut used = wanted;
-        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            used = pattern::stage_count(params);
-            for index in used..wanted {
-                let fresh = pattern::fresh_stage(params, index, size);
-                pattern::set_stage(params, index, fresh);
-            }
-            params.insert("stages".to_string(), ParamValue::Count(wanted as u32));
-        }
-        // A stage that has just been added is the one about to be worked on.
-        for index in used..wanted {
-            self.pattern_tool_folded[index] = false;
-            self.pattern_tool_vary_open[index] = false;
-        }
-    }
-
     /// Take one stage out of the rule, wherever it is in the stack; the ones
     /// below it move up and go on repeating what is left above them.
     pub(crate) fn drop_stage(&mut self, index: usize) {
@@ -70,7 +41,6 @@ impl App {
         // The fold of each stage goes with it, not with its slot.
         for below in index..pattern::MAX_STAGES - 1 {
             self.pattern_tool_folded[below] = self.pattern_tool_folded[below + 1];
-            self.pattern_tool_vary_open[below] = self.pattern_tool_vary_open[below + 1];
         }
     }
 
@@ -86,7 +56,59 @@ impl App {
             pattern::swap_stages(params, index, other);
         }
         self.pattern_tool_folded.swap(index, other);
-        self.pattern_tool_vary_open.swap(index, other);
+    }
+
+    /// Add a stage doing `mode` to the end of the rule (issue 79): what the
+    /// builder's "Add a stage" row offers, as the three things a stage can do
+    /// rather than one button whose stage then has to be told what it is for.
+    ///
+    /// A stage that is added starts as the next thing the rule is missing -- a
+    /// run along an axis nothing above it runs along, spaced clear of what the
+    /// pattern repeats -- rather than as whatever its slot last held. The slot
+    /// used to decide: after a grid that was stage 4's stock turn, and after a
+    /// blank rule it was one copy in place, so adding a stage appeared to do
+    /// nothing at all.
+    pub(crate) fn add_stage_doing(&mut self, mode: pattern::StageMode) {
+        let Some(id) = self.pattern_tool_target() else { return };
+        let used = pattern::stage_count(&self.pattern_tool_params());
+        if used >= pattern::MAX_STAGES {
+            return;
+        }
+        let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
+        self.edit("Pattern stages", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            let fresh = pattern::fresh_stage_doing(params, used, size, mode);
+            pattern::set_stage(params, used, fresh);
+            params.insert("stages".to_string(), ParamValue::Count(used as u32 + 1));
+        }
+        self.pattern_tool_folded[used] = false;
+    }
+
+    /// Add a variation of `what` to the end of stage `index`'s list, at an
+    /// amount that shows what it does (see [`pattern::fresh_variation`]).
+    pub(crate) fn add_variation(&mut self, index: usize, what: pattern::Vary) {
+        let Some(id) = self.pattern_tool_target() else { return };
+        if pattern::variation_count(&self.pattern_tool_params(), index) >= pattern::MAX_VARIATIONS {
+            return;
+        }
+        let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
+        self.edit("Vary pattern stage", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            let fresh = pattern::fresh_variation(params, index, what, size);
+            pattern::add_variation(params, index, fresh);
+        }
+    }
+
+    /// Take variation `slot` off stage `index`; the ones after it move up.
+    pub(crate) fn drop_variation(&mut self, index: usize, slot: usize) {
+        let Some(id) = self.pattern_tool_target() else { return };
+        if slot >= pattern::variation_count(&self.pattern_tool_params(), index) {
+            return;
+        }
+        self.edit("Drop pattern variation", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            pattern::remove_variation(params, index, slot);
+        }
     }
 
     /// Put a saved rule on a pattern: the tool's own, from the question it

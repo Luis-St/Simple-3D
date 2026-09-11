@@ -27,7 +27,19 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
         harness.step();
     }
     assert_eq!(harness.state().noise_popup, Some(id), "the Noise row did not open the window");
-    assert!(jitter_shown(&harness).is_some(), "the window went up without the numbers in it");
+    // A pattern with no noise shows the parts a scatter is built from, not
+    // eight fields at nothing (issue 79). Adding one brings its numbers up.
+    assert!(jitter_shown(&harness).is_none(), "the window drew fields for a scatter nobody has added");
+    let nudge = rect_of(&harness, crate::noise_popup::part_id("", crate::noise_popup::Part::Nudge));
+    press(&mut harness, nudge.center());
+    release(&mut harness, nudge.center());
+    for _ in 0..3 {
+        harness.step();
+    }
+    assert!(jitter_shown(&harness).is_some(), "adding a nudge did not bring its numbers up");
+    let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
+    assert!(params.num("noise_x") > 0.0, "adding a nudge nudged nothing");
+    assert_eq!(pattern::crowding(&params, harness.state().pattern_content_size(id).unwrap()), None);
 
     // Inside the viewport it floats over, which is what "in place" means: it
     // cannot be dragged onto the other screen and left there.
@@ -105,6 +117,43 @@ pub(crate) fn reset_takes_the_whole_scatter_off_in_one_undo_step() {
     assert_eq!(params.num("noise_x"), 2.0, "one undo did not bring the whole scatter back");
     assert_eq!(params.num("noise_turn"), 6.0);
     assert_eq!(params.int("noise_seed"), 4);
+}
+
+/// Each part of the scatter comes off by its own cross, leaving the others, and
+/// Shuffle steps the seed on to another scatter of the same size (issue 79).
+#[test]
+pub(crate) fn a_part_comes_off_by_its_own_cross_and_shuffle_steps_the_seed() {
+    let mut harness = harness("noise-popup-parts");
+    harness.state_mut().run(Command::Pattern);
+    let id = harness.state().primary().expect("the pattern is selected");
+    {
+        let params = harness.state_mut().scene.get_mut(id).and_then(|node| node.params_mut()).expect("a pattern");
+        params.insert("noise_x".to_string(), ParamValue::Length(2.0));
+        params.insert("noise_turn".to_string(), ParamValue::Angle(6.0));
+    }
+    harness.state_mut().noise_popup = Some(id);
+    for _ in 0..4 {
+        harness.step();
+    }
+    let seed = |harness: &Harness<'_, App>| harness.state().scene.node(id).params().unwrap().int("noise_seed");
+    let before = seed(&harness);
+    let shuffle = rect_of(&harness, crate::noise_popup::shuffle_id(""));
+    press(&mut harness, shuffle.center());
+    release(&mut harness, shuffle.center());
+    for _ in 0..2 {
+        harness.step();
+    }
+    assert_ne!(seed(&harness), before, "Shuffle left the seed where it was");
+
+    let cross = rect_of(&harness, crate::noise_popup::drop_part_id("", crate::noise_popup::Part::Turn));
+    press(&mut harness, cross.center());
+    release(&mut harness, cross.center());
+    for _ in 0..2 {
+        harness.step();
+    }
+    let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
+    assert_eq!(params.num("noise_turn"), 0.0, "the turn's cross left the turn on");
+    assert_eq!(params.num("noise_x"), 2.0, "the turn's cross took the nudge with it");
 }
 
 /// Whether the first jitter's own field is on screen. Asked of the field rather

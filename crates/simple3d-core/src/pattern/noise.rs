@@ -143,8 +143,10 @@ pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
                 if length < 1e-9 {
                     continue;
                 }
-                // A run whose gaps shrink is tightest at its far end.
-                (stage.step * (1.0 / length), length + (stage.gap_growth * gaps).min(0.0))
+                // A run whose gaps shrink is tightest at its far end, and one
+                // whose gaps come round on a cycle at its narrowest gap.
+                let narrowest = (0..stage.count - 1).map(|j| stage.gap_after(j)).fold(0.0, f64::min);
+                (stage.step * (1.0 / length), length + narrowest)
             }
             _ => {
                 let radius = stage.radius.min(stage.radius + stage.growth * gaps).abs();
