@@ -69,8 +69,57 @@ impl App {
         let kind = self.scene.node(id).params().map(|p| p.int("kind"));
         self.pattern_tool = Some(id);
         self.pattern_tool_started = !made && kind == Some(pattern::CUSTOM);
+        self.pattern_tool_resumable = false;
         self.pattern_tool_name = self.scene.node(id).name.clone();
+        self.sync_pattern_tool_sections();
         self.refresh_pattern_kinds();
+    }
+
+    /// Unfold every stage, and open the "Vary" section of each one that varies
+    /// anything -- done whenever a whole rule arrives at once, so nothing a
+    /// stage does is folded out of sight of someone who has not seen it yet.
+    pub(crate) fn sync_pattern_tool_sections(&mut self) {
+        let params = self.pattern_tool_params();
+        for index in 0..pattern::MAX_STAGES {
+            self.pattern_tool_folded[index] = false;
+            self.pattern_tool_vary_open[index] = pattern::stage(&params, index).varies();
+        }
+    }
+
+    /// Put the start question back up over the rule (issue 79).
+    ///
+    /// Nothing is written until it is answered, exactly as when the window
+    /// first opens: the rule stays on the pattern, and the question offers the
+    /// way back to it as well as the ways to replace it.
+    pub(crate) fn start_rule_over(&mut self) {
+        self.pattern_tool_started = false;
+        self.pattern_tool_resumable = true;
+        self.pattern_tool_hover = None;
+    }
+
+    /// Leave the question without answering it, back to the rule it was asked
+    /// over.
+    pub(crate) fn resume_rule(&mut self) {
+        self.pattern_tool_started = true;
+        self.pattern_tool_resumable = false;
+    }
+
+    /// Start the rule from one of the layouts that ship ready made, sized to
+    /// what the pattern repeats (issue 79).
+    pub(crate) fn start_rule_from_preset(&mut self, id: NodeId, preset: usize) {
+        if !self.scene.get(id).is_some_and(|n| n.is_pattern()) {
+            return;
+        }
+        let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
+        self.edit("Pattern rule", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            pattern::use_preset(params, preset, size);
+        }
+        self.pattern_tool_started = true;
+        self.pattern_tool_resumable = false;
+        self.sync_pattern_tool_sections();
+        let name = pattern::PRESETS.get(preset).copied().unwrap_or("that layout");
+        self.status = Status::Info(format!("The rule now lays out {}", name.to_lowercase()));
     }
 
     /// Put the window away. Nothing is undone by it: every number the tool
@@ -78,6 +127,7 @@ impl App {
     /// throw back.
     pub(crate) fn close_pattern_tool(&mut self) {
         self.pattern_tool = None;
+        self.pattern_tool_hover = None;
     }
 
     /// Start the rule from what one of the fixed kinds lays out, or -- for
@@ -99,6 +149,8 @@ impl App {
             }
         }
         self.pattern_tool_started = true;
+        self.pattern_tool_resumable = false;
+        self.sync_pattern_tool_sections();
         self.status = Status::Info(match kind {
             pattern::CUSTOM => "The rule starts empty".to_string(),
             _ => {
@@ -120,6 +172,16 @@ impl App {
         // grips in the viewport are placed.
         let Some(gizmo) = self.gizmo_for(id) else { return Vec::new() };
         pattern::instances(params).into_iter().map(|copy| gizmo.own.point(copy.xform.t)).collect()
+    }
+
+    /// Where the rule has put its copies by the end of stage `last`, in world
+    /// space and before any scatter: what the viewport marks while the pointer
+    /// is over that stage in the tool (issue 79).
+    pub(crate) fn pattern_placements_through(&self, last: usize) -> Vec<Vec3> {
+        let Some(id) = self.pattern_tool_target() else { return Vec::new() };
+        let Some(params) = self.scene.node(id).params() else { return Vec::new() };
+        let Some(gizmo) = self.gizmo_for(id) else { return Vec::new() };
+        pattern::instances_through(params, last).into_iter().map(|copy| gizmo.own.point(copy.xform.t)).collect()
     }
 
     /// A pattern with the rule but not yet the shape it repeats. There is no

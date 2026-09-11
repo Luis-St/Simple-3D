@@ -5,6 +5,7 @@ use simple3d_core::pattern;
 use simple3d_core::pattern_library;
 use simple3d_core::primitive::{ParamValue, Params};
 use simple3d_core::scene::NodeId;
+use simple3d_geom::Vec3;
 
 impl App {
     /// Re-read the shelf. Done when the tool opens and after it is written to,
@@ -26,26 +27,70 @@ impl App {
 }
 
 impl App {
-    /// How many stages the rule uses. Adding one starts it from the defaults it
-    /// was born with, so a stage that has just appeared does something visible
-    /// rather than sitting at zero and looking broken.
+    /// How many stages the rule uses.
+    ///
+    /// A stage that is added starts as the next thing the rule is missing -- a
+    /// run along an axis nothing above it runs along, spaced clear of what the
+    /// pattern repeats -- rather than as whatever its slot last held (issue 79).
+    /// The slot used to decide: after a grid that was stage 4's stock turn, and
+    /// after a blank rule it was one copy in place, so pressing "Add a stage"
+    /// appeared to do nothing at all.
     pub(crate) fn set_stage_count(&mut self, wanted: usize) {
         let Some(id) = self.pattern_tool_target() else { return };
-        let wanted = wanted.clamp(1, pattern::MAX_STAGES) as u32;
+        let wanted = wanted.clamp(1, pattern::MAX_STAGES);
+        let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
         self.edit("Pattern stages", None);
+        let mut used = wanted;
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            params.insert("stages".to_string(), ParamValue::Count(wanted));
+            used = pattern::stage_count(params);
+            for index in used..wanted {
+                let fresh = pattern::fresh_stage(params, index, size);
+                pattern::set_stage(params, index, fresh);
+            }
+            params.insert("stages".to_string(), ParamValue::Count(wanted as u32));
+        }
+        // A stage that has just been added is the one about to be worked on.
+        for index in used..wanted {
+            self.pattern_tool_folded[index] = false;
+            self.pattern_tool_vary_open[index] = false;
         }
     }
 
-    /// Put a saved rule on the node the tool is working on.
-    pub(crate) fn apply_saved_kind(&mut self, entry: &pattern_library::Entry) {
+    /// Take one stage out of the rule, wherever it is in the stack; the ones
+    /// below it move up and go on repeating what is left above them.
+    pub(crate) fn drop_stage(&mut self, index: usize) {
         let Some(id) = self.pattern_tool_target() else { return };
-        self.apply_saved_kind_to(id, entry);
+        if pattern::stage_count(&self.pattern_tool_params()) <= 1 {
+            return;
+        }
+        self.edit("Drop pattern stage", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            pattern::remove_stage(params, index);
+        }
+        // The fold of each stage goes with it, not with its slot.
+        for below in index..pattern::MAX_STAGES - 1 {
+            self.pattern_tool_folded[below] = self.pattern_tool_folded[below + 1];
+            self.pattern_tool_vary_open[below] = self.pattern_tool_vary_open[below + 1];
+        }
     }
 
-    /// The same, on a named pattern rather than the tool's own: the property
-    /// panel offers the shelf on any custom pattern, with no tool open.
+    /// Move stage `index` one place up the stack, or down.
+    pub(crate) fn move_stage(&mut self, index: usize, up: bool) {
+        let Some(id) = self.pattern_tool_target() else { return };
+        let used = pattern::stage_count(&self.pattern_tool_params());
+        let Some(other) = (if up { index.checked_sub(1) } else { Some(index + 1) }).filter(|o| *o < used) else {
+            return;
+        };
+        self.edit("Reorder pattern stages", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+            pattern::swap_stages(params, index, other);
+        }
+        self.pattern_tool_folded.swap(index, other);
+        self.pattern_tool_vary_open.swap(index, other);
+    }
+
+    /// Put a saved rule on a pattern: the tool's own, from the question it
+    /// opens with, or any custom pattern from the property panel's shelf.
     pub(crate) fn apply_saved_kind_to(&mut self, id: NodeId, entry: &pattern_library::Entry) {
         if !self.scene.get(id).is_some_and(|n| n.is_pattern()) {
             return;
@@ -67,7 +112,15 @@ impl App {
             }
         }
         self.pattern_tool_name = entry.name.clone();
-        self.status = Status::Info(format!("Pattern kind \u{201C}{}\u{201D} applied", entry.name));
+        // Applied to the rule the tool is open on, it answers the question the
+        // window opens with: the rule now starts from this kind.
+        if self.pattern_tool_target() == Some(id) {
+            self.pattern_tool_started = true;
+            self.pattern_tool_resumable = false;
+            self.sync_pattern_tool_sections();
+        }
+        let with = if pattern_library::has_noise(&kind) { ", with its noise" } else { "" };
+        self.status = Status::Info(format!("Pattern kind \u{201C}{}\u{201D} applied{with}", entry.name));
     }
 
     /// Keep the rule the node currently holds on the shelf, under the name in
@@ -75,10 +128,16 @@ impl App {
     pub(crate) fn save_current_kind(&mut self) {
         let params = self.pattern_tool_params();
         let name = simple3d_core::library::sanitise(&self.pattern_tool_name);
-        match pattern_library::save(self.config_dir(), &name, &params) {
+        // The scatter goes with the rule when the tool says to keep it and
+        // there is one to keep (issue 79). A pattern with none saves none, so
+        // applying the kind later leaves the other pattern's own alone.
+        let with_noise =
+            self.pattern_tool_keep_noise && self.pattern_tool_target().is_some_and(|id| self.noise_is_set(id));
+        match pattern_library::save(self.config_dir(), &name, &params, with_noise) {
             Ok(_) => {
                 self.refresh_pattern_kinds();
-                self.status = Status::Info(format!("Pattern kind \u{201C}{name}\u{201D} saved"));
+                let with = if with_noise { ", with its noise" } else { "" };
+                self.status = Status::Info(format!("Pattern kind \u{201C}{name}\u{201D} saved{with}"));
             }
             Err(e) => self.status = Status::Warning(format!("Could not save the pattern kind: {e}")),
         }

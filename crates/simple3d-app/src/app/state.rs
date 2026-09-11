@@ -255,6 +255,21 @@ pub struct App {
     /// time: the window says which pattern it is for in its title, and two of
     /// them over the same viewport would be two sets of the same six fields.
     pub(crate) noise_popup: Option<NodeId>,
+    /// Which of the tool's stages are folded up to their heading (issue 79).
+    /// Four stages unfolded are taller than most viewports, and the one being
+    /// worked on is usually the only one whose numbers are wanted.
+    pub(crate) pattern_tool_folded: [bool; simple3d_core::pattern::MAX_STAGES],
+    /// Which stages have their "Vary" section open. Opened by itself for a
+    /// stage that varies anything, so nothing a stage does is out of sight.
+    pub(crate) pattern_tool_vary_open: [bool; simple3d_core::pattern::MAX_STAGES],
+    /// The stage the pointer is over in the tool, whose copies the viewport
+    /// marks: what the rule has made by the end of it.
+    pub(crate) pattern_tool_hover: Option<usize>,
+    /// Whether saving the rule keeps the pattern's scatter with it.
+    pub(crate) pattern_tool_keep_noise: bool,
+    /// Whether the start question was brought back over a rule that is still
+    /// on the pattern, so there is something to go back to without choosing.
+    pub(crate) pattern_tool_resumable: bool,
 
     pub keymap_search: String,
     pub recording: Option<Command>,

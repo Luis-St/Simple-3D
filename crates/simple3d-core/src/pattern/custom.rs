@@ -1,7 +1,6 @@
 //! Custom patterns: stages combined into one rule.
 
 use super::*;
-use crate::primitive::Params;
 use crate::xform::Xform;
 
 /// Every parameter a custom rule is made of, which is what a saved kind holds
@@ -19,14 +18,14 @@ pub fn is_custom_key(key: &str) -> bool {
     key == "stages" || stage_of(key).is_some()
 }
 
-pub(crate) fn custom(params: &Params) -> Vec<Instance> {
+/// Lay a stack of stages out: the copies every kind of pattern ends up as.
+pub(crate) fn lay_out(stages: &[Stage]) -> Vec<Instance> {
     // Start with the shape itself, and let each stage repeat everything that
     // came before it. The outer transform is the later stage's, so "a row of
     // five, turned four times round Z" turns the whole row rather than each
     // copy where it stands.
     let mut out = vec![Instance::plain(Xform::IDENTITY)];
-    for index in 0..stage_count(params) {
-        let stage = stage(params, index);
+    for stage in stages {
         let mut next: Vec<Instance> = Vec::new();
         'fill: for outer in stage.instances() {
             for inner in &out {

@@ -19,8 +19,8 @@ pub(crate) fn the_cross_that_drops_a_stage_lines_up_with_the_fields_under_it() {
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool opened on a pattern");
     app.start_rule_from(pattern, 0);
-    // The cross is only on the last stage, and only when there is more than
-    // one -- the others are what it repeats.
+    // Every stage has one once there is more than one to choose between; the
+    // second stage's is measured against the second stage's own field.
     if let Some(params) = app.scene.get_mut(pattern).and_then(|n| n.params_mut()) {
         params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(2));
     }
@@ -36,7 +36,7 @@ pub(crate) fn the_cross_that_drops_a_stage_lines_up_with_the_fields_under_it() {
         egui::CentralPanel::default().show(ctx, |ui| crate::pattern_tool::body(&mut app, ui));
     });
 
-    let cross = ctx.read_response(crate::pattern_tool::drop_stage_id()).expect("the cross was not drawn").rect;
+    let cross = ctx.read_response(crate::pattern_tool::drop_stage_id(1)).expect("the cross was not drawn").rect;
     let field = ctx
         .read_response(crate::panel_properties::grip_id("tool:2 Copies"))
         .expect("the stage's own field was not drawn")

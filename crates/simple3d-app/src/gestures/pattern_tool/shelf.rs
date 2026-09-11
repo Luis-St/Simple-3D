@@ -24,7 +24,7 @@ pub(crate) fn a_custom_pattern_picks_a_saved_kind_from_the_panel() {
     rule.insert("stage2_count".to_string(), simple3d_core::primitive::ParamValue::Count(4));
     rule.insert("stage2_turn".to_string(), simple3d_core::primitive::ParamValue::Angle(90.0));
     let config = harness.state().config_dir().to_path_buf();
-    simple3d_core::pattern_library::save(&config, "Turned row", &rule).expect("the shelf could not be written");
+    simple3d_core::pattern_library::save(&config, "Turned row", &rule, false).expect("the shelf could not be written");
     harness.state_mut().refresh_pattern_kinds();
 
     // The shelf is offered on a custom pattern only: a linear one has a kind of

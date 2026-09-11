@@ -124,6 +124,17 @@ pub(crate) fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View
 /// is to show. The original is the one every other copy is a copy *of*, so it is
 /// the one drawn brightest.
 pub(crate) fn draw_pattern_placements(app: &App, painter: &egui::Painter, view: &View) {
+    // The pointer over a stage in the tool: ring each copy the rule has made by
+    // the end of that stage (issue 79). Rings rather than dots, because the
+    // shapes themselves are drawn under them -- a dot on a copy is lost in it,
+    // and a ring round its origin reads as "this one" whatever the copy is.
+    if let Some(stage) = app.pattern_tool_hover {
+        for at in app.pattern_placements_through(stage) {
+            let Some((screen, _)) = view.project(at) else { continue };
+            painter.circle_stroke(screen, 6.0, egui::Stroke::new(2.0_f32, crate::theme::token::ACCENT));
+        }
+        return;
+    }
     if !app.pattern_tool_is_empty() {
         return;
     }

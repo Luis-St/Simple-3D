@@ -225,10 +225,11 @@ pub(crate) fn every_stage_key_is_a_parameter_of_its_own() {
         assert!(known.contains(&key), "{key} is named by the stage table but is not a parameter");
     }
     assert_eq!(custom_keys().len(), 1 + MAX_STAGES * STAGE_KEY_COUNT);
-    // A saved rule is the stages and nothing else: the noise on a pattern is
-    // that pattern's, not the rule's, so it must not travel on the shelf.
+    // The rule is the stages and nothing else. The scatter can travel on the
+    // shelf with it, but only when it is asked to (see `pattern_library`), so
+    // it is not one of the rule's own keys.
     for key in noise_keys() {
-        assert!(!custom_keys().contains(key), "{key} travels with a saved kind but is not part of the rule");
+        assert!(!custom_keys().contains(key), "{key} is one of the rule's keys but is the scatter's");
         assert!(known.contains(key), "{key} is named by the noise but is not a parameter");
     }
 }

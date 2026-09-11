@@ -111,7 +111,8 @@ pub fn param_visible(spec: &ParamSpec, values: &Params) -> bool {
 
 /// Whether a stage's parameter applies: the stage has to be one of the ones in
 /// use, and then it has to be one of the numbers the stage's own mode needs --
-/// a run has no radius, and a mirror is a plane and two copies.
+/// a run has no radius, and a mirror is a plane and two copies that nothing
+/// varies.
 pub(crate) fn stage_param_visible(key: &str, values: &Params) -> bool {
     let Some(stage) = stage_of(key) else { return true };
     if stage >= stage_count(values) {
@@ -121,9 +122,18 @@ pub(crate) fn stage_param_visible(key: &str, values: &Params) -> bool {
     if key == k.mode {
         return true;
     }
+    // What varies the copies (issue 79) belongs to a run and a turn alike, but
+    // two of its numbers only mean something once another one is set: a cycle
+    // is how often a shift comes round, and a run spins its copies about an
+    // axis it otherwise has no use for.
+    let shifted = k.shift.iter().any(|axis| values.num(axis).abs() > 1e-9);
+    let spinning = values.num(k.spin).abs() > 1e-9;
+    let varies = k.shift.contains(&key) || key == k.spin || key == k.scale || (key == k.shift_every && shifted);
     match StageMode::from_index(values.int(k.mode)) {
-        StageMode::Move => key == k.count || k.step.contains(&key),
-        StageMode::Turn => [k.count, k.axis, k.turn, k.radius, k.growth, k.rise].contains(&key),
+        StageMode::Move => {
+            key == k.count || k.step.contains(&key) || key == k.gap_growth || varies || (key == k.axis && spinning)
+        }
+        StageMode::Turn => varies || [k.count, k.axis, k.turn, k.radius, k.growth, k.rise].contains(&key),
         StageMode::Mirror => key == k.axis,
     }
 }

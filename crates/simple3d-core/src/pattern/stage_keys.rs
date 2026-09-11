@@ -27,6 +27,16 @@ pub struct StageKeys {
     pub growth: &'static str,
     /// How far along the axis each copy of a turning stage climbs.
     pub rise: &'static str,
+    /// How much wider each gap of a run is than the one before it (issue 79).
+    pub gap_growth: &'static str,
+    /// The offset a copy is moved by for each place it sits into its cycle.
+    pub shift: [&'static str; 3],
+    /// How many copies the shift runs over before it starts again.
+    pub shift_every: &'static str,
+    /// How far each copy turns about its own origin, per copy.
+    pub spin: &'static str,
+    /// How big each copy is next to the one before it, in percent.
+    pub scale: &'static str,
     /// The flag a stage used to carry instead of a mode. Read once, when a rule
     /// saved before the mode existed is migrated, and never written.
     pub(super) legacy_mirror: &'static str,
@@ -35,76 +45,64 @@ pub struct StageKeys {
     pub(super) grip_radius: &'static str,
 }
 
-pub const STAGES: [StageKeys; MAX_STAGES] = [
-    StageKeys {
-        label: "Stage 1",
-        mode: "stage1_mode",
-        axis: "stage1_axis",
-        count: "stage1_count",
-        step: ["stage1_step_x", "stage1_step_y", "stage1_step_z"],
-        turn: "stage1_turn",
-        radius: "stage1_radius",
-        growth: "stage1_growth",
-        rise: "stage1_rise",
-        legacy_mirror: "stage1_mirror",
-        grip_spacing: "Stage 1 spacing",
-        grip_copies: "Stage 1 copies",
-        grip_radius: "Stage 1 radius",
-    },
-    StageKeys {
-        label: "Stage 2",
-        mode: "stage2_mode",
-        axis: "stage2_axis",
-        count: "stage2_count",
-        step: ["stage2_step_x", "stage2_step_y", "stage2_step_z"],
-        turn: "stage2_turn",
-        radius: "stage2_radius",
-        growth: "stage2_growth",
-        rise: "stage2_rise",
-        legacy_mirror: "stage2_mirror",
-        grip_spacing: "Stage 2 spacing",
-        grip_copies: "Stage 2 copies",
-        grip_radius: "Stage 2 radius",
-    },
-    StageKeys {
-        label: "Stage 3",
-        mode: "stage3_mode",
-        axis: "stage3_axis",
-        count: "stage3_count",
-        step: ["stage3_step_x", "stage3_step_y", "stage3_step_z"],
-        turn: "stage3_turn",
-        radius: "stage3_radius",
-        growth: "stage3_growth",
-        rise: "stage3_rise",
-        legacy_mirror: "stage3_mirror",
-        grip_spacing: "Stage 3 spacing",
-        grip_copies: "Stage 3 copies",
-        grip_radius: "Stage 3 radius",
-    },
-    StageKeys {
-        label: "Stage 4",
-        mode: "stage4_mode",
-        axis: "stage4_axis",
-        count: "stage4_count",
-        step: ["stage4_step_x", "stage4_step_y", "stage4_step_z"],
-        turn: "stage4_turn",
-        radius: "stage4_radius",
-        growth: "stage4_growth",
-        rise: "stage4_rise",
-        legacy_mirror: "stage4_mirror",
-        grip_spacing: "Stage 4 spacing",
-        grip_copies: "Stage 4 copies",
-        grip_radius: "Stage 4 radius",
-    },
-];
+/// One stage's row of the table, every name spelled out from the stage number.
+///
+/// Written once rather than four times over: seventeen names a stage, typed by
+/// hand for each of four stages, is sixty-eight strings that each have to say
+/// the right number, and the first new number a stage learns is another four.
+macro_rules! stage_keys {
+    ($n:literal) => {
+        StageKeys {
+            label: concat!("Stage ", $n),
+            mode: concat!("stage", $n, "_mode"),
+            axis: concat!("stage", $n, "_axis"),
+            count: concat!("stage", $n, "_count"),
+            step: [concat!("stage", $n, "_step_x"), concat!("stage", $n, "_step_y"), concat!("stage", $n, "_step_z")],
+            turn: concat!("stage", $n, "_turn"),
+            radius: concat!("stage", $n, "_radius"),
+            growth: concat!("stage", $n, "_growth"),
+            rise: concat!("stage", $n, "_rise"),
+            gap_growth: concat!("stage", $n, "_gap_growth"),
+            shift: [
+                concat!("stage", $n, "_shift_x"),
+                concat!("stage", $n, "_shift_y"),
+                concat!("stage", $n, "_shift_z"),
+            ],
+            shift_every: concat!("stage", $n, "_shift_every"),
+            spin: concat!("stage", $n, "_spin"),
+            scale: concat!("stage", $n, "_scale"),
+            legacy_mirror: concat!("stage", $n, "_mirror"),
+            grip_spacing: concat!("Stage ", $n, " spacing"),
+            grip_copies: concat!("Stage ", $n, " copies"),
+            grip_radius: concat!("Stage ", $n, " radius"),
+        }
+    };
+}
+
+pub const STAGES: [StageKeys; MAX_STAGES] = [stage_keys!(1), stage_keys!(2), stage_keys!(3), stage_keys!(4)];
 
 /// How many parameters one stage owns.
-pub const STAGE_KEY_COUNT: usize = 10;
+pub const STAGE_KEY_COUNT: usize = 17;
 
-/// Every parameter key a stage owns, in the order the editor shows them.
+/// Every parameter key a stage owns, in the order the editor shows them: what
+/// the stage does and its own numbers first, then the ones that vary its copies.
 pub fn stage_keys(stage: usize) -> Vec<&'static str> {
     let k = &STAGES[stage.min(MAX_STAGES - 1)];
-    vec![k.mode, k.count, k.step[0], k.step[1], k.step[2], k.axis, k.turn, k.radius, k.growth, k.rise]
+    let mut keys = vec![k.mode, k.count, k.step[0], k.step[1], k.step[2], k.axis, k.turn, k.radius, k.growth, k.rise];
+    // The axis is in both lists, and a key owned twice would be saved twice.
+    keys.extend(vary_keys(stage).into_iter().filter(|key| *key != k.axis));
+    keys
+}
+
+/// The keys that vary a stage's copies from one to the next rather than
+/// placing them (issue 79), in the order the tool's "Vary" section shows them.
+///
+/// The axis is here as well as among the stage's own numbers: a run has no axis
+/// of its own, but a run whose copies spin has to say what they spin about. It
+/// is drawn in whichever of the two places its mode shows it.
+pub fn vary_keys(stage: usize) -> Vec<&'static str> {
+    let k = &STAGES[stage.min(MAX_STAGES - 1)];
+    vec![k.gap_growth, k.shift[0], k.shift[1], k.shift[2], k.shift_every, k.spin, k.axis, k.scale]
 }
 
 /// How many stages a custom rule is currently using.

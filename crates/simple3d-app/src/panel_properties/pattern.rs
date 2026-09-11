@@ -43,6 +43,27 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     // kind, and clicking it made the pattern custom as a side effect of opening
     // a tool: a second way to choose a kind, sitting under the row that chooses
     // the kind. Becoming custom is the Kind row's to say.
+    // A fixed kind is a rule too, and the tool is where a rule of one's own is
+    // built from it (issue 79). The button opens the tool on the question of
+    // what to start from -- this kind among the answers -- and writes nothing
+    // until that is answered, so the Kind row stays the one place a kind is
+    // chosen. The button that used to sit here made the pattern custom as a
+    // side effect of opening a tool; this one does not.
+    if !custom {
+        let mut open_tool = false;
+        field_row(ui, "Rule", "", |ui| {
+            if ui
+                .button("Customise")
+                .on_hover_text("Build a rule of your own out of stages, starting from this layout or another")
+                .clicked()
+            {
+                open_tool = true;
+            }
+        });
+        if open_tool {
+            app.open_pattern_tool();
+        }
+    }
     if custom {
         let mut open_tool = false;
         let mut apply = None;
@@ -160,12 +181,18 @@ pub(crate) fn noise(app: &mut App, ui: &mut egui::Ui, id: NodeId, params: &simpl
     let unit = app.unit();
     let scatter = simple3d_core::pattern::Noise::of(params);
     let summary = if scatter.wanted() {
-        format!(
-            "up to {} {}, {}\u{00B0}",
-            simple3d_core::unit::format_length(scatter.offset.x.max(scatter.offset.y).max(scatter.offset.z), unit),
-            unit.suffix(),
-            simple3d_core::unit::format_number(scatter.turn, 1)
-        )
+        let mut parts = vec![
+            format!(
+                "up to {} {}",
+                simple3d_core::unit::format_length(scatter.offset.x.max(scatter.offset.y).max(scatter.offset.z), unit),
+                unit.suffix()
+            ),
+            format!("{}\u{00B0}", simple3d_core::unit::format_number(scatter.turn, 1)),
+        ];
+        if scatter.scale > 1e-9 {
+            parts.push(format!("\u{00B1}{} %", simple3d_core::unit::format_number(scatter.scale * 100.0, 0)));
+        }
+        parts.join(", ")
     } else {
         "none".to_string()
     };

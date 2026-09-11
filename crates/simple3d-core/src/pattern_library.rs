@@ -58,14 +58,19 @@ pub fn exists(config_dir: &Path, name: &str) -> bool {
 /// linear step and the helix radius that happen to be sitting in the same map
 /// are the node's business, and writing them here would mean applying a kind
 /// silently changed the numbers of every *other* kind the node could be set to.
-pub fn save(config_dir: &Path, name: &str, params: &Params) -> io::Result<PathBuf> {
+///
+/// The scatter is kept too when `with_noise` says so (issue 79). A rule for
+/// laying planks is a rule *and* the bit of randomness that stops the deck
+/// reading as wallpaper, and a kind that came back off the shelf without the
+/// second half was only half of what was saved.
+pub fn save(config_dir: &Path, name: &str, params: &Params, with_noise: bool) -> io::Result<PathBuf> {
     let name = crate::library::sanitise(name);
     if name.is_empty() {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "a saved pattern kind needs a name"));
     }
     std::fs::create_dir_all(dir(config_dir))?;
     let path = path_for(config_dir, &name);
-    let text = serde_json::to_string_pretty(&extract(params))
+    let text = serde_json::to_string_pretty(&extract(params, with_noise))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     std::fs::write(&path, text + "\n")?;
     Ok(path)
@@ -90,6 +95,18 @@ pub fn load(path: &Path) -> Option<Params> {
     // copies down where it always did, which is what the old numbers are read
     // for (issue 79).
     pattern::migrate_stage_modes(&stored, &mut out);
+    // The scatter only where the file has one. A kind saved without it leaves
+    // whatever scatter the pattern it is applied to already has, rather than
+    // taking it off: "no noise was kept" is not "keep no noise".
+    for key in pattern::noise_keys() {
+        let kept = stored
+            .get(*key)
+            .copied()
+            .filter(|v| defaults.get(*key).is_some_and(|d| std::mem::discriminant(v) == std::mem::discriminant(d)));
+        if let Some(value) = kept {
+            out.insert((*key).to_string(), value);
+        }
+    }
     Some(out)
 }
 
@@ -97,9 +114,19 @@ pub fn remove(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
-/// Just the parameters that make up a custom rule.
-pub fn extract(params: &Params) -> Params {
-    pattern::custom_keys().into_iter().filter_map(|key| params.get(key).map(|v| (key.to_string(), *v))).collect()
+/// Just the parameters that make up a custom rule, and its scatter when asked.
+pub fn extract(params: &Params, with_noise: bool) -> Params {
+    let noise: &[&str] = if with_noise { pattern::noise_keys() } else { &[] };
+    pattern::custom_keys()
+        .into_iter()
+        .chain(noise.iter().copied())
+        .filter_map(|key| params.get(key).map(|v| (key.to_string(), *v)))
+        .collect()
+}
+
+/// Whether a saved kind carries a scatter of its own.
+pub fn has_noise(kind: &Params) -> bool {
+    pattern::noise_keys().iter().any(|key| kind.contains_key(*key))
 }
 
 /// Apply a saved rule to a node's parameters: its stages, and the kind choice
@@ -135,7 +162,7 @@ mod tests {
         // A number belonging to another kind entirely, which must not travel.
         params.insert("helix_radius".to_string(), ParamValue::Length(123.0));
 
-        let path = save(&config, "Bolt ring", &params).expect("the kind should save");
+        let path = save(&config, "Bolt ring", &params, false).expect("the kind should save");
         assert_eq!(list(&config).iter().map(|e| e.name.clone()).collect::<Vec<_>>(), vec!["Bolt ring"]);
         assert!(exists(&config, "Bolt ring"));
 
@@ -158,6 +185,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
+    /// A kind saved with its scatter brings the scatter back and puts it on the
+    /// pattern it is applied to; one saved without leaves the pattern's own
+    /// alone (issue 79).
+    #[test]
+    fn a_kind_carries_its_noise_only_when_it_was_saved_with_it() {
+        let config = temp_dir("noise");
+        let mut params = pattern::default_params();
+        params.insert("noise_x".to_string(), ParamValue::Length(1.5));
+        params.insert("noise_seed".to_string(), ParamValue::Count(7));
+
+        let with = load(&save(&config, "Planks", &params, true).unwrap()).expect("the kind should load");
+        assert!(has_noise(&with));
+        assert_eq!(with.num("noise_x"), 1.5);
+        assert_eq!(with.int("noise_seed"), 7);
+        let mut target = pattern::default_params();
+        apply(&mut target, &with);
+        assert_eq!(target.num("noise_x"), 1.5, "applying the kind did not bring its scatter");
+
+        let without = load(&save(&config, "Bare", &params, false).unwrap()).expect("the kind should load");
+        assert!(!has_noise(&without), "a kind saved without its noise carried it anyway");
+        let mut target = pattern::default_params();
+        target.insert("noise_y".to_string(), ParamValue::Length(3.0));
+        apply(&mut target, &without);
+        assert_eq!(target.num("noise_y"), 3.0, "a kind with no noise took the pattern's own off it");
+        let _ = std::fs::remove_dir_all(&config);
+    }
+
     #[test]
     fn a_kind_file_missing_a_stage_is_filled_in_rather_than_refused() {
         let config = temp_dir("partial");
@@ -172,8 +226,8 @@ mod tests {
     #[test]
     fn a_name_that_is_not_a_file_name_is_refused_rather_than_written_elsewhere() {
         let config = temp_dir("badname");
-        assert!(save(&config, "   ", &pattern::default_params()).is_err());
-        let path = save(&config, "a/b", &pattern::default_params()).unwrap();
+        assert!(save(&config, "   ", &pattern::default_params(), false).is_err());
+        let path = save(&config, "a/b", &pattern::default_params(), false).unwrap();
         assert_eq!(path.parent(), Some(dir(&config).as_path()));
         let _ = std::fs::remove_dir_all(&config);
     }

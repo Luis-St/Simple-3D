@@ -1,9 +1,9 @@
 //! The scatter's own window (issue 79).
 //!
-//! How far each copy may wander off where the rule puts it is six numbers, and
+//! How far each copy may wander off where the rule puts it is a handful of numbers, and
 //! they used to unroll inside the properties panel under the pattern's own. That
 //! is where they read worst: a scatter is judged entirely by what it does to the
-//! model, and the six rows appeared by pushing the model's other numbers down
+//! model, and the rows appeared by pushing the model's other numbers down
 //! the panel and the panel's scroll position out from under the pointer. The
 //! numbers now float over the viewport in an [in-place popup](crate::popup),
 //! beside the pattern tool's -- dragged out of the way, rolled up to its bar,
@@ -61,7 +61,8 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// The six numbers the scatter is made of, and what they currently come to.
+/// The numbers the scatter is made of, what they currently come to, and whether
+/// they can make two copies meet.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let unit = app.unit();
     let targets = [id];
@@ -83,6 +84,27 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
          wander off it."
     };
     ui.add(egui::Label::new(theme::hint(note)).selectable(false));
+    // Copies that meet are welded into one body -- a pattern unions them -- so
+    // a scatter that can close the gaps the rule leaves turns a deck of planks
+    // into a slab, and the only sign of it in the viewport is that the joints
+    // have gone. Said here, beside the numbers that did it.
+    let crowded = app.pattern_content_size(id).and_then(|size| pattern::crowding(params, size));
+    if let Some(crowded) = crowded {
+        let length = |mm: f64| format!("{} {}", simple3d_core::unit::format_length(mm, unit), unit.suffix());
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(format!(
+                    "Copies may meet: the rule leaves {} between neighbours, and two of them wandering towards \
+                     each other can close {}. Copies that touch are welded into one body.",
+                    length(crowded.gap),
+                    length(crowded.reach)
+                ))
+                .size(theme::font::SMALL)
+                .color(theme::token::DANGER),
+            )
+            .selectable(false),
+        );
+    }
 }
 
 /// The window's buttons: take the scatter off, or put the window away.

@@ -130,24 +130,35 @@ impl App {
             })
             .collect();
         for id in fresh {
-            let mut bounds: Option<(Vec3, Vec3)> = None;
-            for child in self.scene.node(id).children.clone() {
-                let Some((lo, hi)) = simple3d_core::eval::subtree_bounds(&self.scene, child) else { continue };
-                bounds = Some(match bounds {
-                    Some((l, h)) => (l.min(lo), h.max(hi)),
-                    None => (lo, hi),
-                });
-            }
-            let Some((lo, hi)) = bounds else { continue };
+            let Some(size) = self.pattern_content_size(id) else { continue };
             let kind = self.scene.node(id).params().map(|params| params["kind"]);
             if let Some(node) = self.scene.get_mut(id) {
-                let mut params = simple3d_core::pattern::params_for_size(hi - lo);
+                let mut params = simple3d_core::pattern::params_for_size(size);
                 if let Some(kind) = kind {
                     params.insert("kind".to_string(), kind);
                 }
                 node.body = simple3d_core::scene::Body::Pattern { params };
             }
         }
+    }
+
+    /// How big what the pattern `id` repeats is, across: the bounds of its
+    /// children together. `None` for a pattern with nothing in it yet.
+    ///
+    /// The children are measured, not the pattern: asking the pattern measures
+    /// the repetition rather than the thing being repeated. Whatever is sized
+    /// to "the shape" -- a fresh pattern's step, a new stage, a ready-made
+    /// layout, the scatter's warning that copies may meet -- is sized by this.
+    pub(crate) fn pattern_content_size(&self, id: NodeId) -> Option<Vec3> {
+        let mut bounds: Option<(Vec3, Vec3)> = None;
+        for child in &self.scene.get(id)?.children {
+            let Some((lo, hi)) = simple3d_core::eval::subtree_bounds(&self.scene, *child) else { continue };
+            bounds = Some(match bounds {
+                Some((l, h)) => (l.min(lo), h.max(hi)),
+                None => (lo, hi),
+            });
+        }
+        bounds.map(|(lo, hi)| hi - lo)
     }
 
     /// The pattern creation tool (issue 67): wrap the selection in a pattern

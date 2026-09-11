@@ -114,3 +114,95 @@ pub(crate) fn a_negative_jitter_scatters_exactly_as_far_as_the_positive_one() {
     assert_eq!(instances(&negative), instances(&positive), "a minus sign moved the copies");
     assert_ne!(instances(&negative), instances(&base), "the negative jitter did nothing at all");
 }
+
+/// The original can be left exactly where it is while every copy after it
+/// wanders -- the first plank against the wall, the part the rest are measured
+/// from.
+#[test]
+pub(crate) fn the_original_can_be_left_in_place_while_the_copies_wander() {
+    let mut params = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(10)),
+        ("step_x", ParamValue::Length(10.0)),
+        ("noise_x", ParamValue::Length(2.0)),
+    ]);
+    let wandering = instances(&params);
+    assert_ne!(wandering[0].xform, crate::xform::Xform::IDENTITY, "the seed happened to leave the original alone");
+
+    params.insert("noise_keep_first".to_string(), ParamValue::Bool(true));
+    let kept = instances(&params);
+    assert_eq!(kept[0].xform, crate::xform::Xform::IDENTITY, "the original moved though it was to stay put");
+    assert_eq!(kept[1..], wandering[1..], "keeping the original changed where the others went");
+}
+
+/// A size jitter makes each copy anything up to that much bigger or smaller,
+/// and never more.
+#[test]
+pub(crate) fn a_size_jitter_resizes_every_copy_within_the_bound() {
+    let params = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(40)),
+        ("step_x", ParamValue::Length(10.0)),
+        ("noise_scale", ParamValue::Count(20)),
+    ]);
+    let sizes: Vec<f64> = instances(&params).iter().map(|c| c.xform.axis_vector(0).length()).collect();
+    assert!(sizes.iter().all(|s| (0.8 - 1e-9..=1.2 + 1e-9).contains(s)), "a size fell outside 80..120 %: {sizes:?}");
+    assert!(sizes.iter().any(|s| *s < 0.95) && sizes.iter().any(|s| *s > 1.05), "the sizes hardly varied");
+    // Uniformly: a copy made bigger is bigger every way, not stretched.
+    for copy in instances(&params) {
+        let (x, y, z) = (copy.xform.axis_vector(0), copy.xform.axis_vector(1), copy.xform.axis_vector(2));
+        assert!((x.length() - y.length()).abs() < 1e-12 && (y.length() - z.length()).abs() < 1e-12);
+    }
+}
+
+/// "All" turns each copy about all three axes at once, each by its own
+/// amount: a stone dropped on a path tilts every way, not only about Z.
+#[test]
+pub(crate) fn a_turn_about_all_axes_tilts_every_way() {
+    let params = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(20)),
+        ("step_x", ParamValue::Length(50.0)),
+        ("noise_turn", ParamValue::Angle(10.0)),
+        ("noise_axis", ParamValue::Choice(3)),
+    ]);
+    let copies = instances(&params);
+    // A turn about Z alone leaves each copy's Z axis pointing straight up.
+    assert!(copies.iter().any(|c| c.xform.axis_vector(2).z < 1.0 - 1e-6), "no copy tilted off Z");
+    assert!(copies.iter().any(|c| c.xform.axis_vector(0).y.abs() > 1e-6), "no copy turned about Z");
+    assert_eq!(Noise::of(&params).axis, 3);
+}
+
+/// The scatter says when it can make two copies meet: they would be welded
+/// into one body, and a deck of planks a millimetre too generously scattered
+/// stops being planks.
+#[test]
+pub(crate) fn a_scatter_that_can_close_the_gap_between_copies_says_so() {
+    // 10 mm shapes 12 mm apart: 2 mm between them.
+    let size = Vec3::new(10.0, 10.0, 10.0);
+    let mut params = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(5)),
+        ("step_x", ParamValue::Length(12.0)),
+    ]);
+    assert_eq!(crowding(&params, size), None, "a pattern with no scatter was said to crowd");
+
+    // Half a millimetre each way: two neighbours can close a millimetre of it.
+    params.insert("noise_x".to_string(), ParamValue::Length(0.5));
+    assert_eq!(crowding(&params, size), None);
+
+    // A millimetre and a half each way can close three: more than there is.
+    params.insert("noise_x".to_string(), ParamValue::Length(1.5));
+    let crowded = crowding(&params, size).expect("a scatter wider than the gap was not caught");
+    assert!((crowded.gap - 2.0).abs() < 1e-9 && (crowded.reach - 3.0).abs() < 1e-9, "{crowded:?}");
+
+    // Jitter across the run does not close the gap along it.
+    params.insert("noise_x".to_string(), ParamValue::Length(0.0));
+    params.insert("noise_y".to_string(), ParamValue::Length(5.0));
+    assert_eq!(crowding(&params, size), None, "a sideways scatter was said to close a gap along the run");
+
+    // And copies that touch already are the rule's doing, not the scatter's.
+    params.insert("step_x".to_string(), ParamValue::Length(10.0));
+    params.insert("noise_x".to_string(), ParamValue::Length(1.0));
+    assert_eq!(crowding(&params, size), None);
+}

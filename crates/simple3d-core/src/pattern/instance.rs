@@ -45,27 +45,43 @@ pub fn radial_axis(axis: usize) -> usize {
     (axis + 1) % 3
 }
 
+/// The stages a pattern is laid out by, whatever its kind.
+///
+/// A custom rule's own stages, or -- for any of the six fixed kinds -- the
+/// stages that say exactly what that kind says. One engine lays every pattern
+/// out: the fixed kinds are a name and a short form for a rule, not a second
+/// piece of arithmetic that has to be kept agreeing with the first.
+pub fn rule_stages(params: &Params) -> Vec<Stage> {
+    match params.int("kind") {
+        CUSTOM => (0..stage_count(params)).map(|index| stage(params, index)).collect(),
+        kind => template_stages(params, kind),
+    }
+}
+
 /// The copies a pattern makes, in its own frame, ready to be laid over the
 /// mesh of its children. Always at least one -- the original -- so a pattern
 /// with a count of one, or of nonsense, still shows what it holds.
 pub fn instances(params: &Params) -> Vec<Instance> {
-    let mut out = match params.int("kind") {
-        GRID => grid(params),
-        CIRCULAR => circular(params),
-        MIRROR => mirror(params),
-        HELIX => helix(params),
-        SPIRAL => spiral(params),
-        CUSTOM => custom(params),
-        _ => linear(params),
-    };
+    let mut out = lay_out(&rule_stages(params));
     // A little randomness on top of whatever the rule said, so a run of planks
     // is not wallpaper (issue 79). After the cap is worked out but before it
     // bites, so which copies survive a capped pattern does not depend on it.
     noise::scatter(params, &mut out);
-    // The cap is applied here rather than in each kind so no kind can forget it,
-    // and by truncation rather than by refusing: the pattern still shows what it
-    // makes, just not more of it than anything can draw. `instance_count` says
-    // whether this bit, so the editor can tell the user.
+    // The cap is applied here rather than in each stage so nothing can forget
+    // it, and by truncation rather than by refusing: the pattern still shows
+    // what it makes, just not more of it than anything can draw.
+    // `instance_count` says whether this bit, so the editor can tell the user.
+    out.truncate(MAX_INSTANCES);
+    out
+}
+
+/// The copies the rule makes by the end of stage `last`, zero-based, with no
+/// scatter on them: what the tool marks in the viewport while the pointer is
+/// over a stage, so "each stage repeats what the ones above it made" is
+/// something to see rather than a sentence to take on trust (issue 79).
+pub fn instances_through(params: &Params, last: usize) -> Vec<Instance> {
+    let stages = rule_stages(params);
+    let mut out = lay_out(&stages[..(last + 1).min(stages.len())]);
     out.truncate(MAX_INSTANCES);
     out
 }
@@ -74,25 +90,9 @@ pub fn instances(params: &Params) -> Vec<Instance> {
 /// The two differ only where [`MAX_INSTANCES`] has cut in, which is what the
 /// property editor says out loud rather than silently drawing fewer.
 pub fn instance_count(params: &Params) -> (usize, usize) {
-    let wanted = match params.int("kind") {
-        GRID => {
-            let (nx, ny, nz) = (
-                params.int("grid_x").max(1) as usize,
-                params.int("grid_y").max(1) as usize,
-                params.int("grid_z").max(1) as usize,
-            );
-            nx.saturating_mul(ny).saturating_mul(nz)
-        }
-        CIRCULAR => params.int("circ_count").max(1) as usize,
-        MIRROR => 2,
-        HELIX => params.int("helix_count").max(1) as usize,
-        SPIRAL => params.int("spiral_count").max(1) as usize,
-        // Every stage repeats what the ones before it made, so the copies
-        // multiply exactly as a grid's three counts do.
-        CUSTOM => (0..stage_count(params))
-            .map(|s| stage(params, s).copies())
-            .fold(1usize, |total, copies| total.saturating_mul(copies)),
-        _ => params.int("count").max(1) as usize,
-    };
+    // Every stage repeats what the ones before it made, so the copies multiply
+    // -- which is also exactly what a grid's three counts do.
+    let wanted =
+        rule_stages(params).iter().map(Stage::copies).fold(1usize, |total, copies| total.saturating_mul(copies));
     (wanted, wanted.min(MAX_INSTANCES))
 }

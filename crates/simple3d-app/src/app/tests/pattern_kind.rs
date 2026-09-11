@@ -54,7 +54,8 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     other.select_only(shape);
     other.open_pattern_tool();
     let saved = other.pattern_kinds.first().cloned().expect("the shelf should have the saved kind");
-    other.apply_saved_kind(&saved);
+    let target = other.pattern_tool.expect("the tool opened on a pattern");
+    other.apply_saved_kind_to(target, &saved);
     let applied = other.pattern_tool.and_then(|id| other.scene.node(id).params().cloned()).unwrap();
     assert_eq!(applied.int("kind"), simple3d_core::pattern::CUSTOM);
     assert_eq!(simple3d_core::pattern::instance_count(&applied).1, 12, "the saved rule did not come back");

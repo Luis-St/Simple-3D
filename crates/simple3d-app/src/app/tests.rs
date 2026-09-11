@@ -6,6 +6,7 @@ mod library;
 mod outliner;
 mod panels;
 mod pattern_kind;
+mod pattern_stages;
 mod placement;
 mod settings;
 mod steps;

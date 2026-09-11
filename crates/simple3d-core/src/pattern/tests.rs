@@ -2,6 +2,7 @@ mod custom;
 mod grips;
 mod kinds;
 mod noise;
+mod vary;
 
 use super::*;
 use crate::primitive::{ParamValue, Params};
