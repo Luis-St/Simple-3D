@@ -76,7 +76,7 @@ const MAX_LENGTH: f64 = 1e6;
 /// The range a rotation step may take (issue 98). It divides an angle, so it
 /// cannot be zero; and half a turn is the largest step that is still a step,
 /// since a whole one puts everything back where it started.
-const ROTATE_STEP: ParamKind = ParamKind::Angle { min: 0.1, max: 180.0 };
+const ROTATE_STEP: ParamKind = ParamKind::Angle { min: 0.1, max: 180.0, wrap: false };
 
 /// The range a segment count may take, whether it is the document's default or
 /// one object's override: below three there is no curve to speak of, and above

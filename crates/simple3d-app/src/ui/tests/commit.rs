@@ -63,11 +63,28 @@ pub(crate) fn a_count_is_rounded_and_clamped_to_its_range() {
 
 #[test]
 pub(crate) fn an_angle_is_clamped_to_its_range_and_stays_in_degrees() {
-    let kind = ParamKind::Angle { min: 1.0, max: 360.0 };
+    let kind = ParamKind::Angle { min: 1.0, max: 360.0, wrap: false };
     // Angles are always degrees regardless of the length unit.
     assert_eq!(commit_param("90", kind, Unit::Metre, 45.0), Commit::Value(ParamValue::Angle(90.0)));
     assert_eq!(commit_param("999", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(360.0)));
     assert_eq!(commit_param("0", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(1.0)));
+}
+
+/// An angle that is a direction is wrapped instead, the way the transform
+/// panel's rotation is: 400 is 40 and -90 is 270, so a field never reads its own
+/// limit back at every number past it.
+#[test]
+pub(crate) fn an_angle_that_wraps_comes_back_inside_one_turn() {
+    let kind = ParamKind::Angle { min: 0.0, max: 360.0, wrap: true };
+    assert_eq!(commit_param("40", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(40.0)));
+    assert_eq!(commit_param("400", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(40.0)));
+    assert_eq!(commit_param("-90", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(270.0)));
+    assert_eq!(commit_param("720", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(0.0)));
+    // The relative forms resolve before the wrap, so a degree past 359 is none.
+    assert_eq!(commit_param("+1", kind, Unit::Millimetre, 359.0), Commit::Value(ParamValue::Angle(0.0)));
+    // And the scrub gesture goes the same way, so a drag and a typed number
+    // cannot disagree about where the field lands.
+    assert_eq!(value_from_display(kind, Unit::Millimetre, -0.5), ParamValue::Angle(359.5));
 }
 
 #[test]
@@ -90,7 +107,7 @@ pub(crate) fn what_a_field_shows_round_trips_back_through_what_it_accepts() {
         let shown = show_param(value, unit);
         let kind = match value {
             ParamValue::Length(_) => ParamKind::Length { min: 0.0 },
-            ParamValue::Angle(_) => ParamKind::Angle { min: -360.0, max: 360.0 },
+            ParamValue::Angle(_) => ParamKind::Angle { min: -360.0, max: 360.0, wrap: false },
             ParamValue::Count(_) => ParamKind::Count { min: 0, max: 1000 },
             ParamValue::Choice(_) => ParamKind::Choice { options: &["a", "b"] },
             ParamValue::Bool(_) => ParamKind::Bool,

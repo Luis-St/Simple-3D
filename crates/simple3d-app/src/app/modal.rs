@@ -20,4 +20,7 @@ pub enum Modal {
     ConfirmExtractAll,
     /// Closing a tab with unsaved changes (issue 61).
     ConfirmCloseTab,
+    /// Taking a saved pattern kind off the shelf, which is a file on disk and
+    /// not something undo reaches (issue 67).
+    ConfirmDeleteKind,
 }

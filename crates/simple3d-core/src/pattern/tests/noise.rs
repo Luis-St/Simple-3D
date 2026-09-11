@@ -87,3 +87,30 @@ pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
     );
     assert_eq!(Noise::of(&params).turn, 6.0);
 }
+
+/// A jitter typed with a minus sign is a jitter of that size, not an error and
+/// not nothing.
+///
+/// Asked for from the running application: the three distances refused a
+/// negative number where every other distance in the panel takes one. They are
+/// read either way round whatever the sign -- a scatter has no direction -- so
+/// the sign costs nothing, and a field that silently snapped -2 back to zero
+/// looked like a jitter that would not switch on.
+#[test]
+pub(crate) fn a_negative_jitter_scatters_exactly_as_far_as_the_positive_one() {
+    let base = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(20)),
+        ("step_x", ParamValue::Length(10.0)),
+    ]);
+    let mut positive = base.clone();
+    positive.insert("noise_x".to_string(), ParamValue::Length(2.0));
+    positive.insert("noise_turn".to_string(), ParamValue::Angle(6.0));
+    let mut negative = base.clone();
+    negative.insert("noise_x".to_string(), ParamValue::Length(-2.0));
+    negative.insert("noise_turn".to_string(), ParamValue::Angle(-6.0));
+
+    assert_eq!(Noise::of(&negative), Noise::of(&positive), "a minus sign changed what the scatter is");
+    assert_eq!(instances(&negative), instances(&positive), "a minus sign moved the copies");
+    assert_ne!(instances(&negative), instances(&base), "the negative jitter did nothing at all");
+}

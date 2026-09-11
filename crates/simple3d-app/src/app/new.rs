@@ -109,6 +109,8 @@ impl App {
             pattern_tool_name: String::new(),
             pattern_tool_started: false,
             pattern_kinds: Vec::new(),
+            noise_popup: None,
+            confirm_delete_kind: None,
             keymap_search: String::new(),
             recording: None,
             shortcut_mods: ui::ChordHold::default(),

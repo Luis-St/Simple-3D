@@ -194,6 +194,9 @@ pub struct App {
     /// lands -- see [`crate::split_tool`].
     pub split_tool: Option<crate::split_tool::SplitTool>,
     pub split_job: Option<SplitJob>,
+    /// The saved pattern kind the "delete this" question is being asked about
+    /// (issue 67). Set only while [`Modal::ConfirmDeleteKind`] is up.
+    pub(crate) confirm_delete_kind: Option<simple3d_core::pattern_library::Entry>,
     /// The collection the "extract every piece" question is being asked about
     /// (issue 82). Set only while [`Modal::ConfirmExtractAll`] is up.
     pub(crate) confirm_extract: Option<NodeId>,
@@ -248,6 +251,10 @@ pub struct App {
     /// The saved kinds, read when the tool opens rather than every frame -- the
     /// shelf is a directory and the dialog draws sixty times a second.
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
+    /// The pattern whose scatter is open in its own window (issue 79). One at a
+    /// time: the window says which pattern it is for in its title, and two of
+    /// them over the same viewport would be two sets of the same six fields.
+    pub(crate) noise_popup: Option<NodeId>,
 
     pub keymap_search: String,
     pub recording: Option<Command>,

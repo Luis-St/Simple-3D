@@ -105,7 +105,10 @@ impl App {
     ///
     /// Only while the numbers are still untouched -- exactly the defaults a bare
     /// pattern is born with -- so nothing typed into the property editor, and
-    /// nothing laid out with a grip, is ever overwritten under the user.
+    /// nothing laid out with a grip, is ever overwritten under the user. The
+    /// kind is not one of those numbers: a pattern made for the custom tool is
+    /// born saying Custom, and its stage step wants fitting to what it holds
+    /// exactly as a linear one's does.
     ///
     /// The children are measured, not the pattern: asking the pattern measures
     /// the repetition rather than the thing being repeated, and the spacing
@@ -118,7 +121,12 @@ impl App {
             .into_iter()
             .filter(|&id| {
                 let node = self.scene.node(id);
-                node.is_pattern() && !node.children.is_empty() && node.params() == Some(&defaults)
+                let untouched = node.params().is_some_and(|params| {
+                    let mut as_born = params.clone();
+                    as_born.insert("kind".to_string(), defaults["kind"]);
+                    as_born == defaults
+                });
+                node.is_pattern() && !node.children.is_empty() && untouched
             })
             .collect();
         for id in fresh {
@@ -131,9 +139,13 @@ impl App {
                 });
             }
             let Some((lo, hi)) = bounds else { continue };
+            let kind = self.scene.node(id).params().map(|params| params["kind"]);
             if let Some(node) = self.scene.get_mut(id) {
-                node.body =
-                    simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::params_for_size(hi - lo) };
+                let mut params = simple3d_core::pattern::params_for_size(hi - lo);
+                if let Some(kind) = kind {
+                    params.insert("kind".to_string(), kind);
+                }
+                node.body = simple3d_core::scene::Body::Pattern { params };
             }
         }
     }

@@ -64,6 +64,11 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                     ui.close();
                 }
             }
+            // Ruled off from the group operators above: both halves add a
+            // container, but a group is one that combines what is in it and a
+            // pattern is one that repeats it, and six buttons in an unbroken
+            // column read as six of the same thing.
+            ui.separator();
             // The other container a node can be (issue 67). Empty, for shapes
             // to be put into afterwards -- "Make a pattern of the selection",
             // further down this same menu, is the one that wraps what is
@@ -234,10 +239,14 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             app.add_pattern_at(id);
         }
         // An empty pattern on this row, and the tool opened on it: adding leaves
-        // the new pattern selected, which is what the tool works on.
+        // the new pattern selected, which is what the tool works on -- and which
+        // one it just made, so the tool knows it is a custom kind from the start
+        // rather than a linear one waiting to be told otherwise.
         if add_custom_pattern {
             app.add_pattern_at(id);
-            app.open_pattern_tool();
+            if let Some(made) = app.primary() {
+                app.open_pattern_tool_on_new(made);
+            }
         }
         if let Some(colour) = paint {
             let targets: Vec<NodeId> = app.selection.to_vec();

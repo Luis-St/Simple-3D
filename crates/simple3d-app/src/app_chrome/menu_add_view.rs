@@ -18,6 +18,11 @@ impl App {
                     ui.close();
                 }
             }
+            // Ruled off from the group operators above: both halves add a
+            // container, but a group is one that combines what is in it and a
+            // pattern is one that repeats it, and six buttons in an unbroken
+            // column read as six of the same thing.
+            ui.separator();
             // The other container a node can be (issue 67), beside the group
             // operators it belongs with. Adding one is always "an empty one to
             // fill"; wrapping the selection in a pattern is what Edit > Make a

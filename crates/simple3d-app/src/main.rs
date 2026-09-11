@@ -15,6 +15,7 @@ mod gizmo;
 mod gpu;
 mod icon;
 mod measure_tool;
+mod noise_popup;
 mod panel_outliner;
 mod panel_primitives;
 mod panel_properties;

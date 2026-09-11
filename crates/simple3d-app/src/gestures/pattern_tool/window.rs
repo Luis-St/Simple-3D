@@ -125,6 +125,68 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
     assert_eq!(pattern::instance_count(&params).1, 1, "the blank sheet was not blank");
 }
 
+/// A pattern the custom-kind menu item makes is a custom one from the moment it
+/// exists, and it is blank: one copy, and every number on it zero.
+///
+/// Asked for from the running application, twice. Add > Custom pattern first put
+/// a pattern on the scene whose Kind row read "Linear" while the tool for
+/// building a custom rule was up in front of it -- the sidebar contradicting the
+/// menu item that had just been pressed. Saying Custom without changing the
+/// numbers then left the second half of the same contradiction: a run of three
+/// copies at a 20 mm step is the linear kind's layout wearing the custom kind's
+/// name. A rule built by hand starts from nothing, and the question the window
+/// asks is what the six fixed layouts are still there for.
+#[test]
+pub(crate) fn a_pattern_made_for_the_tool_starts_custom_and_blank() {
+    let mut harness = harness("pattern-tool-born-custom");
+    // What is selected is a shape, not a pattern, so the tool makes one -- which
+    // is what Add > Custom pattern does.
+    harness.state_mut().open_pattern_tool();
+    for _ in 0..4 {
+        harness.step();
+    }
+    let id = harness.state().pattern_tool.expect("the tool did not open on a pattern");
+    let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
+    assert_eq!(params.int("kind"), pattern::CUSTOM, "the pattern the custom tool made calls itself something else");
+
+    // One stage, one copy, and that copy exactly where the original stands.
+    assert_eq!(params.int("stages"), 1, "a rule built by hand started with more than one stage on it");
+    let copies = pattern::instances(&params);
+    assert_eq!(copies.len(), 1, "a blank rule laid down {} copies", copies.len());
+    assert_eq!(
+        copies[0].xform,
+        simple3d_core::xform::Xform::IDENTITY,
+        "the one copy was moved by a rule saying nothing"
+    );
+    for stage in 0..pattern::MAX_STAGES {
+        assert_eq!(
+            pattern::stage(&params, stage),
+            pattern::Stage::run(1, simple3d_geom::Vec3::ZERO),
+            "stage {} of a blank rule carries numbers nobody typed",
+            stage + 1
+        );
+    }
+
+    // And the rule is still unstarted, so the window is still asking what to
+    // start it from rather than opening on the stages.
+    assert!(!harness.state().pattern_tool_started, "the question was answered by the pattern being made");
+    for kind in 0..=pattern::CUSTOM {
+        assert!(
+            harness.ctx.read_response(crate::pattern_tool::template_id(kind)).is_some(),
+            "{} is not offered to start from",
+            pattern::KINDS[kind as usize]
+        );
+    }
+    assert!(stage_shown(&harness).is_none(), "the stages were shown before the question was answered");
+
+    // The six are still six: starting from one of them writes what that kind
+    // lays out, from the numbers the fixed kinds are still holding.
+    harness.state_mut().start_rule_from(id, 0);
+    harness.step();
+    let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
+    assert_eq!(pattern::instance_count(&params).1, 3, "starting from linear did not lay out what linear lays out");
+}
+
 /// Starting from a fixed kind lays the rule out as exactly what that kind lays
 /// out, with the numbers the pattern is already holding rather than the kind's
 /// defaults (issue 79).

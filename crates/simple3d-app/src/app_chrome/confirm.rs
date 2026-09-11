@@ -75,6 +75,63 @@ impl App {
 }
 
 impl App {
+    /// Taking a saved pattern kind off the shelf (issue 67).
+    ///
+    /// Asked because the shelf is not the document: a kind is a file in the
+    /// config directory, deleting it is what the file system does to files, and
+    /// undo -- which covers every other thing a click here can do -- does not
+    /// reach it. The cross sits in a list of names a click away from the name
+    /// above it, which is exactly where a slip costs a rule that took a while
+    /// to build and exists in no project.
+    pub(super) fn confirm_delete_kind_window(&mut self, ctx: &egui::Context) {
+        self.dialog(
+            ctx,
+            DialogSpec {
+                key: "dialog-confirm-delete-kind",
+                title: "Delete pattern kind",
+                size: egui::vec2(440.0, 150.0),
+                resizable: false,
+                fit_height: true,
+                min_size: None,
+            },
+            Self::confirm_delete_kind_body,
+            Self::confirm_delete_kind_actions,
+        );
+    }
+
+    pub(super) fn confirm_delete_kind_body(&mut self, ui: &mut egui::Ui) {
+        let Some(entry) = self.confirm_delete_kind.clone() else {
+            ui.label("There is nothing left to delete.");
+            return;
+        };
+        ui.label(format!("Delete \u{201C}{}\u{201D} from the shelf?", entry.name));
+        ui.add_space(6.0);
+        // What survives it is said as plainly as what does not: a pattern stores
+        // its own stage numbers, so nothing already laid out comes apart.
+        ui.label(theme::hint(
+            "The rule goes for good -- this is a file, not an edit, so undo does not bring it back. Patterns already \
+             built from it keep their numbers and go on laying out exactly as they do now.",
+        ));
+    }
+
+    pub(super) fn confirm_delete_kind_actions(&mut self, ui: &mut egui::Ui) {
+        if ui::dialog_button(ui, "Delete", true).clicked() {
+            let entry = self.confirm_delete_kind.take();
+            self.modal = Modal::None;
+            if let Some(entry) = entry {
+                self.delete_saved_kind(&entry);
+            }
+        }
+        cancel_at_left(ui, |ui| {
+            if ui::dialog_button(ui, "Cancel", true).clicked() {
+                self.confirm_delete_kind = None;
+                self.modal = Modal::None;
+            }
+        });
+    }
+}
+
+impl App {
     pub(super) fn confirm_close_tab_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,

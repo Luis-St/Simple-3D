@@ -143,5 +143,8 @@ pub(crate) fn describe(stage: &pattern::Stage, unit: simple3d_core::unit::Unit) 
     if what.is_empty() {
         what.push("in place".to_string());
     }
-    format!("{} copies, {}", stage.copies(), what.join(", "))
+    // A blank stage makes exactly one copy, and a line of English reading
+    // "1 copies" draws attention to itself rather than to the stage.
+    let copies = stage.copies();
+    format!("{copies} cop{}, {}", if copies == 1 { "y" } else { "ies" }, what.join(", "))
 }

@@ -84,6 +84,14 @@ impl App {
         }
     }
 
+    /// Put the "delete this one" question up. Nothing is removed until it is
+    /// answered: the shelf is a directory, so this is the one thing a click in
+    /// the pattern tool does that undo cannot take back.
+    pub(crate) fn ask_delete_saved_kind(&mut self, entry: pattern_library::Entry) {
+        self.confirm_delete_kind = Some(entry);
+        self.modal = crate::app::Modal::ConfirmDeleteKind;
+    }
+
     pub(crate) fn delete_saved_kind(&mut self, entry: &pattern_library::Entry) {
         match pattern_library::remove(&entry.path) {
             Ok(()) => {

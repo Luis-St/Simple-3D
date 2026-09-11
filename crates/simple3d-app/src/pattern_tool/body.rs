@@ -134,13 +134,18 @@ pub(crate) fn templates(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     }
 }
 
-/// The saved kinds, as one row: pick one to put it on the pattern, and the
-/// cross beside it takes that one off the shelf for good.
+/// The saved kinds, as one row: the dropdown, whose rows each apply a kind or
+/// ask to delete it.
 ///
 /// It was a column of its own, which on an empty shelf was a paragraph of
 /// explanation taking a fifth of the window. Nothing saved, nothing drawn:
 /// the row appears with the first kind kept, and until then the button that
 /// keeps one is the only thing that needs to be there.
+///
+/// The cross that deletes one used to sit *beside* the box and act on whatever
+/// it happened to be showing, so removing a kind meant picking it first -- and
+/// picking it put it on the pattern. Each row now carries its own (see
+/// [`crate::pattern_tool::items`]).
 ///
 /// Returns whether it drew anything, so the caller knows whether to rule a line
 /// under it.
@@ -148,8 +153,7 @@ pub(crate) fn shelf(app: &mut App, ui: &mut egui::Ui) -> bool {
     if app.pattern_kinds.is_empty() {
         return false;
     }
-    let mut apply = None;
-    let mut delete = None;
+    let mut picked = None;
     ui.horizontal(|ui| {
         ui.add(egui::Label::new(theme::header_text("Saved kinds")).selectable(false));
         // The rule on the pattern is the one named in the box, when that name is
@@ -162,28 +166,15 @@ pub(crate) fn shelf(app: &mut App, ui: &mut egui::Ui) -> bool {
         };
         egui::ComboBox::from_id_salt("pattern-shelf")
             .selected_text(theme::value(shown))
-            .width((ui.available_width() - 40.0).clamp(80.0, 220.0))
+            .width(ui.available_width().clamp(80.0, 220.0))
             .show_ui(ui, |ui| {
-                for entry in &app.pattern_kinds {
-                    let chosen = Some(&entry.name) == on_shelf.as_ref().map(|e| &e.name);
-                    if ui.selectable_label(chosen, &entry.name).clicked() {
-                        apply = Some(entry.clone());
-                    }
-                }
+                picked = crate::pattern_tool::items(ui, &app.pattern_kinds, on_shelf.as_ref().map(|e| e.name.as_str()));
             });
-        if ui
-            .add_enabled(on_shelf.is_some(), egui::Button::new("\u{00d7}"))
-            .on_hover_text("Delete the saved kind named here")
-            .clicked()
-        {
-            delete = on_shelf;
-        }
     });
-    if let Some(entry) = apply {
-        app.apply_saved_kind(&entry);
-    }
-    if let Some(entry) = delete {
-        app.delete_saved_kind(&entry);
+    match picked {
+        Some(ShelfPick::Apply(entry)) => app.apply_saved_kind(&entry),
+        Some(ShelfPick::Delete(entry)) => app.ask_delete_saved_kind(entry),
+        None => {}
     }
     true
 }

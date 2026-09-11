@@ -105,10 +105,14 @@ pub const PARAMS: &[ParamSpec] = &[
     jitter("noise_x", "Jitter X"),
     jitter("noise_y", "Jitter Y"),
     jitter("noise_z", "Jitter Z"),
+    // Brought into [0, 360) rather than clamped, the way the transform panel's
+    // rotation is: a turn is a direction, so -30 is 330 and 400 is 40, and a
+    // field that read 180 back at every larger number said nothing about which
+    // of them it had been given.
     ParamSpec {
         key: "noise_turn",
         label: "Jitter turn",
-        kind: ParamKind::Angle { min: 0.0, max: 180.0 },
+        kind: ParamKind::Angle { min: 0.0, max: 360.0, wrap: true },
         default: ParamValue::Angle(0.0),
         lock_group: 0,
         shown_when: None,

@@ -48,6 +48,7 @@ impl App {
             Modal::ConfirmCloseTab => self.confirm_close_tab_window(ctx),
             Modal::SavePrimitive => self.save_primitive_window(ctx),
             Modal::ConfirmExtractAll => self.confirm_extract_all_window(ctx),
+            Modal::ConfirmDeleteKind => self.confirm_delete_kind_window(ctx),
         }
     }
 }

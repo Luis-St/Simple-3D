@@ -20,6 +20,16 @@ pub enum ParamKind {
     Angle {
         min: f64,
         max: f64,
+        /// Whether the number is a *direction* rather than a quantity, in which
+        /// case what is typed comes back brought into `[0, 360)` -- 400 is 40,
+        /// -90 is 270 -- instead of clamped to `min`..`max`, exactly as the
+        /// transform panel's rotation reads (issue 84).
+        ///
+        /// Said per parameter rather than assumed of every angle, because most
+        /// of them are quantities: a sweep of 360 is a whole revolution and a
+        /// ring's span of 360 is a whole ring, and wrapping either to nothing
+        /// would erase the shape.
+        wrap: bool,
     },
     Bool,
     /// A radio-style choice between named alternatives, for measurements that
@@ -133,7 +143,7 @@ impl ParamSpec {
         ParamSpec {
             key: "sweep",
             label: "Sweep angle",
-            kind: ParamKind::Angle { min: 1.0, max: 360.0 },
+            kind: ParamKind::Angle { min: 1.0, max: 360.0, wrap: false },
             default: ParamValue::Angle(360.0),
             lock_group: 0,
             shown_when: None,

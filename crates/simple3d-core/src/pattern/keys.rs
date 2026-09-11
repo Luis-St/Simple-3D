@@ -43,7 +43,7 @@ pub(crate) const fn angle(
     ParamSpec {
         key,
         label,
-        kind: ParamKind::Angle { min: -360.0, max: 360.0 },
+        kind: ParamKind::Angle { min: -360.0, max: 360.0, wrap: false },
         default: ParamValue::Angle(default),
         lock_group: 0,
         shown_when: Some(when),
@@ -81,13 +81,18 @@ pub(crate) const fn does(key: &'static str, default: u32) -> ParamSpec {
     }
 }
 
-/// How far a copy may be nudged off where the rule puts it (issue 79). Never
-/// negative: it is a distance either way, not a direction.
+/// How far a copy may be nudged off where the rule puts it (issue 79).
+///
+/// Unbounded either way, like a position and unlike a dimension. It is read as
+/// a distance -- the scatter runs both ways whatever the sign, which is what
+/// [`Noise::of`](super::Noise::of) takes the absolute value for -- but a field
+/// that snapped a typed `-5` back to zero was the one number in the panel that
+/// refused a minus sign, and refused it without saying why.
 pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec {
     ParamSpec {
         key,
         label,
-        kind: ParamKind::Length { min: 0.0 },
+        kind: ParamKind::Length { min: f64::NEG_INFINITY },
         default: ParamValue::Length(0.0),
         lock_group: 0,
         // Every kind, not one: a run of planks wants a little randomness as much

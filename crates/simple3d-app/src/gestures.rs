@@ -30,6 +30,7 @@ pub(crate) use camera::*;
 mod cursor;
 mod keys;
 mod measure;
+mod noise_popup;
 mod outliner_drag;
 mod outliner_menu;
 mod outliner_select;

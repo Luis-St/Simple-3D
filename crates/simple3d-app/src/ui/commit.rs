@@ -44,7 +44,9 @@ pub fn commit_param(text: &str, kind: ParamKind, unit: Unit, current: f64) -> Co
 pub fn value_from_display(kind: ParamKind, unit: Unit, shown: f64) -> ParamValue {
     match kind {
         ParamKind::Length { min } => ParamValue::Length(unit.to_mm(shown).max(min)),
-        ParamKind::Angle { min, max } => ParamValue::Angle(shown.clamp(min, max)),
+        ParamKind::Angle { min, max, wrap } => {
+            ParamValue::Angle(if wrap { wrap_degrees(shown) } else { shown.clamp(min, max) })
+        }
         ParamKind::Count { min, max } => {
             if shown < 0.0 {
                 ParamValue::Count(min)

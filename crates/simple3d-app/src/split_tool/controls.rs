@@ -150,7 +150,13 @@ pub(crate) fn pass(app: &mut App, ui: &mut egui::Ui, index: usize, tiling: &mut 
         ui.end_row();
 
         label(ui, "Turn (deg)", "Turn the whole grid within its plane, in degrees.");
-        number(app, ui, &field_name(index, "angle"), ParamKind::Angle { min: -360.0, max: 360.0 }, &mut tiling.angle);
+        number(
+            app,
+            ui,
+            &field_name(index, "angle"),
+            ParamKind::Angle { min: -360.0, max: 360.0, wrap: false },
+            &mut tiling.angle,
+        );
         ui.end_row();
 
         label(

@@ -174,11 +174,15 @@ impl App {
     }
 
     /// Close whatever dialog is open, the way that dialog is cancelled.
-    pub(super) fn dismiss_modal(&mut self) {
+    pub(crate) fn dismiss_modal(&mut self) {
         match self.modal {
             Modal::SavePrimitive => self.cancel_save_primitive(),
             Modal::ConfirmExtractAll => {
                 self.confirm_extract = None;
+                self.modal = Modal::None;
+            }
+            Modal::ConfirmDeleteKind => {
+                self.confirm_delete_kind = None;
                 self.modal = Modal::None;
             }
             Modal::ConfirmCloseTab => self.cancel_close_tab(),

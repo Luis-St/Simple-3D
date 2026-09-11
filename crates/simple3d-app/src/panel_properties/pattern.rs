@@ -65,12 +65,14 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                     .selected_text(theme::value(shown))
                     .width(fits(ui, 150.0))
                     .show_ui(ui, |ui| {
-                        for entry in &app.pattern_kinds {
-                            let chosen = picked.as_ref().is_some_and(|p| p.name == entry.name);
-                            if ui.selectable_label(chosen, &entry.name).clicked() && !chosen {
-                                apply = Some(entry.clone());
-                            }
-                        }
+                        // The same rows the tool's own shelf draws, each with the
+                        // cross that deletes that one kind: it is the same list,
+                        // so it had better behave the same way.
+                        apply = crate::pattern_tool::items(
+                            ui,
+                            &app.pattern_kinds,
+                            picked.as_ref().map(|p| p.name.as_str()),
+                        );
                     });
                 // Named rather than found by where it sits: a combo box carries
                 // no label of its own in the accessibility tree -- only the name
@@ -88,8 +90,10 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
                 open_tool = true;
             }
         });
-        if let Some(entry) = apply {
-            app.apply_saved_kind_to(id, &entry);
+        match apply {
+            Some(crate::pattern_tool::ShelfPick::Apply(entry)) => app.apply_saved_kind_to(id, &entry),
+            Some(crate::pattern_tool::ShelfPick::Delete(entry)) => app.ask_delete_saved_kind(entry),
+            None => {}
         }
         if open_tool {
             app.open_pattern_tool();
@@ -104,7 +108,14 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         "Put shapes under this pattern in the outliner -- or add one with it selected -- and it repeats them."
             .to_string()
     } else {
-        format!("{copies} copies of {children} shape{}.", if children == 1 { "" } else { "s" })
+        // Both halves count, and a blank custom rule makes exactly one copy --
+        // where "1 copies" is the line drawing attention to itself rather than
+        // to the rule it is reporting on.
+        format!(
+            "{copies} cop{} of {children} shape{}.",
+            if copies == 1 { "y" } else { "ies" },
+            if children == 1 { "" } else { "s" }
+        )
     };
     ui.add(egui::Label::new(theme::hint(note)).selectable(false));
     // The numbers above are not the only way in: every one of them that places
@@ -140,10 +151,11 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
 /// and an exact pattern is the thing being departed from rather than a seventh
 /// kind of one.
 ///
-/// Rolled up to a single line until there is some, because the usual answer is
-/// none and four fields saying zero are four rows of nothing on the way to the
-/// numbers that matter. The line itself says whether there is any, so a scatter
-/// is never hidden behind a closed section.
+/// One line here, and the six numbers themselves in a window of their own (see
+/// [`crate::noise_popup`]). The line says whether there is any scatter and how
+/// much, which is what the panel is for; unrolling the fields into the panel
+/// pushed the numbers below them down the page and took the scroll position
+/// with them, to edit something only the viewport can show the effect of.
 pub(crate) fn noise(app: &mut App, ui: &mut egui::Ui, id: NodeId, params: &simple3d_core::primitive::Params) {
     let unit = app.unit();
     let scatter = simple3d_core::pattern::Noise::of(params);
@@ -157,21 +169,21 @@ pub(crate) fn noise(app: &mut App, ui: &mut egui::Ui, id: NodeId, params: &simpl
     } else {
         "none".to_string()
     };
-    let open = ui.id().with(("pattern-noise", id));
-    let mut showing = ui.ctx().data(|d| d.get_temp::<bool>(open)).unwrap_or(scatter.wanted());
+    // A button, not a chip that flips: what it does is open a window, and that
+    // window closes by its own cross and its own Done, like every other in-place
+    // popup here. Drawn as a toggle it read as a switch that turns the scatter
+    // on -- which is what the numbers in the window do -- and it said "Hide"
+    // while the thing it would hide was a window the user could already see the
+    // close cross on. Named for that, too: "Set" is what the numbers inside do,
+    // and this only opens the place they are set in.
+    let mut open_window = false;
     field_row(ui, "Noise", "Nudge and turn every copy a little off where the rule puts it", |ui| {
-        if theme::choice(ui, showing, if showing { "Hide" } else { "Set" }).clicked() {
-            showing = !showing;
-            ui.ctx().data_mut(|d| d.insert_temp(open, showing));
+        if ui.button("Configure").on_hover_text("Open the scatter's own window over the viewport").clicked() {
+            open_window = true;
         }
         ui.add(egui::Label::new(theme::hint(summary)).selectable(false));
     });
-    if !showing {
-        return;
-    }
-    let targets = [id];
-    for key in simple3d_core::pattern::noise_keys() {
-        let Some(spec) = simple3d_core::pattern::PARAMS.iter().find(|p| p.key == *key) else { continue };
-        param_field(app, ui, &targets, id, spec, unit, PATTERN_ROW);
+    if open_window {
+        app.noise_popup = Some(id);
     }
 }

@@ -34,6 +34,8 @@ mod body;
 mod kinds;
 mod open;
 pub(crate) use body::*;
+mod shelf;
+pub(crate) use shelf::*;
 mod stages;
 pub(crate) use stages::*;
 mod actions;

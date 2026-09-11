@@ -11,18 +11,51 @@ impl App {
     /// first if what is selected is not a pattern yet, which is what makes this
     /// a *creation* tool and not merely an editor of one.
     pub fn open_pattern_tool(&mut self) {
+        self.show_pattern_tool(None);
+    }
+
+    /// The same, on a pattern that was added for the tool a moment ago: the
+    /// outliner's Add menu puts an empty pattern on a row and then opens the
+    /// tool on it, which is the custom-kind route just as much as the one that
+    /// makes the node here.
+    pub(crate) fn open_pattern_tool_on_new(&mut self, id: NodeId) {
+        self.show_pattern_tool(Some(id));
+    }
+
+    /// `made_for_it` is the pattern that was created by the very action that is
+    /// opening the tool, where there was one.
+    fn show_pattern_tool(&mut self, made_for_it: Option<NodeId>) {
         let existing = self.selection.iter().copied().find(|id| self.scene.get(*id).is_some_and(|n| n.is_pattern()));
-        let target = match existing {
-            Some(id) => Some(id),
+        let (target, mut made) = match existing {
+            Some(id) => (Some(id), made_for_it == Some(id)),
             None => {
                 self.make_pattern();
-                self.selection.iter().copied().find(|id| self.scene.get(*id).is_some_and(|n| n.is_pattern()))
+                (self.selection.iter().copied().find(|id| self.scene.get(*id).is_some_and(|n| n.is_pattern())), true)
             }
         };
         let Some(id) = target else {
             self.status = Status::Warning("That selection cannot be made into a pattern".into());
             return;
         };
+        made &= self.scene.get(id).is_some_and(|n| n.is_pattern());
+        // A pattern made *by* this action is a custom one from the moment it
+        // exists, and it starts blank: one copy, every number zero. The menu
+        // item that made it says custom, so a Kind row reading "Linear" behind
+        // the tool that is about to build a rule out of stages contradicts the
+        // thing the user just asked for -- and so does a run of three copies at
+        // a 20 mm step, which is the linear kind's layout wearing the custom
+        // kind's name. A rule built by hand starts from nothing and has each
+        // stage put on it; the six fixed layouts are what the question below
+        // offers for anyone who would rather not start there.
+        if made {
+            if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
+                pattern::clear_stages(params);
+            }
+            // What made the node said to choose a kind in the properties panel,
+            // which is now both answered and in the wrong place: the window in
+            // front of it is what the next choice is made in.
+            self.status = Status::Info("Custom pattern: pick what its rule starts from".into());
+        }
         // A pattern that is already custom has a rule, so the window opens on
         // it. Anything else has a *layout* but not yet a rule, and the first
         // thing the window asks is what to start that rule from (issue 79):
@@ -30,9 +63,12 @@ impl App {
         // exactly what the kind says, so nothing is thrown away -- or nothing
         // at all. Nothing is written to the node until that is answered, so a
         // window opened by accident and closed again changes no numbers.
+        //
+        // One that was made for the tool is the exception: its kind was written
+        // a moment ago, and it has no rule yet, so the question is still open.
         let kind = self.scene.node(id).params().map(|p| p.int("kind"));
         self.pattern_tool = Some(id);
-        self.pattern_tool_started = kind == Some(pattern::CUSTOM);
+        self.pattern_tool_started = !made && kind == Some(pattern::CUSTOM);
         self.pattern_tool_name = self.scene.node(id).name.clone();
         self.refresh_pattern_kinds();
     }
