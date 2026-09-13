@@ -12,8 +12,8 @@ use simple3d_geom::Vec3;
 /// The narrow layout is `axis_row`'s, and for the same reason (issue 51): three
 /// fields plus their gaps need more than a third of the row each, so below the
 /// width where a number is still readable the only way to keep all three on the
-/// panel is to give each its own line. Each then carries the axis chip that says
-/// which one it is -- across the row their order says it, stacked it does not.
+/// panel is to give each its own line. Each carries the axis chip that says
+/// which one it is, stacked or across the row.
 ///
 /// They were clamped to a floor of 44 points instead, which is not a layout:
 /// three fields of it and their gaps are wider than the panel that forced them
@@ -23,8 +23,12 @@ use simple3d_geom::Vec3;
 pub(crate) fn point_fields(ui: &mut egui::Ui, name: &str, mut field: impl FnMut(&mut egui::Ui, usize)) {
     // The panel's own edge decides how much there is to share out, the way it
     // does on an axis row: a row wide enough to overflow must not take the
-    // others with it.
-    let each = (room_left(ui) / 3.0 - ui.spacing().item_spacing.x).min(POINT_FIELD_MAX);
+    // others with it. Each field has its axis chip in front of it, across the
+    // row as well as stacked, the way the transform's rows do: a column of
+    // numbers whose order is the only thing saying which is X was asked to say
+    // so in colour instead.
+    let chip = theme::AXIS_CHIP_WIDTH + ui.spacing().item_spacing.x;
+    let each = (room_left(ui) / 3.0 - chip - ui.spacing().item_spacing.x).min(POINT_FIELD_MAX);
     if each < MIN_AXIS_FIELD {
         ui.vertical(|ui| {
             for axis in 0..3 {
@@ -37,6 +41,7 @@ pub(crate) fn point_fields(ui: &mut egui::Ui, name: &str, mut field: impl FnMut(
         return;
     }
     for axis in 0..3 {
+        theme::axis_chip(ui, ui.id().with((name, axis)), axis);
         ui.scope(|ui| {
             ui.set_width(each);
             field(ui, axis);

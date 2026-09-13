@@ -174,7 +174,7 @@ pub(crate) fn vector_row(
 ) {
     let unit = app.unit();
     let specs: Vec<&'static simple3d_core::primitive::ParamSpec> =
-        keys.iter().filter_map(|key| simple3d_core::pattern::PARAMS.iter().find(|p| p.key == *key)).collect();
+        keys.iter().filter_map(|key| simple3d_core::pattern::param_spec(key)).collect();
     if specs.len() != 3 {
         return;
     }

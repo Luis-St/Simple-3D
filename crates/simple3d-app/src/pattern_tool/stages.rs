@@ -12,10 +12,12 @@
 
 use super::*;
 use crate::app::App;
-use crate::panel_properties::{field_row_boxed, param_field_as, row_right_edge, vector_row, PATTERN_TOOL_ROW};
+use crate::panel_properties::{
+    field_row, field_row_boxed, param_field_as, row_right_edge, vector_row, PATTERN_TOOL_ROW,
+};
 use crate::theme::{self, token};
-use simple3d_core::pattern::{self, StageMode, Variation, Vary};
-use simple3d_core::primitive::Params;
+use simple3d_core::pattern::{self, StageMode, Variation, Vary, VaryField};
+use simple3d_core::primitive::{ParamValue, Params};
 use simple3d_core::scene::NodeId;
 use simple3d_core::unit::Unit;
 
@@ -166,23 +168,29 @@ fn stage_card(
     if stage.mode == StageMode::Mirror {
         return;
     }
-    for (slot, variation) in stage.variations().iter().enumerate() {
+    for slot in 0..stage.variations().len() {
         ui.add_space(4.0);
         card(token::SURFACE_1).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            if variation_card(app, ui, id, index, slot, variation, stage.mode, params) {
+            if variation_card(app, ui, id, index, slot, &stage, params) {
                 *ask = Some(Ask::DropVariation(index, slot));
             }
         });
     }
-    if stage.varied < pattern::MAX_VARIATIONS {
+    // The chips for the kinds the stage still has room for: one of each axis,
+    // way of stepping and set of copies it can reach. With none left the row
+    // goes, as the stages' own does when the rule is full.
+    let room: Vec<Vary> =
+        Vary::ALL.into_iter().filter(|what| what.fits(stage.mode) && pattern::has_room_for(&stage, *what)).collect();
+    if !room.is_empty() {
         ui.add_space(4.0);
         field_row_boxed(
             ui,
             "Vary",
-            "Change the copies from one to the next, beyond where the stage puts them. A stage takes several.",
+            "Change the copies from one to the next, beyond where the stage puts them. A stage takes one of each \
+             kind for every axis and set of copies it can reach.",
             |ui| {
-                for what in Vary::ALL.into_iter().filter(|what| what.fits(stage.mode)) {
+                for what in room {
                     let chip = theme::choice(ui, false, &format!("+ {}", what.name())).on_hover_text(vary_hover(what));
                     ui.interact(chip.rect, add_variation_id(index, what), egui::Sense::hover());
                     if chip.clicked() {
@@ -194,32 +202,32 @@ fn stage_card(
     }
 }
 
-/// One variation on a stage: its heading, how its amount steps, and the
-/// numbers its kind reads. Returns whether its cross was pressed.
-#[allow(clippy::too_many_arguments)]
+/// One variation on a stage: its heading, what it is along or about, how much,
+/// which copies it reaches and how its amount steps over them. Returns whether
+/// its cross was pressed.
 fn variation_card(
     app: &mut App,
     ui: &mut egui::Ui,
     id: NodeId,
     index: usize,
     slot: usize,
-    variation: &Variation,
-    mode: StageMode,
+    stage: &pattern::Stage,
     params: &Params,
 ) -> bool {
-    let keys = &pattern::STAGES[index].vary[slot];
+    let variation = &stage.variations()[slot];
+    let key = |field: VaryField| pattern::vary_key(index, slot, field);
     let unit = app.unit();
     let dropped = card_heading(
         ui,
-        variation.what.name(),
-        &describe_variation(variation, mode, unit),
+        &variation_name(variation),
+        &describe_variation(variation, stage.mode, unit),
         drop_variation_id(index, slot),
         "Take this variation off the stage",
     );
     // Kept rather than thrown away when the stage turns: switching back to a
     // run brings it back, and the cross is right there for anyone who wants it
     // gone.
-    if !variation.what.fits(mode) {
+    if !variation.what.fits(stage.mode) {
         ui.add(
             egui::Label::new(theme::hint("A turn has no gaps between its copies, so this does nothing here."))
                 .selectable(false)
@@ -227,27 +235,91 @@ fn variation_card(
         );
         return dropped;
     }
-    field(app, ui, id, keys.steps, "Steps", params);
-    field(app, ui, id, keys.every, "Every (copies)", params);
+    if variation.what != Vary::Gap {
+        axis_choice(app, ui, id, &key(VaryField::Axis), variation);
+    }
     let each = !variation.repeats;
-    match variation.what {
-        Vary::Shift => vector_row(
-            app,
-            ui,
-            id,
-            keys.offset,
-            if each { "Shift per copy" } else { "Shift by" },
-            "How far a step moves a copy aside, in the frame the stage placed it in",
-            PATTERN_TOOL_ROW,
-        ),
-        Vary::Spin => {
-            field(app, ui, id, keys.angle, if each { "Turn per copy" } else { "Turn by" }, params);
-            field(app, ui, id, keys.axis, "About", params);
+    let amount = match variation.what {
+        Vary::Shift => {
+            if each {
+                "Shift per step"
+            } else {
+                "Shift by"
+            }
         }
-        Vary::Size => field(app, ui, id, keys.size, if each { "Size per copy (%)" } else { "Size by (%)" }, params),
-        Vary::Gap => field(app, ui, id, keys.gap, if each { "Gap grows by" } else { "Gap wider by" }, params),
+        Vary::Spin => {
+            if each {
+                "Turn per step"
+            } else {
+                "Turn by"
+            }
+        }
+        Vary::Size => {
+            if each {
+                "Size per step (%)"
+            } else {
+                "Size by (%)"
+            }
+        }
+        Vary::Gap => {
+            if each {
+                "Gap grows by"
+            } else {
+                "Gap wider by"
+            }
+        }
+    };
+    field(app, ui, id, &key(VaryField::amount_of(variation.what)), amount, params);
+    field(app, ui, id, &key(VaryField::Every), "Every (copies)", params);
+    field(app, ui, id, &key(VaryField::Start), "Starting at copy", params);
+    field(app, ui, id, &key(VaryField::Steps), "Steps", params);
+    // Two alike are allowed to stand -- one can be edited into the other -- but
+    // not silently: they are one variation with the amounts added up.
+    let alike = stage
+        .variations()
+        .iter()
+        .enumerate()
+        .find(|(other, held)| *other != slot && held.combination() == variation.combination());
+    if let Some((other, _)) = alike {
+        ui.add(
+            egui::Label::new(theme::hint(format!(
+                "The same as variation {} on this stage: along the same axis, over the same copies, so the two add up.",
+                other + 1
+            )))
+            .selectable(false)
+            .wrap(),
+        );
     }
     dropped
+}
+
+/// What a variation's card is headed: its kind, and the axis it is along or
+/// about.
+fn variation_name(variation: &Variation) -> String {
+    match variation.what {
+        Vary::Gap => variation.what.name().to_string(),
+        what => format!("{} {}", what.name(), pattern::VARY_AXES[variation.axis.min(pattern::ALL_AXES)]),
+    }
+}
+
+/// The axes a variation can be along or about, each with its colour in front
+/// of it the way a transform's fields have.
+fn axis_choice(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, variation: &Variation) {
+    let name = if variation.what == Vary::Spin { "About" } else { "Along" };
+    field_row(ui, name, "", |ui| {
+        for &axis in variation.what.axes() {
+            if axis < 3 {
+                theme::axis_chip(ui, egui::Id::new(("vary-axis", key.to_string(), axis)), axis);
+            }
+            let chosen = variation.axis == axis;
+            if theme::choice(ui, chosen, pattern::VARY_AXES[axis]).clicked() && !chosen {
+                app.edit("Set pattern", None);
+                if let Some(params) = app.scene.get_mut(id).and_then(|node| node.params_mut()) {
+                    params.insert(key.to_string(), ParamValue::Choice(axis as u32));
+                }
+            }
+        }
+    });
 }
 
 /// What each kind of variation is for, on the chip that adds it.
@@ -367,8 +439,8 @@ fn heading(ui: &mut egui::Ui, index: usize, used: usize, folded: bool) -> Option
 /// label is what a value field answers to across a relayout, so four stages
 /// with a "Copies" each must carry a number -- "1 Copies", "2.1 Spin" -- that
 /// the card they sit on has already said.
-fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &'static str, name: &str, params: &Params) {
-    let Some(spec) = pattern::PARAMS.iter().find(|p| p.key == key) else { return };
+fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, params: &Params) {
+    let Some(spec) = pattern::param_spec(key) else { return };
     if !pattern::param_visible(spec, params) {
         return;
     }
@@ -423,20 +495,47 @@ pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: U
         return "nothing yet".to_string();
     }
     let length = |mm: f64| format!("{} {}", format_length(mm, unit), unit.suffix());
-    let axis = ["X", "Y", "Z"][variation.axis.min(2)];
-    let how = match (variation.repeats, variation.every) {
-        (false, _) => "a copy".to_string(),
-        (true, 2) => "every other copy".to_string(),
-        (true, n) => format!("a step, round every {n} copies"),
-    };
+    let axis = ["X", "Y", "Z", "all axes"][variation.axis.min(pattern::ALL_AXES)];
+    let copies = reach(variation);
+    let more = if variation.repeats { "" } else { ", more each time" };
     match variation.what {
-        Vary::Shift => format!("shifting {} {how}", length(variation.offset.length())),
-        Vary::Spin => format!("spinning {} deg about {axis} {how}", format_number(variation.angle, 1)),
-        Vary::Size if variation.repeats => format!("sized {} % {how}", format_number(variation.size * 100.0, 0)),
-        Vary::Size => format!("each {} % of the last", format_number(variation.size * 100.0, 0)),
+        Vary::Shift => format!("shifting {} along {axis} {copies}{more}", length(variation.amount)),
+        Vary::Spin => format!("spinning {} deg about {axis} {copies}{more}", format_number(variation.amount, 1)),
+        Vary::Size => {
+            let along = if variation.axis == pattern::ALL_AXES { String::new() } else { format!(" along {axis}") };
+            format!("sized {} %{along} {copies}{more}", format_number(variation.amount * 100.0, 0))
+        }
         Vary::Gap => {
-            let way = if variation.gap > 0.0 { "widening" } else { "narrowing" };
-            format!("gaps {way} {} {how}", length(variation.gap.abs()))
+            let way = if variation.amount > 0.0 { "widening" } else { "narrowing" };
+            format!("gaps {way} {} after {copies}{more}", length(variation.amount.abs()))
         }
     }
+}
+
+/// Which copies a variation reaches, in words.
+fn reach(variation: &Variation) -> String {
+    let from = match variation.start {
+        1 => " from the original".to_string(),
+        2 => String::new(),
+        start => format!(" from copy {start}"),
+    };
+    match variation.every {
+        1 if variation.start == 1 => "every copy".to_string(),
+        1 if variation.start == 2 => "every copy after the original".to_string(),
+        1 => format!("every copy{from}"),
+        2 => format!("every other copy{from}"),
+        every => format!("every {} copy{from}", ordinal(every)),
+    }
+}
+
+/// 3rd, 4th, 11th, 22nd.
+fn ordinal(n: u32) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
 }

@@ -111,7 +111,7 @@ impl App {
             pattern_kinds: Vec::new(),
             noise_popup: None,
             pattern_tool_folded: [false; simple3d_core::pattern::MAX_STAGES],
-            noise_parts_open: (None, [false; 3]),
+            noise_parts_open: (None, [false; crate::noise_popup::Part::COUNT]),
             pattern_tool_hover: None,
             pattern_tool_keep_noise: true,
             pattern_tool_resumable: false,

@@ -69,7 +69,7 @@ pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
         ("count", ParamValue::Count(12)),
         ("step_x", ParamValue::Length(50.0)),
     ]);
-    params.insert("noise_turn".to_string(), ParamValue::Angle(6.0));
+    params.insert("noise_turn_z".to_string(), ParamValue::Angle(6.0));
     let copies = instances(&params);
     for (index, copy) in copies.iter().enumerate() {
         assert!(
@@ -85,7 +85,7 @@ pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
         copies.iter().any(|c| c.xform.axis_vector(0).y.abs() > 1e-6),
         "nothing turned at all, so the jitter did nothing"
     );
-    assert_eq!(Noise::of(&params).turn, 6.0);
+    assert_eq!(Noise::of(&params).turn, Vec3::new(0.0, 0.0, 6.0));
 }
 
 /// A jitter typed with a minus sign is a jitter of that size, not an error and
@@ -105,10 +105,10 @@ pub(crate) fn a_negative_jitter_scatters_exactly_as_far_as_the_positive_one() {
     ]);
     let mut positive = base.clone();
     positive.insert("noise_x".to_string(), ParamValue::Length(2.0));
-    positive.insert("noise_turn".to_string(), ParamValue::Angle(6.0));
+    positive.insert("noise_turn_z".to_string(), ParamValue::Angle(6.0));
     let mut negative = base.clone();
     negative.insert("noise_x".to_string(), ParamValue::Length(-2.0));
-    negative.insert("noise_turn".to_string(), ParamValue::Angle(-6.0));
+    negative.insert("noise_turn_z".to_string(), ParamValue::Angle(-6.0));
 
     assert_eq!(Noise::of(&negative), Noise::of(&positive), "a minus sign changed what the scatter is");
     assert_eq!(instances(&negative), instances(&positive), "a minus sign moved the copies");
@@ -155,22 +155,65 @@ pub(crate) fn a_size_jitter_resizes_every_copy_within_the_bound() {
     }
 }
 
-/// "All" turns each copy about all three axes at once, each by its own
-/// amount: a stone dropped on a path tilts every way, not only about Z.
+/// A turn about each axis turns each copy about all three at once, each by its
+/// own amount: a stone dropped on a path tilts every way, not only about Z.
 #[test]
-pub(crate) fn a_turn_about_all_axes_tilts_every_way() {
+pub(crate) fn a_turn_about_every_axis_tilts_every_way() {
     let params = with(&[
         ("kind", ParamValue::Choice(LINEAR)),
         ("count", ParamValue::Count(20)),
         ("step_x", ParamValue::Length(50.0)),
-        ("noise_turn", ParamValue::Angle(10.0)),
-        ("noise_axis", ParamValue::Choice(3)),
+        ("noise_turn_x", ParamValue::Angle(10.0)),
+        ("noise_turn_y", ParamValue::Angle(10.0)),
+        ("noise_turn_z", ParamValue::Angle(10.0)),
     ]);
     let copies = instances(&params);
     // A turn about Z alone leaves each copy's Z axis pointing straight up.
     assert!(copies.iter().any(|c| c.xform.axis_vector(2).z < 1.0 - 1e-6), "no copy tilted off Z");
     assert!(copies.iter().any(|c| c.xform.axis_vector(0).y.abs() > 1e-6), "no copy turned about Z");
-    assert_eq!(Noise::of(&params).axis, 3);
+
+    // About one axis only, by more about that one than the others are.
+    let tilted = with(&[
+        ("kind", ParamValue::Choice(LINEAR)),
+        ("count", ParamValue::Count(20)),
+        ("step_x", ParamValue::Length(50.0)),
+        ("noise_turn_x", ParamValue::Angle(10.0)),
+    ]);
+    for copy in instances(&tilted) {
+        assert!((copy.xform.axis_vector(0) - Vec3::new(1.0, 0.0, 0.0)).length() < 1e-9, "a turn about X moved X");
+    }
+}
+
+/// A scatter saved while it had one turn and a choice of axis turns every copy
+/// exactly as it did: the turn becomes the amount about that axis, or about
+/// each of the three.
+#[test]
+pub(crate) fn a_scatter_from_when_it_had_one_turn_lands_every_copy_where_it_did() {
+    let base =
+        [("kind", ParamValue::Choice(LINEAR)), ("count", ParamValue::Count(12)), ("step_x", ParamValue::Length(40.0))];
+    // What the one turn laid down, worked out the way it was: one channel for a
+    // turn about one axis, three for all of them.
+    let old_turn = |axis: usize, index: usize| -> Vec3 {
+        let noise = Noise { offset: Vec3::ZERO, turn: Vec3::splat(8.0), scale: 0.0, seed: 1, keep_first: false };
+        let about_one = Noise { turn: unit(axis) * 8.0, ..noise };
+        let rotation = if axis == 3 { noise.wobble(index) } else { about_one.wobble(index) };
+        rotation.axis_vector(0)
+    };
+    for axis in 0..4 {
+        let mut old = with(&base);
+        for key in NOISE_TURN_KEYS {
+            old.remove(key);
+        }
+        old.insert("noise_turn".to_string(), ParamValue::Angle(8.0));
+        old.insert("noise_axis".to_string(), ParamValue::Choice(axis as u32));
+        let migrated = migrate_params(&old);
+        assert!(!migrated.contains_key("noise_turn"), "the old turn was kept");
+        let turned = instances(&migrated);
+        for (index, copy) in turned.iter().enumerate() {
+            let want = old_turn(axis, index);
+            assert!((copy.xform.axis_vector(0) - want).length() < 1e-9, "copy {index} of a turn about {axis} moved");
+        }
+    }
 }
 
 /// The scatter says when it can make two copies meet: they would be welded

@@ -225,6 +225,9 @@ pub(crate) fn every_stage_key_is_a_parameter_of_its_own() {
         assert!(known.contains(&key), "{key} is named by the stage table but is not a parameter");
     }
     assert_eq!(custom_keys().len(), 1 + MAX_STAGES * STAGE_KEY_COUNT);
+    for key in custom_keys() {
+        assert!(parse_vary_key(key).is_none(), "{key} is a stage's own and was read as a variation's");
+    }
     // The rule is the stages and nothing else. The scatter can travel on the
     // shelf with it, but only when it is asked to (see `pattern_library`), so
     // it is not one of the rule's own keys.

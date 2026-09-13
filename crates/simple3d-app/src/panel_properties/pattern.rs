@@ -187,7 +187,10 @@ pub(crate) fn noise(app: &mut App, ui: &mut egui::Ui, id: NodeId, params: &simpl
                 simple3d_core::unit::format_length(scatter.offset.x.max(scatter.offset.y).max(scatter.offset.z), unit),
                 unit.suffix()
             ),
-            format!("{}\u{00B0}", simple3d_core::unit::format_number(scatter.turn, 1)),
+            format!(
+                "{}\u{00B0}",
+                simple3d_core::unit::format_number(scatter.turn.x.max(scatter.turn.y).max(scatter.turn.z), 1)
+            ),
         ];
         if scatter.scale > 1e-9 {
             parts.push(format!("\u{00B1}{} %", simple3d_core::unit::format_number(scatter.scale * 100.0, 0)));

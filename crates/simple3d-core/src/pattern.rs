@@ -16,19 +16,20 @@
 mod keys;
 pub(crate) use keys::*;
 mod params;
-pub use params::{default_params, MAX_INSTANCES, MAX_STAGES, MAX_VARIATIONS, PARAMS};
+pub use params::{default_params, MAX_INSTANCES, MAX_STAGES, PARAMS};
 mod params_size;
 pub use params_size::{migrate_params, migrate_stages, param_visible, params_for_size};
 mod stage_keys;
 pub(crate) use stage_keys::*;
-pub use stage_keys::{
-    stage_count, stage_keys, variation_count, vary_keys, StageKeys, VaryKeys, STAGES, STAGE_KEY_COUNT, VARY_KEY_COUNT,
-};
+pub use stage_keys::{stage_count, stage_keys, variation_count, StageKeys, STAGES, STAGE_KEY_COUNT};
 mod stage;
 pub use stage::{set_stage, stage, Stage, StageMode, STAGE_MODES};
 mod variation;
 pub(crate) use variation::*;
-pub use variation::{Variation, Vary, STEPS, VARIES};
+pub use variation::{
+    combinations, free_variation, has_room_for, param_spec, parse_vary_key, variation_keys, vary_key, vary_spec,
+    Variation, Vary, VaryField, ALL_AXES, MAX_CYCLE, MAX_VARIATIONS, STEPS, VARIES, VARY_AXES,
+};
 mod stage_edit;
 pub use stage_edit::{
     add_variation, fresh_stage, fresh_stage_doing, fresh_variation, remove_stage, remove_variation, swap_stages,
@@ -40,11 +41,11 @@ mod kinds;
 pub(crate) use kinds::*;
 mod custom;
 pub(crate) use custom::*;
-pub use custom::{custom_keys, is_custom_key, Drive};
+pub use custom::{custom_keys, is_custom_key, rule_keys, Drive};
 mod template;
 pub use template::{clear_stages, template_stages, use_as_template, use_preset, PRESETS};
 mod noise;
-pub use noise::{crowding, noise_keys, Crowding, Noise};
+pub use noise::{crowding, migrate_noise, noise_keys, Crowding, Noise, NOISE_TURN_KEYS};
 mod grip;
 pub(crate) use grip::*;
 pub use grip::{apply_grip, grip, grips, Grip};

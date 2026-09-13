@@ -29,7 +29,7 @@ pub(crate) fn a_stage_takes_several_variations_and_drops_any_of_them() {
     app.add_variation(1, Vary::Shift);
     app.add_variation(1, Vary::Spin);
     let stage = pattern::stage(&params(&app, pattern), 1);
-    assert_eq!(stage.varied, 3, "the stage did not take three variations");
+    assert_eq!(stage.variations().len(), 3, "the stage did not take three variations");
     assert!(stage.variations().iter().all(|v| v.acts(StageMode::Move)), "a variation was added doing nothing");
 
     let before = params(&app, pattern);
@@ -37,14 +37,35 @@ pub(crate) fn a_stage_takes_several_variations_and_drops_any_of_them() {
     assert_eq!(pattern::stage(&params(&app, pattern), 1).variations(), &stage.variations()[1..]);
     app.run(Command::Undo);
     assert_eq!(params(&app, pattern), before, "undo did not bring the variation back");
+}
 
-    // Four is the most; a fifth asks for nothing, not even an undo step.
-    app.add_variation(1, Vary::Gap);
+/// Asked for from the running application: a stage stopped at four
+/// variations. It takes as many as are different -- here every shift a stage of
+/// one copy can hold, six -- and the one after that asks for nothing, not even
+/// an undo step.
+#[test]
+pub(crate) fn a_stage_takes_variations_until_every_different_one_is_there() {
+    let (mut app, pattern) = with_rule();
+    app.add_stage_doing(pattern::StageMode::Move);
+    {
+        let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
+        params.insert("stage2_count".to_string(), simple3d_core::primitive::ParamValue::Count(1));
+    }
+    for _ in 0..6 {
+        app.add_variation(1, Vary::Shift);
+    }
+    let stage = pattern::stage(&params(&app, pattern), 1);
+    assert_eq!(stage.variations().len(), 6, "the stage stopped short of every shift it can hold");
+    let mut combinations: Vec<_> = stage.variations().iter().map(|v| v.combination()).collect();
+    combinations.dedup();
+    assert_eq!(combinations.len(), 6, "two of the shifts were the same one");
+
     let full = params(&app, pattern);
-    app.add_variation(1, Vary::Size);
-    assert_eq!(params(&app, pattern), full, "a fifth variation changed the rule");
+    app.add_variation(1, Vary::Shift);
+    assert_eq!(params(&app, pattern), full, "a seventh shift changed the rule");
+    app.add_variation(1, Vary::Spin);
     app.run(Command::Undo);
-    assert_eq!(pattern::variation_count(&params(&app, pattern), 1), 3, "the refused fifth took an undo step");
+    assert_eq!(params(&app, pattern), full, "the refused shift took an undo step");
 }
 
 /// "Add a stage" offers the three things a stage can do, and the stage comes

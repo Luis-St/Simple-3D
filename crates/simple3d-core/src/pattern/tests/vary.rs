@@ -13,7 +13,7 @@ fn near(a: Vec3, b: Vec3) -> bool {
 fn rule(stages: &[Stage]) -> Params {
     let mut params = with(&[("kind", ParamValue::Choice(CUSTOM))]);
     for (index, stage) in stages.iter().enumerate() {
-        set_stage(&mut params, index, *stage);
+        set_stage(&mut params, index, stage);
     }
     params.insert("stages".to_string(), ParamValue::Count(stages.len() as u32));
     params
@@ -24,7 +24,7 @@ fn rule(stages: &[Stage]) -> Params {
 /// further along than the last.
 #[test]
 pub(crate) fn a_shift_every_other_copy_staggers_the_rows() {
-    let rows = Stage::run(3, Vec3::new(0.0, 4.0, 0.0)).with(Variation::shift(Vec3::new(5.0, 0.0, 0.0)).repeating(2));
+    let rows = Stage::run(3, Vec3::new(0.0, 4.0, 0.0)).with(Variation::shift(0, 5.0).repeating(2));
     let copies = instances(&rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0)), rows]));
     assert_eq!(copies.len(), 9);
     let at = |index: usize| copies[index].xform.t;
@@ -35,10 +35,10 @@ pub(crate) fn a_shift_every_other_copy_staggers_the_rows() {
     assert!(near(at(5), Vec3::new(25.0, 4.0, 0.0)));
     assert!(near(at(6), Vec3::new(0.0, 8.0, 0.0)), "the shift did not come round again: {:?}", at(6));
 
-    // A cycle of three steps a third, then two thirds, then starts over.
-    let thirds = Stage::run(4, Vec3::new(0.0, 4.0, 0.0)).with(Variation::shift(Vec3::new(3.0, 0.0, 0.0)).repeating(3));
+    // Every third row from the second.
+    let thirds = Stage::run(5, Vec3::new(0.0, 4.0, 0.0)).with(Variation::shift(0, 3.0).repeating(3));
     let xs: Vec<f64> = instances(&rule(&[thirds])).iter().map(|c| c.xform.t.x).collect();
-    assert_eq!(xs, vec![0.0, 3.0, 6.0, 0.0]);
+    assert_eq!(xs, vec![0.0, 3.0, 0.0, 0.0, 3.0]);
 }
 
 /// Each gap of a run wider than the one before it: the copies spread out
@@ -60,7 +60,7 @@ pub(crate) fn a_growing_gap_spreads_the_copies_out() {
 /// it where the run put it.
 #[test]
 pub(crate) fn spin_turns_each_copy_where_it_stands() {
-    let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::spin(30.0, 2));
+    let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::spin(2, 30.0));
     let copies = instances(&rule(&[run]));
     for (index, copy) in copies.iter().enumerate() {
         assert!(near(copy.xform.t, Vec3::new(10.0 * index as f64, 0.0, 0.0)), "copy {index} was carried off");
@@ -73,9 +73,9 @@ pub(crate) fn spin_turns_each_copy_where_it_stands() {
 /// Each copy a fixed fraction of the size of the one before it.
 #[test]
 pub(crate) fn size_per_copy_multiplies_from_one_copy_to_the_next() {
-    let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::resize(0.5));
+    let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::resize(ALL_AXES, 0.5));
     let params = rule(&[run]);
-    assert_eq!(params.int("stage1_vary1_size"), 50, "the size was not written as a percentage");
+    assert_eq!(params.int("stage1_var1_size"), 50, "the size was not written as a percentage");
     let sizes: Vec<f64> = instances(&params).iter().map(|c| c.xform.axis_vector(0).length()).collect();
     for (got, want) in sizes.iter().zip([1.0, 0.5, 0.25]) {
         assert!((got - want).abs() < 1e-12, "sizes came out {sizes:?}");
@@ -88,16 +88,19 @@ pub(crate) fn size_per_copy_multiplies_from_one_copy_to_the_next() {
 /// with no shift to cycle is a number nobody has used.
 #[test]
 pub(crate) fn a_stage_that_varies_nothing_is_the_run_it_always_was() {
-    let run = Stage::run(4, Vec3::new(7.0, 1.0, 0.0)).with(Variation::shift(Vec3::ZERO).repeating(5));
+    let run = Stage::run(4, Vec3::new(7.0, 1.0, 0.0)).with(Variation::shift(0, 0.0).repeating(5));
     assert!(!run.varies());
-    for (index, copy) in instances(&rule(&[run])).iter().enumerate() {
+    for (index, copy) in instances(&rule(std::slice::from_ref(&run))).iter().enumerate() {
         assert_eq!(copy.xform, crate::xform::Xform::from_translation(Vec3::new(7.0, 1.0, 0.0) * index as f64));
     }
-    assert!(run.with(Variation::spin(1.0, 2)).varies());
-    assert!(run.with(Variation::widen(1.0)).varies());
+    assert!(run.clone().with(Variation::spin(2, 1.0)).varies());
+    assert!(run.clone().with(Variation::widen(1.0)).varies());
     let turn = Stage::turning(3, 10.0, 5.0, 0.0, 0.0, 2);
     assert!(!turn.with(Variation::widen(1.0)).varies(), "a turn has no gaps");
-    assert!(!Stage::mirrored(0).with(Variation::resize(0.5)).varies(), "a mirror is two copies nothing varies");
+    assert!(
+        !Stage::mirrored(0).with(Variation::resize(ALL_AXES, 0.5)).varies(),
+        "a mirror is two copies nothing varies"
+    );
 }
 
 /// A file from before a stage could vary lays out exactly as it did: every one
@@ -106,11 +109,8 @@ pub(crate) fn a_stage_that_varies_nothing_is_the_run_it_always_was() {
 pub(crate) fn a_rule_from_before_the_stages_could_vary_lays_out_the_same_copies() {
     let mut old = rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0)), Stage::turning(4, 90.0, 30.0, 0.0, 0.0, 2)]);
     let laid_out = instances(&old);
-    for (index, k) in STAGES.iter().enumerate() {
-        old.remove(k.varied);
-        for key in vary_keys(index) {
-            old.remove(key);
-        }
+    for k in &STAGES {
+        old.remove(k.variations);
     }
     assert_eq!(instances(&migrate_params(&old)), laid_out);
     // And read straight off the map without the migration, a stage with no
@@ -118,39 +118,42 @@ pub(crate) fn a_rule_from_before_the_stages_could_vary_lays_out_the_same_copies(
     assert_eq!(instances(&old), laid_out, "a stage missing its size shrank its copies");
 }
 
-/// A variation's numbers are offered only while the stage uses it, only the
-/// ones its own kind reads, and its cycle only once it repeats: numbers that
-/// mean nothing until another is set are not on screen until then.
+/// A variation's numbers are offered only while the stage has it, and only the
+/// ones its own kind reads: numbers that mean nothing until another is set are
+/// not on screen until then.
 #[test]
 pub(crate) fn the_numbers_that_vary_a_stage_are_offered_where_they_mean_something() {
-    let shown = |params: &Params| -> Vec<&'static str> {
-        PARAMS.iter().filter(|p| param_visible(p, params)).map(|p| p.key).collect()
+    let shown = |params: &Params| -> Vec<String> {
+        let mut keys: Vec<String> = PARAMS.iter().map(|p| p.key.to_string()).collect();
+        keys.extend(variation_keys(0, 3));
+        keys.into_iter().filter(|key| param_visible(param_spec(key).unwrap(), params)).collect()
     };
+    let has = |keys: &[String], key: &str| keys.iter().any(|k| k == key);
     let run = rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0))]);
-    assert!(shown(&run).contains(&"stage1_varied"));
-    assert!(!shown(&run).iter().any(|key| key.starts_with("stage1_vary")), "a stage varying nothing showed a slot");
-    assert!(!shown(&run).contains(&"stage1_axis"), "a run was offered an axis it has no use for");
+    assert!(has(&shown(&run), "stage1_variations"));
+    assert!(!shown(&run).iter().any(|key| key.starts_with("stage1_var1")), "a stage varying nothing showed a slot");
+    assert!(!has(&shown(&run), "stage1_axis"), "a run was offered an axis it has no use for");
 
-    let shifted = rule(&[Stage::run(3, Vec3::ZERO).with(Variation::shift(Vec3::new(1.0, 0.0, 0.0)))]);
-    for key in ["stage1_vary1_what", "stage1_vary1_steps", "stage1_vary1_x", "stage1_vary1_z"] {
-        assert!(shown(&shifted).contains(&key), "a shift was not offered {key}");
+    let shifted = rule(&[Stage::run(3, Vec3::ZERO).with(Variation::shift(0, 1.0))]);
+    for key in ["stage1_var1_what", "stage1_var1_steps", "stage1_var1_every", "stage1_var1_start", "stage1_var1_axis"] {
+        assert!(has(&shown(&shifted), key), "a shift was not offered {key}");
     }
-    for key in ["stage1_vary1_every", "stage1_vary1_angle", "stage1_vary1_size", "stage1_vary2_x"] {
-        assert!(!shown(&shifted).contains(&key), "a shift that builds up was offered {key}");
+    assert!(has(&shown(&shifted), "stage1_var1_shift"));
+    for key in ["stage1_var1_angle", "stage1_var1_size", "stage1_var1_gap", "stage1_var2_shift"] {
+        assert!(!has(&shown(&shifted), key), "a shift was offered {key}");
     }
-    let cycled = rule(&[Stage::run(3, Vec3::ZERO).with(Variation::shift(Vec3::new(1.0, 0.0, 0.0)).repeating(3))]);
-    assert!(shown(&cycled).contains(&"stage1_vary1_every"), "a repeating shift was not offered its cycle");
+    let gap = rule(&[Stage::run(3, Vec3::ZERO).with(Variation::widen(1.0))]);
+    assert!(!has(&shown(&gap), "stage1_var1_axis"), "a gap was offered an axis");
 
     let turn = rule(&[Stage::turning(4, 90.0, 20.0, 0.0, 0.0, 2).with(Variation::widen(2.0))]);
-    assert!(!shown(&turn).contains(&"stage1_vary1_gap"), "a turn was offered a run's gaps");
-    let mirrored = rule(&[Stage::mirrored(0).with(Variation::spin(5.0, 2))]);
-    assert!(!shown(&mirrored).contains(&"stage1_vary1_angle"), "a mirror was offered something to vary");
+    assert!(!has(&shown(&turn), "stage1_var1_gap"), "a turn was offered a run's gaps");
+    let mirrored = rule(&[Stage::mirrored(0).with(Variation::spin(2, 5.0))]);
+    assert!(!has(&shown(&mirrored), "stage1_var1_angle"), "a mirror was offered something to vary");
 
-    // And every one of them is a stage key, so a saved kind carries it.
-    for index in 0..MAX_STAGES {
-        for key in vary_keys(index) {
-            assert!(stage_keys(index).contains(&key), "{key} varies a stage but is not one of its keys");
-        }
+    // And every one of them is a key of the rule, so a saved kind carries it.
+    let keys = rule_keys(&shifted);
+    for key in variation_keys(0, 1) {
+        assert!(keys.contains(&key), "{key} varies a stage but is not one of the rule's keys");
     }
 }
 
@@ -168,7 +171,7 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
         let shift = rows.variations()[0];
         assert_eq!(shift.what, Vary::Shift, "{name} does not shift its rows");
         assert!(shift.repeats && shift.every == 2, "{name} does not offset every other row");
-        assert!(shift.offset.x > 0.0, "{name} does not offset its rows at all");
+        assert!(shift.axis == 0 && shift.amount > 0.0, "{name} does not offset its rows along them");
         // The first copy of the second row is offset by half the pitch of the
         // first stage, which is what staggers the joints. Read from the rule
         // before its scatter: the planks come with one.
@@ -235,20 +238,20 @@ pub(crate) fn a_stage_can_be_dropped_from_the_middle_and_two_can_trade_places() 
         Stage::turning(4, 90.0, 30.0, 0.0, 0.0, 2),
         Stage::run(3, Vec3::new(0.0, 0.0, 5.0)),
     );
-    let mut params = rule(&[a, b, c]);
+    let mut params = rule(&[a.clone(), b.clone(), c.clone()]);
     remove_stage(&mut params, 1);
     assert_eq!(stage_count(&params), 2);
     assert_eq!(stage(&params, 0), a);
     assert_eq!(stage(&params, 1), c, "the stage below the one dropped did not move up");
-    assert_eq!(instances(&params), instances(&rule(&[a, c])));
+    assert_eq!(instances(&params), instances(&rule(&[a.clone(), c.clone()])));
 
     // The last one left cannot go.
-    let mut single = rule(&[a]);
+    let mut single = rule(std::slice::from_ref(&a));
     remove_stage(&mut single, 0);
     assert_eq!(stage_count(&single), 1);
 
     // Order matters once a stage turns: a ring of rows is not a row of rings.
-    let mut params = rule(&[a, b]);
+    let mut params = rule(&[a.clone(), b.clone()]);
     let before = instances(&params);
     swap_stages(&mut params, 0, 1);
     assert_eq!(stage(&params, 0), b);

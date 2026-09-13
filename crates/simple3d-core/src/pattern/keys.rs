@@ -54,54 +54,6 @@ pub(crate) const fn angle(
 /// measured in.
 pub(crate) const AXES: &[&str] = &["X", "Y", "Z"];
 
-/// What the scatter's turn is about: one of the three axes, or all of them at
-/// once (issue 79). The fourth is an index past the three a turn is ever
-/// *about*, which is how [`Noise`](super::Noise) tells it apart.
-pub(crate) const NOISE_AXES: &[&str] = &["X", "Y", "Z", "All"];
-
-/// A whole number of percent, for a size that changes copy by copy (issue 79).
-///
-/// A count rather than a number of its own kind: a percentage is read and
-/// typed and scrubbed exactly as a count is, and whole percent is finer than a
-/// change anyone lays out by eye. The sign is in the number itself -- 100 is no
-/// change, 90 a tenth smaller -- because a count has none.
-pub(crate) const fn percent(
-    key: &'static str,
-    label: &'static str,
-    default: u32,
-    min: u32,
-    max: u32,
-    when: (&'static str, u32),
-) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Count { min, max },
-        default: ParamValue::Count(default),
-        lock_group: 0,
-        shown_when: Some(when),
-    }
-}
-
-/// How many copies a stage's shift runs over before it starts again (issue
-/// 79). Two at the least: a cycle of one shifts nothing, and a field that
-/// accepted it would be a way to switch the shift off that looks like a number.
-pub(crate) const fn cycle(
-    key: &'static str,
-    label: &'static str,
-    default: u32,
-    when: (&'static str, u32),
-) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Count { min: 2, max: 64 },
-        default: ParamValue::Count(default),
-        lock_group: 0,
-        shown_when: Some(when),
-    }
-}
-
 pub(crate) const fn axis(key: &'static str, when: (&'static str, u32)) -> ParamSpec {
     ParamSpec {
         key,
@@ -149,34 +101,8 @@ pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec 
     }
 }
 
-/// What one variation of a stage changes (issue 79). A choice, like a stage's
-/// mode, so every variation's may share one label.
-pub(crate) const fn vary_what(key: &'static str) -> ParamSpec {
-    ParamSpec {
-        key,
-        label: "Varies",
-        kind: ParamKind::Choice { options: super::VARIES },
-        default: ParamValue::Choice(0),
-        lock_group: 0,
-        shown_when: Some(("kind", super::CUSTOM)),
-    }
-}
-
-/// Whether a variation's amount builds up copy by copy or comes round on a
-/// cycle (issue 79).
-pub(crate) const fn vary_steps(key: &'static str) -> ParamSpec {
-    ParamSpec {
-        key,
-        label: "Steps",
-        kind: ParamKind::Choice { options: super::STEPS },
-        default: ParamValue::Choice(0),
-        lock_group: 0,
-        shown_when: Some(("kind", super::CUSTOM)),
-    }
-}
-
-/// How many of a fixed number of slots are in use -- a stage's variations
-/// (issue 79). Unlike a count of copies it can be none.
+/// How many of something a stage has -- its variations (issue 79). Unlike a
+/// count of copies it can be none.
 pub(crate) const fn tally(key: &'static str, label: &'static str, max: u32) -> ParamSpec {
     ParamSpec {
         key,
@@ -185,5 +111,18 @@ pub(crate) const fn tally(key: &'static str, label: &'static str, max: u32) -> P
         default: ParamValue::Count(0),
         lock_group: 0,
         shown_when: Some(("kind", super::CUSTOM)),
+    }
+}
+
+/// How far a copy may be turned off where the rule puts it, about one axis
+/// (issue 79).
+pub(crate) const fn turn_jitter(key: &'static str, label: &'static str) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Angle { min: 0.0, max: 360.0, wrap: true },
+        default: ParamValue::Angle(0.0),
+        lock_group: 0,
+        shown_when: None,
     }
 }

@@ -7,18 +7,20 @@ use crate::primitive::{ParamKind, ParamSpec, ParamValue, Params};
 /// the scatter's.
 ///
 /// The stages are spelled out by the macro rather than by hand. Each one owns
-/// fifty-one parameters that differ only in the numbers they carry -- its own
-/// eleven and ten for each of its variation slots -- and four of them written
-/// out was two hundred rows in which a single mistyped digit made one stage's
-/// field write another's number: the kind of mistake nothing but a test that
-/// reads every row back could catch. The defaults are the one thing that
+/// eleven parameters that differ only in the number they carry, and four of them
+/// written out was forty-four rows in which a single mistyped digit made one
+/// stage's field write another's number: the kind of mistake nothing but a test
+/// that reads every row back could catch. The defaults are the one thing that
 /// differs between them, so they are what each stage is given.
+///
+/// A stage's variations are not rows here (issue 79). There are as many of them
+/// as the stage has, so their parameters are named and described when asked for
+/// -- see [`vary_spec`].
 macro_rules! pattern_params {
     (
         [$($head:expr),* $(,)?],
         stages [$((
-            $n:literal, $mode:expr, $count:expr, [$sx:expr, $sy:expr, $sz:expr], $turn:expr, $radius:expr,
-            slots [$($m:literal),* $(,)?]
+            $n:literal, $mode:expr, $count:expr, [$sx:expr, $sy:expr, $sz:expr], $turn:expr, $radius:expr
         )),* $(,)?],
         [$($tail:expr),* $(,)?]
     ) => {
@@ -35,30 +37,10 @@ macro_rules! pattern_params {
                 length(concat!("stage", $n, "_radius"), concat!($n, " Radius"), $radius, ("kind", CUSTOM)),
                 length(concat!("stage", $n, "_growth"), concat!($n, " Radius per copy"), 0.0, ("kind", CUSTOM)),
                 length(concat!("stage", $n, "_rise"), concat!($n, " Rise per copy"), 0.0, ("kind", CUSTOM)),
-                // What varies the copies rather than placing them (issue 79):
-                // how many variations the stage uses, and each slot's numbers.
-                // Every default says "no change", so a rule saved before these
-                // existed lays its copies down exactly where it always did.
-                tally(concat!("stage", $n, "_varied"), concat!($n, " Variations"), MAX_VARIATIONS as u32),
-                $(
-                    vary_what(concat!("stage", $n, "_vary", $m, "_what")),
-                    vary_steps(concat!("stage", $n, "_vary", $m, "_steps")),
-                    cycle(concat!("stage", $n, "_vary", $m, "_every"), concat!($n, ".", $m, " Every"), 2, ("kind", CUSTOM)),
-                    length(concat!("stage", $n, "_vary", $m, "_x"), concat!($n, ".", $m, " Shift X"), 0.0, ("kind", CUSTOM)),
-                    length(concat!("stage", $n, "_vary", $m, "_y"), concat!($n, ".", $m, " Shift Y"), 0.0, ("kind", CUSTOM)),
-                    length(concat!("stage", $n, "_vary", $m, "_z"), concat!($n, ".", $m, " Shift Z"), 0.0, ("kind", CUSTOM)),
-                    angle(concat!("stage", $n, "_vary", $m, "_angle"), concat!($n, ".", $m, " Spin"), 0.0, ("kind", CUSTOM)),
-                    axis(concat!("stage", $n, "_vary", $m, "_axis"), ("kind", CUSTOM)),
-                    percent(
-                        concat!("stage", $n, "_vary", $m, "_size"),
-                        concat!($n, ".", $m, " Size (%)"),
-                        100,
-                        10,
-                        1000,
-                        ("kind", CUSTOM)
-                    ),
-                    length(concat!("stage", $n, "_vary", $m, "_gap"), concat!($n, ".", $m, " Gap"), 0.0, ("kind", CUSTOM)),
-                )*
+                // How many variations the stage has (issue 79). None by
+                // default, so a rule saved before they existed lays its copies
+                // down exactly where it always did.
+                tally(concat!("stage", $n, "_variations"), concat!($n, " Variations"), MAX_VARIATIONS),
             )*
             $($tail,)*
         ]
@@ -122,12 +104,12 @@ pub const PARAMS: &[ParamSpec] = pattern_params!(
         count("stages", "Stages", 1, ("kind", CUSTOM)),
     ],
     stages [
-        (1, 0, 3, [20.0, 0.0, 0.0], 0.0, 0.0, slots [1, 2, 3, 4]),
-        (2, 0, 2, [0.0, 20.0, 0.0], 0.0, 0.0, slots [1, 2, 3, 4]),
-        (3, 0, 2, [0.0, 0.0, 20.0], 0.0, 0.0, slots [1, 2, 3, 4]),
+        (1, 0, 3, [20.0, 0.0, 0.0], 0.0, 0.0),
+        (2, 0, 2, [0.0, 20.0, 0.0], 0.0, 0.0),
+        (3, 0, 2, [0.0, 0.0, 20.0], 0.0, 0.0),
         // The fourth opens as a turn, so a rule that has grown three runs long
         // offers the one thing the three before it cannot do next.
-        (4, 1, 4, [0.0, 0.0, 0.0], 90.0, 40.0, slots [1, 2, 3, 4]),
+        (4, 1, 4, [0.0, 0.0, 0.0], 90.0, 40.0),
     ],
     [
         // Noise (issue 79): how far each copy may wander off where the rule
@@ -136,28 +118,17 @@ pub const PARAMS: &[ParamSpec] = pattern_params!(
         jitter("noise_x", "Jitter X"),
         jitter("noise_y", "Jitter Y"),
         jitter("noise_z", "Jitter Z"),
+        // How far a copy may be turned about each axis, each on its own
+        // (issue 79): a plank sits askew about Z, but a stone dropped on a path
+        // tilts every way, and by more about one axis than another.
+        //
         // Brought into [0, 360) rather than clamped, the way the transform
         // panel's rotation is: a turn is a direction, so -30 is 330 and 400 is
         // 40, and a field that read 180 back at every larger number said
         // nothing about which of them it had been given.
-        ParamSpec {
-            key: "noise_turn",
-            label: "Jitter turn",
-            kind: ParamKind::Angle { min: 0.0, max: 360.0, wrap: true },
-            default: ParamValue::Angle(0.0),
-            lock_group: 0,
-            shown_when: None,
-        },
-        // X, Y or Z, or all three at once: a plank sits askew about Z, but a
-        // stone dropped on a path tilts every way.
-        ParamSpec {
-            key: "noise_axis",
-            label: "Jitter axis",
-            kind: ParamKind::Choice { options: NOISE_AXES },
-            default: ParamValue::Choice(2),
-            lock_group: 0,
-            shown_when: None,
-        },
+        turn_jitter("noise_turn_x", "Jitter turn X"),
+        turn_jitter("noise_turn_y", "Jitter turn Y"),
+        turn_jitter("noise_turn_z", "Jitter turn Z"),
         // How much bigger or smaller a copy may come out, either way. Capped
         // below a hundred, where a copy would shrink to nothing.
         ParamSpec {
@@ -213,15 +184,6 @@ pub const MAX_INSTANCES: usize = 4096;
 /// them, the project file carry them, the clipboard copy them and undo cover
 /// them, none of which needed a line of code here.
 pub const MAX_STAGES: usize = 4;
-
-/// The most variations one stage carries (issue 79).
-///
-/// Four, because that is how many a stage had while it had one of each kind --
-/// a gap, a shift, a spin and a size -- so every rule from then still fits, and
-/// a second shift on another cycle or a spin that alternates as well as one
-/// that builds up still leaves room. A fixed number for the reason the stages
-/// have one: it is what lets each variation's numbers be ordinary parameters.
-pub const MAX_VARIATIONS: usize = 4;
 
 /// A fresh pattern's parameters.
 pub fn default_params() -> Params {

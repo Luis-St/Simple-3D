@@ -1,14 +1,25 @@
 //! Custom patterns: stages combined into one rule.
 
 use super::*;
+use crate::primitive::Params;
 use crate::xform::Xform;
 
-/// Every parameter a custom rule is made of, which is what a saved kind holds
-/// and what applying one writes.
+/// Every parameter a custom rule is made of beside its stages' variations: the
+/// ones every rule has, whatever it holds.
 pub fn custom_keys() -> Vec<&'static str> {
     let mut keys = vec!["stages"];
     for index in 0..MAX_STAGES {
         keys.extend(stage_keys(index));
+    }
+    keys
+}
+
+/// Every parameter the custom rule in `params` is made of, its variations
+/// included -- which is what a saved kind holds and what applying one writes.
+pub fn rule_keys(params: &Params) -> Vec<String> {
+    let mut keys: Vec<String> = custom_keys().into_iter().map(str::to_string).collect();
+    for index in 0..MAX_STAGES {
+        keys.extend(variation_keys(index, variation_count(params, index)));
     }
     keys
 }

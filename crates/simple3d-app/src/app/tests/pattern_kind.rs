@@ -37,7 +37,7 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
         let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
         params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(2));
         params.insert("stage1_count".to_string(), ParamValue::Count(3));
-        simple3d_core::pattern::set_stage(params, 1, stage);
+        simple3d_core::pattern::set_stage(params, 1, &stage);
     }
     let params = app.scene.node(pattern).params().unwrap().clone();
     assert_eq!(simple3d_core::pattern::instance_count(&params).1, 12);

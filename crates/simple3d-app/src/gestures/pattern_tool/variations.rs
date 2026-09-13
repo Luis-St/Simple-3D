@@ -20,7 +20,7 @@ pub(crate) fn variations_are_added_and_dropped_from_the_stage_card() {
         harness.step();
     }
     let rows = |harness: &Harness<'_, App>| pattern::stage(harness.state().scene.node(id).params().unwrap(), 1);
-    assert_eq!(rows(&harness).varied, 1);
+    assert_eq!(rows(&harness).variations().len(), 1);
 
     let click = |harness: &mut Harness<'_, App>, target: egui::Id| {
         let rect = rect_of(harness, target);
@@ -31,15 +31,27 @@ pub(crate) fn variations_are_added_and_dropped_from_the_stage_card() {
         }
     };
     click(&mut harness, crate::pattern_tool::add_variation_id(1, Vary::Spin));
-    assert_eq!(rows(&harness).varied, 2, "the Spin chip added nothing");
+    assert_eq!(rows(&harness).variations().len(), 2, "the Spin chip added nothing");
     assert!(
         harness.ctx.read_response(crate::panel_properties::grip_id("tool:2.2 Spin")).is_some(),
         "the spin's card was not drawn"
     );
+    // The spin's card is taller than the window has room for below it, so the
+    // chips it pushed down are scrolled back up to.
+    let spin = rect_of(&harness, crate::panel_properties::grip_id("tool:2.2 Spin"));
+    crate::gestures::camera::wheel(&mut harness, spin.center(), egui::vec2(0.0, -400.0));
+    for _ in 0..4 {
+        harness.step();
+    }
     click(&mut harness, crate::pattern_tool::add_variation_id(1, Vary::Shift));
     let kinds: Vec<Vary> = rows(&harness).variations().iter().map(|v| v.what).collect();
     assert_eq!(kinds, [Vary::Shift, Vary::Spin, Vary::Shift], "a second shift could not join the first");
 
+    let spin = rect_of(&harness, crate::panel_properties::grip_id("tool:2.2 Spin"));
+    crate::gestures::camera::wheel(&mut harness, spin.center(), egui::vec2(0.0, 800.0));
+    for _ in 0..4 {
+        harness.step();
+    }
     click(&mut harness, crate::pattern_tool::drop_variation_id(1, 0));
     let kinds: Vec<Vary> = rows(&harness).variations().iter().map(|v| v.what).collect();
     assert_eq!(kinds, [Vary::Spin, Vary::Shift], "the cross took off a different variation");

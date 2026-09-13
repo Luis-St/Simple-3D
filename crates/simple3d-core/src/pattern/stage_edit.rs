@@ -54,47 +54,58 @@ pub fn fresh_stage_doing(params: &Params, index: usize, size: Vec3, mode: StageM
 /// zigzag across the stage's own run, half the shape wide. A spin builds up a
 /// fifteenth of a right angle a copy, a size a tenth smaller a copy, and a gap
 /// a quarter of the step wider a copy.
-pub fn fresh_variation(params: &Params, index: usize, what: Vary, size: Vec3) -> Variation {
+///
+/// Where the stage already holds one just like it, the nearest one that is not
+/// -- another axis, or other copies -- so the chip adds a variation rather than
+/// a second copy of one. `None` where the stage has every one there is.
+pub fn fresh_variation(params: &Params, index: usize, what: Vary, size: Vec3) -> Option<Variation> {
     let own = stage(params, index);
     let extents = [size.x, size.y, size.z];
     let half_shape = |axis: usize| if extents[axis] > 1e-9 { extents[axis] / 2.0 } else { 10.0 };
-    match what {
+    let wanted = match what {
         Vary::Shift => {
             let above = (0..index)
                 .rev()
                 .map(|i| stage(params, i))
                 .find(|s| s.mode == StageMode::Move && s.step.length() > 1e-9);
-            let offset = match above {
-                Some(run) => run.step * 0.5,
+            let (axis, distance) = match above {
+                Some(run) => {
+                    let axis = along_axis(run.step);
+                    (axis, [run.step.x, run.step.y, run.step.z][axis] * 0.5)
+                }
                 None => {
                     let across = match own.mode {
                         StageMode::Turn => radial_axis(own.axis),
                         _ if own.step.length() > 1e-9 && along_axis(own.step) == 0 => 1,
                         _ => 0,
                     };
-                    unit(across) * half_shape(across)
+                    (across, half_shape(across))
                 }
             };
-            Variation::shift(offset).repeating(2)
+            Variation::shift(axis, distance).repeating(2)
         }
-        Vary::Spin => Variation::spin(15.0, if own.mode == StageMode::Turn { own.axis } else { 2 }),
-        Vary::Size => Variation::resize(0.9),
+        Vary::Spin => Variation::spin(if own.mode == StageMode::Turn { own.axis } else { 2 }, 15.0),
+        Vary::Size => Variation::resize(ALL_AXES, 0.9),
         Vary::Gap => {
             let length = own.step.length();
             Variation::widen(if length > 1e-9 { length * 0.25 } else { clear(size.x) * 0.25 })
         }
+    };
+    if !has_room_for(&own, what) {
+        return None;
     }
+    free_variation(&own, wanted)
 }
 
 /// Put `variation` on the end of stage `index`'s list. False, and nothing
-/// written, where the list is already full.
+/// written, where the stage already holds one just like it (see
+/// [`Variation::combination`]).
 pub fn add_variation(params: &mut Params, index: usize, variation: Variation) -> bool {
-    let mut stage = stage(params, index);
-    if stage.varied >= MAX_VARIATIONS {
+    let stage = stage(params, index);
+    if stage.variations().iter().any(|held| held.combination() == variation.combination()) {
         return false;
     }
-    stage = stage.with(variation);
-    set_stage(params, index, stage);
+    set_stage(params, index, &stage.with(variation));
     true
 }
 
@@ -102,13 +113,11 @@ pub fn add_variation(params: &mut Params, index: usize, variation: Variation) ->
 /// on being applied in the order they were.
 pub fn remove_variation(params: &mut Params, index: usize, slot: usize) {
     let mut stage = stage(params, index);
-    if slot >= stage.varied {
+    if slot >= stage.vary.len() {
         return;
     }
-    stage.vary.copy_within(slot + 1..stage.varied, slot);
-    stage.varied -= 1;
-    stage.vary[stage.varied] = Variation::blank(Vary::Shift);
-    set_stage(params, index, stage);
+    stage.vary.remove(slot);
+    set_stage(params, index, &stage);
 }
 
 /// A ring round the shape: four copies a right angle apart, far enough out to
@@ -151,7 +160,7 @@ pub fn remove_stage(params: &mut Params, index: usize) {
     }
     for below in index + 1..used {
         let moved = stage(params, below);
-        set_stage(params, below - 1, moved);
+        set_stage(params, below - 1, &moved);
     }
     params.insert("stages".to_string(), ParamValue::Count(used as u32 - 1));
 }
@@ -165,6 +174,6 @@ pub fn swap_stages(params: &mut Params, a: usize, b: usize) {
         return;
     }
     let (first, second) = (stage(params, a), stage(params, b));
-    set_stage(params, a, second);
-    set_stage(params, b, first);
+    set_stage(params, a, &second);
+    set_stage(params, b, &first);
 }

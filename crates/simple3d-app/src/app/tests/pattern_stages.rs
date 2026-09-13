@@ -181,10 +181,12 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
     app.add_stage_doing(pattern::StageMode::Move);
     {
         let params = app.scene.get_mut(pattern).and_then(|n| n.params_mut()).unwrap();
-        pattern::add_variation(params, 0, pattern::Variation::spin(5.0, 2));
-        pattern::add_variation(params, 0, pattern::Variation::resize(0.95));
-        pattern::add_variation(params, 0, pattern::Variation::shift(Vec3::new(1.0, 0.0, 2.0)).repeating(3));
-        params.insert("noise_turn".into(), ParamValue::Angle(4.0));
+        pattern::add_variation(params, 0, pattern::Variation::spin(2, 5.0));
+        pattern::add_variation(params, 0, pattern::Variation::resize(pattern::ALL_AXES, 0.95));
+        pattern::add_variation(params, 0, pattern::Variation::shift(0, 1.0).repeating(3).reaching(3, 1));
+        pattern::add_variation(params, 0, pattern::Variation::shift(2, 2.0).repeating(3).reaching(3, 1));
+        params.insert("noise_turn_z".into(), ParamValue::Angle(4.0));
+        params.insert("noise_turn_x".into(), ParamValue::Angle(2.0));
     }
     app.sync_pattern_tool_sections();
     app.reevaluate_for_test();
@@ -215,7 +217,9 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
                 for index in 0..3 {
                     assert!(ctx.read_response(crate::pattern_tool::drop_stage_id(index)).is_some());
                 }
-                for grip in ["tool:1.1 Spin", "tool:1.3 Shift Z", "tool:Jitter X", "tool:Jitter turn"] {
+                for grip in
+                    ["tool:1.1 Spin", "tool:1.4 Shift", "tool:Jitter X", "tool:Jitter turn Z", "tool:Jitter turn X"]
+                {
                     assert!(
                         ctx.read_response(crate::panel_properties::grip_id(grip)).is_some(),
                         "the builder did not draw {grip}"

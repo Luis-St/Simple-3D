@@ -78,52 +78,60 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     builder(app, ui, id, PATTERN_ROW);
 }
 
-/// The three parts a scatter is built from, in the order the builder lists
-/// them (issue 79).
+/// The parts a scatter is built from, in the order the builder lists them
+/// (issue 79).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Part {
     /// Moved off where the rule put it, along each axis.
     Nudge,
-    /// Turned where it stands.
-    Turn,
+    /// Turned where it stands, about one axis. A scatter takes one for each.
+    Turn(usize),
     /// Made bigger or smaller.
     Size,
 }
 
+/// The axes a turn is added about, in the order "+ Turn" takes them: Z first,
+/// the way a plank lies askew on a floor.
+const TURN_ORDER: [usize; 3] = [2, 0, 1];
+
 impl Part {
-    pub(crate) const ALL: [Part; 3] = [Part::Nudge, Part::Turn, Part::Size];
+    pub(crate) const ALL: [Part; 5] = [Part::Nudge, Part::Turn(0), Part::Turn(1), Part::Turn(2), Part::Size];
+
+    /// How many parts there are, for what the builder keeps open.
+    pub(crate) const COUNT: usize = Part::ALL.len();
 
     fn index(self) -> usize {
         match self {
             Part::Nudge => 0,
-            Part::Turn => 1,
-            Part::Size => 2,
+            Part::Turn(axis) => 1 + axis.min(2),
+            Part::Size => 4,
         }
     }
 
-    fn name(self) -> &'static str {
+    fn name(self) -> String {
         match self {
-            Part::Nudge => "Nudge",
-            Part::Turn => "Turn",
-            Part::Size => "Size",
+            Part::Nudge => "Nudge".to_string(),
+            Part::Turn(axis) => format!("Turn {}", ["X", "Y", "Z"][axis.min(2)]),
+            Part::Size => "Size".to_string(),
         }
     }
 
     fn hover(self) -> &'static str {
         match self {
             Part::Nudge => "Move each copy a little off where the rule puts it",
-            Part::Turn => "Turn each copy a little askew where it stands",
+            Part::Turn(_) => "Turn each copy a little askew where it stands, about one axis; add one for each axis",
             Part::Size => "Make each copy a little bigger or smaller",
         }
     }
 
     /// The numbers it is made of, which are what taking it off puts back to
-    /// nothing. The turn's axis is not one: it says what a turn is about, and
-    /// a turn of nothing about Z is no turn at all.
+    /// nothing.
     fn keys(self) -> &'static [&'static str] {
         match self {
             Part::Nudge => &["noise_x", "noise_y", "noise_z"],
-            Part::Turn => &["noise_turn"],
+            Part::Turn(0) => &["noise_turn_x"],
+            Part::Turn(1) => &["noise_turn_y"],
+            Part::Turn(_) => &["noise_turn_z"],
             Part::Size => &["noise_scale"],
         }
     }
@@ -137,6 +145,16 @@ impl Part {
 /// the tool and the window can both be up on one pattern.
 pub(crate) fn part_id(scope: &str, part: Part) -> egui::Id {
     egui::Id::new(("noise-add-part", scope.to_string(), part.index()))
+}
+
+/// The id of the chip that adds a turn about the next axis without one.
+pub(crate) fn add_turn_id(scope: &str) -> egui::Id {
+    egui::Id::new(("noise-add-turn", scope.to_string()))
+}
+
+/// The id of the chip that moves a turn onto `axis`.
+pub(crate) fn turn_axis_id(scope: &str, from: usize, to: usize) -> egui::Id {
+    egui::Id::new(("noise-turn-axis", scope.to_string(), from, to))
 }
 
 /// The id of the cross that takes `part` off.
@@ -154,6 +172,8 @@ pub(crate) fn shuffle_id(scope: &str) -> egui::Id {
 enum Ask {
     Add(Part),
     Drop(Part),
+    /// Move the turn about the first axis onto the second.
+    Retarget(usize, usize),
     Shuffle,
 }
 
@@ -173,7 +193,7 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
             ui.set_width(ui.available_width());
             if crate::pattern_tool::card_heading(
                 ui,
-                part.name(),
+                &part.name(),
                 &summary(*part, &params, unit),
                 drop_part_id(scope, *part),
                 "Take this part of the noise off",
@@ -190,21 +210,36 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
                     "The furthest a copy may be moved along each axis, either way",
                     style,
                 ),
-                Part::Turn => {
-                    field(app, ui, id, "noise_turn", "Up to", style);
-                    field(app, ui, id, "noise_axis", "About", style);
+                Part::Turn(axis) => {
+                    field(app, ui, id, part.keys()[0], "Up to", style);
+                    turn_axis_row(ui, scope, *axis, &shown, &mut ask);
                 }
                 Part::Size => field(app, ui, id, "noise_scale", "Up to \u{00B1} (%)", style),
             }
         });
     }
-    if shown.len() < Part::ALL.len() {
+    // What is left to add: the nudge and the size once each, and a turn while
+    // an axis is still without one.
+    let addable: Vec<Part> = [Part::Nudge, Part::Turn(TURN_ORDER[0]), Part::Size]
+        .into_iter()
+        .filter_map(|part| match part {
+            Part::Turn(_) => TURN_ORDER.iter().map(|axis| Part::Turn(*axis)).find(|turn| !shown.contains(turn)),
+            other => (!shown.contains(&other)).then_some(other),
+        })
+        .collect();
+    if !addable.is_empty() {
         ui.add_space(4.0);
         field_row_boxed(ui, "Add", "Let the copies wander off where the rule puts them", |ui| {
-            for part in Part::ALL.into_iter().filter(|part| !shown.contains(part)) {
-                let chip = theme::choice(ui, false, &format!("+ {}", part.name())).on_hover_text(part.hover());
-                // It senses nothing; the chip answers the pointer.
-                ui.interact(chip.rect, part_id(scope, part), egui::Sense::hover());
+            for part in addable {
+                let text = match part {
+                    Part::Turn(_) => "+ Turn".to_string(),
+                    other => format!("+ {}", other.name()),
+                };
+                let chip = theme::choice(ui, false, &text).on_hover_text(part.hover());
+                // It senses nothing; the chip answers the pointer. A turn's chip
+                // is one chip whichever axis it adds next.
+                let named = if matches!(part, Part::Turn(_)) { add_turn_id(scope) } else { part_id(scope, part) };
+                ui.interact(chip.rect, named, egui::Sense::hover());
                 if chip.clicked() {
                     ask = Some(Ask::Add(part));
                 }
@@ -239,6 +274,7 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
     match ask {
         Some(Ask::Add(part)) => app.add_noise_part(id, part),
         Some(Ask::Drop(part)) => app.drop_noise_part(id, part),
+        Some(Ask::Retarget(from, to)) => app.move_noise_turn(id, from, to),
         Some(Ask::Shuffle) => app.shuffle_noise(id),
         None => {}
     }
@@ -278,9 +314,27 @@ const SHUFFLE: f32 = 64.0;
 
 /// One of the scatter's rows, under the name the builder gives it.
 fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, style: RowStyle) {
-    let Some(spec) = pattern::PARAMS.iter().find(|param| param.key == key) else { return };
+    let Some(spec) = pattern::param_spec(key) else { return };
     let unit = app.unit();
     param_field_as(app, ui, &[id], id, spec, name, unit, style);
+}
+
+/// What a turn is about, as three chips in the axes' colours. The axes that
+/// already have a turn of their own are greyed: a scatter holds one turn about
+/// each, and moving this one onto another's would be two turns about one axis.
+fn turn_axis_row(ui: &mut egui::Ui, scope: &str, axis: usize, shown: &[Part], ask: &mut Option<Ask>) {
+    field_row(ui, "About", "", |ui| {
+        for other in 0..3 {
+            theme::axis_chip(ui, egui::Id::new(("noise-turn-axis-chip", scope.to_string(), axis, other)), other);
+            let taken = other != axis && shown.contains(&Part::Turn(other));
+            let chip = ui.add_enabled_ui(!taken, |ui| theme::choice(ui, other == axis, ["X", "Y", "Z"][other])).inner;
+            // Named, so a test can find it. It senses nothing; the chip answers.
+            ui.interact(chip.rect, turn_axis_id(scope, axis, other), egui::Sense::hover());
+            if chip.clicked() && other != axis {
+                *ask = Some(Ask::Retarget(axis, other));
+            }
+        }
+    });
 }
 
 /// What one part currently comes to, in a few words.
@@ -295,9 +349,9 @@ fn summary(part: Part, params: &Params, unit: simple3d_core::unit::Unit) -> Stri
             let most = scatter.offset.x.max(scatter.offset.y).max(scatter.offset.z);
             format!("up to {} {} either way", format_length(most, unit), unit.suffix())
         }
-        Part::Turn => {
-            let about = ["X", "Y", "Z", "all three axes"][scatter.axis.min(3)];
-            format!("up to {} deg about {about}", format_number(scatter.turn, 1))
+        Part::Turn(axis) => {
+            let turn = [scatter.turn.x, scatter.turn.y, scatter.turn.z][axis.min(2)];
+            format!("up to {} deg about {}", format_number(turn, 1), ["X", "Y", "Z"][axis.min(2)])
         }
         Part::Size => format!("up to \u{00B1}{} %", format_number(scatter.scale * 100.0, 0)),
     }
@@ -363,10 +417,10 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
 impl App {
     /// Whether anything here has been moved off what a fresh pattern holds.
     ///
-    /// Asked of all six rather than of the scatter itself: a seed stepped past a
-    /// scatter that looked wrong, and an axis turned from Z, are both things the
-    /// user set and both things Reset puts back, so a button that went grey
-    /// while they still said something would be lying about what it does.
+    /// Asked of all of them rather than of the scatter itself: a seed stepped
+    /// past a scatter that looked wrong is something the user set and something
+    /// Reset puts back, so a button that went grey while it still said something
+    /// would be lying about what it does.
     pub(crate) fn noise_is_set(&self, id: NodeId) -> bool {
         let Some(params) = self.scene.get(id).and_then(|node| node.params()) else { return false };
         pattern::noise_keys().iter().any(|key| match default_of(key) {
@@ -393,7 +447,7 @@ impl App {
                 }
             }
         }
-        self.noise_parts_open = (None, [false; 3]);
+        self.noise_parts_open = (None, [false; Part::COUNT]);
         self.touch();
     }
 
@@ -405,7 +459,7 @@ impl App {
 
     fn set_noise_part_open(&mut self, id: NodeId, part: Part, open: bool) {
         if self.noise_parts_open.0 != Some(id) {
-            self.noise_parts_open = (Some(id), [false; 3]);
+            self.noise_parts_open = (Some(id), [false; Part::COUNT]);
         }
         self.noise_parts_open.1[part.index()] = open;
     }
@@ -427,8 +481,8 @@ impl App {
                     params.insert("noise_x".to_string(), ParamValue::Length(amount));
                     params.insert("noise_y".to_string(), ParamValue::Length(amount));
                 }
-                Part::Turn => {
-                    params.insert("noise_turn".to_string(), ParamValue::Angle(3.0));
+                Part::Turn(axis) => {
+                    params.insert(pattern::NOISE_TURN_KEYS[axis.min(2)].to_string(), ParamValue::Angle(3.0));
                 }
                 Part::Size => {
                     params.insert("noise_scale".to_string(), ParamValue::Count(5));
@@ -453,6 +507,28 @@ impl App {
         self.touch();
     }
 
+    /// Move the turn about `from` onto `to`, amount and all -- unless `to` has a
+    /// turn of its own already.
+    pub(crate) fn move_noise_turn(&mut self, id: NodeId, from: usize, to: usize) {
+        let (from, to) = (from.min(2), to.min(2));
+        if from == to || self.noise_part_open(id, Part::Turn(to)) {
+            return;
+        }
+        let Some(params) = self.scene.get(id).and_then(|node| node.params()) else { return };
+        if Part::Turn(to).in_use(params) {
+            return;
+        }
+        let amount = params.num(pattern::NOISE_TURN_KEYS[from]);
+        self.edit("Set noise", None);
+        if let Some(params) = self.scene.get_mut(id).and_then(|node| node.params_mut()) {
+            params.insert(pattern::NOISE_TURN_KEYS[from].to_string(), ParamValue::Angle(0.0));
+            params.insert(pattern::NOISE_TURN_KEYS[to].to_string(), ParamValue::Angle(amount));
+        }
+        self.set_noise_part_open(id, Part::Turn(from), false);
+        self.set_noise_part_open(id, Part::Turn(to), true);
+        self.touch();
+    }
+
     /// Step the seed on to the next scatter of the same size.
     ///
     /// One undo step however many times it is pressed in a row: shuffling is
@@ -473,5 +549,5 @@ impl App {
 
 /// What a fresh pattern holds for one of the scatter's parameters.
 fn default_of(key: &str) -> Option<simple3d_core::primitive::ParamValue> {
-    pattern::PARAMS.iter().find(|param| param.key == key).map(|param| param.default)
+    pattern::param_spec(key).map(|param| param.default)
 }

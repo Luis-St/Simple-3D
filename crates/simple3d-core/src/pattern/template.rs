@@ -77,7 +77,7 @@ pub fn use_as_template(params: &mut Params, kind: u32) {
 /// six.
 pub fn clear_stages(params: &mut Params) {
     for index in 0..MAX_STAGES {
-        set_stage(params, index, Stage::run(1, Vec3::ZERO));
+        set_stage(params, index, &Stage::run(1, Vec3::ZERO));
     }
     params.insert("stages".to_string(), ParamValue::Count(1));
     params.insert("kind".to_string(), ParamValue::Choice(CUSTOM));
@@ -106,8 +106,7 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
     let (long, wide, tall) = (or_stock(size.x), or_stock(size.y), or_stock(size.z));
     let joint = long.min(wide) * 0.05;
     let (pitch, row) = (long + joint, wide + joint);
-    let half =
-        |across: f64| Stage::run(1, Vec3::ZERO).with(Variation::shift(Vec3::new(across / 2.0, 0.0, 0.0)).repeating(2));
+    let half = |across: f64| Stage::run(1, Vec3::ZERO).with(Variation::shift(0, across / 2.0).repeating(2));
     let stages = match preset {
         // Planks end to end along X, rows of them across Y, every other row
         // moved on by half a plank so no two joints line up.
@@ -149,7 +148,7 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
 /// Write `stages` as the rule the pattern uses, and switch the pattern to it.
 fn write_rule(params: &mut Params, stages: &[Stage]) {
     for (index, stage) in stages.iter().enumerate().take(MAX_STAGES) {
-        set_stage(params, index, *stage);
+        set_stage(params, index, stage);
     }
     params.insert("stages".to_string(), ParamValue::Count(stages.len().clamp(1, MAX_STAGES) as u32));
     params.insert("kind".to_string(), ParamValue::Choice(CUSTOM));

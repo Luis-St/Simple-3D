@@ -78,23 +78,23 @@ impl App {
         self.edit("Pattern stages", None);
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
             let fresh = pattern::fresh_stage_doing(params, used, size, mode);
-            pattern::set_stage(params, used, fresh);
+            pattern::set_stage(params, used, &fresh);
             params.insert("stages".to_string(), ParamValue::Count(used as u32 + 1));
         }
         self.pattern_tool_folded[used] = false;
     }
 
     /// Add a variation of `what` to the end of stage `index`'s list, at an
-    /// amount that shows what it does (see [`pattern::fresh_variation`]).
+    /// amount that shows what it does (see [`pattern::fresh_variation`]) --
+    /// along another axis or reaching other copies where the stage already has
+    /// one just like it. A stage that has every variation of `what` its copies
+    /// allow asks for nothing, not even an undo step.
     pub(crate) fn add_variation(&mut self, index: usize, what: pattern::Vary) {
         let Some(id) = self.pattern_tool_target() else { return };
-        if pattern::variation_count(&self.pattern_tool_params(), index) >= pattern::MAX_VARIATIONS {
-            return;
-        }
         let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
+        let Some(fresh) = pattern::fresh_variation(&self.pattern_tool_params(), index, what, size) else { return };
         self.edit("Vary pattern stage", None);
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
-            let fresh = pattern::fresh_variation(params, index, what, size);
             pattern::add_variation(params, index, fresh);
         }
     }

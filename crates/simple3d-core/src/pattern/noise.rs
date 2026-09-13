@@ -13,13 +13,45 @@
 //! step past.
 
 use super::*;
-use crate::primitive::{Params, ParamsExt};
+use crate::primitive::{ParamValue, Params, ParamsExt};
 use crate::xform::Xform;
 use simple3d_geom::Vec3;
 
 /// Every parameter the scatter is made of, in the order its window shows them.
 pub fn noise_keys() -> &'static [&'static str] {
-    &["noise_x", "noise_y", "noise_z", "noise_turn", "noise_axis", "noise_scale", "noise_seed", "noise_keep_first"]
+    &[
+        "noise_x",
+        "noise_y",
+        "noise_z",
+        "noise_turn_x",
+        "noise_turn_y",
+        "noise_turn_z",
+        "noise_scale",
+        "noise_seed",
+        "noise_keep_first",
+    ]
+}
+
+/// The turn about each axis, by axis.
+pub const NOISE_TURN_KEYS: [&str; 3] = ["noise_turn_x", "noise_turn_y", "noise_turn_z"];
+
+/// Bring an older scatter's turn up to date (issue 79).
+///
+/// A scatter used to have one turn and a choice of what it was about -- X, Y, Z
+/// or all three by the same amount. Each axis now has an amount of its own, so
+/// the one turn becomes the amount about the axis it was about, or about each
+/// of the three. Reads `stored` and writes `out`, for a project's parameters and
+/// a saved kind alike; a scatter that already has the new turns is left alone.
+pub fn migrate_noise(stored: &Params, out: &mut Params) {
+    if NOISE_TURN_KEYS.iter().any(|key| stored.contains_key(*key)) {
+        return;
+    }
+    let Some(turn) = stored.get("noise_turn").map(|v| v.as_f64()) else { return };
+    let axis = stored.get("noise_axis").map_or(2, |v| v.as_u32()).min(3) as usize;
+    for (index, key) in NOISE_TURN_KEYS.iter().enumerate() {
+        let amount = if axis == 3 || axis == index { turn } else { 0.0 };
+        out.insert((*key).to_string(), ParamValue::Angle(amount.rem_euclid(360.0)));
+    }
 }
 
 /// How far the copies may wander, as read off a pattern's parameters.
@@ -27,11 +59,8 @@ pub fn noise_keys() -> &'static [&'static str] {
 pub struct Noise {
     /// The most a copy may be nudged along each axis, either way.
     pub offset: Vec3,
-    /// The most a copy may be turned, either way, in degrees.
-    pub turn: f64,
-    /// What it is turned about: 0, 1 or 2 for one axis, 3 for all three --
-    /// each by its own amount, up to `turn`.
-    pub axis: usize,
+    /// The most a copy may be turned about each axis, either way, in degrees.
+    pub turn: Vec3,
     /// The most a copy may be made bigger or smaller, as a fraction: 0.1 is
     /// anything from a tenth smaller to a tenth bigger.
     pub scale: f64,
@@ -44,8 +73,11 @@ impl Noise {
     pub fn of(params: &Params) -> Noise {
         Noise {
             offset: Vec3::new(params.num("noise_x").abs(), params.num("noise_y").abs(), params.num("noise_z").abs()),
-            turn: params.num("noise_turn").abs(),
-            axis: params.int("noise_axis").min(3) as usize,
+            turn: Vec3::new(
+                params.num(NOISE_TURN_KEYS[0]).abs(),
+                params.num(NOISE_TURN_KEYS[1]).abs(),
+                params.num(NOISE_TURN_KEYS[2]).abs(),
+            ),
             scale: params.int("noise_scale").min(90) as f64 / 100.0,
             seed: params.int("noise_seed"),
             keep_first: params.get("noise_keep_first").is_some_and(|v| v.as_bool()),
@@ -54,7 +86,7 @@ impl Noise {
 
     /// Whether any is asked for. A pattern with none pays nothing for this.
     pub fn wanted(&self) -> bool {
-        self.offset.length() > 1e-9 || self.turn > 1e-9 || self.scale > 1e-9
+        self.offset.length() > 1e-9 || self.turn.length() > 1e-9 || self.scale > 1e-9
     }
 
     /// Where copy `index` actually goes, in its own frame: resized and turned
@@ -62,21 +94,25 @@ impl Noise {
     ///
     /// Each number has a channel of its own, and the four a scatter has always
     /// had keep theirs, so a file scattered before the turn could be about all
-    /// three axes or the size could change lands every copy where it did.
+    /// three axes or the size could change lands every copy where it did. A turn
+    /// about one axis alone draws from the channel the single turn always drew
+    /// from, whichever axis that is, and a turn about several draws a channel
+    /// for each -- which is what the old turn about all three did.
     pub fn wobble(&self, index: usize) -> Xform {
         let offset = Vec3::new(
             self.offset.x * self.signed(index, 0),
             self.offset.y * self.signed(index, 1),
             self.offset.z * self.signed(index, 2),
         );
-        let rotation = if self.axis >= 3 {
-            Vec3::new(
-                self.turn * self.signed(index, 3),
-                self.turn * self.signed(index, 4),
-                self.turn * self.signed(index, 5),
-            )
-        } else {
-            rotation_about(self.axis, self.turn * self.signed(index, 3))
+        let turns = [self.turn.x, self.turn.y, self.turn.z];
+        let about: Vec<usize> = (0..3).filter(|axis| turns[*axis] > 1e-9).collect();
+        let rotation = match about.as_slice() {
+            [axis] => rotation_about(*axis, turns[*axis] * self.signed(index, 3)),
+            _ => Vec3::new(
+                self.turn.x * self.signed(index, 3),
+                self.turn.y * self.signed(index, 4),
+                self.turn.z * self.signed(index, 5),
+            ),
         };
         let size = 1.0 + self.scale * self.signed(index, 6);
         Xform::from_pos_rot_scale(offset, rotation, Vec3::splat(size))
@@ -163,7 +199,7 @@ pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
         }
         // Each of the two can come the whole jitter towards the other, grow by
         // its share of the size jitter, and swing a corner round by its turn.
-        let turn = noise.turn.min(90.0).to_radians().sin();
+        let turn = noise.turn.x.max(noise.turn.y).max(noise.turn.z).min(90.0).to_radians().sin();
         let reach = 2.0 * across(noise.offset) + extent * noise.scale + size.length() * turn;
         if reach > gap && worst.is_none_or(|w| gap < w.gap) {
             worst = Some(Crowding { gap, reach });

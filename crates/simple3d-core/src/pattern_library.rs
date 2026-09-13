@@ -95,6 +95,7 @@ pub fn load(path: &Path) -> Option<Params> {
     // its copies more than one way, has to go on laying its copies down where
     // it always did, which is what the old numbers are read for (issue 79).
     pattern::migrate_stages(&stored, &mut out);
+    pattern::migrate_noise(&stored, &mut out);
     // The scatter only where the file has one. A kind saved without it leaves
     // whatever scatter the pattern it is applied to already has, rather than
     // taking it off: "no noise was kept" is not "keep no noise".
@@ -117,10 +118,10 @@ pub fn remove(path: &Path) -> io::Result<()> {
 /// Just the parameters that make up a custom rule, and its scatter when asked.
 pub fn extract(params: &Params, with_noise: bool) -> Params {
     let noise: &[&str] = if with_noise { pattern::noise_keys() } else { &[] };
-    pattern::custom_keys()
+    pattern::rule_keys(params)
         .into_iter()
-        .chain(noise.iter().copied())
-        .filter_map(|key| params.get(key).map(|v| (key.to_string(), *v)))
+        .chain(noise.iter().map(|key| key.to_string()))
+        .filter_map(|key| params.get(&key).copied().map(|v| (key, v)))
         .collect()
 }
 
@@ -228,7 +229,7 @@ mod tests {
         let back = load(&dir(&config).join("Old.json")).expect("an older kind should still load");
         assert_eq!(
             pattern::stage(&back, 1).variations(),
-            [pattern::Variation::shift(simple3d_geom::Vec3::new(7.0, 0.0, 0.0)).repeating(2)],
+            [pattern::Variation::shift(0, 7.0).repeating(2)],
             "the older kind lost its stagger"
         );
         let _ = std::fs::remove_dir_all(&config);

@@ -67,7 +67,7 @@ impl StageMode {
 /// it is what lets the copies *vary* at all: a gap that widens, a shift that
 /// comes round every other copy, a size that shrinks are all a function of `i`
 /// and of nothing a previous copy did.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Stage {
     pub mode: StageMode,
     pub count: u32,
@@ -83,12 +83,9 @@ pub struct Stage {
     /// How far along `axis` each copy after the first climbs -- what turns a
     /// ring into a helix.
     pub rise: f64,
-    /// How many of `vary` are in use.
-    pub varied: usize,
     /// What changes the copies from one to the next, applied in this order
-    /// (issue 79). Only the first `varied` of them mean anything; the rest are
-    /// blank, so two stages that vary their copies alike compare equal.
-    pub vary: [Variation; MAX_VARIATIONS],
+    /// (issue 79).
+    pub vary: Vec<Variation>,
 }
 
 impl Stage {
@@ -117,24 +114,19 @@ impl Stage {
             radius: 0.0,
             growth: 0.0,
             rise: 0.0,
-            varied: 0,
-            vary: [Variation::blank(Vary::Shift); MAX_VARIATIONS],
+            vary: Vec::new(),
         }
     }
 
-    /// The same stage with `variation` on the end of its list. A full list is
-    /// left as it is.
+    /// The same stage with `variation` on the end of its list.
     pub fn with(mut self, variation: Variation) -> Stage {
-        if self.varied < MAX_VARIATIONS {
-            self.vary[self.varied] = variation;
-            self.varied += 1;
-        }
+        self.vary.push(variation);
         self
     }
 
-    /// The variations in use, in the order they are applied.
+    /// The variations, in the order they are applied.
     pub fn variations(&self) -> &[Variation] {
-        &self.vary[..self.varied.min(MAX_VARIATIONS)]
+        &self.vary
     }
 
     /// Whether the stage changes its copies from one to the next rather than
@@ -205,7 +197,7 @@ impl Stage {
         if self.mode != StageMode::Move {
             return 0.0;
         }
-        self.variations().iter().filter(|v| v.what == Vary::Gap).map(|v| v.gap * v.times(j)).sum()
+        self.variations().iter().filter(|v| v.what == Vary::Gap).map(|v| v.amount * v.times(j)).sum()
     }
 
     /// How many copies it makes. A mirror is always two.
@@ -222,11 +214,7 @@ impl Stage {
 pub fn stage(params: &Params, index: usize) -> Stage {
     let index = index.min(MAX_STAGES - 1);
     let k = &STAGES[index];
-    let varied = variation_count(params, index);
-    let mut vary = [Variation::blank(Vary::Shift); MAX_VARIATIONS];
-    for (slot, keys) in k.vary.iter().enumerate().take(varied) {
-        vary[slot] = read_variation(params, keys);
-    }
+    let vary = (0..variation_count(params, index)).map(|slot| read_variation(params, index, slot)).collect();
     Stage {
         mode: StageMode::from_index(params.int(k.mode)),
         count: params.int(k.count).max(1),
@@ -236,15 +224,15 @@ pub fn stage(params: &Params, index: usize) -> Stage {
         radius: params.num(k.radius),
         growth: params.num(k.growth),
         rise: params.num(k.rise),
-        varied,
         vary,
     }
 }
 
 /// Write one stage back into a pattern's parameters -- its variations too, and
-/// the slots past the last one it uses as blank.
-pub fn set_stage(params: &mut Params, index: usize, stage: Stage) {
-    let k = &STAGES[index.min(MAX_STAGES - 1)];
+/// nothing left behind of a longer list it used to have.
+pub fn set_stage(params: &mut Params, index: usize, stage: &Stage) {
+    let index = index.min(MAX_STAGES - 1);
+    let k = &STAGES[index];
     params.insert(k.mode.to_string(), ParamValue::Choice(stage.mode.index()));
     params.insert(k.count.to_string(), ParamValue::Count(stage.count.clamp(1, 512)));
     for (key, component) in k.step.iter().zip([stage.step.x, stage.step.y, stage.step.z]) {
@@ -255,10 +243,10 @@ pub fn set_stage(params: &mut Params, index: usize, stage: Stage) {
     params.insert(k.radius.to_string(), ParamValue::Length(stage.radius));
     params.insert(k.growth.to_string(), ParamValue::Length(stage.growth));
     params.insert(k.rise.to_string(), ParamValue::Length(stage.rise));
-    let varied = stage.varied.min(MAX_VARIATIONS);
-    params.insert(k.varied.to_string(), ParamValue::Count(varied as u32));
-    for (slot, keys) in k.vary.iter().enumerate() {
-        let blank = Variation::blank(Vary::Shift);
-        write_variation(params, keys, if slot < varied { &stage.vary[slot] } else { &blank });
+    let used = stage.vary.len().min(MAX_VARIATIONS as usize);
+    params.insert(k.variations.to_string(), ParamValue::Count(used as u32));
+    clear_variations_from(params, index, used);
+    for (slot, variation) in stage.vary.iter().take(used).enumerate() {
+        write_variation(params, index, slot, variation);
     }
 }
