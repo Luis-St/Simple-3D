@@ -12,14 +12,11 @@
 
 use super::*;
 use crate::app::App;
-use crate::panel_properties::{
-    field_row, field_row_boxed, param_field_as, row_right_edge, vector_row, PATTERN_TOOL_ROW,
-};
+use crate::panel_properties::{field_row_boxed, param_field_as, vector_row, PATTERN_TOOL_ROW};
 use crate::theme::{self, token};
-use simple3d_core::pattern::{self, StageMode, Variation, Vary, VaryField};
-use simple3d_core::primitive::{ParamValue, Params};
+use simple3d_core::pattern::{self, StageMode, Vary};
+use simple3d_core::primitive::Params;
 use simple3d_core::scene::NodeId;
-use simple3d_core::unit::Unit;
 
 /// What one of the builder's controls asked for this frame. Collected and acted
 /// on after the stages are drawn, because acting while the loop over them is
@@ -194,149 +191,6 @@ fn stage_card(
     }
 }
 
-/// One variation on a stage: its heading, what it is along or about, how much,
-/// which copies it reaches and how its amount steps over them. Returns whether
-/// its cross was pressed.
-fn variation_card(
-    app: &mut App,
-    ui: &mut egui::Ui,
-    id: NodeId,
-    index: usize,
-    slot: usize,
-    stage: &pattern::Stage,
-    params: &Params,
-) -> bool {
-    let variation = &stage.variations()[slot];
-    let key = |field: VaryField| pattern::vary_key(index, slot, field);
-    let unit = app.unit();
-    let dropped = card_heading(
-        ui,
-        &variation_name(variation),
-        &describe_variation(variation, stage.mode, unit),
-        drop_variation_id(index, slot),
-        "Take this variation off the stage",
-    );
-    // Kept rather than thrown away when the stage turns: switching back to a
-    // run brings it back, and the cross is right there for anyone who wants it
-    // gone.
-    if !variation.what.fits(stage.mode) {
-        note(ui, "A turn has no gaps between its copies, so this does nothing here.");
-        return dropped;
-    }
-    if variation.what != Vary::Gap {
-        axis_choice(app, ui, id, &key(VaryField::Axis), variation);
-    }
-    // Named for what one step is: more each time, or the same on every copy.
-    let (builds_up, repeats) = match variation.what {
-        Vary::Shift => ("Shift per step", "Shift by"),
-        Vary::Spin => ("Turn per step", "Turn by"),
-        Vary::Size => ("Size per step (%)", "Size by (%)"),
-        Vary::Gap => ("Gap grows by", "Gap wider by"),
-    };
-    let amount = if variation.repeats { repeats } else { builds_up };
-    field(app, ui, id, &key(VaryField::amount_of(variation.what)), amount, params);
-    field(app, ui, id, &key(VaryField::Every), "Every (copies)", params);
-    field(app, ui, id, &key(VaryField::Start), "Starting at copy", params);
-    field(app, ui, id, &key(VaryField::Steps), "Steps", params);
-    // Two alike are allowed to stand -- one can be edited into the other -- but
-    // not silently: they are one variation with the amounts added up.
-    let alike = stage
-        .variations()
-        .iter()
-        .enumerate()
-        .find(|(other, held)| *other != slot && held.combination() == variation.combination());
-    if let Some((other, _)) = alike {
-        note(
-            ui,
-            format!(
-                "The same as variation {} on this stage: along the same axis, over the same copies, so the two add up.",
-                other + 1
-            ),
-        );
-    }
-    dropped
-}
-
-/// What a variation's card is headed: its kind, and the axis it is along or
-/// about.
-fn variation_name(variation: &Variation) -> String {
-    match variation.what {
-        Vary::Gap => variation.what.name().to_string(),
-        what => format!("{} {}", what.name(), pattern::VARY_AXES[variation.axis.min(pattern::ALL_AXES)]),
-    }
-}
-
-/// The axes a variation can be along or about. Plain chips: the axis colours
-/// belong in front of value fields, and a chip already says its axis.
-fn axis_choice(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, variation: &Variation) {
-    let name = if variation.what == Vary::Spin { "About" } else { "Along" };
-    field_row(ui, name, "", |ui| {
-        for &axis in variation.what.axes() {
-            let chosen = variation.axis == axis;
-            if theme::choice(ui, chosen, pattern::VARY_AXES[axis]).clicked() && !chosen {
-                app.edit("Set pattern", None);
-                if let Some(params) = app.scene.get_mut(id).and_then(|node| node.params_mut()) {
-                    params.insert(key.to_string(), ParamValue::Choice(axis as u32));
-                }
-            }
-        }
-    });
-}
-
-/// What each kind of variation is for, on the chip that adds it.
-fn vary_hover(what: Vary) -> &'static str {
-    match what {
-        Vary::Shift => "Move copies aside where they stand: every other one by half a step staggers rows",
-        Vary::Spin => "Turn each copy about its own origin",
-        Vary::Size => "Make each copy bigger or smaller than the one before",
-        Vary::Gap => "Widen or narrow the gaps along the run",
-    }
-}
-
-/// A card's heading inside the builder: its name, what it currently does in a
-/// few words, and the cross that takes it off. Returns whether the cross was
-/// pressed.
-pub(crate) fn card_heading(ui: &mut egui::Ui, name: &str, summary: &str, cross_id: egui::Id, hover: &str) -> bool {
-    let mut clicked = false;
-    capped_row(ui, |ui| {
-        ui.add(egui::Label::new(theme::header_text(name)).selectable(false));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let cross = ui.add_sized(egui::Vec2::splat(CARD_CROSS), egui::Button::new("\u{00d7}")).on_hover_text(hover);
-            // It senses nothing; the button answers the pointer.
-            ui.interact(cross.rect, cross_id, egui::Sense::hover());
-            clicked = cross.clicked();
-        });
-    });
-    if !summary.is_empty() {
-        note(ui, summary);
-    }
-    clicked
-}
-
-/// A chip that adds something to the builder, named by `id` rather than found
-/// by the word on it, so a test can ask where it was drawn. Returns whether it
-/// was pressed.
-pub(crate) fn add_chip(ui: &mut egui::Ui, text: &str, hover: &str, id: egui::Id) -> bool {
-    let chip = theme::choice(ui, false, text).on_hover_text(hover);
-    // It senses nothing; the chip answers the pointer.
-    ui.interact(chip.rect, id, egui::Sense::hover());
-    chip.clicked()
-}
-
-/// A quiet line of English under a card's numbers, wrapped to the column.
-pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
-    ui.add(egui::Label::new(theme::hint(text)).selectable(false).wrap());
-}
-
-/// A row that ends where the field rows under it do (see [`heading`]).
-fn capped_row(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    let right = row_right_edge(ui);
-    ui.horizontal(|ui| {
-        ui.set_max_width((right - ui.max_rect().left()).max(0.0));
-        add(ui);
-    });
-}
-
 /// A stage's heading: the twisty and name that fold it, and the arrows and
 /// cross that move and drop it.
 ///
@@ -420,108 +274,11 @@ fn heading(ui: &mut egui::Ui, index: usize, used: usize, folded: bool) -> Option
 /// label is what a value field answers to across a relayout, so four stages
 /// with a "Copies" each must carry a number -- "1 Copies", "2.1 Spin" -- that
 /// the card they sit on has already said.
-fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, params: &Params) {
+pub(super) fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, params: &Params) {
     let Some(spec) = pattern::param_spec(key) else { return };
     if !pattern::param_visible(spec, params) {
         return;
     }
     let unit = app.unit();
     param_field_as(app, ui, &[id], id, spec, name, unit, PATTERN_TOOL_ROW);
-}
-
-/// A line of English saying what one stage does, so the numbers under it can be
-/// read without working them out.
-pub(crate) fn describe(stage: &pattern::Stage, unit: Unit) -> String {
-    use simple3d_core::unit::format_number;
-    let axis = pattern::VARY_AXES[stage.axis.min(2)];
-    if stage.mode == StageMode::Mirror {
-        return format!("mirrored across {axis}");
-    }
-    let length = |mm: f64| length(mm, unit);
-    let mut what: Vec<String> = Vec::new();
-    if stage.mode == StageMode::Turn {
-        if stage.turn.abs() > 1e-9 {
-            what.push(format!("turning {} deg about {axis}", format_number(stage.turn, 1)));
-        }
-        if stage.radius.abs() > 1e-9 || stage.growth.abs() > 1e-9 {
-            what.push(format!("at radius {}", length(stage.radius)));
-        }
-        if stage.rise.abs() > 1e-9 {
-            what.push(format!("rising {}", length(stage.rise)));
-        }
-    } else if stage.step.length() > 1e-9 {
-        what.push(format!("{} apart", length(stage.step.length())));
-    }
-    // What varies the copies, in the same sentence: a rule that staggers its
-    // rows has to say so where the rule is read, even with its cards folded.
-    for variation in stage.variations().iter().filter(|v| v.acts(stage.mode)) {
-        what.push(describe_variation(variation, stage.mode, unit));
-    }
-    if what.is_empty() {
-        what.push("in place".to_string());
-    }
-    // A blank stage makes exactly one copy, and a line of English reading
-    // "1 copies" draws attention to itself rather than to the stage.
-    let copies = stage.copies();
-    format!("{copies} cop{}, {}", if copies == 1 { "y" } else { "ies" }, what.join(", "))
-}
-
-/// A few words saying what one variation does to a stage doing `mode`.
-pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: Unit) -> String {
-    use simple3d_core::unit::format_number;
-    if !variation.what.fits(mode) {
-        return "does nothing on a turn".to_string();
-    }
-    if !variation.acts(mode) {
-        return "nothing yet".to_string();
-    }
-    let length = |mm: f64| length(mm, unit);
-    let axis = ["X", "Y", "Z", "all axes"][variation.axis.min(pattern::ALL_AXES)];
-    let copies = reach(variation);
-    let more = if variation.repeats { "" } else { ", more each time" };
-    match variation.what {
-        Vary::Shift => format!("shifting {} along {axis} {copies}{more}", length(variation.amount)),
-        Vary::Spin => format!("spinning {} deg about {axis} {copies}{more}", format_number(variation.amount, 1)),
-        Vary::Size => {
-            let along = if variation.axis == pattern::ALL_AXES { String::new() } else { format!(" along {axis}") };
-            format!("sized {} %{along} {copies}{more}", format_number(variation.amount * 100.0, 0))
-        }
-        Vary::Gap => {
-            let way = if variation.amount > 0.0 { "widening" } else { "narrowing" };
-            format!("gaps {way} {} after {copies}{more}", length(variation.amount.abs()))
-        }
-    }
-}
-
-/// A length with its unit, the way a sentence says it.
-pub(crate) fn length(mm: f64, unit: Unit) -> String {
-    format!("{} {}", simple3d_core::unit::format_length(mm, unit), unit.suffix())
-}
-
-/// Which copies a variation reaches, in words.
-fn reach(variation: &Variation) -> String {
-    let from = match variation.start {
-        1 => " from the original".to_string(),
-        2 => String::new(),
-        start => format!(" from copy {start}"),
-    };
-    match variation.every {
-        1 if variation.start == 1 => "every copy".to_string(),
-        1 if variation.start == 2 => "every copy after the original".to_string(),
-        1 => format!("every copy{from}"),
-        2 => format!("every other copy{from}"),
-        every => format!("every {} copy{from}", ordinal(every)),
-    }
-}
-
-/// 3rd, 4th, 11th, 22nd.
-fn ordinal(n: u32) -> String {
-    let suffix = match (n % 10, n % 100) {
-        (_, 11..=13) => "th",
-        (1, _) => "st",
-        (2, _) => "nd",
-        (3, _) => "rd",
-        _ => "th",
-    };
-    format!("{n}{suffix}")
 }

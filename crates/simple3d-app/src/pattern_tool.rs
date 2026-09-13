@@ -44,6 +44,12 @@ mod shelf;
 pub(crate) use shelf::*;
 mod stages;
 pub(crate) use stages::*;
+mod variation_card;
+use variation_card::*;
+mod cards;
+pub(crate) use cards::*;
+mod describe;
+pub(crate) use describe::*;
 mod actions;
 pub(crate) use actions::*;
 

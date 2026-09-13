@@ -26,10 +26,12 @@ mod stage;
 pub use stage::{set_stage, stage, Stage, StageMode, STAGE_MODES};
 mod variation;
 pub(crate) use variation::*;
-pub use variation::{
-    combinations, free_variation, has_room_for, param_spec, parse_vary_key, variation_keys, vary_key, vary_spec,
-    Variation, Vary, VaryField, ALL_AXES, MAX_CYCLE, MAX_VARIATIONS, STEPS, VARIES, VARY_AXES,
-};
+pub use variation::{Variation, Vary, ALL_AXES, MAX_CYCLE, MAX_VARIATIONS, STEPS, VARIES, VARY_AXES};
+mod vary_keys;
+pub(crate) use vary_keys::*;
+pub use vary_keys::{param_spec, parse_vary_key, variation_keys, vary_key, vary_spec, VaryField};
+mod vary_room;
+pub use vary_room::{combinations, free_variation, has_room_for};
 mod stage_edit;
 pub use stage_edit::{
     add_variation, fresh_stage, fresh_stage_doing, fresh_variation, remove_stage, remove_variation, swap_stages,
