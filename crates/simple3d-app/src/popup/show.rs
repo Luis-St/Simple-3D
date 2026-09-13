@@ -82,6 +82,37 @@ pub fn body_room(bounds: egui::Rect) -> f32 {
     (bounds.height() - TITLE_BAR - PAD * 3.0 - theme::metric::DIALOG_BUTTON - theme::metric::GAP * 2.0).max(120.0)
 }
 
+/// A popup's body, scrolling once it is taller than [`body_room`].
+///
+/// The bar goes in the window's right padding rather than inside the column:
+/// taken out of the column, it squeezed every row the moment it appeared, and
+/// three fields side by side lost what they had to spare. The content keeps the
+/// width it has either way.
+pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.available_width();
+    let mut room = ui.available_rect_before_wrap();
+    room.max.x += PAD;
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(room));
+    let (area, restore) = theme::list_scroll_area(&mut child);
+    // Gap, bar and margin together fill the padding exactly, so the bar sits
+    // clear of both the fields and the window's border.
+    let scroll = &mut child.style_mut().spacing.scroll;
+    scroll.bar_inner_margin = 2.0;
+    scroll.bar_width = PAD - 4.0;
+    scroll.bar_outer_margin = 2.0;
+    area.auto_shrink([false, true]).max_height(body_room(bounds)).show(&mut child, |ui| {
+        ui.set_style(restore);
+        // Never wider than it is given: while the bar slides in, the room is
+        // briefly less than the column.
+        ui.set_max_width(ui.available_width().min(width));
+        body(ui);
+    });
+    // Only the column is taken from the window: the padding the bar sits in is
+    // the window's already, and claiming it would widen the window by that much.
+    let used = child.min_rect();
+    ui.advance_cursor_after_rect(egui::Rect::from_min_size(used.min, egui::vec2(width, used.height())));
+}
+
 /// The buttons along the foot of a popup, under a rule: right-aligned and laid
 /// out right to left, so the closure names the rightmost -- the one that goes
 /// through with the command -- first. The same shape as a dialog's row, because

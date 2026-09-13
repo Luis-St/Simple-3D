@@ -20,7 +20,7 @@
 //! that wants one asks for one.
 
 mod show;
-pub use show::{action_row, body_room, show};
+pub use show::{action_row, scrolling_body, show};
 mod title_bar;
 pub(crate) use title_bar::*;
 mod settle;

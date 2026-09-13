@@ -3,7 +3,7 @@
 use super::*;
 use crate::app::App;
 use crate::popup::{self, PopupEvent, PopupSpec};
-use crate::{theme, ui};
+use crate::ui;
 use simple3d_geom::tiling::CellKind;
 
 /// The tool's own window, drawn over the viewport once a frame while it is open
@@ -30,11 +30,7 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
         // Three cuts is three columns of fields, which is taller than a short
         // viewport: the body scrolls rather than pushing Split and Cancel off
         // the bottom of the screen where nothing can reach them.
-        let (area, restore) = theme::list_scroll_area(ui);
-        area.auto_shrink([false, true]).max_height(popup::body_room(bounds)).show(ui, |ui| {
-            ui.set_style(restore);
-            body(app, ui);
-        });
+        popup::scrolling_body(ui, bounds, |ui| body(app, ui));
         popup::action_row(ui, |ui| actions(app, ui));
     });
     app.popups.insert(KEY, placement);

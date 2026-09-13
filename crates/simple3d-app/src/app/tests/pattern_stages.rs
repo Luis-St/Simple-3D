@@ -229,3 +229,48 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
         }
     }
 }
+
+/// Two stages each with a "Step" row gave the axis chips in front of the fields
+/// the same ids, and a popup short enough to scroll took the bar out of the
+/// fields' width. Neither may happen again.
+#[test]
+pub(crate) fn a_scrolling_tool_keeps_its_field_widths_and_no_ids_clash() {
+    let (mut app, _) = with_rule();
+    app.add_stage_doing(pattern::StageMode::Move);
+    app.add_stage_doing(pattern::StageMode::Move);
+    app.pattern_tool_started = true;
+    app.sync_pattern_tool_sections();
+    app.reevaluate_for_test();
+    let mut widths = Vec::new();
+    for tall in [3000.0_f32, 400.0] {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, tall));
+        app.popups.clear();
+        let mut clashes = Vec::new();
+        // Enough frames, a tenth of a second apart, for the window to grow to
+        // its height and the bar to slide in or out again.
+        for frame in 0..30 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, tall))),
+                time: Some(frame as f64 * 0.1),
+                ..Default::default()
+            };
+            let out = ctx.run(input, |ctx| crate::pattern_tool::show(&mut app, ctx));
+            let mut shapes: Vec<egui::Shape> = out.shapes.into_iter().map(|clipped| clipped.shape).collect();
+            while let Some(shape) = shapes.pop() {
+                match shape {
+                    egui::Shape::Vec(inner) => shapes.extend(inner),
+                    egui::Shape::Text(text) if text.galley.text().contains("widget ID") => {
+                        clashes.push(text.galley.text().to_string())
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(clashes.is_empty(), "ids clashed at {tall} px: {clashes:?}");
+        // The stage's cross ends where its fields do, at the column's edge.
+        widths.push(ctx.read_response(crate::pattern_tool::drop_stage_id(0)).map(|r| r.rect.max.x));
+    }
+    assert_eq!(widths[0], widths[1], "the scrollbar took room from the column");
+}

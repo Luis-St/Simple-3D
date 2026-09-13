@@ -30,11 +30,7 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
             // Four rows and a hint is a short window until the rows stack on a
             // narrow one, and a viewport can be short: the body scrolls rather
             // than pushing the button off the bottom of the screen.
-            let (area, restore) = theme::list_scroll_area(ui);
-            area.auto_shrink([false, true]).max_height(popup::body_room(bounds)).show(ui, |ui| {
-                ui.set_style(restore);
-                body(app, ui);
-            });
+            popup::scrolling_body(ui, bounds, |ui| body(app, ui));
             popup::action_row(ui, |ui| actions(app, ui));
         });
     app.popups.insert(KEY, placement);

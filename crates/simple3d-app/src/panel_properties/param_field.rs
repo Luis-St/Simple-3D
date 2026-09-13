@@ -178,8 +178,11 @@ pub(crate) fn vector_row(
     if specs.len() != 3 {
         return;
     }
+    // The axis chips are named after the first value rather than the row's
+    // name: every stage has a "Step", and chips named after that clashed.
+    let chips = format!("{}:{}", style.grip_scope, keys[0]);
     field_row(ui, &named(name, unit.suffix()), hover, |ui| {
-        point_fields(ui, name, |ui, axis| {
+        point_fields(ui, &chips, |ui, axis| {
             let spec = specs[axis];
             // Named after the value rather than where it sits, and told apart
             // by the scope, so the tool and the noise window can show the same

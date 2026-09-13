@@ -76,11 +76,7 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
         // Four stages is four columns of fields, which is taller than a short
         // viewport: the body scrolls rather than pushing the buttons off the
         // bottom of the screen where nothing can reach them.
-        let (area, restore) = theme::list_scroll_area(ui);
-        area.auto_shrink([false, true]).max_height(popup::body_room(bounds)).show(ui, |ui| {
-            ui.set_style(restore);
-            body(app, ui);
-        });
+        popup::scrolling_body(ui, bounds, |ui| body(app, ui));
         popup::action_row(ui, |ui| actions(app, ui));
     });
     app.popups.insert(KEY, placement);
