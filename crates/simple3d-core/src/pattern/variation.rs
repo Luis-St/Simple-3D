@@ -24,7 +24,7 @@ use super::*;
 use crate::primitive::{ParamKind, ParamSpec, ParamValue, Params};
 use crate::xform::Xform;
 use simple3d_geom::Vec3;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 /// What a variation changes.
@@ -59,21 +59,11 @@ impl Vary {
     pub const ALL: [Vary; 4] = [Vary::Shift, Vary::Spin, Vary::Size, Vary::Gap];
 
     pub fn index(self) -> u32 {
-        match self {
-            Vary::Shift => 0,
-            Vary::Spin => 1,
-            Vary::Size => 2,
-            Vary::Gap => 3,
-        }
+        self as u32
     }
 
     pub fn from_index(index: u32) -> Vary {
-        match index {
-            1 => Vary::Spin,
-            2 => Vary::Size,
-            3 => Vary::Gap,
-            _ => Vary::Shift,
-        }
+        Vary::ALL.get(index as usize).copied().unwrap_or(Vary::Shift)
     }
 
     pub fn name(self) -> &'static str {
@@ -158,10 +148,14 @@ impl Variation {
         Variation { every: every.clamp(1, MAX_CYCLE), start: start.clamp(1, MAX_CYCLE), ..self }
     }
 
+    /// The first copy it reaches, counted from nought.
+    fn first(&self) -> u32 {
+        self.start.max(1) - 1
+    }
+
     /// Whether it reaches copy `i`, counted from nought.
     pub fn reaches(&self, i: u32) -> bool {
-        let first = self.start.max(1) - 1;
-        i >= first && (i - first).is_multiple_of(self.every.max(1))
+        i >= self.first() && (i - self.first()).is_multiple_of(self.every.max(1))
     }
 
     /// How many steps of it copy `i` gets.
@@ -171,19 +165,18 @@ impl Variation {
         } else if self.repeats {
             1.0
         } else {
-            ((i - (self.start.max(1) - 1)) / self.every.max(1) + 1) as f64
+            ((i - self.first()) / self.every.max(1) + 1) as f64
         }
     }
 
     /// How many steps the copies before copy `i` got between them, which is how
     /// far along its run a gap variation puts that copy.
     fn times_before(&self, i: u32) -> f64 {
-        let first = self.start.max(1) - 1;
-        if i <= first {
+        if i <= self.first() {
             return 0.0;
         }
         // The copies it reached before `i`, and the steps they got.
-        let reached = ((i - first - 1) / self.every.max(1) + 1) as f64;
+        let reached = ((i - self.first() - 1) / self.every.max(1) + 1) as f64;
         if self.repeats {
             reached
         } else {
@@ -193,11 +186,15 @@ impl Variation {
 
     /// Whether it changes anything on a stage doing `mode`.
     pub fn acts(&self, mode: StageMode) -> bool {
-        self.what.fits(mode)
-            && match self.what {
-                Vary::Size => (self.amount - 1.0).abs() > 1e-9,
-                _ => self.amount.abs() > 1e-9,
-            }
+        self.what.fits(mode) && self.changes()
+    }
+
+    /// Whether its amount is anything but no change.
+    fn changes(&self) -> bool {
+        match self.what {
+            Vary::Size => (self.amount - 1.0).abs() > 1e-9,
+            _ => self.amount.abs() > 1e-9,
+        }
     }
 
     /// What makes it a different variation from another of the same kind: the
@@ -214,17 +211,13 @@ impl Variation {
     /// itself (see [`Variation::gap_before`]).
     pub(crate) fn reshape(&self, i: u32) -> Option<Xform> {
         let times = self.times(i);
-        if times == 0.0 {
+        if times == 0.0 || !self.changes() {
             return None;
         }
         match self.what {
-            Vary::Shift if self.amount.abs() > 1e-9 => {
-                Some(Xform::from_translation(unit(self.axis) * (self.amount * times)))
-            }
-            Vary::Spin if self.amount.abs() > 1e-9 => {
-                Some(Xform::from_pos_rot(Vec3::ZERO, rotation_about(self.axis, self.amount * times)))
-            }
-            Vary::Size if (self.amount - 1.0).abs() > 1e-9 => {
+            Vary::Shift => Some(Xform::from_translation(unit(self.axis) * (self.amount * times))),
+            Vary::Spin => Some(Xform::from_pos_rot(Vec3::ZERO, rotation_about(self.axis, self.amount * times))),
+            Vary::Size => {
                 // Kept above nothing: a hundred copies at 90 % each come out a
                 // few hundred-thousandths of the first, and a copy of no size at
                 // all is a degenerate matrix the rest of the program has no use
@@ -236,7 +229,7 @@ impl Variation {
                 };
                 Some(Xform::from_pos_rot_scale(Vec3::ZERO, Vec3::ZERO, scale))
             }
-            _ => None,
+            Vary::Gap => None,
         }
     }
 
@@ -389,10 +382,10 @@ pub(crate) fn read_variation(params: &Params, stage: usize, slot: usize) -> Vari
         Vary::Size => value(VaryField::Size).as_u32().clamp(10, 1000) as f64 / 100.0,
         _ => value(VaryField::amount_of(what)).as_f64(),
     };
-    let axis = value(VaryField::Axis).as_u32() as usize;
+    let most_axis = if what == Vary::Size { ALL_AXES } else { 2 };
     Variation {
         what,
-        axis: if what == Vary::Size { axis.min(ALL_AXES) } else { axis.min(2) },
+        axis: (value(VaryField::Axis).as_u32() as usize).min(most_axis),
         amount,
         repeats: value(VaryField::Steps).as_u32() == 1,
         every: value(VaryField::Every).as_u32().clamp(1, MAX_CYCLE),
@@ -442,14 +435,12 @@ pub fn combinations(what: Vary, copies: u32) -> usize {
 /// the same as any it already holds.
 pub fn has_room_for(stage: &Stage, what: Vary) -> bool {
     let copies = stage.copies() as u32;
-    let mut taken: Vec<_> = stage
+    let taken: HashSet<_> = stage
         .variations()
         .iter()
         .filter(|v| v.what == what && v.every <= copies && v.start <= copies)
         .map(Variation::combination)
         .collect();
-    taken.sort_by_key(|c| (c.1, c.2, c.3, c.4));
-    taken.dedup();
     what.fits(stage.mode) && taken.len() < combinations(what, copies)
 }
 

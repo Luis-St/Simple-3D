@@ -52,9 +52,7 @@ pub(crate) fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let params = app.pattern_tool_params();
     let used = pattern::stage_count(&params);
     let mut ask = None;
-    let right = row_right_edge(ui);
-    ui.horizontal(|ui| {
-        ui.set_max_width((right - ui.max_rect().left()).max(0.0));
+    capped_row(ui, |ui| {
         ui.add(egui::Label::new(theme::header_text("Stages")).selectable(false));
         ui.add(egui::Label::new(theme::value(format!("{used} of {}", pattern::MAX_STAGES))).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -98,11 +96,7 @@ pub(crate) fn stages(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         ui.add_space(6.0);
         field_row_boxed(ui, "Add a stage", "Repeat everything the stages above make", |ui| {
             for (mode, text, hover) in ADD_STAGE {
-                let chip = theme::choice(ui, false, text).on_hover_text(hover);
-                // Named rather than found by the word on it, so a test can ask
-                // where it was drawn. It senses nothing; the chip answers.
-                ui.interact(chip.rect, add_stage_id(mode), egui::Sense::hover());
-                if chip.clicked() {
+                if add_chip(ui, text, hover, add_stage_id(mode)) {
                     ask = Some(Ask::Add(mode));
                 }
             }
@@ -139,7 +133,7 @@ fn stage_card(
     // What the stage does in a line of English, under its name rather than
     // beside it: beside it, a long one pushed the stage's own buttons off the
     // end of the row.
-    ui.add(egui::Label::new(theme::hint(describe(&stage, unit))).selectable(false).wrap());
+    note(ui, describe(&stage, unit));
     if folded {
         return;
     }
@@ -191,9 +185,7 @@ fn stage_card(
              kind for every axis and set of copies it can reach.",
             |ui| {
                 for what in room {
-                    let chip = theme::choice(ui, false, &format!("+ {}", what.name())).on_hover_text(vary_hover(what));
-                    ui.interact(chip.rect, add_variation_id(index, what), egui::Sense::hover());
-                    if chip.clicked() {
+                    if add_chip(ui, &format!("+ {}", what.name()), vary_hover(what), add_variation_id(index, what)) {
                         *ask = Some(Ask::AddVariation(index, what));
                     }
                 }
@@ -228,47 +220,20 @@ fn variation_card(
     // run brings it back, and the cross is right there for anyone who wants it
     // gone.
     if !variation.what.fits(stage.mode) {
-        ui.add(
-            egui::Label::new(theme::hint("A turn has no gaps between its copies, so this does nothing here."))
-                .selectable(false)
-                .wrap(),
-        );
+        note(ui, "A turn has no gaps between its copies, so this does nothing here.");
         return dropped;
     }
     if variation.what != Vary::Gap {
         axis_choice(app, ui, id, &key(VaryField::Axis), variation);
     }
-    let each = !variation.repeats;
-    let amount = match variation.what {
-        Vary::Shift => {
-            if each {
-                "Shift per step"
-            } else {
-                "Shift by"
-            }
-        }
-        Vary::Spin => {
-            if each {
-                "Turn per step"
-            } else {
-                "Turn by"
-            }
-        }
-        Vary::Size => {
-            if each {
-                "Size per step (%)"
-            } else {
-                "Size by (%)"
-            }
-        }
-        Vary::Gap => {
-            if each {
-                "Gap grows by"
-            } else {
-                "Gap wider by"
-            }
-        }
+    // Named for what one step is: more each time, or the same on every copy.
+    let (builds_up, repeats) = match variation.what {
+        Vary::Shift => ("Shift per step", "Shift by"),
+        Vary::Spin => ("Turn per step", "Turn by"),
+        Vary::Size => ("Size per step (%)", "Size by (%)"),
+        Vary::Gap => ("Gap grows by", "Gap wider by"),
     };
+    let amount = if variation.repeats { repeats } else { builds_up };
     field(app, ui, id, &key(VaryField::amount_of(variation.what)), amount, params);
     field(app, ui, id, &key(VaryField::Every), "Every (copies)", params);
     field(app, ui, id, &key(VaryField::Start), "Starting at copy", params);
@@ -281,13 +246,12 @@ fn variation_card(
         .enumerate()
         .find(|(other, held)| *other != slot && held.combination() == variation.combination());
     if let Some((other, _)) = alike {
-        ui.add(
-            egui::Label::new(theme::hint(format!(
+        note(
+            ui,
+            format!(
                 "The same as variation {} on this stage: along the same axis, over the same copies, so the two add up.",
                 other + 1
-            )))
-            .selectable(false)
-            .wrap(),
+            ),
         );
     }
     dropped
@@ -334,9 +298,7 @@ fn vary_hover(what: Vary) -> &'static str {
 /// pressed.
 pub(crate) fn card_heading(ui: &mut egui::Ui, name: &str, summary: &str, cross_id: egui::Id, hover: &str) -> bool {
     let mut clicked = false;
-    let right = row_right_edge(ui);
-    ui.horizontal(|ui| {
-        ui.set_max_width((right - ui.max_rect().left()).max(0.0));
+    capped_row(ui, |ui| {
         ui.add(egui::Label::new(theme::header_text(name)).selectable(false));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let cross = ui.add_sized(egui::Vec2::splat(CARD_CROSS), egui::Button::new("\u{00d7}")).on_hover_text(hover);
@@ -346,9 +308,33 @@ pub(crate) fn card_heading(ui: &mut egui::Ui, name: &str, summary: &str, cross_i
         });
     });
     if !summary.is_empty() {
-        ui.add(egui::Label::new(theme::hint(summary)).selectable(false).wrap());
+        note(ui, summary);
     }
     clicked
+}
+
+/// A chip that adds something to the builder, named by `id` rather than found
+/// by the word on it, so a test can ask where it was drawn. Returns whether it
+/// was pressed.
+pub(crate) fn add_chip(ui: &mut egui::Ui, text: &str, hover: &str, id: egui::Id) -> bool {
+    let chip = theme::choice(ui, false, text).on_hover_text(hover);
+    // It senses nothing; the chip answers the pointer.
+    ui.interact(chip.rect, id, egui::Sense::hover());
+    chip.clicked()
+}
+
+/// A quiet line of English under a card's numbers, wrapped to the column.
+pub(crate) fn note(ui: &mut egui::Ui, text: impl Into<String>) {
+    ui.add(egui::Label::new(theme::hint(text)).selectable(false).wrap());
+}
+
+/// A row that ends where the field rows under it do (see [`heading`]).
+fn capped_row(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
+    let right = row_right_edge(ui);
+    ui.horizontal(|ui| {
+        ui.set_max_width((right - ui.max_rect().left()).max(0.0));
+        add(ui);
+    });
 }
 
 /// A stage's heading: the twisty and name that fold it, and the arrows and
@@ -362,9 +348,7 @@ pub(crate) fn card_heading(ui: &mut egui::Ui, name: &str, summary: &str, cross_i
 /// they are pinned to.
 fn heading(ui: &mut egui::Ui, index: usize, used: usize, folded: bool) -> Option<Ask> {
     let mut ask = None;
-    let right = row_right_edge(ui);
-    ui.horizontal(|ui| {
-        ui.set_max_width((right - ui.max_rect().left()).max(0.0));
+    capped_row(ui, |ui| {
         let (twisty, _) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::hover());
         let name = ui.add(
             egui::Label::new(theme::header_text(pattern::STAGES[index].label))
@@ -448,12 +432,12 @@ fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, pa
 /// A line of English saying what one stage does, so the numbers under it can be
 /// read without working them out.
 pub(crate) fn describe(stage: &pattern::Stage, unit: Unit) -> String {
-    use simple3d_core::unit::{format_length, format_number};
-    let axis = ["X", "Y", "Z"][stage.axis.min(2)];
+    use simple3d_core::unit::format_number;
+    let axis = pattern::VARY_AXES[stage.axis.min(2)];
     if stage.mode == StageMode::Mirror {
         return format!("mirrored across {axis}");
     }
-    let length = |mm: f64| format!("{} {}", format_length(mm, unit), unit.suffix());
+    let length = |mm: f64| length(mm, unit);
     let mut what: Vec<String> = Vec::new();
     if stage.mode == StageMode::Turn {
         if stage.turn.abs() > 1e-9 {
@@ -484,14 +468,14 @@ pub(crate) fn describe(stage: &pattern::Stage, unit: Unit) -> String {
 
 /// A few words saying what one variation does to a stage doing `mode`.
 pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: Unit) -> String {
-    use simple3d_core::unit::{format_length, format_number};
+    use simple3d_core::unit::format_number;
     if !variation.what.fits(mode) {
         return "does nothing on a turn".to_string();
     }
     if !variation.acts(mode) {
         return "nothing yet".to_string();
     }
-    let length = |mm: f64| format!("{} {}", format_length(mm, unit), unit.suffix());
+    let length = |mm: f64| length(mm, unit);
     let axis = ["X", "Y", "Z", "all axes"][variation.axis.min(pattern::ALL_AXES)];
     let copies = reach(variation);
     let more = if variation.repeats { "" } else { ", more each time" };
@@ -507,6 +491,11 @@ pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: U
             format!("gaps {way} {} after {copies}{more}", length(variation.amount.abs()))
         }
     }
+}
+
+/// A length with its unit, the way a sentence says it.
+pub(crate) fn length(mm: f64, unit: Unit) -> String {
+    format!("{} {}", simple3d_core::unit::format_length(mm, unit), unit.suffix())
 }
 
 /// Which copies a variation reaches, in words.
