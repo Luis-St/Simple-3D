@@ -10,8 +10,11 @@ fn bounds() -> egui::Rect {
 fn a_popup_opens_inside_the_viewport_it_belongs_to() {
     // Not in the middle of the screen the way a dialog does: it is drawn in
     // the viewport, and the viewport is not the window.
-    let placed = clamp_into(bounds().left_top() + egui::vec2(16.0, 16.0), egui::vec2(320.0, TITLE_BAR), bounds());
+    let placed = settle(&Placement::default(), 320.0, bounds());
     assert!(bounds().contains(placed), "{placed:?} is outside {:?}", bounds());
+    // In the top right corner (issue 103), clear of the edge by the same margin
+    // on both sides.
+    assert_eq!(placed, egui::pos2(bounds().right() - 320.0 - 16.0, bounds().top() + 16.0));
 }
 
 #[test]

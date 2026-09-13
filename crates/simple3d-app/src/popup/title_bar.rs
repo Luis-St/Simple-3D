@@ -28,7 +28,10 @@ pub(crate) fn title_bar(
         if response.dragged() { token::SURFACE_3 } else { token::SURFACE_2 },
     );
     painter.hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, token::SURFACE_3));
-    if response.hovered() || response.dragged() {
+    // The ordinary pointer over the bar, and the hand only while it is held and
+    // moving the window (issue 104): a hand at rest read as the bar being
+    // something to click rather than a place to take hold of.
+    if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
 

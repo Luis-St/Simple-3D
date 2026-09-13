@@ -5,9 +5,9 @@ use super::*;
 /// Where the window comes to rest this frame: where it was left, brought inside
 /// the viewport.
 ///
-/// Opened in the top-left of the viewport, a comfortable margin in -- over the
+/// Opened in the top right of the viewport, a comfortable margin in: over the
 /// corner of the picture rather than over the middle of it, which is where the
-/// thing being worked on is.
+/// thing being worked on is, and clear of the view cube in the bottom right.
 ///
 /// Clamped every frame and not only when it is dragged, because the viewport
 /// can be made smaller and a popup left off the edge of a shrunken one cannot
@@ -17,9 +17,16 @@ use super::*;
 /// which is what a roll-up has to do: the bar stays exactly under the chevron
 /// that was clicked.
 pub(crate) fn settle(placement: &Placement, width: f32, bounds: egui::Rect) -> egui::Pos2 {
-    let pos = placement.pos.unwrap_or_else(|| bounds.left_top() + egui::vec2(16.0, 16.0));
+    let pos = placement.pos.unwrap_or_else(|| default_pos(width, bounds));
     let tall = if placement.collapsed { TITLE_BAR } else { placement.height.max(TITLE_BAR) };
     clamp_into(pos, egui::vec2(width, tall), bounds)
+}
+
+/// Where a popup that has never been moved opens: its top right corner a margin
+/// in from the viewport's.
+pub(crate) fn default_pos(width: f32, bounds: egui::Rect) -> egui::Pos2 {
+    const MARGIN: f32 = 16.0;
+    bounds.right_top() + egui::vec2(-width - MARGIN, MARGIN)
 }
 
 /// Keep a window's title bar inside `bounds`, so it can always be grabbed
