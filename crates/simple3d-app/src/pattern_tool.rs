@@ -50,11 +50,11 @@ pub(crate) use actions::*;
 /// Identifies the popup, and is what remembers where it was dragged to.
 const KEY: &str = "pattern-tool";
 
-/// How wide the window is: a stage's name and three fields side by side inside
-/// a variation's card inside a stage's, and no wider. A popup lives over the
-/// model, so every pixel of it is a pixel of the pattern being laid out that
-/// cannot be seen.
-const WIDTH: f32 = 340.0;
+/// How wide the window is: an X, Y and Z field side by side inside a card
+/// inside another, each still wide enough to read, and no wider. A popup lives
+/// over the model, so every pixel of it is a pixel of the pattern being laid out
+/// that cannot be seen.
+const WIDTH: f32 = 430.0;
 
 /// The cross that drops a stage: twice the height egui's small button comes out
 /// at, and square, because it is a mark rather than a word and a wide one reads

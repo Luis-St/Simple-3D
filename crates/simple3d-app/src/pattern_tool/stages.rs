@@ -302,15 +302,12 @@ fn variation_name(variation: &Variation) -> String {
     }
 }
 
-/// The axes a variation can be along or about, each with its colour in front
-/// of it the way a transform's fields have.
+/// The axes a variation can be along or about. Plain chips: the axis colours
+/// belong in front of value fields, and a chip already says its axis.
 fn axis_choice(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, variation: &Variation) {
     let name = if variation.what == Vary::Spin { "About" } else { "Along" };
     field_row(ui, name, "", |ui| {
         for &axis in variation.what.axes() {
-            if axis < 3 {
-                theme::axis_chip(ui, egui::Id::new(("vary-axis", key.to_string(), axis)), axis);
-            }
             let chosen = variation.axis == axis;
             if theme::choice(ui, chosen, pattern::VARY_AXES[axis]).clicked() && !chosen {
                 app.edit("Set pattern", None);

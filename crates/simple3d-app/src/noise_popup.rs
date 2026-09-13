@@ -119,7 +119,7 @@ impl Part {
     fn hover(self) -> &'static str {
         match self {
             Part::Nudge => "Move each copy a little off where the rule puts it",
-            Part::Turn(_) => "Turn each copy a little askew where it stands, about one axis; add one for each axis",
+            Part::Turn(_) => "Turn each copy a little askew where it stands, about one axis. Add one for each axis.",
             Part::Size => "Make each copy a little bigger or smaller",
         }
     }
@@ -250,7 +250,7 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
         ui.add(
             egui::Label::new(theme::hint(
                 "None: every copy is exactly where the rule puts it. Add a part and the copies wander off it by no \
-                 more than you say -- planks laid a little askew, stones along a path.",
+                 more than you say, like planks laid a little askew or stones along a path.",
             ))
             .selectable(false)
             .wrap(),
@@ -290,8 +290,8 @@ fn seed_row(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowStyle, ask: 
     field_row(
         ui,
         "Seed",
-        "The same seed scatters the same way every time the file is opened; another is another scatter of the \
-         same size",
+        "The same seed scatters the same way every time the file is opened. Another seed gives another \
+         scatter of the same size.",
         |ui| {
             let width = (room_left(ui) - SHUFFLE - ui.spacing().item_spacing.x).max(40.0);
             ui.scope(|ui| {
@@ -319,13 +319,12 @@ fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, st
     param_field_as(app, ui, &[id], id, spec, name, unit, style);
 }
 
-/// What a turn is about, as three chips in the axes' colours. The axes that
-/// already have a turn of their own are greyed: a scatter holds one turn about
-/// each, and moving this one onto another's would be two turns about one axis.
+/// What a turn is about, as three chips. The axes that already have a turn of
+/// their own are greyed: a scatter holds one turn about each, and moving this
+/// one onto another's would be two turns about one axis.
 fn turn_axis_row(ui: &mut egui::Ui, scope: &str, axis: usize, shown: &[Part], ask: &mut Option<Ask>) {
     field_row(ui, "About", "", |ui| {
         for other in 0..3 {
-            theme::axis_chip(ui, egui::Id::new(("noise-turn-axis-chip", scope.to_string(), axis, other)), other);
             let taken = other != axis && shown.contains(&Part::Turn(other));
             let chip = ui.add_enabled_ui(!taken, |ui| theme::choice(ui, other == axis, ["X", "Y", "Z"][other])).inner;
             // Named, so a test can find it. It senses nothing; the chip answers.

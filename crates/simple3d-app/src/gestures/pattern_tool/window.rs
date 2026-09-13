@@ -50,7 +50,7 @@ pub(crate) fn the_pattern_tool_goes_up_over_the_viewport_rather_than_in_front_of
     // a popup keeps itself inside the viewport from the height it came out at
     // last frame -- so it is still moving for a frame or two afterwards, and a
     // click aimed at where a button was before it settled lands on nothing.
-    for _ in 0..4 {
+    for _ in 0..8 {
         harness.step();
     }
     harness.get_by_label("Done").click();

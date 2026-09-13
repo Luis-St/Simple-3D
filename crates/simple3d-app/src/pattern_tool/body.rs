@@ -115,7 +115,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         ui.add(
             egui::Label::new(theme::hint(
                 "Pick what the rule starts from. Each of the six lays its copies out exactly as that kind does, \
-                 with the numbers this pattern is already holding; the ready-made layouts are sized to what the \
+                 with the numbers this pattern is already holding. The ready made layouts are sized to what the \
                  pattern repeats.",
             ))
             .selectable(false),
