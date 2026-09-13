@@ -55,3 +55,77 @@ pub(crate) fn a_region_that_cannot_be_rebuilt_keeps_its_original_triangles() {
     let (lo, hi) = rebuilt.bounds().unwrap();
     assert_eq!((lo, hi), region.bounds().unwrap());
 }
+
+#[test]
+pub(crate) fn copies_meeting_off_centre_leave_no_face_folded_over_the_notch() {
+    // Three boxes in a row with the middle one moved back half its depth -- a
+    // pattern shifting every other copy. The outline of the bottom face then has
+    // an inner corner exactly in line with two outer ones, and the ear clipper
+    // took an ear whose new side ran straight through that corner: the face
+    // came back closed and of the right volume, but with triangles laid across
+    // the notch in front of the middle box, facing up into it, where they drew
+    // as a grey wedge of floor that is not there.
+    let cube = || primitives::box_mesh(20.0, 20.0, 20.0);
+    let result = evaluate_boolean(
+        BooleanOp::Union,
+        &[cube(), cube().translated(Vec3::new(20.0, 10.0, 0.0)), cube().translated(Vec3::new(40.0, 0.0, 0.0))],
+    );
+    assert_manifold("staggered boxes", &result);
+    for t in &result.indices {
+        let [a, b, c] = t.map(|i| result.positions[i as usize]);
+        if [a, b, c].iter().all(|p| (p.z + 10.0).abs() < 1e-9) {
+            assert!((b - a).cross(c - a).z < 0.0, "a bottom triangle {a:?} {b:?} {c:?} faces up");
+        }
+    }
+}
+
+#[test]
+pub(crate) fn an_ear_whose_new_side_runs_through_a_corner_is_not_taken() {
+    // The same outline on its own: two notches' worth of corners in line. Both
+    // the fold and, on the wider outline, giving up altogether came from ears
+    // whose third side passed through a corner of the loop.
+    let outlines: [&[(f64, f64)]; 2] = [
+        &[
+            (-10.0, -10.0),
+            (10.0, -10.0),
+            (10.0, 0.0),
+            (30.0, 0.0),
+            (30.0, 20.0),
+            (10.0, 20.0),
+            (10.0, 10.0),
+            (-10.0, 10.0),
+        ],
+        &[
+            (-10.0, -10.0),
+            (10.0, -10.0),
+            (10.0, 0.0),
+            (30.0, 0.0),
+            (30.0, -10.0),
+            (50.0, -10.0),
+            (50.0, 10.0),
+            (30.0, 10.0),
+            (30.0, 20.0),
+            (10.0, 20.0),
+            (10.0, 10.0),
+            (-10.0, 10.0),
+        ],
+    ];
+    for outline in outlines {
+        let positions: Vec<Vec3> = outline.iter().map(|&(x, y)| Vec3::new(x, y, 0.0)).collect();
+        let area: f64 = crate::planar::signed_area(outline);
+        let tris = crate::planar::triangulate_loops(
+            &positions,
+            Vec3::new(0.0, 0.0, 1.0),
+            vec![(0..outline.len() as u32).collect()],
+        )
+        .expect("the outline was not triangulated");
+        let mut covered = 0.0;
+        for t in tris {
+            let [a, b, c] = t.map(|i| positions[i as usize]);
+            let twice = (b - a).cross(c - a).z;
+            assert!(twice > 0.0, "a triangle {a:?} {b:?} {c:?} is folded over");
+            covered += twice / 2.0;
+        }
+        assert!((covered - area).abs() < 1e-9, "{covered} covered of an outline of {area}");
+    }
+}

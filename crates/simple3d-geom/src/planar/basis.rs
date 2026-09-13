@@ -30,6 +30,18 @@ pub(crate) fn duplicated(ids: &[u32], remaining: &[usize], slot: usize) -> bool 
     remaining.iter().filter(|&&s| ids[s] == ids[slot]).count() > 1
 }
 
+/// Whether `p` lies on the segment `a`-`b`, strictly between its ends.
+pub(crate) fn on_open_segment(p: Point, a: Point, b: Point) -> bool {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    if len2 <= 1e-24 {
+        return false;
+    }
+    let cross = dx * (p.1 - a.1) - dy * (p.0 - a.0);
+    let along = (dx * (p.0 - a.0) + dy * (p.1 - a.1)) / len2;
+    cross.abs() / len2.sqrt() <= 1e-9 && along > 1e-12 && along < 1.0 - 1e-12
+}
+
 pub(crate) fn strictly_inside(p: Point, a: Point, b: Point, c: Point) -> bool {
     let side = |q: Point, r: Point| (r.0 - q.0) * (p.1 - q.1) - (r.1 - q.1) * (p.0 - q.0);
     // The loop is counter-clockwise, so an interior point is left of all three

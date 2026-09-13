@@ -40,6 +40,20 @@ pub(crate) fn ear_clip(ids: &[u32], points: &[Point], out: &mut Vec<[u32; 3]>) -
             if remaining.iter().any(|&j| j != ia && j != ib && j != ic && strictly_inside(points[j], a, b, c)) {
                 continue;
             }
+            // A vertex lying on the diagonal the ear would leave behind blocks
+            // it just as one inside does. The ear's own sides are edges of the
+            // loop already, but its third side is new, and a corner of the loop
+            // sitting on it means the loop turns back in right there: two boxes
+            // unioned off-centre leave an outline whose inner corner is exactly
+            // in line with two outer ones, and clipping across it laid a
+            // triangle over the notch, facing the wrong way. Only a copy of `a`
+            // or `c` itself -- a bridge seam -- may lie on it.
+            if remaining.iter().any(|&j| {
+                let p = points[j];
+                j != ia && j != ib && j != ic && p != a && p != c && on_open_segment(p, c, a)
+            }) {
+                continue;
+            }
             clipped = Some((i, [ids[ia], ids[ib], ids[ic]]));
             break;
         }
