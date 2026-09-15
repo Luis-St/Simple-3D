@@ -65,21 +65,41 @@ pub fn show(
     });
     // What it actually came out at, for the next frame's clamp.
     if !placement.collapsed {
-        placement.height = response.response.rect.height();
+        let height = response.response.rect.height();
+        placement.height = height;
+        // And how much of that was not the body, for the next frame's room.
+        let layer = response.response.layer_id.id;
+        if let Some(body) = ctx.data(|d| d.get_temp::<f32>(layer.with(BODY_HEIGHT))) {
+            ctx.data_mut(|d| d.insert_temp(layer.with(CHROME_HEIGHT), height - body));
+        }
     }
     event
 }
 
+/// Where [`scrolling_body`] leaves the height it came out at, and where
+/// [`show`] leaves the height of everything else in the window, both under the
+/// popup's own layer.
+const BODY_HEIGHT: &str = "popup-body-height";
+const CHROME_HEIGHT: &str = "popup-chrome-height";
+
 /// How tall a popup's body may be before it has to scroll: the room in
 /// `bounds` -- the viewport -- less the window's own chrome, which is the title
-/// bar, the padding and the action row along the foot.
+/// bar, the padding, the rule and the action row along the foot, and the
+/// spacing between all of them.
 ///
 /// A popup is as tall as what is in it, which is the right answer until what is
 /// in it is taller than the viewport: then the foot of the window goes off the
 /// bottom of the screen, and the buttons that finish the job go with it. The
 /// body scrolls instead, and the buttons stay where they are.
-pub fn body_room(bounds: egui::Rect) -> f32 {
-    (bounds.height() - TITLE_BAR - PAD * 3.0 - theme::metric::DIALOG_BUTTON - theme::metric::GAP * 2.0).max(120.0)
+///
+/// The chrome is measured, not added up: a sum of the constants left out the
+/// spacing egui puts between them and the rule's own height, and the window
+/// came out a dozen pixels taller than the viewport, over the status bar. The
+/// sum stands in only for the first frame, before there is a measurement.
+fn body_room(ui: &egui::Ui, bounds: egui::Rect) -> f32 {
+    let estimate = TITLE_BAR + PAD * 3.0 + theme::metric::DIALOG_BUTTON + theme::metric::GAP * 2.0;
+    let chrome = ui.ctx().data(|d| d.get_temp::<f32>(ui.layer_id().id.with(CHROME_HEIGHT))).unwrap_or(estimate);
+    (bounds.height() - chrome).max(120.0)
 }
 
 /// A popup's body, scrolling once it is taller than [`body_room`].
@@ -90,6 +110,7 @@ pub fn body_room(bounds: egui::Rect) -> f32 {
 /// width it has either way.
 pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&mut egui::Ui)) {
     let width = ui.available_width();
+    let max_height = body_room(ui, bounds);
     let mut room = ui.available_rect_before_wrap();
     room.max.x += PAD;
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(room));
@@ -100,7 +121,7 @@ pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&
     scroll.bar_inner_margin = 2.0;
     scroll.bar_width = PAD - 4.0;
     scroll.bar_outer_margin = 2.0;
-    area.auto_shrink([false, true]).max_height(body_room(bounds)).show(&mut child, |ui| {
+    area.auto_shrink([false, true]).max_height(max_height).show(&mut child, |ui| {
         ui.set_style(restore);
         // Never wider than it is given: while the bar slides in, the room is
         // briefly less than the column.
@@ -110,6 +131,7 @@ pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&
     // Only the column is taken from the window: the padding the bar sits in is
     // the window's already, and claiming it would widen the window by that much.
     let used = child.min_rect();
+    ui.ctx().data_mut(|d| d.insert_temp(ui.layer_id().id.with(BODY_HEIGHT), used.height()));
     ui.advance_cursor_after_rect(egui::Rect::from_min_size(used.min, egui::vec2(width, used.height())));
 }
 

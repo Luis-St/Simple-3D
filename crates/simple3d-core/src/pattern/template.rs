@@ -131,9 +131,15 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
         }
     };
     write_rule(params, &stages);
-    // The scatter is part of what a preset is. Planks come with a little --
-    // less than half the joint either way, so they wander without touching --
-    // and the two whose whole point is that every copy lines up come with none.
+    // A scatter the pattern already has is the user's, set in the noise window
+    // before the rule was picked, and a layout is a question about the rule
+    // alone: it is kept, not swapped for the preset's.
+    if Noise::of(params).wanted() {
+        return;
+    }
+    // Otherwise the preset brings its own. Planks come with a little -- less
+    // than half the joint either way, so they wander without touching -- and
+    // the two whose whole point is that every copy lines up come with none.
     for key in noise_keys() {
         if let Some(spec) = PARAMS.iter().find(|p| p.key == *key) {
             params.insert((*key).to_string(), spec.default);

@@ -67,3 +67,44 @@ fn a_viewport_smaller_than_the_popup_still_leaves_it_somewhere_to_be() {
     let out = clamp_into(egui::pos2(500.0, 500.0), egui::vec2(320.0, TITLE_BAR), tiny);
     assert_eq!(out, tiny.left_top());
 }
+
+#[test]
+fn a_popup_taller_than_the_viewport_ends_inside_it() {
+    // The bug: the room the body was given left out part of the window's own
+    // chrome, so a body that had to scroll came out taller than the viewport
+    // and its foot hung over the status bar. Against a viewport from y = 54 to
+    // y = 855 the rule builder ran on to y = 867.
+    for tall in [300.0_f32, 520.0, 801.0] {
+        let bounds = egui::Rect::from_min_size(egui::pos2(300.0, 54.0), egui::vec2(780.0, tall));
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx);
+        let mut placement = Placement::default();
+        for frame in 0..20 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+                time: Some(frame as f64 * 0.1),
+                ..Default::default()
+            };
+            let _ = ctx.run(input, |ctx| {
+                let spec = PopupSpec { key: "tall", title: "Tall", width: 430.0 };
+                show(ctx, bounds, &mut placement, spec, |ui| {
+                    scrolling_body(ui, bounds, |ui| {
+                        for row in 0..200 {
+                            ui.label(format!("row {row}"));
+                        }
+                    });
+                    action_row(ui, |ui| {
+                        let _ = ui.button("Done");
+                    });
+                });
+            });
+        }
+        let window = ctx.memory(|m| m.area_rect(egui::Id::new(("in-place-popup", "tall")))).unwrap();
+        assert!(
+            window.top() >= bounds.top() && window.bottom() <= bounds.bottom() + 0.5,
+            "at {tall} px the window spans {:?} in a viewport spanning {:?}",
+            window.y_range(),
+            bounds.y_range()
+        );
+    }
+}

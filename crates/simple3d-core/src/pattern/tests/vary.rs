@@ -199,9 +199,20 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
     assert!(Noise::of(&planks).wanted(), "the planks came without the randomness they are for");
     assert_eq!(crowding(&planks, size), None, "the planks' own scatter can close their joints");
     let mut bricks = default_params();
-    bricks.insert("noise_x".to_string(), ParamValue::Length(3.0));
     use_preset(&mut bricks, 1, size);
-    assert!(!Noise::of(&bricks).wanted(), "a brick wall kept a scatter it should have replaced");
+    assert!(!Noise::of(&bricks).wanted(), "a brick wall came with a scatter of its own");
+
+    // A scatter set before the layout was picked is the user's, and stays --
+    // on the planks too, which would otherwise bring their own.
+    for preset in [0, 1] {
+        let mut scattered = default_params();
+        scattered.insert("noise_x".to_string(), ParamValue::Length(3.0));
+        scattered.insert("noise_turn_z".to_string(), ParamValue::Angle(4.0));
+        use_preset(&mut scattered, preset, size);
+        assert_eq!(scattered.num("noise_x"), 3.0, "{} replaced the nudge it was given", PRESETS[preset]);
+        assert_eq!(scattered.num("noise_turn_z"), 4.0, "{} dropped the turn it was given", PRESETS[preset]);
+        assert_eq!(scattered.num("noise_y"), 0.0, "{} added to the scatter it was given", PRESETS[preset]);
+    }
 }
 
 /// A stage added to a rule starts as the next thing the rule is missing:
