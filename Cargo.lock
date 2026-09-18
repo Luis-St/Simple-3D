@@ -2506,6 +2506,7 @@ name = "simple3d-export"
 version = "0.0.0"
 dependencies = [
  "simple3d-geom",
+ "simple3d-import",
 ]
 
 [[package]]

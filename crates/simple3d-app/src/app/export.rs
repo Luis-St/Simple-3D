@@ -170,10 +170,12 @@ impl App {
             unit: simple3d_export::Unit3mf::Millimeter,
             allow_invalid: false,
             bodies,
+            compress: self.export_compress,
         };
         let extension = self.export_format.extension();
         let format_id = self.export_format.id().to_string();
         let bodies_id = self.export_bodies.id().to_string();
+        let compress = self.export_compress;
         self.ask_for_file("Export", dialog, true, move |app, mut path| {
             if path.extension().is_none() {
                 path.set_extension(extension);
@@ -182,6 +184,7 @@ impl App {
             app.settings.last_export_format = format_id;
             app.settings.last_export_scale = scale;
             app.settings.last_export_bodies = bodies_id;
+            app.settings.last_export_compress = compress;
             app.export_job = Some(ExportJob::spawn_parts(path, parts, options, EXPORT_LIMIT));
             app.modal = Modal::None;
         });

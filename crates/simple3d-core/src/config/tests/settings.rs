@@ -25,6 +25,14 @@ pub(crate) fn settings_round_trip_and_tolerate_a_partial_file() {
     // A settings file written before there was an engine to choose was
     // written by a build that drew in software, so that is what it means.
     assert_eq!(partial.render_engine, RenderEngine::Cpu);
+    // And one written before a 3MF could be compressed still means compressed:
+    // a missing switch takes the default, which is the whole reason the field
+    // is not read as `false` (issue 105).
+    assert!(partial.last_export_compress, "an older settings file would keep writing uncompressed packages");
+    // Turning it off is remembered, which a default-filled field could easily
+    // fail to be.
+    let off: AppSettings = serde_json::from_str("{\"last_export_compress\":false}").unwrap();
+    assert!(!off.last_export_compress);
 }
 
 /// The engine a settings file names, and the one it means when it names

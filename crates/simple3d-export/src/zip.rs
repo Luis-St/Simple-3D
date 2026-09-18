@@ -37,7 +37,11 @@ fn crc_table() -> &'static [u32; 256] {
 struct Entry {
     name: String,
     crc: u32,
+    /// The entry as it was handed in, and as it is in the archive. The two are
+    /// the same for a stored entry.
     size: u32,
+    stored_size: u32,
+    method: u16,
     offset: u32,
 }
 
@@ -57,28 +61,51 @@ impl ZipWriter {
         ZipWriter { buffer: Vec::new(), entries: Vec::new() }
     }
 
+    /// Add an entry, stored as it is.
     pub fn add(&mut self, name: &str, data: &[u8]) {
+        self.write(name, data, None)
+    }
+
+    /// Add an entry compressed (issue 105's other half). The checksum and the
+    /// uncompressed size are still of the *original* data, which is what a
+    /// reader checks the inflated bytes against.
+    pub fn add_deflated(&mut self, name: &str, data: &[u8]) {
+        let compressed = crate::deflate::deflate(data);
+        // Never larger than storing it: a tiny part -- the relationships XML --
+        // can come out bigger compressed than it went in, and there is no
+        // reason to write the worse of the two.
+        if compressed.len() < data.len() {
+            self.write(name, data, Some(&compressed));
+        } else {
+            self.write(name, data, None);
+        }
+    }
+
+    fn write(&mut self, name: &str, data: &[u8], compressed: Option<&[u8]>) {
         let offset = self.buffer.len() as u32;
         let crc = crc32(data);
         let size = data.len() as u32;
+        let body = compressed.unwrap_or(data);
+        let stored_size = body.len() as u32;
+        let method: u16 = if compressed.is_some() { 8 } else { 0 };
 
         self.buffer.extend_from_slice(&0x0403_4b50u32.to_le_bytes()); // local file header
         self.buffer.extend_from_slice(&20u16.to_le_bytes()); // version needed
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // flags
-        self.buffer.extend_from_slice(&0u16.to_le_bytes()); // method: stored
-                                                            // A fixed timestamp, so exporting the same scene twice produces
-                                                            // byte-identical files -- the same reason the evaluator is deterministic.
+        self.buffer.extend_from_slice(&method.to_le_bytes()); // 0 stored, 8 deflated
+                                                              // A fixed timestamp, so exporting the same scene twice produces
+                                                              // byte-identical files -- the same reason the evaluator is deterministic.
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // time
         self.buffer.extend_from_slice(&0x21u16.to_le_bytes()); // date: 1980-01-01
         self.buffer.extend_from_slice(&crc.to_le_bytes());
-        self.buffer.extend_from_slice(&size.to_le_bytes()); // compressed size
+        self.buffer.extend_from_slice(&stored_size.to_le_bytes()); // compressed size
         self.buffer.extend_from_slice(&size.to_le_bytes()); // uncompressed size
         self.buffer.extend_from_slice(&(name.len() as u16).to_le_bytes());
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // extra length
         self.buffer.extend_from_slice(name.as_bytes());
-        self.buffer.extend_from_slice(data);
+        self.buffer.extend_from_slice(body);
 
-        self.entries.push(Entry { name: name.to_string(), crc, size, offset });
+        self.entries.push(Entry { name: name.to_string(), crc, size, stored_size, method, offset });
     }
 
     pub fn finish(mut self) -> Vec<u8> {
@@ -88,11 +115,11 @@ impl ZipWriter {
             self.buffer.extend_from_slice(&20u16.to_le_bytes()); // version made by
             self.buffer.extend_from_slice(&20u16.to_le_bytes()); // version needed
             self.buffer.extend_from_slice(&0u16.to_le_bytes()); // flags
-            self.buffer.extend_from_slice(&0u16.to_le_bytes()); // method
+            self.buffer.extend_from_slice(&entry.method.to_le_bytes()); // 0 stored, 8 deflated
             self.buffer.extend_from_slice(&0u16.to_le_bytes()); // time
             self.buffer.extend_from_slice(&0x21u16.to_le_bytes()); // date
             self.buffer.extend_from_slice(&entry.crc.to_le_bytes());
-            self.buffer.extend_from_slice(&entry.size.to_le_bytes());
+            self.buffer.extend_from_slice(&entry.stored_size.to_le_bytes());
             self.buffer.extend_from_slice(&entry.size.to_le_bytes());
             self.buffer.extend_from_slice(&(entry.name.len() as u16).to_le_bytes());
             self.buffer.extend_from_slice(&0u16.to_le_bytes()); // extra

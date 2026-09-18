@@ -9,3 +9,6 @@ description = "Mesh export for Simple 3D: 3MF, STL, OBJ and PLY, with a watertig
 
 [dependencies]
 simple3d-geom = { path = "../simple3d-geom" }
+
+[dev-dependencies]
+simple3d-import = { path = "../simple3d-import" }

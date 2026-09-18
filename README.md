@@ -108,7 +108,10 @@ portable.
   one by one, and a difference stays whole because its operands are not shapes
   the result still holds. The grouping is saved with the project, so a re-export
   after a change only needs whatever is new to be placed. STL, OBJ and PLY hold
-  one body, and say so.
+  one body, and say so. The package is compressed, which takes a model part to
+  about a quarter of its size, and the export dialog can turn that off for
+  anyone who wants to read the XML inside with something that cannot
+  decompress it.
 - **An import for everything it exports.** 3MF, STL, OBJ and PLY come back in,
   binary or text, recognised by their content rather than by their extension. A
   3MF arrives placed as its build says, converted from whatever unit it records,
@@ -200,7 +203,8 @@ crates/
   simple3d-export/   STL (binary and ASCII), OBJ, PLY and 3MF writers, with
                        pre-write watertightness verification, progress
                        reporting and cancellation. Includes a minimal zip
-                       writer for the 3MF container.
+                       writer and a DEFLATE encoder, so a 3MF package is
+                       compressed.
   simple3d-import/   The readers for the same four formats, each encoding
                        recognised from the file's own content, with 3MF
                        objects, assemblies, units and colours resolved.

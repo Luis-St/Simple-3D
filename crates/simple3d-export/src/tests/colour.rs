@@ -9,7 +9,7 @@ pub(crate) fn an_unpainted_model_is_written_without_the_colour_extension() {
     // Nothing that reads plain 3MF should have to cope with a namespace a
     // model does not use.
     let bytes = three_mf(&[Part::whole(&plate())], &Options::default(), &mut no_progress()).unwrap();
-    let text = String::from_utf8_lossy(&bytes).to_string();
+    let text = model_document(&bytes);
     assert!(!text.contains("colorgroup"));
     assert!(!text.contains("xmlns:m="));
 }
@@ -25,7 +25,7 @@ pub(crate) fn a_painted_model_carries_one_colour_group_and_a_colour_per_face() {
     mesh.append(&other);
 
     let bytes = three_mf(&[Part::whole(&mesh)], &Options::default(), &mut no_progress()).unwrap();
-    let text = String::from_utf8_lossy(&bytes).to_string();
+    let text = model_document(&bytes);
     assert!(text.contains("xmlns:m=\"http://schemas.microsoft.com/3dmanufacturing/material/2015/02\""));
     assert!(text.contains("<m:color color=\"#204080\"/>"));
     assert!(text.contains("<m:color color=\"#FF0000\"/>"));
@@ -47,7 +47,7 @@ pub(crate) fn separated_objects_share_one_colour_group() {
     right.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
     let parts = [Part { name: "A", mesh: &left }, Part { name: "B", mesh: &right }];
     let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
-    let text = String::from_utf8_lossy(&three_mf(&parts, &options, &mut no_progress()).unwrap()).to_string();
+    let text = model_document(&three_mf(&parts, &options, &mut no_progress()).unwrap());
     assert_eq!(text.matches("<m:colorgroup").count(), 1, "{text}");
     assert_eq!(text.matches("<m:color ").count(), 2, "one default and one painted colour: {text}");
     assert_eq!(text.matches("pid=\"3\" pindex=\"0\"").count(), 2, "{text}");

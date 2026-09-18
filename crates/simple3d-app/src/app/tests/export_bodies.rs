@@ -133,7 +133,14 @@ pub(crate) fn the_written_3mf_holds_one_named_component_per_chosen_body() {
     let path = dir.join("bodies.3mf");
     simple3d_export::write_parts(&path, &borrowed, &options, &mut |_| true).expect("the export should succeed");
 
-    let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_string();
+    // Read the way a slicer reads it: the package is compressed by default, so
+    // the XML is not in the file's own bytes any more.
+    let package = std::fs::read(&path).unwrap();
+    let archive = simple3d_import::unzip::Archive::open(&package).expect("the export wrote a package");
+    let text = String::from_utf8(
+        archive.read_by(|name| name == "3D/3dmodel.model").expect("it holds a model part").expect("it is readable"),
+    )
+    .expect("the model document is text");
     assert_eq!(text.matches("<object id=").count(), 2, "{text}");
     assert!(text.contains("name=\"Plate + Bracket\""), "the merged body is not named for what is in it");
     assert!(text.contains("name=\"Lid\""), "the untouched shape lost its own body");

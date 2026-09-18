@@ -26,14 +26,21 @@ pub(crate) use error::malformed;
 pub use error::ImportError;
 mod format;
 pub use format::{Format, Unit};
-mod inflate;
+/// The DEFLATE decoder. Public because the export crate's encoder is tested
+/// against it: an encoder that is only checked by its own decoder proves
+/// nothing, and these two were written to the same RFC from opposite ends.
+pub mod inflate;
 mod obj;
 mod ply;
 mod stl;
 #[cfg(test)]
 mod tests;
 mod three_mf;
-mod unzip;
+/// The package reader. Public alongside [`inflate`] and for the same reason:
+/// the export crate writes 3MF packages and its tests have to read them back
+/// the way a slicer would, rather than by looking for XML in the raw bytes --
+/// which stopped saying anything the moment those bytes were compressed.
+pub mod unzip;
 mod xml;
 
 use simple3d_geom::Mesh;

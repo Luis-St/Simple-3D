@@ -14,7 +14,7 @@ pub(crate) fn separate_objects_write_one_component_each_with_its_node_s_name() {
     let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
 
     let bytes = three_mf(&parts, &options, &mut no_progress()).unwrap();
-    let text = String::from_utf8_lossy(&bytes).to_string();
+    let text = model_document(&bytes);
     assert_eq!(text.matches("<object id=").count(), 2, "{text}");
     assert!(text.contains("<object id=\"1\" type=\"model\" name=\"Base plate\">"), "{text}");
     assert!(text.contains("<object id=\"2\" type=\"model\" name=\"Peg\">"), "{text}");
@@ -35,7 +35,7 @@ pub(crate) fn the_same_objects_merge_into_one_component_when_the_option_is_off()
     let parts = [Part { name: "Base plate", mesh: &left }, Part { name: "Peg", mesh: &right }];
     let path = temp_dir().join("merged.3mf");
     write_parts(&path, &parts, &Options::default(), &mut no_progress()).unwrap();
-    let text = String::from_utf8_lossy(&std::fs::read(&path).unwrap()).to_string();
+    let text = model_document(&std::fs::read(&path).unwrap());
     assert_eq!(text.matches("<object id=").count(), 1, "{text}");
     assert_eq!(text.matches("<item objectid=").count(), 1, "{text}");
     assert!(!text.contains("name=\"Base plate\""), "a merged body has no part names to give");
@@ -69,6 +69,6 @@ pub(crate) fn a_name_with_xml_in_it_cannot_break_the_document() {
     let other = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
     let parts = [Part { name: "<Bracket & \"clip\">", mesh: &mesh }, Part { name: "B", mesh: &other }];
     let options = Options { bodies: BodyMode::TopLevel, ..Default::default() };
-    let text = String::from_utf8_lossy(&three_mf(&parts, &options, &mut no_progress()).unwrap()).to_string();
+    let text = model_document(&three_mf(&parts, &options, &mut no_progress()).unwrap());
     assert!(text.contains("name=\"&lt;Bracket &amp; &quot;clip&quot;&gt;\""), "{text}");
 }

@@ -24,6 +24,7 @@ mod write;
 pub use write::{write, write_parts, Part};
 mod three_mf;
 pub(crate) use three_mf::*;
+mod deflate;
 mod stl;
 pub(crate) use stl::*;
 mod obj;

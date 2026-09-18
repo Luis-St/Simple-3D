@@ -214,6 +214,10 @@ pub struct App {
     /// What the objects of an export are (issue 58). Only 3MF can hold more
     /// than one, so the dialog offers the choice only there.
     pub export_bodies: simple3d_export::BodyMode,
+    /// Whether a 3MF package is compressed (issue 105). Only 3MF is a package;
+    /// the dialog says so rather than offering the choice on the formats that
+    /// are a single file.
+    pub export_compress: bool,
     /// What the export dialog last counted, and what it counted it for: the
     /// contents choice, the selection and the evaluation it was measured
     /// against. Counting a selection means evaluating it, which must not happen

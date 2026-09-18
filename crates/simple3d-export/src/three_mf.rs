@@ -166,8 +166,15 @@ pub(crate) fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress
         </Relationships>\n";
 
     let mut archive = zip::ZipWriter::new();
-    archive.add("[Content_Types].xml", CONTENT_TYPES.as_bytes());
-    archive.add("_rels/.rels", RELS.as_bytes());
-    archive.add("3D/3dmodel.model", model.as_bytes());
+    let add = |name: &str, data: &[u8], archive: &mut zip::ZipWriter| {
+        if options.compress {
+            archive.add_deflated(name, data)
+        } else {
+            archive.add(name, data)
+        }
+    };
+    add("[Content_Types].xml", CONTENT_TYPES.as_bytes(), &mut archive);
+    add("_rels/.rels", RELS.as_bytes(), &mut archive);
+    add("3D/3dmodel.model", model.as_bytes(), &mut archive);
     Ok(archive.finish())
 }

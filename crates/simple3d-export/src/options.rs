@@ -17,6 +17,14 @@ pub struct Options {
     /// more than one [`Part`] has anything to separate, and only a
     /// [`Format::keeps_objects_separate`] format can hold it.
     pub bodies: BodyMode,
+    /// Compress the parts of a 3MF package rather than storing them. On by
+    /// default: a model part is XML and compresses by about a factor of four,
+    /// and every program that reads 3MF reads a deflated one -- it is what they
+    /// all write. Off is for the rare case of wanting to read the XML out of
+    /// the package with something that cannot decompress it.
+    ///
+    /// Only 3MF is a package; the other formats are single files and ignore it.
+    pub compress: bool,
 }
 
 impl Default for Options {
@@ -27,6 +35,7 @@ impl Default for Options {
             unit: Unit3mf::Millimeter,
             allow_invalid: false,
             bodies: BodyMode::One,
+            compress: true,
         }
     }
 }

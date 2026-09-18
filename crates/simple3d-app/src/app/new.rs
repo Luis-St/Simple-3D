@@ -97,6 +97,7 @@ impl App {
             export_scale: "1".to_string(),
             export_selection_only: false,
             export_bodies: simple3d_export::BodyMode::One,
+            export_compress: true,
             export_preview: None,
             modal: Modal::None,
             dialog_placed: None,
@@ -131,6 +132,7 @@ impl App {
         app.export_format = Format::from_id(&app.settings.last_export_format).unwrap_or(Format::ThreeMf);
         app.export_scale = simple3d_core::unit::format_number(app.settings.last_export_scale, 4);
         app.export_bodies = simple3d_export::BodyMode::from_id(&app.settings.last_export_bodies).unwrap_or_default();
+        app.export_compress = app.settings.last_export_compress;
         app.refresh_library();
         // And the saved pattern kinds, for the same reason: the property panel
         // offers them on any custom pattern, which is a place the user reaches

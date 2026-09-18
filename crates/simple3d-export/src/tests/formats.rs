@@ -16,11 +16,14 @@ pub(crate) fn every_format_writes_a_file_with_the_expected_shape() {
         match format {
             Format::ThreeMf => {
                 assert_eq!(&bytes[0..2], b"PK");
-                let text = String::from_utf8_lossy(&bytes);
+                // The entry names are in the clear in any zip; the parts
+                // themselves are compressed, so the document is read out.
+                let names = String::from_utf8_lossy(&bytes);
+                assert!(names.contains("[Content_Types].xml"));
+                assert!(names.contains("3D/3dmodel.model"));
+                let text = model_document(&bytes);
                 assert!(text.contains("unit=\"millimeter\""), "3MF did not record its unit");
                 assert!(text.contains("<triangle v1="));
-                assert!(text.contains("[Content_Types].xml"));
-                assert!(text.contains("3D/3dmodel.model"));
             }
             Format::StlBinary => {
                 let count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]);

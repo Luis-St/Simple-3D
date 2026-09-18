@@ -125,6 +125,28 @@ impl App {
                 );
             });
             ui.end_row();
+
+            // Only 3MF is a package with parts to compress; the single-file
+            // formats have nothing to apply it to, so the row says so rather
+            // than offering a switch that would do nothing.
+            ui.label("Compression");
+            ui.vertical(|ui| {
+                let packaged = self.export_format == Format::ThreeMf;
+                ui.add_enabled_ui(packaged, |ui| {
+                    ui.checkbox(&mut self.export_compress, "Compress the package");
+                });
+                ui.label(
+                    egui::RichText::new(if !packaged {
+                        format!("{} is a single file and is written as it is.", self.export_format.label())
+                    } else if self.export_compress {
+                        "About a quarter of the size, and what every program that reads 3MF writes.".to_string()
+                    } else {
+                        "Stored uncompressed, so the XML inside can be read with anything.".to_string()
+                    })
+                    .weak(),
+                );
+            });
+            ui.end_row();
         });
 
         if self.export_body_mode() == BodyMode::Selected {

@@ -77,6 +77,11 @@ pub struct AppSettings {
     pub last_import_dir: Option<PathBuf>,
     pub last_export_format: String,
     pub last_export_scale: f64,
+    /// Whether a 3MF is written compressed (issue 105). Newer than the
+    /// settings file, and a missing field is filled from the default below --
+    /// which is on, so an older settings file does not quietly keep writing the
+    /// uncompressed packages this option exists to stop writing.
+    pub last_export_compress: bool,
     /// How the last export decided its bodies, by `BodyMode::id`. Newer than
     /// the settings file, so absent means the single merged body an export
     /// always used to write.
@@ -119,6 +124,7 @@ impl Default for AppSettings {
             last_export_format: "3mf".to_string(),
             last_export_scale: 1.0,
             last_export_bodies: "one".to_string(),
+            last_export_compress: true,
             last_split: simple3d_geom::tiling::SplitPlan::default(),
             recent_files: Vec::new(),
         }
