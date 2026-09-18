@@ -57,6 +57,13 @@ pub struct AppSettings {
     /// settings file, so an older one reads as unlocked.
     #[serde(default)]
     pub lock_view_centre: bool,
+    /// Where a model opened while the application is already running goes
+    /// (issue 107): a tab in the window it was opened from, or a window of its
+    /// own. Newer than the settings file, so an older one reads as a tab --
+    /// which is what the application did before there were windows to choose
+    /// between.
+    #[serde(default)]
+    pub open_target: OpenTarget,
     /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
     /// `snap_step`, a project setting rather than a user one.
     pub rotate_snap_deg: f64,
@@ -122,6 +129,7 @@ impl Default for AppSettings {
             placement: Placement::Origin,
             geometry_snap: SnapMode::default(),
             lock_view_centre: false,
+            open_target: OpenTarget::Tab,
             rotate_snap_deg: 15.0,
             recent_colours: Vec::new(),
             last_export_dir: None,

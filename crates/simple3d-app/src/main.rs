@@ -27,6 +27,7 @@ mod popup;
 mod raster;
 mod render;
 mod section_tool;
+mod shell;
 mod simplify_tool;
 mod snap;
 mod split_tool;
@@ -111,6 +112,9 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         app::APP_NAME,
         options,
-        Box::new(move |cc| Ok(Box::new(app::App::new(&cc.egui_ctx, cc.gl.clone(), open)))),
+        // The shell rather than one `App`: a document can be pulled out into a
+        // window of its own, and every window is an `App` of its own under it
+        // (issue 107).
+        Box::new(move |cc| Ok(Box::new(shell::Shell::new(&cc.egui_ctx, cc.gl.clone(), open)))),
     )
 }

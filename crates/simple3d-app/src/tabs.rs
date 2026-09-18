@@ -13,9 +13,12 @@
 //! helpers below, which know to answer for the active tab from `App`.
 
 mod close;
+pub(crate) mod drag;
+pub use drag::{resolve_drag, TabDrag};
 mod open;
-mod strip;
+pub(crate) mod strip;
 mod swap;
+mod transfer;
 pub use strip::show;
 
 use simple3d_core::eval::Evaluated;

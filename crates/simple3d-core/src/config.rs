@@ -11,6 +11,8 @@ mod display;
 pub use display::{DisplayMode, RenderEngine};
 mod snap;
 pub use snap::SnapMode;
+mod open;
+pub use open::OpenTarget;
 mod layout;
 pub use layout::{Layout, Panel, Placement, Side};
 mod settings;

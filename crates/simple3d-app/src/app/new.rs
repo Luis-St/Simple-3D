@@ -32,6 +32,15 @@ impl App {
             history: History::new(),
             tabs: vec![crate::tabs::Document::empty()],
             active: 0,
+            window_id: 0,
+            root_window: true,
+            window_request: None,
+            other_windows: Vec::new(),
+            unsaved_elsewhere: false,
+            window_rect: None,
+            strip_rect: egui::Rect::NOTHING,
+            tab_drag: None,
+            pointer_on_strip: false,
             persisted_settings: settings.clone(),
             settings_written: None,
             settings,
@@ -129,6 +138,9 @@ impl App {
             last_title: String::new(),
             nudging: false,
             quit_now: false,
+            close_now: false,
+            leaving: false,
+            closing_window: false,
         };
         app.export_format = Format::from_id(&app.settings.last_export_format).unwrap_or(Format::ThreeMf);
         app.export_scale = simple3d_core::unit::format_number(app.settings.last_export_scale, 4);

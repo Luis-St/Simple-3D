@@ -4,28 +4,26 @@ use super::*;
 use crate::render::Renderable;
 use std::time::Duration;
 
-impl eframe::App for App {
+impl App {
     /// What is behind the window's own painting. The frame belongs to the
     /// window system now, so nothing is rounded away and nothing needs to show
     /// the desktop through it: an opaque surface, and no transparency for a
     /// compositor to have to blend.
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+    pub(crate) fn clear_colour(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         let c = crate::theme::token::SURFACE_0;
         [c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0, 1.0]
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    /// One frame of this window. The shell calls it for every window it has
+    /// open, each in its own viewport (issue 107); it used to be `eframe::App`'s
+    /// `update`, back when a window and the application were the same thing.
+    pub(crate) fn run_frame(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // The GPU renderer's texture is registered with egui exactly once, here,
         // where `eframe::Frame` is in reach -- `App::ui` is also driven by the
         // test harness, which has no window and so no context to register with.
         // The texture keeps its identity across a resize, so one registration
         // lasts the life of the application.
         self.prepare_gpu(frame);
-        // Asked every frame rather than once at startup, so the setting takes
-        // effect on the next dialog rather than on the next run. egui reads it
-        // when a viewport is shown, and `dialog` already draws the embedded
-        // form -- it is the one the headless tests have always driven.
-        ctx.set_embed_viewports(self.settings.embed_dialogs);
         // A new message restarts its clock. Watching the value rather than
         // stamping it at every assignment means no `status = ...` anywhere in
         // the application can forget to.
@@ -70,17 +68,28 @@ impl eframe::App for App {
 
         // Confirmation on quit (spec section 7.4): intercept the window's own
         // close button as well as the Quit command.
-        if ctx.input(|i| i.viewport().close_requested()) && !self.quit_now {
-            if self.any_unsaved() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-                self.modal = Modal::ConfirmQuit;
-            } else {
-                self.quit_now = true;
-            }
+        //
+        // The button closes *this* window, which with one window open is the
+        // same thing as quitting and with several is not (issue 107). Either
+        // way the close is always cancelled here and asked for through the
+        // shell instead: a window cannot take itself out of the application,
+        // and the root viewport cannot be closed at all without ending the
+        // process under the other windows.
+        //
+        // The close the *application* asked for is let through: `Shell::quit`
+        // ends the run by closing the root viewport, and a handler that
+        // cancelled that close as well would cancel every way out of the
+        // application -- which is exactly what it did, and why the close button
+        // stopped working.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.leaving {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request_close_window();
         }
-        if self.quit_now {
-            self.persist();
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if std::mem::take(&mut self.quit_now) {
+            self.window_request = Some(crate::shell::WindowRequest::Quit);
+        }
+        if std::mem::take(&mut self.close_now) {
+            self.window_request = Some(crate::shell::WindowRequest::Close);
         }
         // Keep animating while work is in flight, so progress and the preview
         // update without the user having to move the mouse. A drag and a camera
@@ -113,10 +122,6 @@ impl eframe::App for App {
                 ctx.request_repaint_after(Duration::from_millis(33));
             }
         }
-    }
-
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        self.persist();
     }
 }
 

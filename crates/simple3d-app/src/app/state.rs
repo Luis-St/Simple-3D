@@ -32,6 +32,38 @@ pub struct App {
     /// another tab is picked. `crate::tabs` owns the swapping.
     pub tabs: Vec<crate::tabs::Document>,
     pub active: usize,
+    /// Which window this is (issue 107). The shell hands out the id, never
+    /// reuses one, and never changes the one a window is wearing -- so the
+    /// viewport a window is drawn in can never be a window that has closed.
+    pub window_id: u64,
+    /// Whether this is the window drawn in the root viewport. The window's
+    /// geometry and the settings file are that one window's to record and to
+    /// write: every window holds the same settings, and two of them writing
+    /// would be two answers to how big the window was left.
+    pub(crate) root_window: bool,
+    /// What this window is asking the shell to do once the frame is over --
+    /// open a window, move a tab into one, close itself. A window never acts on
+    /// another window itself; see [`crate::shell`].
+    pub(crate) window_request: Option<crate::shell::WindowRequest>,
+    /// The other windows, as the shell last saw them: what the tab menu offers
+    /// a document to be sent to, and where a dragged tab can be dropped.
+    pub(crate) other_windows: Vec<crate::shell::OtherWindow>,
+    /// Whether any *other* window holds unsaved changes, so the question asked
+    /// before quitting is about the application rather than about this window.
+    pub(crate) unsaved_elsewhere: bool,
+    /// Where this window's contents are on the desktop, as the window system
+    /// last said. `None` on Wayland, which never tells a client where it is --
+    /// and a tab can only be dropped onto a window whose place is known.
+    pub(crate) window_rect: Option<egui::Rect>,
+    /// Where the row of tabs is in this window, so a tab dragged along the row
+    /// can be told from one pulled off it.
+    pub(crate) strip_rect: egui::Rect,
+    /// The tab being dragged, if one is (issue 107).
+    pub tab_drag: Option<crate::tabs::TabDrag>,
+    /// Whether the pointer is on this window's row of tabs, as of the frame it
+    /// last drew. How a window claims a tab another window has let go over it,
+    /// on a desktop where no window knows where it is; see `crate::shell`.
+    pub(crate) pointer_on_strip: bool,
     pub settings: AppSettings,
     /// The settings as they are on disk, so a change to them can be noticed and
     /// written without every place that makes one having to remember to.
@@ -313,8 +345,22 @@ pub struct App {
     pub(super) last_title: String,
     /// True while a run of held-down nudge keys is coalescing into one undo step.
     pub(super) nudging: bool,
-    /// Set once a quit has been confirmed, so the event loop can close the window.
+    /// Set once a quit has been confirmed, so the event loop can end the run.
     pub(super) quit_now: bool,
+    /// Set once closing this window has been confirmed, so the shell can take it
+    /// out of the row of windows (issue 107).
+    pub(super) close_now: bool,
+    /// Set once the shell has been told to end the run, so the close the window
+    /// system reports next is the one the application asked for and is let
+    /// through rather than questioned again. Without it the close a quit sends
+    /// is cancelled by the very handler that watches for the close button, and
+    /// the window can never be closed at all.
+    pub(crate) leaving: bool,
+    /// Whether the unsaved-changes question on screen is about closing this
+    /// window rather than about quitting. With one window open the two are the
+    /// same thing and the question says "quit"; with more than one, closing a
+    /// window leaves the others running and must not claim otherwise.
+    pub(crate) closing_window: bool,
 }
 
 /// The orientation cube turned on its own, so a side the camera cannot see can

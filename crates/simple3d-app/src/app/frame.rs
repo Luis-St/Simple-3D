@@ -54,8 +54,15 @@ impl App {
         // Before the panels rather than after: what they change this frame is
         // written on the next one, and a frame is drawn for every change any of
         // them makes.
-        self.record_window_shape(ctx);
-        self.persist_settings_if_changed(ctx);
+        // The window that is drawn in the root viewport keeps both: how big the
+        // window was left is one answer for the application, and the settings
+        // file has one writer (issue 107). The shell hands a change made in any
+        // window to all of them, so nothing of what another window changed is
+        // lost by only writing here.
+        if self.root_window {
+            self.record_window_shape(ctx);
+            self.persist_settings_if_changed(ctx);
+        }
         self.menu_bar(ctx);
         self.status_bar(ctx);
         crate::panel_toolrail::show(self, ctx);
@@ -76,6 +83,10 @@ impl App {
         crate::pattern_tool::show(self, ctx);
         crate::noise_popup::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
+        // And the other drag that crosses the window: a tab on its way out of it
+        // (issue 107). After the panels for the same reason -- it needs the row
+        // of tabs to have said where it is.
+        crate::tabs::resolve_drag(self, ctx);
         // A dialog is modal, and it was only half of one: `handle_shortcuts`
         // hands it the keyboard, but nothing stopped the main window taking the
         // pointer, so a dialog left open behind it was an application whose

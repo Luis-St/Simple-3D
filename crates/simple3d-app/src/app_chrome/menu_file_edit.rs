@@ -2,6 +2,7 @@
 
 use crate::app::{App, Modal};
 use crate::ui;
+use simple3d_core::config::OpenTarget;
 use simple3d_core::keymap::Command;
 
 impl App {
@@ -28,10 +29,31 @@ impl App {
                 });
             });
 
+            // Where an opened model goes when there is already one open
+            // (issue 107): beside the two entries that open one, which is where
+            // the question comes up.
+            ui.menu_button("Open a model in", |ui| {
+                for option in OpenTarget::ALL {
+                    let chosen = self.settings.open_target == option;
+                    let label = format!("{} {}", if chosen { "*" } else { " " }, option.label());
+                    if ui::menu_entry(ui, &label, true).on_hover_text(option.description()).clicked() {
+                        self.settings.open_target = option;
+                        ui.close();
+                    }
+                }
+            });
+
             ui.separator();
             self.command_item(ui, Command::CloseTab, true);
             self.command_item(ui, Command::NextTab, self.tab_count() > 1);
             self.command_item(ui, Command::PreviousTab, self.tab_count() > 1);
+            // Closing the window rather than the document in it. With one window
+            // open it is the same thing as Quit and asks the same question; with
+            // more than one it leaves the others where they are.
+            if ui.button("Close window").on_hover_text("Close this window and the documents in it").clicked() {
+                self.request_close_window();
+                ui.close();
+            }
             ui.separator();
             self.command_item(ui, Command::Save, true);
             self.command_item(ui, Command::SaveAs, true);

@@ -126,7 +126,7 @@ impl App {
         });
     }
 
-    pub(super) fn save_to(&mut self, path: &Path) {
+    pub(crate) fn save_to(&mut self, path: &Path) {
         // Written without a tool's preview in it, for the reason an undo step
         // is taken without one: it is the result of a command nobody has
         // pressed yet, and a file is the last place it should turn up

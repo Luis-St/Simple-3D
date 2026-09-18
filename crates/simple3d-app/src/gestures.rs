@@ -38,6 +38,7 @@ mod palette_drag;
 mod pattern_tool;
 mod snap;
 mod split_tool;
+mod tab_drag;
 mod view_cube;
 
 use crate::app::App;

@@ -197,19 +197,34 @@ impl App {
             1 => "This project, and one other open document, have changes that have not been saved.".to_string(),
             n => format!("This project, and {n} other open documents, have changes that have not been saved."),
         });
+        // Quitting takes the other windows with it, so what is unsaved in them
+        // is part of the question (issue 107). Closing one window is not asked
+        // about them at all: they are staying open.
+        if !self.closing_one_window() && self.unsaved_elsewhere {
+            ui.add_space(4.0);
+            ui.label("Another window has unsaved changes as well.");
+        }
         ui.add_space(4.0);
         ui.add(egui::Label::new(theme::hint("Only the document on screen can be saved from here.")).selectable(false));
     }
 
     pub(super) fn confirm_quit_actions(&mut self, ui: &mut egui::Ui) {
-        if ui::dialog_button(ui, "Save and quit", true).clicked() {
+        // One window is the application, so closing it is quitting and the
+        // buttons say so; with another window open, this one is only a window
+        // (issue 107).
+        let (save, leave) = if self.closing_one_window() {
+            ("Save and close", "Close without saving")
+        } else {
+            ("Save and quit", "Quit without saving")
+        };
+        if ui::dialog_button(ui, save, true).clicked() {
             self.save();
             if !self.unsaved() {
                 self.confirm_quit();
             }
             self.modal = Modal::None;
         }
-        if ui::dialog_button(ui, "Quit without saving", true).clicked() {
+        if ui::dialog_button(ui, leave, true).clicked() {
             self.confirm_quit();
             self.modal = Modal::None;
         }

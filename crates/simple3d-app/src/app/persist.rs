@@ -8,8 +8,12 @@ use std::time::{Duration, Instant};
 impl App {
     // -- shutdown -----------------------------------------------------------
 
+    /// Quit the application, every window of it. Asks first if anything
+    /// anywhere would be lost -- in this window's documents or in another
+    /// window's, since the windows go together.
     pub fn request_quit(&mut self) {
-        if self.any_unsaved() {
+        self.closing_window = false;
+        if self.any_unsaved() || self.unsaved_elsewhere {
             self.modal = Modal::ConfirmQuit;
         } else {
             self.modal = Modal::None;
@@ -17,8 +21,33 @@ impl App {
         }
     }
 
+    /// Close this window: its own close button, and File > Close window
+    /// (issue 107). Asks about this window's own documents and no others --
+    /// the windows that are staying are not being asked about. With one window
+    /// open the shell turns this into a quit, because then it is one.
+    pub fn request_close_window(&mut self) {
+        self.closing_window = true;
+        if self.any_unsaved() {
+            self.modal = Modal::ConfirmQuit;
+        } else {
+            self.modal = Modal::None;
+            self.close_now = true;
+        }
+    }
+
+    /// The answer to the question above, whichever of the two was asked.
     pub fn confirm_quit(&mut self) {
-        self.quit_now = true;
+        if self.closing_window {
+            self.close_now = true;
+        } else {
+            self.quit_now = true;
+        }
+    }
+
+    /// Whether the question on screen is about closing one window of several.
+    /// With one window open, closing it *is* quitting and it says so.
+    pub(crate) fn closing_one_window(&self) -> bool {
+        self.closing_window && !self.other_windows.is_empty()
     }
 
     /// Where this application reads and writes its settings and keymap.

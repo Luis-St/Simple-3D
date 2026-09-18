@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::{App, Status};
+use simple3d_core::config::OpenTarget;
 use std::path::Path;
 
 impl App {
@@ -55,22 +56,39 @@ impl App {
     }
 
     /// The tab `path` is already open in, if it is open at all.
-    pub(super) fn tab_for_path(&self, path: &Path) -> Option<usize> {
+    pub(crate) fn tab_for_path(&self, path: &Path) -> Option<usize> {
         (0..self.tabs.len()).find(|index| {
             let held = if *index == self.active { self.path.as_deref() } else { self.tabs[*index].path.as_deref() };
             held == Some(path)
         })
     }
 
-    /// Open a project file: in the tab it is already open in if it is one, in
-    /// the current tab if that is still scratch space, and otherwise in a tab
-    /// of its own.
+    /// Open a project file, wherever the settings say a model opened while the
+    /// application is already running should go (issue 107).
+    ///
+    /// A file that is already open is shown rather than read a second time,
+    /// whichever window it is open in -- the shell answers that half, since a
+    /// window knows nothing about the others' documents. An untouched,
+    /// never-saved document is scratch space and is opened into rather than
+    /// left behind, which is why choosing "a window of its own" does not put a
+    /// second, empty window on screen when the first one has nothing in it.
     pub fn open_path(&mut self, path: &Path) {
         if let Some(index) = self.tab_for_path(path) {
             self.activate_tab(index);
             self.status = Status::Info(format!("{} is already open", document_name(Some(path))));
             return;
         }
+        if self.settings.open_target == OpenTarget::Window && !self.active_is_scratch() {
+            self.window_request = Some(crate::shell::WindowRequest::Open(path.to_path_buf()));
+            return;
+        }
+        self.open_path_in_tab(path);
+    }
+
+    /// Open a project file in this window: in the current tab if that is still
+    /// scratch space, and otherwise in a tab of its own. What the shell falls
+    /// back to when a window of its own cannot be had.
+    pub(crate) fn open_path_in_tab(&mut self, path: &Path) {
         if !self.active_is_scratch() {
             self.open_tab(Document::empty());
         }

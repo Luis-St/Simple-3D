@@ -25,6 +25,7 @@ mod pattern_grips;
 mod pattern_tool;
 mod pattern_tool_layout;
 mod tabs;
+mod windows;
 pub(crate) use pattern_grips::*;
 mod mesh;
 mod pattern_edit;
