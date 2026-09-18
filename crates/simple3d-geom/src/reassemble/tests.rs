@@ -303,3 +303,35 @@ fn a_plate_of_pins_comes_back_as_every_pin() {
     assert_eq!(found.groups, vec![(0..21).collect::<Vec<usize>>()], "the pins stand on the plate, so it is one group");
     assert!(worst(&before, &found) < 1e-6);
 }
+
+#[test]
+fn a_shape_survives_being_stored_as_f32() {
+    // What a project file does to a mesh: positions are kept as `f32`, because
+    // a stored mesh is the result of a tessellation rather than a dimension
+    // anybody typed. Nothing about the shapes may depend on more precision
+    // than that.
+    //
+    // This is not a hypothetical. A round cap is fanned from a vertex added at
+    // its centre, and that vertex is *exactly* on the axis only in the numbers
+    // a generator produces: stored and read back it is a hundredth of a micron
+    // off, which still points somewhere. Counted as one more side, a hexagonal
+    // prism came back seven-sided -- and a seven-sided prism fits a hexagon so
+    // badly that it was then recognised as nothing at all.
+    let build = || {
+        gen::regular_prism_mesh(6, 40.0, 50.0, false)
+            .transformed(Vec3::new(0.0, 230.0, 40.0), Vec3::new(-62.0, 30.0, 0.0))
+    };
+    let mut stored = build();
+    for p in stored.positions.iter_mut() {
+        *p = Vec3::new(f64::from(p.x as f32), f64::from(p.y as f32), f64::from(p.z as f32));
+    }
+    let found = reassemble(&stored, &plan());
+    match found.parts[0].shape {
+        Shape::Prism { sides, diameter, height } => {
+            assert_eq!(sides, 6, "the cap's own centre vertex was counted as a side");
+            assert!((diameter - 40.0).abs() < 1e-3 && (height - 50.0).abs() < 1e-3, "{diameter} by {height}");
+        }
+        other => panic!("a stored hexagonal prism came back as {other:?}"),
+    }
+    assert!(worst(&build(), &found) < 1e-3);
+}

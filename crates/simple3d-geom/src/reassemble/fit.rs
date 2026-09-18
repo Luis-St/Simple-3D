@@ -233,8 +233,8 @@ fn as_round(body: &Mesh, axis: Vec3, tolerance: f64) -> Option<Fitted> {
     let plain = Frame::new(axis, Vec3::ZERO);
     let (bottom_centre, bottom_radius) = ring(&bottom, &plain)?;
     let (top_centre, top_radius) = ring(&top, &plain)?;
-    let wider = if bottom.len() >= top.len() { &bottom } else { &top };
-    let (sides, phase) = spokes(wider, &plain, (bottom_centre + top_centre) * 0.5)?;
+    let (wider, wider_radius) = if bottom.len() >= top.len() { (&bottom, bottom_radius) } else { (&top, top_radius) };
+    let (sides, phase) = spokes(wider, &plain, (bottom_centre + top_centre) * 0.5, wider_radius)?;
     let frame = plain.turned(phase);
     // The axis runs through the middle of the two rings; the shape's own centre
     // is halfway up it.
@@ -264,7 +264,11 @@ fn as_sphere(body: &Mesh, axis: Vec3) -> Option<Fitted> {
     }
     let centre = body.positions.iter().fold(Vec3::ZERO, |sum, &p| sum + p) / count as f64;
     let plain = Frame::new(axis, Vec3::ZERO);
-    let (sides, phase) = spokes(&body.positions, &plain, centre)?;
+    // How far the widest of it stands off the axis, which is what tells a pole
+    // from a vertex that is merely near one.
+    let radius =
+        body.positions.iter().map(|&p| (p - centre).dot(plain.x).hypot((p - centre).dot(plain.y))).fold(0.0, f64::max);
+    let (sides, phase) = spokes(&body.positions, &plain, centre, radius)?;
     // A tessellated ellipsoid of this many meridians has exactly this many
     // vertices -- a ring of them at each latitude but the two poles, which are
     // one vertex each. A body with any other number is not one, and saying so
@@ -365,7 +369,18 @@ fn circle(points: &[Vec3], frame: &Frame) -> Option<(Vec3, f64)> {
 /// generated a sixth of a turn out of step with the body is out by the whole
 /// sagitta of its facets everywhere, which is not a near miss but a different
 /// solid.
-fn spokes(points: &[Vec3], frame: &Frame, centre: Vec3) -> Option<(u32, f64)> {
+fn spokes(points: &[Vec3], frame: &Frame, centre: Vec3, radius: f64) -> Option<(u32, f64)> {
+    // What counts as standing on the axis, measured against how far out the
+    // ring itself is rather than as a distance.
+    //
+    // An absolute figure cannot work, and the way it failed is worth keeping
+    // in mind: a round cap is fanned from a vertex added at its centre, which
+    // in the numbers a generator produces is *exactly* on the axis -- and is
+    // not, once the mesh has been through a project file, where a stored
+    // position is an `f32`. A hundredth of a micron off the axis still points
+    // somewhere, and that direction was counted as one more side: a hexagonal
+    // prism came back seven-sided and then failed to be anything at all.
+    let inside = (radius / 2.0).max(ON_AXIS);
     let mut angles: Vec<f64> = Vec::new();
     for &p in points {
         let from = p - centre;
@@ -373,7 +388,7 @@ fn spokes(points: &[Vec3], frame: &Frame, centre: Vec3) -> Option<(u32, f64)> {
         // A vertex on the axis itself -- a cone's apex, a sphere's pole, the
         // vertex a round cap is fanned from -- has no direction round it and
         // says nothing about the phase.
-        if u.hypot(v) > ON_AXIS {
+        if u.hypot(v) > inside {
             angles.push(v.atan2(u).rem_euclid(std::f64::consts::TAU));
         }
     }
@@ -463,8 +478,9 @@ const MOST_SIDES: u32 = 128;
 /// polygon, which is the finest ring that is recognised at all.
 const APART: f64 = std::f64::consts::TAU / 1280.0;
 
-/// How far from the axis a vertex has to be before it points anywhere.
-const ON_AXIS: f64 = 1e-6;
+/// The least a vertex may stand off the axis and still point anywhere, for a
+/// ring so small that half its radius is smaller still.
+const ON_AXIS: f64 = 1e-9;
 
 /// How many of the largest faces are looked through for one square to the axis.
 const FACINGS_SQUARE: usize = 8;
