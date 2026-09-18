@@ -62,11 +62,11 @@ pub(crate) fn hiding_the_grid_hides_it() {
 
 #[test]
 pub(crate) fn grid_spacing_steps_up_so_a_fine_grid_stays_legible() {
-    let mut v = view(800, 600);
-    v.camera.distance = 50.0;
+    let v = view(800, 600);
+    let v = v.with_camera(Camera { distance: 50.0, ..v.camera() });
     assert_eq!(effective_grid_spacing(&v, 10.0), 10.0);
     // Zoomed far out, a 1mm grid would be sub-pixel, so it coarsens.
-    v.camera.distance = 100_000.0;
+    let v = v.with_camera(Camera { distance: 100_000.0, ..v.camera() });
     let spacing = effective_grid_spacing(&v, 1.0);
     assert!(spacing >= 100.0, "spacing stayed at {spacing}");
     assert!(spacing * v.pixels_per_mm() >= 6.0);

@@ -67,10 +67,9 @@ pub(crate) fn every_view_preset_has_distinct_angles() {
 
 #[test]
 pub(crate) fn the_top_preset_looks_down() {
-    let mut v = view();
+    let v = view();
     let (yaw, pitch) = ViewPreset::Top.angles();
-    v.camera.yaw = yaw;
-    v.camera.pitch = pitch;
+    let v = v.with_camera(Camera { yaw, pitch, ..v.camera() });
     assert!(v.forward().z < -0.99, "{:?}", v.forward());
     assert!(v.eye().z > 90.0);
 }

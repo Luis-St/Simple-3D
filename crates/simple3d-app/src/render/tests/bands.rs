@@ -65,7 +65,7 @@ pub(crate) fn rendering_the_same_scene_twice_gives_the_same_image() {
 pub(crate) fn a_camera_inside_the_model_does_not_smear_across_the_viewport() {
     let prepared = Renderable::prepare(&primitives::box_mesh(200.0, 200.0, 200.0));
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-    req.view.camera.distance = 1.0;
+    req.view = req.view.with_camera(Camera { distance: 1.0, ..req.view.camera() });
     let frame = render(&req);
     // A parallel projection has no near-plane singularity to fall into: the
     // walls the camera has passed simply land behind the ones it has not, so
@@ -77,8 +77,7 @@ pub(crate) fn a_camera_inside_the_model_does_not_smear_across_the_viewport() {
 pub(crate) fn a_view_from_far_away_renders_too() {
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-    req.view.camera.distance = 4000.0;
-    req.view.camera.fov_deg = 2.0;
+    req.view = req.view.with_camera(Camera { distance: 4000.0, fov_deg: 2.0, ..req.view.camera() });
     let frame = render(&req);
     assert!(count_non_background(&frame, &req.palette) > 1000);
 }

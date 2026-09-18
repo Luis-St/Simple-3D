@@ -10,11 +10,10 @@ pub(crate) fn the_cube_and_the_viewport_agree_about_which_way_is_which() {
     // than none. Both are driven from yaw and pitch, so this can be checked
     // directly rather than looked at.
     for (yaw, pitch) in [(-55.0, 28.0), (-90.0, 0.0), (0.0, 0.0), (140.0, -35.0), (20.0, 60.0)] {
-        let mut v = view();
-        v.camera.yaw = yaw;
-        v.camera.pitch = pitch;
+        let v = view();
+        let v = v.with_camera(Camera { yaw, pitch, ..v.camera() });
         for axis in [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)] {
-            let (screen, _) = v.project(v.camera.target + axis * 10.0).unwrap();
+            let (screen, _) = v.project(v.camera().target + axis * 10.0).unwrap();
             let on_screen = screen - v.centre;
             let (on_cube, depth) = cube_project(yaw, pitch, axis, 20.0);
             assert_eq!(
@@ -32,7 +31,7 @@ pub(crate) fn the_cube_and_the_viewport_agree_about_which_way_is_which() {
             // front: negative depth on the cube, nearer in the viewport. An
             // axis lying edge-on has no side to be on, so it is skipped.
             if depth.abs() > 1e-6 {
-                let nearer = v.to_view(v.camera.target + axis * 10.0).z < v.to_view(v.camera.target).z;
+                let nearer = v.to_view(v.camera().target + axis * 10.0).z < v.to_view(v.camera().target).z;
                 assert_eq!(
                     nearer,
                     depth < 0.0,
@@ -131,10 +130,9 @@ pub(crate) fn every_cube_face_names_a_different_view() {
         seen.push(label);
         // The face you can see is the side the camera would be on.
         let (yaw, pitch) = preset.angles();
-        let mut v = view();
-        v.camera.yaw = yaw;
-        v.camera.pitch = pitch;
-        let eye = v.eye() - v.camera.target;
+        let v = view();
+        let v = v.with_camera(Camera { yaw, pitch, ..v.camera() });
+        let eye = v.eye() - v.camera().target;
         let normal = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
         assert!(
             eye.normalized().dot(normal) > 0.99,

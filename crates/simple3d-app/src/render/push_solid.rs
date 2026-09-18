@@ -5,6 +5,7 @@ use crate::raster::Rgba;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_geom::section::{self, Plane};
+use simple3d_geom::Vec3;
 
 pub(crate) fn push_shaded(
     steps: &mut Vec<Step>,
@@ -17,16 +18,18 @@ pub(crate) fn push_shaded(
 ) {
     let forward = view.forward();
     for (index, tri) in item.mesh.indices.iter().enumerate() {
+        // The normal was worked out when the renderable was made: it is the
+        // surface's, not the camera's, and `Vec3::ZERO` is what a triangle too
+        // degenerate to have one comes back as.
+        let normal = item.normals[index];
+        if normal == Vec3::ZERO {
+            continue;
+        }
         let world = [
             item.mesh.positions[tri[0] as usize],
             item.mesh.positions[tri[1] as usize],
             item.mesh.positions[tri[2] as usize],
         ];
-        let normal = (world[1] - world[0]).cross(world[2] - world[0]);
-        if normal.length() < 1e-12 {
-            continue;
-        }
-        let normal = normal.normalized();
         // Back-face culling in world space, where it means something: for a
         // closed solid the far side is never visible, so this halves the work.
         let centroid = (world[0] + world[1] + world[2]) * (1.0 / 3.0);
@@ -107,17 +110,17 @@ pub(crate) fn push_cap(
 /// hidden tool body reads as a translucent volume rather than a flat patch.
 pub(crate) fn push_ghost(steps: &mut Vec<Step>, view: &View, item: &Renderable, base: Rgba, section: Option<Plane>) {
     let forward = view.forward();
-    for tri in &item.mesh.indices {
+    for (index, tri) in item.mesh.indices.iter().enumerate() {
+        let normal = item.normals[index];
+        if normal == Vec3::ZERO {
+            continue;
+        }
         let world = [
             item.mesh.positions[tri[0] as usize],
             item.mesh.positions[tri[1] as usize],
             item.mesh.positions[tri[2] as usize],
         ];
-        let normal = (world[1] - world[0]).cross(world[2] - world[0]);
-        if normal.length() < 1e-12 {
-            continue;
-        }
-        let colour = shade(base, normal.normalized(), forward, base[3]);
+        let colour = shade(base, normal, forward, base[3]);
         // A ghost writes no depth, so the tag it would have written is never
         // read; it carries the one a solid would have had for form's sake.
         for piece in kept(section, world).triangles() {

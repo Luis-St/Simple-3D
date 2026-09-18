@@ -1,7 +1,6 @@
 //! Which stretches of an axis are inside the model and which are clear.
 
-use super::*;
-use simple3d_geom::Vec3;
+use simple3d_geom::{Mesh, Vec3};
 
 /// `[a, b]` -- a stretch of an axis, given as the coordinate along it -- cut at
 /// every boundary of `spans`, each piece saying whether it lies inside one.
@@ -35,7 +34,7 @@ pub(crate) fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64,
     pieces
 }
 
-/// Where along `axis` one item's solids are, as spans of the coordinate along
+/// Where along `axis` one mesh's solids are, as spans of the coordinate along
 /// it, each with the body it runs through.
 ///
 /// A closed surface is crossed an even number of times, so the crossings sorted
@@ -45,31 +44,36 @@ pub(crate) fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64,
 /// which would call the empty space between two boxes "material". An odd count
 /// means the line grazed an edge or the mesh is not closed; the odd one out is
 /// dropped rather than turned into a span that runs to infinity.
-pub(crate) fn axis_inside_spans(item: &Item<'_>, axis: usize, tag_base: u16) -> Vec<((f64, f64), u16)> {
+///
+/// The answer depends on the mesh and on nothing else -- not on the camera, not
+/// on the section, not on where this item's tags start -- so it is worked out
+/// once, when the renderable is made, and the frame only reads it. Doing it per
+/// frame meant a Moller-Trumbore test against every triangle three times over
+/// for every turn of the camera, which on an imported assembly was two
+/// milliseconds of every frame spent re-deriving an answer that had not moved.
+/// What comes back is therefore the *body*, not the tag: the tag depends on the
+/// item's base, which is a property of the frame.
+pub(crate) fn axis_inside_spans(mesh: &Mesh, bodies: &[u16], axis: usize) -> Vec<((f64, f64), u16)> {
     // The axis passes through the origin, so a solid that does not straddle zero
     // on the other two coordinates cannot be on it -- which is most of them, and
     // this is the whole mesh not looked at.
-    let Some((lo, hi)) = item.renderable.mesh.bounds() else { return Vec::new() };
+    let Some((lo, hi)) = mesh.bounds() else { return Vec::new() };
     if (0..3).any(|other| other != axis && (component(lo, other) > 0.0 || component(hi, other) < 0.0)) {
         return Vec::new();
     }
     let mut crossings: std::collections::BTreeMap<u16, Vec<f64>> = std::collections::BTreeMap::new();
-    for (index, tri) in item.renderable.mesh.indices.iter().enumerate() {
-        let world = [
-            item.renderable.mesh.positions[tri[0] as usize],
-            item.renderable.mesh.positions[tri[1] as usize],
-            item.renderable.mesh.positions[tri[2] as usize],
-        ];
+    for tri in &mesh.indices {
+        let world = [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
         if let Some(at) = axis_crossing(world, axis) {
-            crossings.entry(item.renderable.tag(index, tag_base)).or_default().push(at);
+            crossings.entry(bodies.get(tri[0] as usize).copied().unwrap_or(0)).or_default().push(at);
         }
     }
     let mut spans = Vec::new();
-    for (tag, mut at) in crossings {
+    for (body, mut at) in crossings {
         at.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         // A crossing on a shared edge is found twice, once for each triangle.
         at.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
-        spans.extend(at.chunks_exact(2).map(|pair| ((pair[0], pair[1]), tag)));
+        spans.extend(at.chunks_exact(2).map(|pair| ((pair[0], pair[1]), body)));
     }
     spans
 }

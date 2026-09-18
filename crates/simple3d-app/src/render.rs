@@ -3,6 +3,7 @@
 //! axes, the selection highlight and translucent ghosts for hidden nodes.
 
 mod renderable;
+pub(crate) use renderable::body_tag;
 pub use renderable::Renderable;
 mod palette;
 pub use palette::Palette;

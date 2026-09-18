@@ -16,7 +16,7 @@ pub(crate) fn the_front_view_looks_along_positive_y() {
 #[test]
 pub(crate) fn the_target_projects_to_the_centre_of_the_viewport() {
     let v = view();
-    let (screen, depth) = v.project(v.camera.target).unwrap();
+    let (screen, depth) = v.project(v.camera().target).unwrap();
     assert!((screen - v.centre).length() < 1e-3, "{screen:?} vs {:?}", v.centre);
     assert!((depth - 100.0).abs() < 1e-6);
 }
@@ -32,9 +32,8 @@ pub(crate) fn screen_right_is_world_right_and_screen_up_is_world_up() {
 
 #[test]
 pub(crate) fn projecting_and_unprojecting_agree() {
-    let mut v = view();
-    v.camera.yaw = -55.0;
-    v.camera.pitch = 28.0;
+    let v = view();
+    let v = v.with_camera(Camera { yaw: -55.0, pitch: 28.0, ..v.camera() });
     for world in [Vec3::new(10.0, 5.0, 3.0), Vec3::new(-30.0, 12.0, -8.0), Vec3::new(0.0, 0.0, 0.0)] {
         let (screen, _) = v.project(world).unwrap();
         let (origin, dir) = v.ray(screen);
@@ -81,17 +80,17 @@ pub(crate) fn a_plane_drag_lands_on_the_plane() {
 
 #[test]
 pub(crate) fn a_pixel_covers_more_millimetres_as_the_camera_pulls_back() {
-    let mut v = view();
+    let v = view();
     let near = v.mm_per_pixel_at(Vec3::ZERO);
-    v.camera.distance = 400.0;
+    let v = v.with_camera(Camera { distance: 400.0, ..v.camera() });
     let far = v.mm_per_pixel_at(Vec3::ZERO);
     assert!(far > near * 3.5, "{near} -> {far}");
 }
 
 #[test]
 pub(crate) fn looking_straight_down_still_yields_a_usable_basis() {
-    let mut v = view();
-    v.camera.pitch = 90.0;
+    let v = view();
+    let v = v.with_camera(Camera { pitch: 90.0, ..v.camera() });
     let (right, up) = v.basis();
     assert!(right.length() > 0.9 && up.length() > 0.9);
     assert!(right.dot(up).abs() < 1e-6, "basis is not orthogonal");

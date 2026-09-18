@@ -20,7 +20,7 @@ pub(crate) fn the_grid_never_draws_over_geometry_it_is_coplanar_with() {
     let build = |grid: bool| {
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
         req.grid = Grid { visible: grid, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-        req.view.camera.pitch = 10.0;
+        req.view = req.view.with_camera(Camera { pitch: 10.0, ..req.view.camera() });
         // The axes fade, so an axis pixel is a blend of the axis with
         // whatever is under it -- which is the grid in one render and the
         // background in the other. Making them invisible here leaves the

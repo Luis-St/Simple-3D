@@ -6,27 +6,58 @@ use simple3d_geom::Vec3;
 
 impl View {
     pub fn new(camera: Camera, rect: egui::Rect) -> View {
-        View { camera, centre: rect.center(), size: rect.size() }
+        let (centre, size) = (rect.center(), rect.size());
+        View { camera, centre, size, projection: Projection::of(camera, size) }
     }
 
-    /// Direction from the target towards the eye.
+    /// The same rectangle seen from another camera. How a camera is changed,
+    /// since assigning to one would leave the projection behind -- see [`View`].
+    /// Only the tests move a camera without the application building the view
+    /// afresh from the scene's own, which is what every frame does.
+    #[cfg(test)]
+    pub fn with_camera(&self, camera: Camera) -> View {
+        View { camera, centre: self.centre, size: self.size, projection: Projection::of(camera, self.size) }
+    }
+
+    pub fn camera(&self) -> Camera {
+        self.camera
+    }
+
+    /// Direction from the target towards the eye. The tests' way of putting a
+    /// shape between the camera and the origin; the renderer asks for
+    /// [`View::forward`] instead.
+    #[cfg(test)]
     pub fn offset_dir(&self) -> Vec3 {
-        let yaw = self.camera.yaw.to_radians();
-        let pitch = self.camera.pitch.to_radians().clamp(-1.5533, 1.5533);
-        Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin())
+        -self.projection.forward
     }
 
     pub fn eye(&self) -> Vec3 {
-        self.camera.target + self.offset_dir() * self.camera.distance
+        self.projection.eye
     }
 
     pub fn forward(&self) -> Vec3 {
-        -self.offset_dir()
+        self.projection.forward
     }
 
     /// Screen right and up, in world space.
     pub fn basis(&self) -> (Vec3, Vec3) {
-        let forward = self.forward();
+        (self.projection.right, self.projection.up)
+    }
+
+    /// Pixels per world unit: the projection's whole scale, since it is
+    /// orthographic and one millimetre is the same number of pixels wherever it
+    /// sits in the frame.
+    pub fn pixels_per_mm(&self) -> f64 {
+        self.projection.pixels_per_mm
+    }
+}
+
+impl Projection {
+    fn of(camera: Camera, size: egui::Vec2) -> Projection {
+        let yaw = camera.yaw.to_radians();
+        let pitch = camera.pitch.to_radians().clamp(-1.5533, 1.5533);
+        let offset_dir = Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin());
+        let forward = -offset_dir;
         let mut right = forward.cross(Vec3::new(0.0, 0.0, 1.0));
         if right.length() < 1e-9 {
             // Looking straight down or up: any horizontal axis will do, and
@@ -34,15 +65,13 @@ impl View {
             right = Vec3::new(1.0, 0.0, 0.0);
         }
         let right = right.normalized();
-        let up = right.cross(forward).normalized();
-        (right, up)
-    }
-
-    /// Pixels per world unit: the projection's whole scale, since it is
-    /// orthographic and one millimetre is the same number of pixels wherever it
-    /// sits in the frame.
-    pub fn pixels_per_mm(&self) -> f64 {
-        let half_height = self.camera.distance * (self.camera.fov_deg.to_radians() / 2.0).tan();
-        (self.size.y as f64 / 2.0) / half_height.max(1e-9)
+        let half_height = camera.distance * (camera.fov_deg.to_radians() / 2.0).tan();
+        Projection {
+            right,
+            up: right.cross(forward).normalized(),
+            forward,
+            eye: camera.target + offset_dir * camera.distance,
+            pixels_per_mm: (size.y as f64 / 2.0) / half_height.max(1e-9),
+        }
     }
 }

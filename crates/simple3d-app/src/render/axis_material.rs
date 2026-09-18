@@ -48,8 +48,7 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
         reach: 0.0,
     };
     for (item, tag_base) in items.iter().zip(tag_bases(items)) {
-        let positions = item.renderable.mesh.positions.iter();
-        material.reach = positions.map(|p| p.length()).fold(material.reach, f64::max);
+        material.reach = material.reach.max(item.renderable.reach);
         // A ghost is see-through, so the axis inside it is too -- and it never
         // reaches the depth buffer either way.
         if item.style != Style::Solid {
@@ -59,7 +58,11 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
             if !grid.axes[axis] {
                 continue;
             }
-            for (span, tag) in axis_inside_spans(item, axis, tag_base) {
+            // Read off the renderable rather than measured again: where an axis
+            // runs through a mesh is a property of the mesh, and the mesh has
+            // not moved since the renderable was made.
+            for &(span, body) in &item.renderable.axis_spans[axis] {
+                let tag = body_tag(body, tag_base);
                 // Material the section took away is no longer in the axis's
                 // way: the line is drawn through the space the cut opened, the
                 // way it is drawn through empty space anywhere else.

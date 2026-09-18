@@ -1,6 +1,7 @@
 //! What the renderer is handed: a body's triangles, and the edges worth
 //! drawing on it.
 
+use super::axis_inside_spans;
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 
@@ -27,8 +28,21 @@ pub struct BorderEdge {
 
 /// A mesh prepared for drawing: welded, so edges can be found, together with
 /// its feature edges.
+///
+/// Everything here that does not depend on where the camera is standing is
+/// worked out once, when the renderable is made, rather than once per frame:
+/// the face normals, how far the mesh reaches from the origin, and where each
+/// origin axis runs through it. A renderable is rebuilt only when the
+/// evaluation or the selection changes, so an orbit re-uses all of it, and the
+/// alternative was re-deriving it from a hundred and fifty thousand triangles
+/// for every frame of the drag.
 pub struct Renderable {
     pub mesh: Mesh,
+    /// One outward unit normal per triangle, in the order `mesh.indices` has
+    /// them. `Vec3::ZERO` for a triangle too degenerate to have one, which is
+    /// exactly what [`Mesh::triangle_normal`] answers for it, so a caller tests
+    /// for that rather than measuring the cross product itself.
+    pub normals: Vec<Vec3>,
     /// Edges worth drawing: a real crease in the surface, not an artefact of how
     /// a flat face happens to be triangulated.
     pub edges: Vec<[u32; 2]>,
@@ -49,6 +63,13 @@ pub struct Renderable {
     /// How many bodies that is: what the next item's tags start after, so two
     /// items' bodies are never the same body as far as the frame is concerned.
     pub body_count: u16,
+    /// The distance from the origin to the furthest vertex: what an origin
+    /// axis's arms have to be longer than (see `AxisMaterial::reach`).
+    pub reach: f64,
+    /// Per axis, the stretches of that axis that run inside this mesh, each
+    /// with the *body* it runs through -- not the tag, because the tag depends
+    /// on where this item's bodies start in the frame and the spans do not.
+    pub(super) axis_spans: [Vec<((f64, f64), u16)>; 3],
 }
 
 impl Renderable {
@@ -65,15 +86,27 @@ impl Renderable {
 
     pub(super) fn prepare_with(mesh: &Mesh, outlined: bool) -> Renderable {
         let welded = mesh.weld();
+        let normals: Vec<Vec3> = welded.indices.iter().map(|tri| welded.triangle_normal(*tri)).collect();
         let edges = feature_edges(&welded, 20.0);
         let outline = if outlined { border_edges(&welded) } else { Vec::new() };
         let bodies = bodies_of(&welded);
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
-        Renderable { mesh: welded, edges, outline, bodies, body_count }
+        let reach = welded.positions.iter().map(|p| p.length()).fold(0.0, f64::max);
+        let axis_spans = std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis));
+        Renderable { mesh: welded, normals, edges, outline, bodies, body_count, reach, axis_spans }
     }
 
     pub fn empty() -> Renderable {
-        Renderable { mesh: Mesh::new(), edges: Vec::new(), outline: Vec::new(), bodies: Vec::new(), body_count: 0 }
+        Renderable {
+            mesh: Mesh::new(),
+            normals: Vec::new(),
+            edges: Vec::new(),
+            outline: Vec::new(),
+            bodies: Vec::new(),
+            body_count: 0,
+            reach: 0.0,
+            axis_spans: [Vec::new(), Vec::new(), Vec::new()],
+        }
     }
 
     /// The body a triangle belongs to, as a tag for the depth buffer. `base` is
@@ -84,8 +117,15 @@ impl Renderable {
     }
 
     pub(super) fn body_tag(&self, vertex: usize, base: u16) -> u16 {
-        self.bodies.get(vertex).map_or(0, |body| base.saturating_add(*body).saturating_add(1))
+        self.bodies.get(vertex).map_or(0, |body| body_tag(*body, base))
     }
+}
+
+/// The depth-buffer tag a body of one item carries, where `base` is where that
+/// item's bodies start. Shared, because a span cached on the renderable knows
+/// its body but cannot know the base, and the two have to agree.
+pub(crate) fn body_tag(body: u16, base: u16) -> u16 {
+    base.saturating_add(body).saturating_add(1)
 }
 
 /// Group the vertices of a welded mesh into connected bodies: union-find over

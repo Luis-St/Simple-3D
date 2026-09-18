@@ -75,6 +75,11 @@ pub(crate) fn push_selection(
         return;
     }
     let towards = view.forward();
+    // The normals come off the renderable: they are the mesh's own, and working
+    // them out here again cost a normalisation per triangle and a
+    // several-megabyte vector on every frame of an orbit. Which of them face
+    // the eye is the camera's question, so that one is still asked per frame.
+    let normals = &item.normals;
     // Edge-on counts as turned away, and by a margin. A face exactly
     // perpendicular to the view -- every side face of a box seen straight on --
     // has a dot product of zero, and which side of zero the arithmetic lands on
@@ -85,7 +90,6 @@ pub(crate) fn push_selection(
     // *back* face's right edge one instead -- so the line was drawn at the far
     // side of the box, lost the depth test against the box's own front face,
     // and the shape came back outlined on three sides out of four.
-    let normals: Vec<Vec3> = item.mesh.indices.iter().map(|tri| item.mesh.triangle_normal(*tri)).collect();
     let front: Vec<bool> = normals.iter().map(|normal| normal.dot(towards) < -EDGE_ON).collect();
     let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
     // Whether the surface really turns a corner across an edge, measured from

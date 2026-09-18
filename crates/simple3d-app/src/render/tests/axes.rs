@@ -146,7 +146,7 @@ pub(crate) fn the_grid_and_axes_draw_in_their_own_colours() {
     let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
     // Close enough in that a 10 mm grid is drawn at full strength, so there
     // are grid lines either side of the axes to find.
-    req.view.camera.distance = 30.0;
+    req.view = req.view.with_camera(Camera { distance: 30.0, ..req.view.camera() });
     req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
     let frame = render(&req);
     for (name, colour) in

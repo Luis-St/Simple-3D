@@ -36,7 +36,7 @@ pub(crate) const MAX_TILT_REACH: f64 = 6.0;
 /// is what the grid has to reach.
 pub fn grid_radius(view: &View) -> f64 {
     let face_on = frame_reach(view);
-    let centre = Vec3::new(view.camera.target.x, view.camera.target.y, 0.0);
+    let centre = Vec3::new(view.camera().target.x, view.camera().target.y, 0.0);
     let half = view.size / 2.0;
     let mut reach: f64 = 0.0;
     for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {

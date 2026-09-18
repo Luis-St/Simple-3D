@@ -50,8 +50,8 @@ pub(crate) fn prepare_axes(view: &View, palette: &Palette, grid: &Grid, material
                 let centre = match axis {
                     // Snapped to the grid's own spacing, so the axis lies along
                     // a grid line rather than between two of them.
-                    0 => Vec3::new((view.camera.target.x / spacing).round() * spacing, 0.0, 0.0),
-                    1 => Vec3::new(0.0, (view.camera.target.y / spacing).round() * spacing, 0.0),
+                    0 => Vec3::new((view.camera().target.x / spacing).round() * spacing, 0.0, 0.0),
+                    1 => Vec3::new(0.0, (view.camera().target.y / spacing).round() * spacing, 0.0),
                     // Z has no grid line to be: the grid is the ground.
                     _ => Vec3::ZERO,
                 };

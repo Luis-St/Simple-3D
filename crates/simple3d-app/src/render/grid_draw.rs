@@ -37,8 +37,8 @@ pub(crate) fn push_grid_level(
 ) {
     let lines = ((radius / spacing).ceil() as i64).clamp(1, MAX_LINES);
     let half = spacing * lines as f64;
-    let cx = (view.camera.target.x / spacing).round() * spacing;
-    let cy = (view.camera.target.y / spacing).round() * spacing;
+    let cx = (view.camera().target.x / spacing).round() * spacing;
+    let cy = (view.camera().target.y / spacing).round() * spacing;
     // A major line every ten, counted in whole multiples of the spacing from
     // the world origin rather than from the centre, so which lines are major
     // stays put while the camera pans over them.
