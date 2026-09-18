@@ -147,6 +147,7 @@ impl App {
             .as_ref()
             .map(|tool| tool.target)
             .or_else(|| self.simplify_tool.as_ref().map(|tool| tool.target))
+            .or_else(|| self.reassemble_tool.as_ref().map(|tool| tool.target))
             .filter(|&id| self.scene.contains(id))
     }
 

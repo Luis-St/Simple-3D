@@ -108,6 +108,7 @@ pub(crate) fn paint_scene(
             preview: crate::split_tool::preview_loops(app)
                 .into_iter()
                 .chain(crate::simplify_tool::preview_loops(app))
+                .chain(crate::reassemble_tool::preview_loops(app))
                 .collect(),
             // The plane the model is cut with, while there is one (issue 71).
             section: app.scene.settings.section.plane(),

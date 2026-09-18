@@ -30,6 +30,7 @@ pub enum Command {
     Pattern,
     ConvertToMesh,
     SimplifyMesh,
+    Reassemble,
     SplitIntoPieces,
     Rejoin,
     Rename,

@@ -16,9 +16,12 @@
 //!   preview is worth having in the viewport at all.
 //!
 //! Nothing here knows what a split is. A popup is a title, a body, a row of
-//! buttons and a [`Placement`] the application keeps for it, so the next tool
-//! that wants one asks for one.
+//! buttons, the labelled number fields its settings are made of, and a
+//! [`Placement`] the application keeps for it, so the next tool that wants one
+//! asks for one.
 
+mod fields;
+pub(crate) use fields::*;
 mod show;
 pub use show::{action_row, scrolling_body, show};
 mod title_bar;

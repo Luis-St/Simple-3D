@@ -27,9 +27,20 @@ use std::collections::HashMap;
 
 /// The furthest any point of `from` ends up from the surface of `to`, in
 /// millimetres.
-pub(crate) fn furthest_from(from: &[Vec3], to: &Mesh) -> f64 {
+pub fn furthest_from(from: &[Vec3], to: &Mesh) -> f64 {
     let Some(grid) = Grid::of(to) else { return 0.0 };
     from.iter().map(|&p| grid.distance(to, p)).fold(0.0, f64::max)
+}
+
+/// The furthest the two surfaces are from each other, in millimetres: the worse
+/// of the two directions.
+///
+/// One direction is not enough to say two meshes are the same solid. Every
+/// vertex of a plate sits on the surface of the box it was cut out of, so
+/// measuring only that way calls a drilled plate a box; measuring the box
+/// against the plate finds the hole.
+pub fn furthest_between(a: &Mesh, b: &Mesh) -> f64 {
+    furthest_from(&a.positions, b).max(furthest_from(&b.positions, a))
 }
 
 /// The triangles of a mesh, in buckets by where they are.

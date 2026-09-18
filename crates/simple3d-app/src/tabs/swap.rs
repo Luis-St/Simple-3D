@@ -104,6 +104,7 @@ impl App {
         }
         self.split_tool = None;
         self.simplify_tool = None;
+        self.reassemble_tool = None;
 
         // Nothing cached about the model on screen survives a change of model.
         self.evaluation_generation += 1;

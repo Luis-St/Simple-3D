@@ -25,6 +25,7 @@ mod pattern_tool;
 mod pick;
 mod popup;
 mod raster;
+mod reassemble_tool;
 mod render;
 mod section_tool;
 mod shell;

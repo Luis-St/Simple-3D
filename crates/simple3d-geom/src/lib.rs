@@ -4,6 +4,7 @@ pub mod mesh;
 pub mod planar;
 pub mod polyhedra;
 pub mod primitives;
+pub mod reassemble;
 pub mod repair;
 pub mod revolve;
 pub mod section;

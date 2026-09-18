@@ -29,6 +29,7 @@ mod windows;
 pub(crate) use pattern_grips::*;
 mod mesh;
 mod pattern_edit;
+mod reassemble;
 mod simplify;
 mod snap;
 mod snap_resize;

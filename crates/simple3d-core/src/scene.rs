@@ -30,6 +30,7 @@ mod edit;
 mod export_body;
 mod node_data;
 mod paint;
+mod rebuild;
 mod split;
 mod subtree;
 pub use node_data::NodeData;

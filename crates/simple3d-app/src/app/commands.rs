@@ -68,6 +68,7 @@ impl App {
             Pattern => self.make_pattern(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             SimplifyMesh => self.open_simplify_tool(),
+            Reassemble => self.open_reassemble_tool(),
             SplitIntoPieces => self.open_split_tool(),
             Rejoin => self.rejoin_selection(),
             Rename => {

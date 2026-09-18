@@ -37,7 +37,11 @@ pub(crate) use quadric::Quadric;
 mod surface;
 pub(crate) use surface::Surface;
 mod collapse;
-mod measure;
+// Public, and shared with the reassembly (issue 108), which asks the same
+// question of a fitted shape that a simplification asks of its result: how far
+// is this surface from that one. It is also the one honest way for a test to
+// say two meshes describe the same solid.
+pub mod measure;
 #[cfg(test)]
 mod tests;
 

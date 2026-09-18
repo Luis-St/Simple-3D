@@ -109,6 +109,12 @@ pub struct AppSettings {
     /// default.
     #[serde(default)]
     pub last_simplify: simple3d_geom::simplify::Simplify,
+    /// How a mesh was last taken back apart into objects (issue 108), for the
+    /// same reason as the two above it: the tool opens on the numbers the user
+    /// is working in. Newer than the settings file, so an older one reads as
+    /// the default.
+    #[serde(default)]
+    pub last_reassemble: simple3d_geom::reassemble::Reassemble,
     pub recent_files: Vec<PathBuf>,
 }
 
@@ -141,6 +147,7 @@ impl Default for AppSettings {
             last_export_compress: true,
             last_split: simple3d_geom::tiling::SplitPlan::default(),
             last_simplify: simple3d_geom::simplify::Simplify::default(),
+            last_reassemble: simple3d_geom::reassemble::Reassemble::default(),
             recent_files: Vec::new(),
         }
     }

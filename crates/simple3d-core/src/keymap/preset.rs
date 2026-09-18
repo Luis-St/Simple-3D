@@ -41,6 +41,10 @@ impl Keymap {
         // conversion that makes the meshes it works on; the plain R names the
         // resize tool, and no preset spends it with a Ctrl and a Shift on it.
         set(SimplifyMesh, Chord::ctrl_shift("R"));
+        // Taking a mesh back apart into the objects it is made of (issue 108).
+        // A for "assemble", beside the conversion it is the way back from, and
+        // no preset spends the plain A on anything.
+        set(Reassemble, Chord::ctrl_shift("A"));
         // Cutting a shape into a pattern of pieces (issue 82). K for the knife
         // it is, which no preset spends on anything with a Ctrl and a Shift on
         // it.

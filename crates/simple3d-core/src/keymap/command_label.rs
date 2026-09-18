@@ -27,6 +27,7 @@ impl Command {
             Pattern => "Make a pattern of the selection",
             ConvertToMesh => "Convert to a mesh",
             SimplifyMesh => "Simplify the mesh",
+            Reassemble => "Reassemble into objects",
             SplitIntoPieces => "Split into smaller pieces",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
@@ -74,7 +75,7 @@ impl Command {
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | SimplifyMesh
-            | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
+            | Reassemble | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {

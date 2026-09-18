@@ -236,6 +236,13 @@ pub struct App {
     /// simplified mesh -- so the tool also holds the mesh that was there
     /// before, which is what Cancel puts back. See [`crate::simplify_tool`].
     pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
+    /// The reassembly tool's window while it is open (issue 108). Unlike the
+    /// simplify tool above it, its work never goes into the document until it
+    /// is accepted -- what it produces is a subtree rather than a mesh, and a
+    /// subtree written and unwritten on every turn of a number would be the
+    /// outliner rebuilding itself under the pointer. See
+    /// [`crate::reassemble_tool`].
+    pub reassemble_tool: Option<crate::reassemble_tool::ReassembleTool>,
     /// The saved pattern kind the "delete this" question is being asked about
     /// (issue 67). Set only while [`Modal::ConfirmDeleteKind`] is up.
     pub(crate) confirm_delete_kind: Option<simple3d_core::pattern_library::Entry>,

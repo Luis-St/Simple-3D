@@ -128,7 +128,7 @@ impl App {
 impl App {
     /// Whether something is running that will change what is on screen without
     /// any input to wake the loop for it: an evaluation, an export, a cut into
-    /// pieces, or a simplification.
+    /// pieces, a simplification, or a mesh being taken apart.
     ///
     /// Each of these hands its result back over a channel, which is not an
     /// event the toolkit knows about -- so a frame that is not asked for here
@@ -147,5 +147,6 @@ impl App {
             || self.export_job.is_some()
             || self.split_job.is_some()
             || self.simplify_tool.as_ref().is_some_and(|tool| tool.job.is_some())
+            || self.reassemble_tool.as_ref().is_some_and(|tool| tool.job.is_some())
     }
 }

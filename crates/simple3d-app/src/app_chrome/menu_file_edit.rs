@@ -131,6 +131,13 @@ impl App {
                 Command::SimplifyMesh,
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
             );
+            // The way back from the conversion, and so enabled on the same one
+            // row it is (issue 108).
+            self.command_item(
+                ui,
+                Command::Reassemble,
+                self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
+            );
             self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
             // Enabled only on a split, because a split is the only thing it has
             // anything to say to -- everything else was never cut up.

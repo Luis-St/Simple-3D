@@ -89,6 +89,11 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     if let Some(tool) = app.simplify_tool.as_ref() {
         tool.wireframe.hash(&mut hasher);
     }
+    // What the reassembly found is drawn over the mesh and is not the mesh, so
+    // nothing else in this key moves with it (issue 108).
+    if let Some(tool) = app.reassemble_tool.as_ref() {
+        tool.hash_preview(&mut hasher);
+    }
     app.scene.settings.preview_viewport.hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
