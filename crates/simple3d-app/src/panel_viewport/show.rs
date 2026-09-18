@@ -82,6 +82,13 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     if let Some(tool) = app.split_tool.as_ref() {
         tool.hash_preview(&mut hasher);
     }
+    // The simplify tool's own picture is the mesh in the document, which the
+    // evaluation above already stands for -- but whether its triangles are
+    // drawn over that mesh is a switch in the window and nothing else in this
+    // key moves with it (issue 106).
+    if let Some(tool) = app.simplify_tool.as_ref() {
+        tool.wireframe.hash(&mut hasher);
+    }
     app.scene.settings.preview_viewport.hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);

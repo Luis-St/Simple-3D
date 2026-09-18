@@ -91,7 +91,7 @@ impl eframe::App for App {
         // runs as fast as the machine allows.
         if self.drag.is_some() || self.camera_move.is_some() {
             ctx.request_repaint();
-        } else if self.worker.is_busy() || self.export_job.is_some() || self.split_job.is_some() {
+        } else if self.work_in_flight() {
             // Progress and the preview, at a rate a person can read rather than
             // at whatever the rasterizer can manage.
             ctx.request_repaint_after(Duration::from_millis(33));
@@ -117,5 +117,30 @@ impl eframe::App for App {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.persist();
+    }
+}
+
+impl App {
+    /// Whether something is running that will change what is on screen without
+    /// any input to wake the loop for it: an evaluation, an export, a cut into
+    /// pieces, or a simplification.
+    ///
+    /// Each of these hands its result back over a channel, which is not an
+    /// event the toolkit knows about -- so a frame that is not asked for here
+    /// is a result that sits in the channel until the pointer happens to move.
+    /// For the simplify tool that is the whole picture: its result *is* the
+    /// preview (issue 106).
+    pub(crate) fn work_in_flight(&self) -> bool {
+        // A scene marked for re-evaluation counts as work: the submission
+        // happens at the top of a frame and the marking usually happens in the
+        // middle of one, so the evaluation a tool asked for does not start
+        // until the frame after -- and if nothing asks for that frame, it never
+        // starts at all. That is not hypothetical: it is what left the simplify
+        // tool's window reporting a result the viewport never showed.
+        self.dirty
+            || self.worker.is_busy()
+            || self.export_job.is_some()
+            || self.split_job.is_some()
+            || self.simplify_tool.as_ref().is_some_and(|tool| tool.job.is_some())
     }
 }

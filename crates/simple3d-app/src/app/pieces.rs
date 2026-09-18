@@ -143,7 +143,11 @@ impl App {
     /// key. Only the split tool has a preview today; the next tool that grows
     /// one answers here too, and nothing downstream has to learn about it.
     pub(crate) fn preview_subject(&self) -> Option<NodeId> {
-        self.split_tool.as_ref().map(|tool| tool.target).filter(|&id| self.scene.contains(id))
+        self.split_tool
+            .as_ref()
+            .map(|tool| tool.target)
+            .or_else(|| self.simplify_tool.as_ref().map(|tool| tool.target))
+            .filter(|&id| self.scene.contains(id))
     }
 
     /// The collection whose pieces the properties panel is listing: the one

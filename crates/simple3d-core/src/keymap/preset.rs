@@ -37,6 +37,10 @@ impl Keymap {
         set(Pattern, Chord::ctrl_shift("P"));
         // Baking a shape into the triangles it evaluates to (issue 80).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
+        // Dropping detail from a mesh (issue 106). R for "reduce", beside the
+        // conversion that makes the meshes it works on; the plain R names the
+        // resize tool, and no preset spends it with a Ctrl and a Shift on it.
+        set(SimplifyMesh, Chord::ctrl_shift("R"));
         // Cutting a shape into a pattern of pieces (issue 82). K for the knife
         // it is, which no preset spends on anything with a Ctrl and a Shift on
         // it.

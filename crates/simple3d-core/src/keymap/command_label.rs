@@ -26,6 +26,7 @@ impl Command {
             Group => "Group selection",
             Pattern => "Make a pattern of the selection",
             ConvertToMesh => "Convert to a mesh",
+            SimplifyMesh => "Simplify the mesh",
             SplitIntoPieces => "Split into smaller pieces",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
@@ -72,7 +73,7 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh | SimplifyMesh
             | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection

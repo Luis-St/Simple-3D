@@ -31,6 +31,12 @@ impl App {
     /// Lift the current document off `App`, leaving the fields that belong to a
     /// document empty and the ones that belong to the window alone.
     pub(super) fn detach(&mut self) -> Document {
+        // The simplify tool writes its result straight into the document, so
+        // the document is put back as it was before it is stored away: a tab
+        // switched away from mid-preview would otherwise come back holding a
+        // simplification nobody accepted, with no undo step to take it off
+        // again (issue 106).
+        self.cancel_simplify_tool();
         Document {
             scene: std::mem::replace(&mut self.scene, Scene::new()),
             history: std::mem::replace(&mut self.history, History::new()),
@@ -97,6 +103,7 @@ impl App {
             job.cancel();
         }
         self.split_tool = None;
+        self.simplify_tool = None;
 
         // Nothing cached about the model on screen survives a change of model.
         self.evaluation_generation += 1;

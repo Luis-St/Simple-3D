@@ -90,6 +90,7 @@ impl App {
             export_job: None,
             import_job: None,
             split_tool: None,
+            simplify_tool: None,
             split_job: None,
             confirm_extract: None,
             popups: std::collections::HashMap::new(),

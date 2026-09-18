@@ -127,12 +127,15 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         item(ui, keymap, &mut chosen, Command::Pattern, !is_root);
         ui.separator();
         // What a node can be turned into. Baking a shape into its triangles
-        // (issue 80); cutting one into a pattern of pieces, which on a split
-        // re-cuts rather than splits a split, and is why it is offered there
-        // too (issue 82); and the way back, on the split itself, which is the
-        // only row it can act on. All three act on the selection, which the
-        // click above has already made this row.
+        // (issue 80); dropping detail from one already baked, which is the same
+        // row the other way round and so sits next to it (issue 106); cutting
+        // one into a pattern of pieces, which on a split re-cuts rather than
+        // splits a split, and is why it is offered there too (issue 82); and
+        // the way back, on the split itself, which is the only row it can act
+        // on. All of them act on the selection, which the click above has
+        // already made this row.
         item(ui, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
+        item(ui, keymap, &mut chosen, Command::SimplifyMesh, !multiple && app.scene.node(id).is_mesh());
         item(ui, keymap, &mut chosen, Command::SplitIntoPieces, !is_root && !multiple);
         item(ui, keymap, &mut chosen, Command::Rejoin, !multiple && app.scene.node(id).is_split());
         ui.separator();

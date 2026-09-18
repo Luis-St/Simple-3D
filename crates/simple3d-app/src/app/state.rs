@@ -198,6 +198,12 @@ pub struct App {
     /// lands -- see [`crate::split_tool`].
     pub split_tool: Option<crate::split_tool::SplitTool>,
     pub split_job: Option<SplitJob>,
+    /// The simplify tool's window while it is open (issue 106). Unlike the
+    /// split above it, the result of its work goes into the document as it is
+    /// computed rather than when it is accepted -- the preview *is* the
+    /// simplified mesh -- so the tool also holds the mesh that was there
+    /// before, which is what Cancel puts back. See [`crate::simplify_tool`].
+    pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
     /// The saved pattern kind the "delete this" question is being asked about
     /// (issue 67). Set only while [`Modal::ConfirmDeleteKind`] is up.
     pub(crate) confirm_delete_kind: Option<simple3d_core::pattern_library::Entry>,

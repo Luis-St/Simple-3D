@@ -96,6 +96,12 @@ pub struct AppSettings {
     /// split could be cut more than once reads as the one cut it holds.
     #[serde(default)]
     pub last_split: simple3d_geom::tiling::SplitPlan,
+    /// How much detail a mesh was last simplified by (issue 106), for the same
+    /// reason as the split above it: the tool opens on the numbers the user is
+    /// working in. Newer than the settings file, so an older one reads as the
+    /// default.
+    #[serde(default)]
+    pub last_simplify: simple3d_geom::simplify::Simplify,
     pub recent_files: Vec<PathBuf>,
 }
 
@@ -126,6 +132,7 @@ impl Default for AppSettings {
             last_export_bodies: "one".to_string(),
             last_export_compress: true,
             last_split: simple3d_geom::tiling::SplitPlan::default(),
+            last_simplify: simple3d_geom::simplify::Simplify::default(),
             recent_files: Vec::new(),
         }
     }

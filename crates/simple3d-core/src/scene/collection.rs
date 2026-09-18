@@ -137,6 +137,25 @@ impl Scene {
     /// operands of a boolean are not parts of the result, and leaving them in
     /// the tree under a mesh that already contains them would double every
     /// solid in the export.
+    /// Swap the geometry of a node that already holds one, keeping everything
+    /// else about it (issue 106).
+    ///
+    /// What the simplify tool writes while its numbers are being turned, and
+    /// what it puts back when the tool is cancelled -- an `Arc` in and an `Arc`
+    /// out, so showing a preview of a hundred thousand triangles and then
+    /// taking it away again costs two pointer writes rather than two copies of
+    /// the geometry. Refuses anything that is not already a mesh: replacing a
+    /// box's parameters with triangles is a conversion, and conversions take an
+    /// undo step and say so.
+    pub fn set_mesh(&mut self, id: NodeId, mesh: Arc<MeshData>) -> bool {
+        let Some(node) = self.nodes.get_mut(&id) else { return false };
+        if !matches!(node.body, Body::Mesh { .. }) {
+            return false;
+        }
+        node.body = Body::Mesh { mesh };
+        true
+    }
+
     pub fn convert_to_mesh(&mut self, id: NodeId, mesh: MeshData) -> bool {
         if id == self.root || !self.nodes.contains_key(&id) {
             return false;

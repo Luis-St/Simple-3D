@@ -27,6 +27,7 @@ mod popup;
 mod raster;
 mod render;
 mod section_tool;
+mod simplify_tool;
 mod snap;
 mod split_tool;
 mod tabs;

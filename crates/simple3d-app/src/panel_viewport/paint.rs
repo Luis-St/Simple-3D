@@ -102,7 +102,13 @@ pub(crate) fn paint_scene(
             // The split tool's cells, drawn on the model with the depth buffer
             // rather than over the finished picture, so the far side of the
             // shape hides the ones behind it (issue 82).
-            preview: crate::split_tool::preview_loops(app),
+            // The split tool's cells and the simplify tool's triangles go
+            // through the same channel: only one tool is ever open, and neither
+            // knows about the other.
+            preview: crate::split_tool::preview_loops(app)
+                .into_iter()
+                .chain(crate::simplify_tool::preview_loops(app))
+                .collect(),
             // The plane the model is cut with, while there is one (issue 71).
             section: app.scene.settings.section.plane(),
         };

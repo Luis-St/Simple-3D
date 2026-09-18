@@ -24,6 +24,7 @@ impl Command {
         Command::Group,
         Command::Pattern,
         Command::ConvertToMesh,
+        Command::SimplifyMesh,
         Command::SplitIntoPieces,
         Command::Rejoin,
         Command::Rename,

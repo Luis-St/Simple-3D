@@ -19,8 +19,13 @@ impl App {
         let rotate_snap = self.settings.rotate_snap_deg;
         // Records the undo step under a key stable across a held run, so the
         // whole run coalesces into one.
+        // This one records its own undo step rather than going through
+        // `edit`, so it lifts a tool's preview out of the document for itself
+        // -- see `App::lift_preview`.
+        let lifted = self.lift_preview();
         let step =
             gizmo::apply_nudge(&mut self.history, &mut self.scene, &gizmo, &view, id, command, snap, rotate_snap);
+        self.drop_preview_back(lifted);
         let Some(step) = step else { return };
         self.touch();
         self.nudging = true;

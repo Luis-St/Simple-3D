@@ -29,6 +29,7 @@ pub enum Command {
     Group,
     Pattern,
     ConvertToMesh,
+    SimplifyMesh,
     SplitIntoPieces,
     Rejoin,
     Rename,

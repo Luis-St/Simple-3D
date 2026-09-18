@@ -127,7 +127,13 @@ impl App {
     }
 
     pub(super) fn save_to(&mut self, path: &Path) {
+        // Written without a tool's preview in it, for the reason an undo step
+        // is taken without one: it is the result of a command nobody has
+        // pressed yet, and a file is the last place it should turn up
+        // (issue 106).
+        let lifted = self.lift_preview();
         let text = project::to_string(&self.scene);
+        self.drop_preview_back(lifted);
         match std::fs::write(path, text) {
             Ok(()) => {
                 self.path = Some(path.to_path_buf());

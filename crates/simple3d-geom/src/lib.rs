@@ -7,6 +7,7 @@ pub mod primitives;
 pub mod repair;
 pub mod revolve;
 pub mod section;
+pub mod simplify;
 pub mod tiling;
 pub mod vec3;
 

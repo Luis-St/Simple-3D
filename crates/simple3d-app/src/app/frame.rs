@@ -70,6 +70,7 @@ impl App {
         // in-place popup is part of the picture rather than a window in front of
         // the application (issue 82).
         crate::split_tool::show(self, ctx);
+        crate::simplify_tool::show(self, ctx);
         crate::measure_tool::show(self, ctx);
         crate::section_tool::show(self, ctx);
         crate::pattern_tool::show(self, ctx);
