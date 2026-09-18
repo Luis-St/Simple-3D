@@ -3,7 +3,8 @@
 Parametric 3D modelling with exact metric dimensions. Assemble models out of
 primitives (boxes rounded or chamfered, prisms, spheres, cylinders, cones,
 pyramids, tori, slots, regular polyhedra), combine them with booleans, and
-export to 3MF, STL, OBJ or PLY for a slicer.
+export to 3MF, STL, OBJ or PLY for a slicer. Every one of those four reads back
+in as well, so a model from somebody else's program is something to build on.
 
 Nothing has to be entered as a scale factor: a 40 mm box is 40 mm because its
 width parameter says 40, and dragging its right face rewrites that parameter
@@ -108,6 +109,15 @@ portable.
   the result still holds. The grouping is saved with the project, so a re-export
   after a change only needs whatever is new to be placed. STL, OBJ and PLY hold
   one body, and say so.
+- **An import for everything it exports.** 3MF, STL, OBJ and PLY come back in,
+  binary or text, recognised by their content rather than by their extension. A
+  3MF arrives placed as its build says, converted from whatever unit it records,
+  with its colours on the faces that carried them. Its objects, an OBJ's groups
+  and an STL's several solids arrive as separate bodies under a group named after
+  the file. What lands is a stored mesh, the same kind of node a converted shape
+  becomes, because a file from another program has no parameters to recover, only
+  a surface. A mesh that is not a closed solid is still brought in, and the
+  footer says so, since exporting it again is what will be refused.
 - **Several models at once.** A row of tabs holds every open document, each with
   its own model, selection, undo history and camera. New opens a tab rather than
   replacing what is open, a file already open is shown rather than opened twice,
@@ -191,6 +201,11 @@ crates/
                        pre-write watertightness verification, progress
                        reporting and cancellation. Includes a minimal zip
                        writer for the 3MF container.
+  simple3d-import/   The readers for the same four formats, each encoding
+                       recognised from the file's own content, with 3MF
+                       objects, assemblies, units and colours resolved.
+                       Includes a zip reader and a DEFLATE decoder, since a
+                       3MF from anywhere else is compressed.
   simple3d-app/      eframe/egui desktop UI: outliner, property editor,
                        software-rasterized viewport, direct-manipulation
                        handles, docks, menus and dialogs, evaluation worker

@@ -138,6 +138,28 @@ impl App {
                     if ui.small_button("Cancel").clicked() {
                         job.cancel();
                     }
+                } else if let Some(job) = &self.import_job {
+                    // A file is read at a rate it can report honestly -- the
+                    // triangles are counted in the header of every format but
+                    // OBJ -- so the bar means the same thing here as it does
+                    // for an export.
+                    ui.add(egui::ProgressBar::new(job.fraction()).desired_width(110.0).show_percentage());
+                    ui.add(
+                        egui::Label::new(theme::value(format!(
+                            "Importing {} ({}s of {}s allowed)",
+                            job.path.file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_default(),
+                            job.elapsed().as_secs(),
+                            job.limit().as_secs()
+                        )))
+                        .selectable(false),
+                    );
+                    if ui
+                        .small_button("Cancel")
+                        .on_hover_text("Stop reading. Nothing is added to the document.")
+                        .clicked()
+                    {
+                        job.cancel();
+                    }
                 } else if let Some(prompt) = &self.file_prompt {
                     // The dialog is a window of the desktop's, not ours, and on
                     // Linux it is the portal's -- which can be slow, or absent,

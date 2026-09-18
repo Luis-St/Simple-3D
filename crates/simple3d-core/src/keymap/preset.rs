@@ -20,6 +20,9 @@ impl Keymap {
         set(PreviousTab, Chord::ctrl_shift("Tab"));
         set(Save, Chord::ctrl("S"));
         set(SaveAs, Chord::ctrl_shift("S"));
+        // Beside Export, which it is the other half of (issue 105). I for
+        // import, which no preset spends on anything else.
+        set(Import, Chord::ctrl("I"));
         set(Export, Chord::ctrl("E"));
         set(Quit, Chord::ctrl("Q"));
 

@@ -11,6 +11,7 @@ impl Command {
         Command::PreviousTab,
         Command::Save,
         Command::SaveAs,
+        Command::Import,
         Command::Export,
         Command::Quit,
         Command::Undo,

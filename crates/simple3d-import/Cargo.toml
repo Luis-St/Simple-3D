@@ -1,0 +1,17 @@
+[package]
+name = "simple3d-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Mesh import for Simple 3D: reads back every format it writes -- 3MF, STL, OBJ and PLY, binary or text."
+
+[dependencies]
+simple3d-geom = { path = "../simple3d-geom" }
+
+[dev-dependencies]
+# Only the tests need a writer: what an import has to read first of all is a
+# file this workspace wrote, so every round trip is measured against the real
+# exporter rather than against a fixture somebody typed.
+simple3d-export = { path = "../simple3d-export" }

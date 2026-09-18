@@ -13,6 +13,7 @@ impl Command {
             PreviousTab => "Previous document",
             Save => "Save",
             SaveAs => "Save as",
+            Import => "Import a model",
             Export => "Export",
             Quit => "Quit",
             Undo => "Undo",
@@ -70,7 +71,7 @@ impl Command {
     pub fn area(self) -> Area {
         use Command::*;
         match self {
-            New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Export | Quit => Area::File,
+            New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | ConvertToMesh
             | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft

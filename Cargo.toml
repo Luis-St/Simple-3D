@@ -4,6 +4,7 @@ members = [
     "crates/simple3d-core",
     "crates/simple3d-geom",
     "crates/simple3d-export",
+    "crates/simple3d-import",
     "crates/simple3d-app",
 ]
 

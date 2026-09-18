@@ -50,6 +50,7 @@ impl eframe::App for App {
             self.dirty = false;
         }
         self.poll_export();
+        self.poll_import();
         self.poll_split();
         self.poll_file_prompt();
         self.advance_camera();

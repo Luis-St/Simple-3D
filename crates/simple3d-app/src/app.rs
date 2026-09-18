@@ -41,6 +41,7 @@ mod snap_apply;
 pub use export::ExportSummary;
 pub(crate) use export::*;
 mod hints;
+mod import;
 mod persist;
 pub use hints::insertion_hint;
 pub(crate) use hints::*;
@@ -60,3 +61,9 @@ pub const PROJECT_EXTENSION: &str = "simple3d";
 /// An export that has not finished by now has gone wrong; better a clear message
 /// than an indefinite hang (spec section 9).
 pub const EXPORT_LIMIT: Duration = Duration::from_secs(120);
+
+/// The same guard on an import (issue 105). The same two minutes: reading a
+/// file is far quicker than verifying and writing one, so a read still going
+/// after this long is a file that is not what it claims to be rather than a
+/// large model.
+pub const IMPORT_LIMIT: Duration = Duration::from_secs(120);

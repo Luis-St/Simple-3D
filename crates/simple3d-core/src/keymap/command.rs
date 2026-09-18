@@ -15,6 +15,7 @@ pub enum Command {
     PreviousTab,
     Save,
     SaveAs,
+    Import,
     Export,
     Quit,
 

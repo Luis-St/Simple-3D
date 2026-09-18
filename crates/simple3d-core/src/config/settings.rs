@@ -67,6 +67,14 @@ pub struct AppSettings {
     #[serde(default)]
     pub recent_colours: Vec<[u8; 3]>,
     pub last_export_dir: Option<PathBuf>,
+    /// Where the last import was read from, so the dialog opens where the
+    /// models are rather than where the last project was saved. Its own
+    /// setting rather than the export's: a model that is brought in comes from
+    /// somebody else's folder, and what is written goes to one's own. Newer
+    /// than the settings file, so an older one reads as unset -- and the
+    /// dialog then starts beside the open project.
+    #[serde(default)]
+    pub last_import_dir: Option<PathBuf>,
     pub last_export_format: String,
     pub last_export_scale: f64,
     /// How the last export decided its bodies, by `BodyMode::id`. Newer than
@@ -106,6 +114,7 @@ impl Default for AppSettings {
             rotate_snap_deg: 15.0,
             recent_colours: Vec::new(),
             last_export_dir: None,
+            last_import_dir: None,
             // 3MF by default, because it records units.
             last_export_format: "3mf".to_string(),
             last_export_scale: 1.0,

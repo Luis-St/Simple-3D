@@ -11,6 +11,8 @@ mod submit;
 use poll::*;
 mod export;
 pub use export::ExportJob;
+mod import;
+pub use import::ImportJob;
 mod split;
 pub use split::SplitJob;
 #[cfg(test)]

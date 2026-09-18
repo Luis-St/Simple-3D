@@ -88,6 +88,7 @@ impl App {
             dock_headers: Vec::new(),
             dock_rects: Vec::new(),
             export_job: None,
+            import_job: None,
             split_tool: None,
             split_job: None,
             confirm_extract: None,

@@ -36,6 +36,8 @@ impl App {
             self.command_item(ui, Command::Save, true);
             self.command_item(ui, Command::SaveAs, true);
             ui.separator();
+            // Beside Export, which it is the other half of (issue 105).
+            self.command_item(ui, Command::Import, true);
             self.command_item(ui, Command::Export, true);
             ui.separator();
             let has_selection = !self.selection.is_empty();

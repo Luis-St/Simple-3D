@@ -89,6 +89,13 @@ impl App {
         if let Some(job) = self.split_job.take() {
             job.cancel();
         }
+        // An import in flight was read *for* the document that was on screen,
+        // and `poll_import` would drop it on the tab it was started in -- so it
+        // is stopped here rather than left to finish reading a file nothing
+        // will use.
+        if let Some(job) = self.import_job.take() {
+            job.cancel();
+        }
         self.split_tool = None;
 
         // Nothing cached about the model on screen survives a change of model.

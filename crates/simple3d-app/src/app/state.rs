@@ -9,7 +9,7 @@ use crate::gizmo::{Drag, Handle, Mode};
 use crate::render::Renderable;
 use crate::ui::{self, FieldBuffers};
 use crate::view::CameraMove;
-use crate::worker::{EvalWorker, ExportJob, SplitJob};
+use crate::worker::{EvalWorker, ExportJob, ImportJob, SplitJob};
 use simple3d_core::clipboard::Clip;
 use simple3d_core::config::{AppSettings, Side};
 use simple3d_core::eval::Evaluated;
@@ -188,6 +188,10 @@ pub struct App {
     pub dock_rects: Vec<(Side, egui::Rect)>,
 
     pub export_job: Option<ExportJob>,
+    /// The file being read in (issue 105). On its own thread, like the export,
+    /// and carrying the tab that asked for it so the model lands in the
+    /// document it was read for.
+    pub import_job: Option<ImportJob>,
     /// The split tool's window while it is open, and the cutting it started
     /// (issue 82). The tool holds the shape it is about to cut; the job holds
     /// the thread cutting it, and nothing in the document changes until it

@@ -39,6 +39,7 @@ impl App {
             PreviousTab => self.cycle_tab(-1),
             Save => self.save(),
             SaveAs => self.save_as(),
+            Import => self.start_import(),
             Export => self.modal = Modal::Export,
             Quit => self.request_quit(),
 

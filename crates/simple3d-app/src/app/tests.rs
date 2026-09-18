@@ -15,6 +15,7 @@ pub(crate) use drag::*;
 mod export;
 mod export_bodies;
 mod file_dialog;
+mod import;
 mod measure;
 mod measure_axis;
 mod measure_hidden;
