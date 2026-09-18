@@ -174,6 +174,20 @@ fn creases(mesh: &Mesh) -> Vec<Vec<Vec3>> {
             out.push(vec![welded.positions[a as usize], welded.positions[b as usize]]);
         }
     }
+    // A shape with no corner anywhere is drawn as three rings round it instead.
+    //
+    // A sphere is the one that has none: every facet of a finely tessellated one
+    // meets its neighbour at a few degrees, so asking for its corners asks for
+    // nothing, and a recognised sphere came back drawn as *nothing at all* --
+    // which in a viewport where everything else is outlined reads as a body the
+    // tool missed, or as a preview that has stopped working. Drawing the whole
+    // tessellation instead is no better: a thousand facets over a ball twenty
+    // pixels across is a solid orange blob, which reads as paint.
+    if out.is_empty() {
+        if let Some(bounds) = welded.bounds() {
+            out.extend(rings(bounds));
+        }
+    }
     // Gathered out of a map, so put back in an order that does not change from
     // one run to the next: the renderer draws them in the order they arrive,
     // and a preview that reshuffles itself every frame flickers.
@@ -183,6 +197,32 @@ fn creases(mesh: &Mesh) -> Vec<Vec<Vec3>> {
     });
     out
 }
+
+/// Three rings round a body, one square to each axis, sized to its box: what a
+/// shape with no corner to draw is drawn as.
+fn rings((lo, hi): (Vec3, Vec3)) -> Vec<Vec<Vec3>> {
+    let centre = (lo + hi) * 0.5;
+    let half = (hi - lo) * 0.5;
+    let at = |u: f64, v: f64, axis: usize| match axis {
+        0 => Vec3::new(0.0, u * half.y, v * half.z),
+        1 => Vec3::new(u * half.x, 0.0, v * half.z),
+        _ => Vec3::new(u * half.x, v * half.y, 0.0),
+    };
+    (0..3)
+        .map(|axis| {
+            (0..RING_POINTS)
+                .map(|i| {
+                    let (sin, cos) = (std::f64::consts::TAU * i as f64 / RING_POINTS as f64).sin_cos();
+                    centre + at(cos, sin, axis)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// How finely a ring is drawn. Enough that it reads as a circle at the size a
+/// body is looked at, and few enough that a hundred of them is still a frame.
+const RING_POINTS: usize = 32;
 
 /// The twelve edges of a box, as six lines -- the two faces square to Z and the
 /// four uprights between them.

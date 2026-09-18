@@ -282,3 +282,25 @@ fn the_window_draws() {
     draw_one_frame(&mut app);
     assert!(app.reassemble_tool.is_some(), "drawing the window closed it");
 }
+
+/// A recognised sphere still draws something.
+///
+/// Every other shape is drawn by its corners, and a finely tessellated sphere
+/// has none: its facets meet at a few degrees each. Asking for its corners asks
+/// for nothing, and a sphere that came back recognised but drawn as *nothing at
+/// all* reads, in a viewport where everything else is outlined, as a body the
+/// tool missed.
+#[test]
+fn a_sphere_is_still_drawn() {
+    let mut app = app_in(temp_config_dir("reassemble-sphere"));
+    let root = app.scene.root();
+    let mesh = simple3d_geom::primitives::ellipsoid_mesh(30.0, 30.0, 30.0, 48);
+    let id = app.scene.add_mesh("Ball", simple3d_core::mesh_data::MeshData::new(mesh), root, 0);
+    app.select_only(id);
+    app.reevaluate_for_test();
+
+    open_with(&mut app, Reassemble::default());
+    let found = app.reassemble_tool.as_ref().unwrap().found.as_ref().unwrap();
+    assert_eq!(found.assembly.recognised(), 1, "the sphere was not recognised, so this tests nothing");
+    assert!(!crate::reassemble_tool::preview_loops(&app).is_empty(), "a recognised sphere drew nothing");
+}
