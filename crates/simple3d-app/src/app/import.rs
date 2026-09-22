@@ -95,10 +95,13 @@ impl App {
             let mesh = simple3d_core::mesh_data::MeshData::new(part.mesh.clone());
             self.scene.add_mesh(stem, mesh, root, index)
         } else {
-            // A union, which is what a group of separate bodies is: they are
-            // one model, and the evaluation leaves disjoint parts alone rather
-            // than running them through the boolean kernel.
-            let group = self.scene.add_group(GroupOp::Union, root, index);
+            // An assembly, not a union: the file says these are separate
+            // bodies, and separate bodies is what they stay. A union only left
+            // parts alone that stood clear of each other, and a model whose
+            // colours are separate objects has them meeting along whole faces
+            // -- the kernel's worst case, minutes of it, for a result it could
+            // not close either (see `GroupOp::Assembly`).
+            let group = self.scene.add_group(GroupOp::Assembly, root, index);
             if let Some(node) = self.scene.get_mut(group) {
                 node.name = stem.to_string();
             }

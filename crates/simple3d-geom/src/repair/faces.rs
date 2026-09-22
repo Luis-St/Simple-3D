@@ -1,7 +1,6 @@
 //! Cancelling face pairs that occupy the same place facing opposite ways.
 
-use crate::mesh::Mesh;
-use std::collections::HashMap;
+use crate::mesh::{FastMap, Mesh};
 
 /// Drop triangle pairs that describe the same three vertices with opposite
 /// winding. They are two coincident, oppositely-facing surface patches that
@@ -14,7 +13,7 @@ pub(crate) fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
         k.sort_unstable();
         k
     };
-    let mut by_key: HashMap<[u32; 3], Vec<usize>> = HashMap::new();
+    let mut by_key: FastMap<[u32; 3], Vec<usize>> = FastMap::default();
     for (i, t) in mesh.indices.iter().enumerate() {
         by_key.entry(key(t)).or_default().push(i);
     }

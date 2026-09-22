@@ -2,9 +2,9 @@
 //! with no area.
 
 use super::*;
+use crate::mesh::FastMap;
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
-use std::collections::HashMap;
 
 /// Merge vertices within `tol` of each other. Unlike `Mesh::weld`, which
 /// buckets by rounding and so can miss a pair that straddles a bucket
@@ -12,7 +12,7 @@ use std::collections::HashMap;
 /// distances, which is what makes the manifold check trustworthy.
 pub fn weld_tolerant(mesh: &Mesh, tol: f64) -> Mesh {
     let size = tol * 2.0;
-    let mut buckets: HashMap<Cell, Vec<u32>> = HashMap::new();
+    let mut buckets: FastMap<Cell, Vec<u32>> = FastMap::default();
     let mut positions: Vec<Vec3> = Vec::with_capacity(mesh.positions.len());
     let mut remap = vec![0u32; mesh.positions.len()];
 

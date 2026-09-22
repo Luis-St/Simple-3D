@@ -4,7 +4,6 @@
 use super::*;
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
-use std::collections::HashMap;
 
 /// Split every triangle edge that has another vertex of the mesh lying on its
 /// interior, so each undirected edge ends up shared by exactly two triangles.
@@ -30,14 +29,8 @@ pub(crate) fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
     if mesh.indices.is_empty() {
         return mesh;
     }
-    let (lo, hi) = mesh.bounds().unwrap();
-    let extent = (hi - lo).x.max((hi - lo).y).max((hi - lo).z);
-    let size = (extent / 48.0).max(tol * 16.0);
-
-    let mut grid: HashMap<Cell, Vec<u32>> = HashMap::new();
-    for (i, &p) in mesh.positions.iter().enumerate() {
-        grid.entry(cell_of(p, size)).or_default().push(i as u32);
-    }
+    let tree = PointTree::new(&mesh.positions);
+    let mut stack: Vec<u32> = Vec::new();
 
     let mut positions = mesh.positions.clone();
     let pos = &mesh.positions;
@@ -51,7 +44,7 @@ pub(crate) fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
     for (i, tri) in mesh.indices.iter().enumerate() {
         let tag = mesh.tag(i);
         for (e, out) in on_edge.iter_mut().enumerate() {
-            on_edge_vertices(pos, &grid, size, tol, tri, e, out);
+            on_edge_vertices(pos, &tree, &mut stack, tol, tri, e, out);
         }
         loop_.clear();
         for e in 0..3 {
@@ -88,8 +81,8 @@ pub(crate) struct OnEdge {
 
 pub(crate) fn on_edge_vertices(
     pos: &[Vec3],
-    grid: &HashMap<Cell, Vec<u32>>,
-    size: f64,
+    tree: &PointTree,
+    stack: &mut Vec<u32>,
     tol: f64,
     tri: &[u32; 3],
     e: usize,
@@ -105,34 +98,25 @@ pub(crate) fn on_edge_vertices(
     }
     let margin = tol / len2.sqrt();
 
-    let lo = pa.min(pb) - Vec3::splat(tol);
-    let hi = pa.max(pb) + Vec3::splat(tol);
-    let (c0, c1) = (cell_of(lo, size), cell_of(hi, size));
-    for cx in c0.0..=c1.0 {
-        for cy in c0.1..=c1.1 {
-            for cz in c0.2..=c1.2 {
-                let Some(list) = grid.get(&(cx, cy, cz)) else { continue };
-                for &v in list {
-                    if v == tri[0] || v == tri[1] || v == tri[2] {
-                        continue;
-                    }
-                    let d = pos[v as usize] - pa;
-                    let s = d.dot(ab) / len2;
-                    if s <= margin || s >= 1.0 - margin {
-                        continue;
-                    }
-                    if (d - ab * s).length() > tol {
-                        continue;
-                    }
-                    out.push(OnEdge { along: s, vertex: v });
-                }
-            }
+    tree.near_segment(pa, pb, tol, stack, |v| {
+        if v == tri[0] || v == tri[1] || v == tri[2] {
+            return;
         }
-    }
-    out.sort_by(|a, b| a.along.total_cmp(&b.along));
-    // The same physical point can be present twice over -- the grid is searched
-    // by cell, and a vertex sitting exactly on a cell boundary is listed in
-    // both. Two boundary vertices at the same place would make a zero-length
-    // edge, and the ear clipper below would have to cope with it.
+        let d = pos[v as usize] - pa;
+        let s = d.dot(ab) / len2;
+        if s <= margin || s >= 1.0 - margin {
+            return;
+        }
+        if (d - ab * s).length() > tol {
+            return;
+        }
+        out.push(OnEdge { along: s, vertex: v });
+    });
+    // By vertex as well, so the order never depends on the order the tree
+    // happened to reach them in.
+    out.sort_by(|a, b| a.along.total_cmp(&b.along).then(a.vertex.cmp(&b.vertex)));
+    // The same physical point can be present twice over, as two vertices the
+    // weld left apart. Two boundary vertices at the same place would make a
+    // zero-length edge, and the ear clipper below would have to cope with it.
     out.dedup_by(|a, b| (a.along - b.along).abs() <= f64::EPSILON || a.vertex == b.vertex);
 }

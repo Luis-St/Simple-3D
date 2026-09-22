@@ -135,7 +135,6 @@ impl Mesh {
     /// about positions) -- welding recovers a topologically connected mesh
     /// for the manifold check and for smaller PLY/3MF/OBJ output.
     pub fn weld(&self) -> Mesh {
-        use std::collections::HashMap;
         let key = |p: Vec3| -> (i64, i64, i64) {
             let s = 1_000_000.0; // 1e-6 mm buckets
             ((p.x * s).round() as i64, (p.y * s).round() as i64, (p.z * s).round() as i64)
@@ -144,7 +143,7 @@ impl Mesh {
         // the keys are coordinates of the model, not input from an adversary,
         // and on a mesh of millions of vertices the hashing alone was most of
         // what welding cost.
-        let mut map: HashMap<(i64, i64, i64), u32, std::hash::BuildHasherDefault<CoordHasher>> = HashMap::default();
+        let mut map: FastMap<(i64, i64, i64), u32> = FastMap::default();
         let mut positions = Vec::new();
         let mut remap = vec![0u32; self.positions.len()];
         for (i, p) in self.positions.iter().enumerate() {
@@ -181,9 +180,8 @@ impl Mesh {
     /// a face left in twice the same way round, or three faces meeting at one
     /// edge, and each of those still shows up as a count that does not balance.
     pub fn manifold_issue(&self) -> Option<String> {
-        use std::collections::HashMap;
         let welded = self.weld();
-        let mut directed: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut directed: FastMap<(u32, u32), u32> = FastMap::default();
         for tri in &welded.indices {
             for i in 0..3 {
                 let a = tri[i];
@@ -201,11 +199,17 @@ impl Mesh {
     }
 }
 
+/// A map keyed by integers -- coordinates, vertex and edge numbers -- with
+/// [`CoordHasher`] in place of the standard SipHash. The repair passes after a
+/// boolean key maps like this by every edge of a mesh of a million triangles,
+/// several times over, and with SipHash the hashing was a third of their time.
+pub(crate) type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<CoordHasher>>;
+
 /// A hasher for integer keys: each word is folded in with a multiply and a
 /// rotate, the way `rustc`'s own FxHash does. See [`Mesh::weld`] for why it is
 /// not the standard one.
 #[derive(Default)]
-struct CoordHasher(u64);
+pub(crate) struct CoordHasher(u64);
 
 impl std::hash::Hasher for CoordHasher {
     fn finish(&self) -> u64 {
@@ -223,6 +227,14 @@ impl std::hash::Hasher for CoordHasher {
     }
 
     fn write_i64(&mut self, word: i64) {
+        self.write_u64(word as u64);
+    }
+
+    fn write_u32(&mut self, word: u32) {
+        self.write_u64(word as u64);
+    }
+
+    fn write_usize(&mut self, word: usize) {
         self.write_u64(word as u64);
     }
 }

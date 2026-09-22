@@ -23,6 +23,8 @@ mod faces;
 pub(crate) use faces::*;
 mod junctions;
 pub(crate) use junctions::*;
+mod points;
+pub(crate) use points::*;
 mod pinch;
 pub(crate) use pinch::*;
 mod cap;

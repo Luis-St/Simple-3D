@@ -33,10 +33,22 @@ pub enum GroupOp {
     Difference,
     Intersection,
     Hull,
+    /// No boolean at all: the children side by side, each still a body of its
+    /// own -- what a split does with its pieces, for a group of shapes that
+    /// were never one.
+    ///
+    /// Made for a file of several objects. A 3MF holding a model's colours as
+    /// separate objects has them meeting along whole faces, and a union of two
+    /// bodies that share a face is the kernel's worst case: the parts of one
+    /// imported model took minutes to union, the union came out non-manifold
+    /// all the same, and the group fell back to showing them side by side with
+    /// an error on it -- which is where it should have started.
+    Assembly,
 }
 
 impl GroupOp {
-    pub const ALL: [GroupOp; 4] = [GroupOp::Union, GroupOp::Difference, GroupOp::Intersection, GroupOp::Hull];
+    pub const ALL: [GroupOp; 5] =
+        [GroupOp::Union, GroupOp::Difference, GroupOp::Intersection, GroupOp::Hull, GroupOp::Assembly];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -44,6 +56,7 @@ impl GroupOp {
             GroupOp::Difference => "Difference",
             GroupOp::Intersection => "Intersection",
             GroupOp::Hull => "Hull",
+            GroupOp::Assembly => "Assembly",
         }
     }
 
@@ -53,20 +66,23 @@ impl GroupOp {
     }
 
     /// Whether the result still contains its operands as pieces that can be
-    /// taken out of it. A union is its operands standing side by side; a
-    /// difference, an intersection and a hull are one new surface, and a child
-    /// of one of those is not a solid that exists in the result at all -- so it
-    /// can never be a body of its own in an export.
+    /// taken out of it. A union is its operands standing side by side, and an
+    /// assembly is nothing else; a difference, an intersection and a hull are
+    /// one new surface, and a child of one of those is not a solid that exists
+    /// in the result at all -- so it can never be a body of its own in an
+    /// export.
     pub fn separable(self) -> bool {
-        self == GroupOp::Union
+        matches!(self, GroupOp::Union | GroupOp::Assembly)
     }
 
-    pub fn to_geom(self) -> BooleanOp {
+    /// The kernel's operation, and `None` for the one group that runs none.
+    pub fn to_geom(self) -> Option<BooleanOp> {
         match self {
-            GroupOp::Union => BooleanOp::Union,
-            GroupOp::Difference => BooleanOp::Difference,
-            GroupOp::Intersection => BooleanOp::Intersection,
-            GroupOp::Hull => BooleanOp::Hull,
+            GroupOp::Union => Some(BooleanOp::Union),
+            GroupOp::Difference => Some(BooleanOp::Difference),
+            GroupOp::Intersection => Some(BooleanOp::Intersection),
+            GroupOp::Hull => Some(BooleanOp::Hull),
+            GroupOp::Assembly => None,
         }
     }
 }

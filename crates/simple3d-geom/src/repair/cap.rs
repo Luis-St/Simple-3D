@@ -1,6 +1,6 @@
 //! Closing boundary loops a repair has left open.
 
-use crate::mesh::Mesh;
+use crate::mesh::{FastMap, Mesh};
 
 /// The largest hole this is willing to put a lid on, as a fraction of the
 /// model's own extent. A boolean of two closed solids has a closed result, so
@@ -39,7 +39,10 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
     let Some((lo, hi)) = mesh.bounds() else { return mesh };
     let span = (hi - lo).length() * CAP_SPAN;
 
-    let mut count: BTreeMap<(u32, u32), i32> = BTreeMap::new();
+    // Only looked up and walked in no particular order, so hashed: this runs
+    // over every edge of a boolean's result, several times a boolean.
+    let mut count: FastMap<(u32, u32), i32> = FastMap::default();
+    count.reserve(mesh.indices.len() * 3);
     for t in &mesh.indices {
         for k in 0..3 {
             *count.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
@@ -154,9 +157,8 @@ pub(crate) fn sounder_of(healed: Mesh, simplified: Mesh) -> Mesh {
 /// How many directed edges of the welded mesh are not matched by their
 /// reverse: zero exactly when `Mesh::manifold_issue` has nothing to report.
 pub(crate) fn defect_count(mesh: &Mesh) -> usize {
-    use std::collections::HashMap;
     let welded = mesh.weld();
-    let mut directed: HashMap<(u32, u32), u32> = HashMap::new();
+    let mut directed: FastMap<(u32, u32), u32> = FastMap::default();
     for tri in &welded.indices {
         for i in 0..3 {
             *directed.entry((tri[i], tri[(i + 1) % 3])).or_insert(0) += 1;
@@ -190,13 +192,6 @@ pub(crate) fn split_needles(mut mesh: Mesh, tol: f64) -> Mesh {
 }
 
 fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
-    use std::collections::HashMap;
-    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::new();
-    for (i, t) in mesh.indices.iter().enumerate() {
-        for k in 0..3 {
-            by_edge.insert((t[k], t[(k + 1) % 3]), i);
-        }
-    }
     let height = |mesh: &Mesh, a: u32, b: u32, p: u32| {
         let (a, b, p) = (mesh.positions[a as usize], mesh.positions[b as usize], mesh.positions[p as usize]);
         let base = (b - a).length();
@@ -205,24 +200,42 @@ fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
         }
         (b - a).cross(p - a).length() / base
     };
+    // The long side runs from corner `k` to corner `k + 1`; the corner left
+    // over is the one lying on it.
+    let needle = |mesh: &Mesh, t: [u32; 3]| {
+        let lengths: [f64; 3] =
+            std::array::from_fn(|k| (mesh.positions[t[(k + 1) % 3] as usize] - mesh.positions[t[k] as usize]).length());
+        let k = (0..3).max_by(|&x, &y| lengths[x].total_cmp(&lengths[y])).expect("three sides");
+        let (a, c, b) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
+        (height(mesh, a, c, b) <= tol).then_some((a, c, b))
+    };
+    let needles: Vec<(usize, (u32, u32, u32))> =
+        mesh.indices.iter().enumerate().filter_map(|(i, &t)| Some((i, needle(&mesh, t)?))).collect();
+    if needles.is_empty() {
+        return (mesh, false);
+    }
+    // The triangle across each needle's long side, and nothing else: a map of
+    // every edge of the mesh was the whole of this pass's cost, a million
+    // triangles' worth of it up to sixteen times a boolean, for the handful of
+    // edges ever looked up in it. The last triangle using an edge wins, as it
+    // did in the map of all of them.
+    let mut by_edge: FastMap<(u32, u32), usize> = needles.iter().map(|&(_, (a, c, _))| ((c, a), usize::MAX)).collect();
+    for (i, t) in mesh.indices.iter().enumerate() {
+        for k in 0..3 {
+            if let Some(slot) = by_edge.get_mut(&(t[k], t[(k + 1) % 3])) {
+                *slot = i;
+            }
+        }
+    }
     let mut done = vec![false; mesh.indices.len()];
     let mut changed = false;
-    for i in 0..mesh.indices.len() {
+    // Found before any triangle changed, which is the state every one of them
+    // is read in: a needle that the loop has not yet touched is unchanged.
+    for (i, (a, c, b)) in needles {
         if done[i] {
             continue;
         }
-        let t = mesh.indices[i];
-        let lengths: [f64; 3] = std::array::from_fn(|k| {
-            (mesh.positions[t[(k + 1) % 3] as usize] - mesh.positions[t[k] as usize]).length()
-        });
-        // The long side runs from corner `k` to corner `k + 1`; the corner
-        // left over is the one lying on it.
-        let k = (0..3).max_by(|&x, &y| lengths[x].total_cmp(&lengths[y])).expect("three sides");
-        let (a, c, b) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
-        if height(&mesh, a, c, b) > tol {
-            continue;
-        }
-        let Some(&j) = by_edge.get(&(c, a)) else { continue };
+        let Some(&j) = by_edge.get(&(c, a)).filter(|&&j| j != usize::MAX) else { continue };
         if done[j] || j == i {
             continue;
         }

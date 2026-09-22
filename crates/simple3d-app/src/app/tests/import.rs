@@ -104,6 +104,35 @@ pub(crate) fn a_file_of_several_bodies_comes_back_as_a_group_of_them() {
     assert!((hi.x - lo.x - 120.0).abs() < 1e-6, "the two boxes span {} rather than 120", hi.x - lo.x);
 }
 
+/// Bodies that meet along a whole face -- a model's colours written as
+/// separate objects -- arrive as an assembly and are never run through the
+/// boolean kernel: each keeps every one of its triangles, and nothing is
+/// reported against the group.
+#[test]
+pub(crate) fn bodies_sharing_a_face_arrive_side_by_side() {
+    let mut app = app_in(temp_config_dir("import-touching"));
+    let left = simple3d_geom::primitives::box_mesh(20.0, 20.0, 20.0);
+    let right = left.translated(Vec3::new(20.0, 0.0, 0.0));
+    let path = temp_config_dir("import-touching").join("halves.3mf");
+    let parts =
+        [simple3d_export::Part { name: "Left", mesh: &left }, simple3d_export::Part { name: "Right", mesh: &right }];
+    let options = simple3d_export::Options {
+        format: simple3d_export::Format::ThreeMf,
+        bodies: simple3d_export::BodyMode::TopLevel,
+        ..Default::default()
+    };
+    simple3d_export::write_parts(&path, &parts, &options, &mut |_| true).expect("two boxes are exportable");
+
+    import_file(&mut app, &path);
+    let group = app.scene.node(app.scene.root()).children[0];
+    assert_eq!(app.scene.node(group).combine_op(), Some(simple3d_core::scene::GroupOp::Assembly));
+    app.reevaluate_for_test();
+    assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
+    let apart: usize =
+        app.scene.node(group).children.iter().map(|&id| app.scene.node(id).mesh().unwrap().triangle_count()).sum();
+    assert_eq!(app.evaluated.mesh.triangle_count(), apart, "the halves were combined");
+}
+
 /// A file that is not a model changes nothing: the error says what is wrong,
 /// and the document is left alone rather than gaining an empty row.
 #[test]

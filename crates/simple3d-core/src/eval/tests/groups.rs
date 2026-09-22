@@ -165,3 +165,28 @@ pub(crate) fn a_rotated_group_is_measured_over_its_geometry_not_its_box() {
     // Turned a quarter turn about Z, the 40 x 20 plate measures 20 x 40.
     assert!((hi - lo - Vec3::new(20.0, 40.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
 }
+
+/// An assembly lays its children side by side and runs no boolean: two plates
+/// stacked face to face come out as both plates' triangles, where a union
+/// welds them into one slab.
+#[test]
+pub(crate) fn an_assembly_keeps_its_children_apart() {
+    let mut scene = Scene::new();
+    let root = scene.root();
+    let group = scene.add_group(GroupOp::Assembly, root, 0);
+    let lower = plate(&mut scene, group);
+    let upper = plate(&mut scene, group);
+    let thickness = size(&Evaluator::new().evaluate(&scene, &Cancel::new()).node_meshes[&lower]).z;
+    scene.get_mut(upper).unwrap().position = Vec3::new(0.0, 0.0, thickness);
+
+    let assembled = Evaluator::new().evaluate(&scene, &Cancel::new());
+    assert!(assembled.errors.is_empty(), "{:?}", assembled.errors);
+    let apart = assembled.node_meshes[&lower].triangle_count() + assembled.node_meshes[&upper].triangle_count();
+    assert_eq!(assembled.mesh.triangle_count(), apart);
+    assert!(assembled.mesh.manifold_issue().is_none());
+
+    scene.get_mut(group).unwrap().body = crate::scene::Body::Group { op: GroupOp::Union };
+    let unioned = Evaluator::new().evaluate(&scene, &Cancel::new());
+    assert!(unioned.mesh.triangle_count() < apart, "the union did not weld the plates together");
+    assert_eq!(size(&unioned.mesh), size(&assembled.mesh));
+}

@@ -40,6 +40,7 @@ pub(crate) fn symbol(op: GroupOp) -> Glyph {
         GroupOp::Difference => Glyph::Difference,
         GroupOp::Intersection => Glyph::Intersection,
         GroupOp::Hull => Glyph::Polyhedron,
+        GroupOp::Assembly => Glyph::Group,
     }
 }
 

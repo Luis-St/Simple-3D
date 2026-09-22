@@ -3,7 +3,7 @@
 use super::*;
 use crate::scene::{GroupOp, NodeId, Scene};
 use crate::xform::Xform;
-use simple3d_geom::{evaluate_boolean, evaluate_boolean_until, Mesh, Vec3};
+use simple3d_geom::{evaluate_boolean, evaluate_boolean_until, BooleanOp, Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ pub fn selection_mesh(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, X
     match parts.len() {
         0 => Mesh::new(),
         1 => parts.pop().unwrap(),
-        _ => evaluate_boolean(GroupOp::Union.to_geom(), &parts),
+        _ => evaluate_boolean(BooleanOp::Union, &parts),
     }
 }
 
@@ -111,7 +111,14 @@ pub(crate) fn combine(
     // `cancel.cancel()` never landed, every newer edit queued behind it, and the
     // application could not be got out of it -- the footer still said
     // "Evaluating..." with every node deleted.
-    let result = evaluate_boolean_until(op.to_geom(), children, &|| cancel.is_cancelled());
+    let Some(boolean) = op.to_geom() else {
+        let mut side_by_side = Mesh::new();
+        for child in children {
+            side_by_side.append(child);
+        }
+        return side_by_side;
+    };
+    let result = evaluate_boolean_until(boolean, children, &|| cancel.is_cancelled());
     if cancel.is_cancelled() {
         // Not a result: an abandoned boolean is an empty or half-built mesh.
         // Returned as it is rather than reported as non-manifold, which it
