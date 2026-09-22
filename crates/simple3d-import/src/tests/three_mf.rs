@@ -177,3 +177,38 @@ pub(crate) fn an_escaped_object_name_is_read_back_unescaped() {
     let model = read_all(&package(&tetrahedron_model("millimeter", named, "")), None).unwrap();
     assert_eq!(model.parts[0].name, "Bracket & base <2>");
 }
+
+/// Bambu Studio and OrcaSlicer keep every mesh in a model part of its own and
+/// reach it with the Production extension's `p:path`. The ids in that part are
+/// its own, so one may repeat an id the main part uses for something else.
+#[test]
+pub(crate) fn a_component_in_another_model_part_is_read_from_that_part() {
+    let root = "<?xml version=\"1.0\"?>\n\
+        <model unit=\"millimeter\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\" \
+        xmlns:p=\"http://schemas.microsoft.com/3dmanufacturing/production/2015/06\" requiredextensions=\"p\">\
+        <resources>\
+        <object id=\"1\" type=\"model\"><mesh><vertices>\
+        <vertex x=\"0\" y=\"0\" z=\"0\"/><vertex x=\"1\" y=\"0\" z=\"0\"/>\
+        <vertex x=\"0\" y=\"1\" z=\"0\"/><vertex x=\"0\" y=\"0\" z=\"1\"/>\
+        </vertices><triangles>\
+        <triangle v1=\"0\" v2=\"2\" v3=\"1\"/><triangle v1=\"0\" v2=\"1\" v3=\"3\"/>\
+        <triangle v1=\"1\" v2=\"2\" v3=\"3\"/><triangle v1=\"0\" v2=\"3\" v3=\"2\"/>\
+        </triangles></mesh></object>\
+        <object id=\"2\" name=\"Placed\" type=\"model\"><components>\
+        <component p:path=\"/3D/Objects/object_1.model\" objectid=\"1\" transform=\"1 0 0 0 1 0 0 0 1 0 0 0\"/>\
+        </components></object>\
+        </resources>\
+        <build><item objectid=\"2\" transform=\"2 0 0 0 2 0 0 0 2 100 0 0\"/></build></model>";
+    let bytes = deflated_zip(&[
+        ("[Content_Types].xml", b"<?xml version=\"1.0\"?><Types/>"),
+        ("_rels/.rels", b"<?xml version=\"1.0\"?><Relationships/>"),
+        ("3D/3dmodel.model", root.as_bytes()),
+        ("3D/Objects/object_1.model", tetrahedron_model("millimeter", "", "").as_bytes()),
+    ]);
+    let model = read_all(&bytes, None).unwrap();
+    assert_eq!(model.parts.len(), 1);
+    assert_eq!(model.parts[0].name, "Placed");
+    assert_eq!(model.parts[0].mesh.triangle_count(), 4, "the object of the same id in the main part was read instead");
+    let (lo, hi) = model.parts[0].mesh.bounds().unwrap();
+    assert_eq!((lo.x, hi.x), (100.0, 120.0), "the build's transform was not applied to the other part's mesh");
+}
