@@ -120,19 +120,128 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
 }
 
 /// Whichever of the two is fit to be returned: a manifold mesh in preference to
-/// a broken one, and the smaller of the two when there is nothing to choose
-/// between them on that count.
+/// a broken one, the less broken of two broken ones, and the smaller of the two
+/// when there is nothing to choose between them on either count.
 ///
 /// Never the broken one while a whole mesh is on the table. The rule this
 /// replaces kept the *first* candidate unless the second was strictly smaller,
 /// which quietly let a broken result through whenever both were broken -- and
 /// that is exactly the position a boolean that has gone marginally differently
 /// on another platform puts this in.
+///
+/// Between two broken ones, fewer triangles was the tie-break until a boolean
+/// on a dense imported surface showed what that costs: the retriangulated
+/// candidate is always the smaller, and it came out with 74 open edges where
+/// the one it replaced had 8 -- small enough for `cap_boundary_loops` to close,
+/// and thrown away before it could.
 pub(crate) fn sounder_of(healed: Mesh, simplified: Mesh) -> Mesh {
-    match (healed.manifold_issue().is_none(), simplified.manifold_issue().is_none()) {
+    let (h, s) = (defect_count(&healed), defect_count(&simplified));
+    match (h == 0, s == 0) {
         (false, true) => simplified,
         (true, false) => healed,
+        (false, false) if s != h => {
+            if s < h {
+                simplified
+            } else {
+                healed
+            }
+        }
         _ if simplified.triangle_count() < healed.triangle_count() => simplified,
         _ => healed,
     }
+}
+
+/// How many directed edges of the welded mesh are not matched by their
+/// reverse: zero exactly when `Mesh::manifold_issue` has nothing to report.
+pub(crate) fn defect_count(mesh: &Mesh) -> usize {
+    use std::collections::HashMap;
+    let welded = mesh.weld();
+    let mut directed: HashMap<(u32, u32), u32> = HashMap::new();
+    for tri in &welded.indices {
+        for i in 0..3 {
+            *directed.entry((tri[i], tri[(i + 1) % 3])).or_insert(0) += 1;
+        }
+    }
+    directed.iter().filter(|(&(a, b), &count)| directed.get(&(b, a)).copied().unwrap_or(0) != count).count()
+}
+
+/// Replace every needle -- a triangle whose three corners lie on one line --
+/// and its neighbour across the needle's long side by two real triangles.
+///
+/// `cap_boundary_loops` lays exactly such a lid over a slit whose corners are
+/// collinear: the loop is closed and the mesh manifold, but a triangle with no
+/// area has no normal, and the exporter rightly refuses a file with one in it
+/// -- the black of a coloured import came back from its boolean with two. The middle corner lies on the long
+/// side, so splitting the neighbour there is exact, and the two edges the
+/// needle shared with the rest of the mesh go to the two halves unchanged.
+///
+/// A lid over a collinear loop of more than three corners is a fan of needles,
+/// each one's long side shared with the next, so this runs until a pass finds
+/// nothing: every split gives the needle beside it a real neighbour.
+pub(crate) fn split_needles(mut mesh: Mesh, tol: f64) -> Mesh {
+    for _ in 0..16 {
+        let (split, changed) = split_needles_once(mesh, tol);
+        mesh = split;
+        if !changed {
+            break;
+        }
+    }
+    mesh
+}
+
+fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
+    use std::collections::HashMap;
+    let mut by_edge: HashMap<(u32, u32), usize> = HashMap::new();
+    for (i, t) in mesh.indices.iter().enumerate() {
+        for k in 0..3 {
+            by_edge.insert((t[k], t[(k + 1) % 3]), i);
+        }
+    }
+    let height = |mesh: &Mesh, a: u32, b: u32, p: u32| {
+        let (a, b, p) = (mesh.positions[a as usize], mesh.positions[b as usize], mesh.positions[p as usize]);
+        let base = (b - a).length();
+        if base == 0.0 {
+            return 0.0;
+        }
+        (b - a).cross(p - a).length() / base
+    };
+    let mut done = vec![false; mesh.indices.len()];
+    let mut changed = false;
+    for i in 0..mesh.indices.len() {
+        if done[i] {
+            continue;
+        }
+        let t = mesh.indices[i];
+        let lengths: [f64; 3] = std::array::from_fn(|k| {
+            (mesh.positions[t[(k + 1) % 3] as usize] - mesh.positions[t[k] as usize]).length()
+        });
+        // The long side runs from corner `k` to corner `k + 1`; the corner
+        // left over is the one lying on it.
+        let k = (0..3).max_by(|&x, &y| lengths[x].total_cmp(&lengths[y])).expect("three sides");
+        let (a, c, b) = (t[k], t[(k + 1) % 3], t[(k + 2) % 3]);
+        if height(&mesh, a, c, b) > tol {
+            continue;
+        }
+        let Some(&j) = by_edge.get(&(c, a)) else { continue };
+        if done[j] || j == i {
+            continue;
+        }
+        let u = mesh.indices[j];
+        let Some(d) = u.iter().copied().find(|&v| v != a && v != c) else { continue };
+        if height(&mesh, a, c, d) <= tol {
+            continue;
+        }
+        let tag = mesh.tag(j);
+        // The needle runs a -> c -> b and `u` runs c -> a -> d, with `b`
+        // between c and a: `u` split at `b`, and the needle gone.
+        mesh.indices[i] = [c, b, d];
+        mesh.indices[j] = [b, a, d];
+        if mesh.tags.len() == mesh.indices.len() {
+            mesh.tags[i] = tag;
+        }
+        done[i] = true;
+        done[j] = true;
+        changed = true;
+    }
+    (mesh, changed)
 }

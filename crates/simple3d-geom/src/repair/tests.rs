@@ -100,3 +100,27 @@ fn open_tetrahedron(size: f64) -> Mesh {
     mesh.push_triangle(p[2], p[0], p[3]);
     weld_tolerant(&mesh, WELD_TOL)
 }
+
+/// A lid over a slit whose three corners are collinear closes the surface
+/// but has no area, and the exporter refuses a triangle without a normal.
+/// Splitting its neighbour at the middle corner takes the needle out and
+/// leaves the solid exactly as closed as it was.
+#[test]
+fn a_needle_lid_is_traded_for_a_split_of_its_neighbour() {
+    let v = |x, y, z| Vec3::new(x, y, z);
+    // A tetrahedron whose front face is split at the middle of its bottom
+    // edge, with the slit that leaves closed by a lid through that point.
+    let mesh = Mesh {
+        positions: vec![v(0.0, 0.0, 0.0), v(0.5, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)],
+        indices: vec![[0, 3, 2], [0, 1, 4], [1, 2, 4], [0, 4, 3], [2, 3, 4], [0, 2, 1]],
+        tags: Vec::new(),
+    };
+    let area_free = |m: &Mesh| m.indices.iter().filter(|&&t| m.triangle_normal(t).length() < 0.5).count();
+    assert_eq!(mesh.manifold_issue(), None, "this test needs a closed surface to start with");
+    assert_eq!(area_free(&mesh), 1, "this test needs a needle to start with");
+
+    let split = split_needles(mesh.clone(), WELD_TOL);
+    assert_eq!(split.manifold_issue(), None, "the split opened the surface");
+    assert_eq!(area_free(&split), 0, "a triangle with no area is left");
+    assert_eq!(split.triangle_count(), mesh.triangle_count());
+}

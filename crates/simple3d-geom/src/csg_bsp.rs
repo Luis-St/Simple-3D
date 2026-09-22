@@ -43,7 +43,7 @@ pub use convert::{debug_mesh_to_polygons, debug_roundtrip, debug_splits_nothing}
 
 use crate::mesh::Mesh;
 
-const EPSILON: f64 = 1e-5;
+const EPSILON: f64 = 1e-8;
 
 /// How many polygons a clip gets through between asking whether the answer is
 /// still wanted. See [`crate::Abandon`].

@@ -107,8 +107,15 @@ fn heal_at(mesh: &Mesh, tol: f64) -> Mesh {
     // and those orphans sit *on* the large new triangles that replaced them.
     // Left in `positions` they would all be found as on-edge vertices and split
     // straight back out again.
+    //
+    // Both are capped before choosing between them: which of the two the
+    // capping can finish is not something their triangle counts say.
     let simplified = split_t_junctions(compact(crate::planar::retriangulate_flat_regions(&healed)), tol);
-    cap_boundary_loops(compact(sounder_of(healed, simplified)))
+    let simplified = split_needles(cap_boundary_loops(compact(simplified)), tol);
+    if simplified.manifold_issue().is_none() {
+        return simplified;
+    }
+    sounder_of(split_needles(cap_boundary_loops(compact(healed)), tol), simplified)
 }
 
 /// Drop positions no triangle references (cancelling faces can orphan some).
