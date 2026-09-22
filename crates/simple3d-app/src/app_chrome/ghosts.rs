@@ -17,9 +17,17 @@ impl App {
 
     /// A cheap summary of which nodes are ghosts, for the cache key: the
     /// renderables have to be rebuilt when one is turned on or off.
+    ///
+    /// Asked on every frame, so it reads the nodes in the order the scene
+    /// keeps them rather than walking the tree into a list the way [`ghosts`]
+    /// does: which nodes are ghosts is all the key needs, not their order.
+    ///
+    /// [`ghosts`]: App::ghosts
     pub(super) fn ghost_generation(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.ghosts().hash(&mut hasher);
+        for id in self.scene.ids().filter(|id| self.scene.node(*id).visibility() == Visibility::Ghost) {
+            id.hash(&mut hasher);
+        }
         hasher.finish()
     }
 

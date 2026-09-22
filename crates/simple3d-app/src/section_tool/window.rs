@@ -59,7 +59,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
                 // The old offset is a place on a different axis, so the plane
                 // goes back to the middle of the model rather than to wherever
                 // that number happens to land on this one.
-                let middle = middle_of(app.evaluated.mesh.bounds(), axis);
+                let middle = middle_of(app.evaluated.bounds, axis);
                 app.set_section_offset(middle);
             }
         }
@@ -111,7 +111,7 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
             .on_hover_text("Stand the plane in the middle of the model again")
             .clicked()
         {
-            let middle = middle_of(app.evaluated.mesh.bounds(), app.scene.settings.section.axis());
+            let middle = middle_of(app.evaluated.bounds, app.scene.settings.section.axis());
             app.set_section_offset(middle);
         }
     });

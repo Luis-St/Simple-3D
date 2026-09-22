@@ -10,7 +10,7 @@ pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
     if !section.enabled {
         return;
     }
-    let corners = frame(&section, app.evaluated.mesh.bounds());
+    let corners = frame(&section, app.evaluated.bounds);
     let screen: Vec<egui::Pos2> = corners.iter().filter_map(|&at| view.project(at).map(|(p, _)| p)).collect();
     if screen.len() < 4 {
         return;

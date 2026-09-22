@@ -10,8 +10,7 @@ use simple3d_geom::Vec3;
 /// Where the section plane's grips are drawn right now, on screen.
 pub(crate) fn section_grips(harness: &Harness<'_, App>) -> Vec<egui::Pos2> {
     let view = harness.state().current_view();
-    let corners =
-        crate::section_tool::frame(&harness.state().scene.settings.section, harness.state().evaluated.mesh.bounds());
+    let corners = crate::section_tool::frame(&harness.state().scene.settings.section, harness.state().evaluated.bounds);
     crate::section_tool::grips(&corners).iter().filter_map(|&at| view.project(at).map(|(p, _)| p)).collect()
 }
 

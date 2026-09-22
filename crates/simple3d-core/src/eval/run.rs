@@ -58,6 +58,7 @@ impl Evaluator {
         self.trim();
         Evaluated {
             mesh: result.mesh.clone(),
+            bounds: result.mesh.bounds(),
             node_meshes: collected.meshes,
             group_meshes: collected.group_meshes,
             node_frames: collected.frames,

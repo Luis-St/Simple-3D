@@ -36,7 +36,7 @@ impl App {
     }
 
     pub fn frame_all(&mut self) {
-        match self.evaluated.mesh.bounds().or_else(|| self.selection_bounds()) {
+        match self.evaluated.bounds.or_else(|| self.selection_bounds()) {
             Some((lo, hi)) => self.frame_onto(lo, hi),
             None => {
                 if !self.settings.lock_view_centre {
@@ -58,8 +58,12 @@ impl App {
         let mut result: Option<(Vec3, Vec3)> = None;
         for id in &self.selection {
             for node in std::iter::once(*id).chain(self.scene.descendants(*id)) {
-                let Some(mesh) = self.evaluated.node_meshes.get(&node) else { continue };
-                let Some((lo, hi)) = mesh.bounds() else { continue };
+                // The nodes with a mesh of their own, measured by the
+                // evaluation rather than here on every frame the box is drawn.
+                if !self.evaluated.node_meshes.contains_key(&node) {
+                    continue;
+                }
+                let Some(&(lo, hi)) = self.evaluated.node_world_bounds.get(&node) else { continue };
                 result = Some(match result {
                     None => (lo, hi),
                     Some((a, b)) => (a.min(lo), b.max(hi)),

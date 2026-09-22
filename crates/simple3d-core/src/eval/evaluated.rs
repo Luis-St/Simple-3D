@@ -12,6 +12,11 @@ use std::sync::Arc;
 pub struct Evaluated {
     /// The whole scene as one mesh, ready to export.
     pub mesh: Arc<Mesh>,
+    /// `mesh`'s bounding box, measured once. The interface asks for the size of
+    /// the scene on every frame -- the status bar, the document panel, the
+    /// bounding box overlay and the section plane all show it -- and measuring
+    /// it meant a pass over every vertex of the model each time.
+    pub bounds: Option<(Vec3, Vec3)>,
     /// Each primitive's own mesh in world space, for picking, selection
     /// highlighting and the translucent display of hidden nodes. Hidden nodes are
     /// included so they can be drawn as ghosts.

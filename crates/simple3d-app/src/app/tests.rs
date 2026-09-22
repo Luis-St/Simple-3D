@@ -1,3 +1,4 @@
+mod bounds;
 mod camera;
 mod document;
 mod drag;

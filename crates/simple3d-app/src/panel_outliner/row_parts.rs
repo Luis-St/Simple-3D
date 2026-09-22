@@ -102,9 +102,9 @@ pub(crate) fn hover_text(
     } else if let Some(spec) = app.scene.node(id).spec() {
         lines.push(spec.label.to_string());
     }
-    if let Some(mesh) = app.evaluated.node_meshes.get(&id) {
-        if let Some((lo, hi)) = mesh.bounds() {
-            lines.push(crate::ui::describe_size(hi - lo, app.unit()));
+    if app.evaluated.node_meshes.contains_key(&id) {
+        if let Some((lo, hi)) = app.evaluated.node_world_bounds.get(&id) {
+            lines.push(crate::ui::describe_size(*hi - *lo, app.unit()));
         }
     }
     lines.join("\n")

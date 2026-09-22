@@ -25,7 +25,7 @@ pub fn interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
     // which way the plane travels are put on that one alone, so five grips do
     // not become five pairs of arrows over the model.
     let mut live = None;
-    for (index, at) in grips(&frame(&section, app.evaluated.mesh.bounds())).into_iter().enumerate() {
+    for (index, at) in grips(&frame(&section, app.evaluated.bounds)).into_iter().enumerate() {
         let Some((screen, _)) = view.project(at) else { continue };
         let response = ui
             .interact(

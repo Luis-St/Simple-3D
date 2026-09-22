@@ -28,7 +28,7 @@ impl App {
         let unit = self.unit();
         let bounds = match self.primary() {
             Some(id) => self.evaluated.node_world_bounds.get(&id).copied(),
-            None => self.evaluated.mesh.bounds(),
+            None => self.evaluated.bounds,
         };
         match bounds {
             Some((lo, hi)) => ui::describe_size(hi - lo, unit),

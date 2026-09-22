@@ -18,7 +18,7 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
             // never in the selection's.
             label_box(&painter, ui, view, lo, hi, app.unit(), token::MEASURE);
         }
-        if let Some((lo, hi)) = app.evaluated.mesh.bounds() {
+        if let Some((lo, hi)) = app.evaluated.bounds {
             draw_box(&painter, view, lo, hi, token::TEXT_LO.gamma_multiply(0.5), 1.0);
         }
     }

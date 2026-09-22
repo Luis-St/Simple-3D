@@ -79,6 +79,7 @@ impl Document {
 pub fn empty_evaluation() -> Evaluated {
     Evaluated {
         mesh: std::sync::Arc::new(simple3d_geom::Mesh::new()),
+        bounds: None,
         node_meshes: BTreeMap::new(),
         group_meshes: BTreeMap::new(),
         node_frames: BTreeMap::new(),

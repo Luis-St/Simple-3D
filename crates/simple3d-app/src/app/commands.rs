@@ -143,7 +143,7 @@ impl App {
         self.scene.settings.section.enabled = on;
         if on && self.scene.settings.section.offset == 0.0 {
             let axis = self.scene.settings.section.axis();
-            self.scene.settings.section.offset = crate::section_tool::middle_of(self.evaluated.mesh.bounds(), axis);
+            self.scene.settings.section.offset = crate::section_tool::middle_of(self.evaluated.bounds, axis);
         }
         self.status = Status::Info(match on {
             true => crate::section_tool::readout(self),
