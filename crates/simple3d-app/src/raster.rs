@@ -66,9 +66,29 @@ pub struct Image {
 }
 
 impl Image {
-    /// Hand the framebuffer to egui as a texture image.
-    pub fn to_color_image(&self) -> egui::ColorImage {
-        egui::ColorImage::from_rgba_unmultiplied([self.width, self.height], &self.color)
+    /// Hand the framebuffer to egui as a texture image, without copying it.
+    ///
+    /// Every pixel the renderer writes is opaque -- the background is laid
+    /// down opaque, a face is either copied in at full alpha or blended with
+    /// the result's alpha set to full -- and an opaque pixel reads the same
+    /// four bytes whether its alpha is taken as straight or premultiplied. So
+    /// the buffer already is what egui wants, and converting it pixel by pixel
+    /// was a pass over the whole frame, every frame, for nothing.
+    pub fn into_color_image(self) -> egui::ColorImage {
+        debug_assert!(self.color.chunks_exact(4).all(|pixel| pixel[3] == 255), "the frame has a see-through pixel");
+        let size = [self.width, self.height];
+        let mut color = std::mem::ManuallyDrop::new(self.color);
+        let (bytes, len, capacity) = (color.as_mut_ptr(), color.len(), color.capacity());
+        if len % 4 != 0 || capacity % 4 != 0 {
+            // Not a whole number of pixels to hand over: copy instead.
+            let color = std::mem::ManuallyDrop::into_inner(color);
+            return egui::ColorImage::from_rgba_premultiplied(size, &color);
+        }
+        // `Color32` is `repr(C)` over `[u8; 4]`, so it has the bytes' own
+        // alignment, and a buffer of `4n` bytes is exactly a buffer of `n` of
+        // them -- the allocation is released with the layout it was made with.
+        let pixels = unsafe { Vec::from_raw_parts(bytes as *mut egui::Color32, len / 4, capacity / 4) };
+        egui::ColorImage::new(size, pixels)
     }
 }
 

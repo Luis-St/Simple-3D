@@ -27,10 +27,14 @@ impl Frame<'_> {
         let (v, area) = if area < 0.0 { ([v[0], v[2], v[1]], -area) } else { (v, area) };
         let (p0, p1, p2) = (v[0].pos, v[1].pos, v[2].pos);
 
-        let min_x = p0.x.min(p1.x).min(p2.x).floor().max(0.0) as usize;
-        let max_x = (p0.x.max(p1.x).max(p2.x).ceil() as isize).clamp(0, self.width as isize - 1) as usize;
-        let min_y = p0.y.min(p1.y).min(p2.y).floor().max(0.0) as usize;
-        let max_y = (p0.y.max(p1.y).max(p2.y).ceil() as isize).clamp(0, self.height as isize - 1) as usize;
+        // Rounded without `floor` and `ceil`, which on the baseline x86-64
+        // target are calls into the C library rather than an instruction, and
+        // were an eighth of the time a dense mesh took to fill. See
+        // `floor_at_zero` and `ceil_of` for why the answers are the same.
+        let min_x = floor_at_zero(p0.x.min(p1.x).min(p2.x));
+        let max_x = ceil_of(p0.x.max(p1.x).max(p2.x)).clamp(0, self.width as isize - 1) as usize;
+        let min_y = floor_at_zero(p0.y.min(p1.y).min(p2.y));
+        let max_y = ceil_of(p0.y.max(p1.y).max(p2.y)).clamp(0, self.height as isize - 1) as usize;
         // Rows outside this band are another band's work; not walking them at
         // all is the whole point of splitting the frame up.
         let min_y = min_y.max(self.row_lo);
@@ -71,8 +75,8 @@ impl Frame<'_> {
             }
             // A pixel of slack at each end, so rounding in the division above
             // can never shorten the run the exact test would have accepted.
-            let from = (from.floor().max(min_x as f32) as usize).saturating_sub(1).max(min_x);
-            let to = ((to.ceil().max(0.0) as usize) + 1).min(max_x);
+            let from = floor_at_zero(from.max(min_x as f32)).saturating_sub(1).max(min_x);
+            let to = (ceil_of(to).max(0) as usize + 1).min(max_x);
             for x in from..=to {
                 let p = egui::pos2(x as f32 + 0.5, y as f32 + 0.5);
                 let w0 = edge(p1, p2, p);
@@ -89,6 +93,27 @@ impl Frame<'_> {
                 }
             }
         }
+    }
+}
+
+/// `v.floor().max(0.0) as usize`, without the call to `floor`.
+///
+/// A cast truncates towards zero, which for a number at or above zero is
+/// flooring; and everything below zero ends up at zero either way. A NaN comes
+/// out as zero from both.
+fn floor_at_zero(v: f32) -> usize {
+    v.max(0.0) as usize
+}
+
+/// `v.ceil() as isize`, without the call to `ceil`: truncate, and step up one
+/// where that fell short. The cast saturates the way the original's did, and a
+/// NaN is zero from both.
+fn ceil_of(v: f32) -> isize {
+    let truncated = v as isize;
+    if (truncated as f32) < v {
+        truncated + 1
+    } else {
+        truncated
     }
 }
 

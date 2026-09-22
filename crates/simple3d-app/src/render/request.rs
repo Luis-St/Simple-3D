@@ -71,11 +71,17 @@ pub struct Request<'a> {
     pub section: Option<Plane>,
 }
 
-/// How many rows a band must have before splitting the frame again is worth
-/// the thread it costs. Below this the whole frame goes to one band: a small
-/// viewport rasterizes in well under a millisecond, and spawning eight threads
-/// to share that out costs more than it saves.
-pub(crate) const MIN_BAND_ROWS: usize = 96;
+/// How many rows a band must have, on average, before splitting the frame
+/// again is worth the thread it costs. Below this the whole frame goes to one
+/// band: a small viewport rasterizes in well under a millisecond, and spawning
+/// eight threads to share that out costs more than it saves.
+///
+/// It used to be 96, which on a frame a thousand pixels tall allowed ten bands
+/// whatever the machine had: a dense mesh costs per triangle rather than per
+/// pixel, and ten threads were all it ever got. The bands are cut by work now
+/// (`balanced_ranges`), so a band this short across the model is as busy as a
+/// tall one across the sky.
+pub(crate) const MIN_BAND_ROWS: usize = 24;
 
 /// How many bands to cut the frame into: one per core, but never so many that
 /// they stop being worth starting.

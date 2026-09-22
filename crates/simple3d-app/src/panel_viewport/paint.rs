@@ -131,7 +131,7 @@ pub(crate) fn paint_scene(
             None => app.gpu_texture = None,
         }
         if app.gpu_texture.is_none() {
-            let image = render::render_prepared(&request, &render::prepare_frame(&request)).to_color_image();
+            let image = render::render_prepared(&request, &render::prepare_frame(&request)).into_color_image();
             match &mut app.texture {
                 Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
                 None => app.texture = Some(ui.ctx().load_texture("viewport", image, egui::TextureOptions::LINEAR)),

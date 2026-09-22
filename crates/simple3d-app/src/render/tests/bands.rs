@@ -97,3 +97,43 @@ pub(crate) fn nearer_geometry_hides_what_is_behind_it() {
     let centre = (120 / 2 * 160 + 160 / 2) * 4;
     assert_eq!(with_both.color[centre..centre + 4], only_near.color[centre..centre + 4]);
 }
+
+/// The same, for a mesh dense enough that the steps are sorted into their bands
+/// on several threads at once, each taking a stretch of them, and the bands are
+/// cut where the work is rather than at equal heights.
+///
+/// A band draws the lists the sorting threads made for it one after another,
+/// and the picture depends on that being preparation order: a face drawn
+/// before an edge on it, not after.
+#[test]
+pub(crate) fn bands_sorted_on_many_threads_still_draw_the_frame_one_thread_draws() {
+    let mut mesh = primitives::box_mesh(100.0, 100.0, 10.0).translated(Vec3::new(0.0, 0.0, -20.0));
+    for i in 0..3 {
+        for j in 0..3 {
+            let at = Vec3::new(i as f64 * 32.0 - 32.0, j as f64 * 32.0 - 32.0, 0.0);
+            mesh.append(&primitives::ellipsoid_mesh(30.0, 30.0, 30.0, 160).translated(at));
+        }
+    }
+    let prepared = Renderable::prepare(&mesh);
+    let items = vec![Item { renderable: &prepared, style: Style::Solid }];
+    let mut req = request(items, DisplayMode::ShadedWithEdges);
+    req.size = [480, 360];
+    req.view = View::new(
+        simple3d_core::scene::Camera { yaw: -40.0, pitch: 25.0, distance: 120.0, ..Default::default() },
+        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 360.0)),
+    );
+    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Grid, plane_marks: true };
+    let prepared = prepare_frame(&req);
+    assert!(
+        prepared.steps.len() > 4 * 16_384,
+        "only {} steps: too few to be sorted on several threads",
+        prepared.steps.len()
+    );
+    let one = render_in_bands(&req, &prepared, 1);
+    for bands in [5, 13, 32] {
+        let many = render_in_bands(&req, &prepared, bands);
+        let differing =
+            (0..one.color.len() / 4).filter(|i| one.color[i * 4..i * 4 + 4] != many.color[i * 4..i * 4 + 4]).count();
+        assert_eq!(differing, 0, "{bands} bands differ from one band at {differing} pixels");
+    }
+}

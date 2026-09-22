@@ -80,17 +80,16 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
     // costing more than the drawing.
     let mut color = vec![0u8; width * height * 4];
 
-    // Rows are handed out so the remainder is spread over the first few bands
-    // rather than piled onto the last one.
-    let ranges: Vec<(usize, usize)> =
-        (0..bands).map(|i| (height * i / bands, height * (i + 1) / bands)).filter(|(lo, hi)| lo < hi).collect();
+    // Rows are handed out by how much there is to draw in them -- see
+    // `balanced_ranges`.
+    let ranges = balanced_ranges(steps, height, bands);
     if ranges.len() == 1 {
-        let mine: Vec<u32> = (0..steps.len() as u32).collect();
         let mut frame = Frame::band(&mut color, width, height, 0, height);
-        draw(&mut frame, request, steps, &mine, axes);
+        draw(&mut frame, request, steps, &[&(0..steps.len() as u32).collect::<Vec<_>>()], axes);
         return Image { width, height, color };
     }
 
+    // `bins[chunk][band]`: which of the chunk's steps reach the band.
     let bins = bin_steps(steps, &ranges);
     // One disjoint slice per band, in row order.
     let mut rest = &mut color[..];
@@ -102,11 +101,14 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
     }
 
     std::thread::scope(|scope| {
-        for ((&(lo, hi), mine), slice) in ranges.iter().zip(&bins).zip(slices) {
-            let (steps, axes) = (steps, axes);
+        for (band, (&(lo, hi), slice)) in ranges.iter().zip(slices).enumerate() {
+            let (steps, axes, bins) = (steps, axes, &bins);
             scope.spawn(move || {
+                // The band's steps from every chunk, in chunk order: which is
+                // preparation order, since the chunks are consecutive.
+                let mine: Vec<&[u32]> = bins.iter().map(|chunk| &chunk[band][..]).collect();
                 let mut frame = Frame::band(slice, width, height, lo, hi);
-                draw(&mut frame, request, steps, mine, axes);
+                draw(&mut frame, request, steps, &mine, axes);
             });
         }
     });
@@ -216,7 +218,7 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
 }
 
 /// Draw the whole scene into one frame -- a band of one, or the lot.
-pub(crate) fn draw(frame: &mut Frame, request: &Request<'_>, steps: &[Step], mine: &[u32], axes: &[AxisStep]) {
+pub(crate) fn draw(frame: &mut Frame, request: &Request<'_>, steps: &[Step], mine: &[&[u32]], axes: &[AxisStep]) {
     fill_background(frame, &request.palette);
     draw_steps(frame, steps, mine);
     frame.set_tag(0);
