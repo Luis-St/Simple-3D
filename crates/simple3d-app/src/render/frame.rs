@@ -39,9 +39,31 @@ pub struct Prepared {
 }
 
 pub fn prepare_frame(request: &Request<'_>) -> Prepared {
+    prepare_frame_for(request, Geometry::Steps)
+}
+
+/// Who draws the items' own faces and lines: the ones that come straight off
+/// a renderable's mesh and do not depend on the camera beyond where it looks
+/// from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Geometry {
+    /// Projected here and handed over as steps, which is what the software
+    /// renderer needs.
+    Steps,
+    /// Left out: the engine keeps the mesh itself and projects it on its own.
+    /// That is the GPU renderer, which uploads each renderable once and from
+    /// then on is handed only the camera, so an orbit costs it no work per
+    /// triangle on the CPU at all. Everything that *is* decided per frame --
+    /// the selection's silhouette, the section's cap, the grid, the axes, a
+    /// tool's preview -- still comes through here, so the rules for those stay
+    /// in one place.
+    Resident,
+}
+
+pub fn prepare_frame_for(request: &Request<'_>, geometry: Geometry) -> Prepared {
     let material = axis_material(&request.items, &request.grid, request.section);
     let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
-    Prepared { steps: prepare(request), axes }
+    Prepared { steps: prepare_with(request, geometry), axes }
 }
 
 /// Draw the frame in a given number of bands. The band count must not change
@@ -93,7 +115,14 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
 
 /// Everything of the model that is the same whichever rows are being drawn:
 /// projected, culled, shaded and ordered exactly as the drawing order requires.
+/// All of it as steps: the tests' way in.
+#[cfg(test)]
 pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
+    prepare_with(request, Geometry::Steps)
+}
+
+pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Step> {
+    let steps_too = geometry == Geometry::Steps;
     let view = request.view;
     let mut steps = Vec::new();
     if request.grid.visible {
@@ -104,16 +133,22 @@ pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
         match item.style {
             Style::Solid => match request.mode {
                 DisplayMode::Wireframe => {
-                    push_wireframe(&mut steps, &view, item.renderable, request.palette.wire, cut);
+                    if steps_too {
+                        push_wireframe(&mut steps, &view, item.renderable, request.palette.wire, cut);
+                    }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
                 DisplayMode::Shaded => {
-                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                    if steps_too {
+                        push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                    }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
                 DisplayMode::ShadedWithEdges => {
-                    push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
-                    push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base, cut);
+                    if steps_too {
+                        push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                        push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base, cut);
+                    }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
             },
@@ -132,7 +167,11 @@ pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
                     cut,
                 );
             }
-            Style::Ghost => push_ghost(&mut steps, &view, item.renderable, request.palette.ghost, cut),
+            Style::Ghost => {
+                if steps_too {
+                    push_ghost(&mut steps, &view, item.renderable, request.palette.ghost, cut);
+                }
+            }
             // The outline here; the glow itself comes last, after everything
             // that could be standing in front of it.
             Style::Glow => push_selection(
@@ -148,11 +187,11 @@ pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
     }
     // Last of all, over the finished model: what a buried body is pointed out
     // with, and the cells of a tool's preview.
-    for item in request.items.iter().filter(|item| item.style == Style::Glow) {
+    for item in request.items.iter().filter(|item| item.style == Style::Glow && steps_too) {
         push_glow(&mut steps, &view, item.renderable, request.palette.glow, cut);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
-    if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
+    if steps_too && request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
         // there is no surface for it to sit on.
         push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid, cut);

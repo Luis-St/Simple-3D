@@ -70,6 +70,17 @@ pub struct Renderable {
     /// with the *body* it runs through -- not the tag, because the tag depends
     /// on where this item's bodies start in the frame and the spans do not.
     pub(super) axis_spans: [Vec<((f64, f64), u16)>; 3],
+    /// Which renderable this is, unique for the life of the process. What the
+    /// GPU renderer keys the copy of the mesh it keeps on the card by: the
+    /// renderable never changes once made, so as long as the same one is
+    /// handed in, the geometry already uploaded for it is still the geometry.
+    pub(crate) id: u64,
+}
+
+/// The next [`Renderable::id`].
+fn next_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl Renderable {
@@ -93,7 +104,7 @@ impl Renderable {
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
         let reach = welded.positions.iter().map(|p| p.length()).fold(0.0, f64::max);
         let axis_spans = std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis));
-        Renderable { mesh: welded, normals, edges, outline, bodies, body_count, reach, axis_spans }
+        Renderable { mesh: welded, normals, edges, outline, bodies, body_count, reach, axis_spans, id: next_id() }
     }
 
     pub fn empty() -> Renderable {
@@ -106,6 +117,7 @@ impl Renderable {
             body_count: 0,
             reach: 0.0,
             axis_spans: [Vec::new(), Vec::new(), Vec::new()],
+            id: next_id(),
         }
     }
 

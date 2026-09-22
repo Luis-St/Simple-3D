@@ -131,3 +131,114 @@ void main() {
     out_tag = 0u;
 }
 "#;
+
+/// A resident mesh's faces, projected, culled and shaded on the card.
+///
+/// The arithmetic is `push_shaded`'s, `push_ghost`'s and `push_glow`'s,
+/// moved here so that an orbit hands the card a camera rather than a million
+/// projected triangles. The projection is orthographic and so affine: each
+/// screen coordinate and the depth key are a dot product with the vertex plus
+/// a constant, and those rows are worked out on the CPU in double precision
+/// once per mesh per frame. Positions are stored relative to the mesh's own
+/// centre, so the single-precision arithmetic left here is on small numbers.
+///
+/// A triangle the CPU would have skipped -- turned away from the eye for a
+/// solid, too degenerate to have a normal for a ghost -- has all three corners
+/// sent to the same point outside the frame, which is how a vertex shader
+/// drops a primitive. Every corner of a face carries the same normal, so the
+/// three agree.
+pub(crate) const FACE_VERTEX: &str = r#"#version 330 core
+layout(location = 0) in vec3 in_pos;
+layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec4 in_colour;
+layout(location = 3) in uint in_body;
+
+uniform vec2 u_viewport;
+uniform vec2 u_depth;
+uniform vec4 u_row_x;
+uniform vec4 u_row_y;
+uniform vec4 u_row_key;
+uniform vec3 u_forward;
+// The colour a face is drawn in when its own paint does not say otherwise, in
+// bytes: the palette's solid, ghost or glow.
+uniform vec4 u_base;
+// 0 a solid, 1 a ghost, 2 a glow.
+uniform int u_mode;
+uniform uint u_tag_base;
+// The section plane as a distance that is positive on the side that is kept.
+uniform vec4 u_clip;
+
+out vec4 v_colour;
+flat out uint v_tag;
+
+void main() {
+    float facing = dot(in_normal, -u_forward);
+    bool degenerate = in_normal == vec3(0.0);
+    if ((u_mode == 0 && facing <= 0.0) || (u_mode == 1 && degenerate)) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        gl_ClipDistance[0] = -1.0;
+        v_colour = vec4(0.0);
+        v_tag = 0u;
+        return;
+    }
+    float x = dot(u_row_x.xyz, in_pos) + u_row_x.w;
+    float y = dot(u_row_y.xyz, in_pos) + u_row_y.w;
+    float key = dot(u_row_key.xyz, in_pos) + u_row_key.w;
+    vec2 ndc = vec2((x / u_viewport.x) * 2.0 - 1.0, (y / u_viewport.y) * 2.0 - 1.0);
+    gl_Position = vec4(ndc, clamp(u_depth.x - key * u_depth.y, -1.0, 1.0), 1.0);
+    gl_ClipDistance[0] = dot(u_clip.xyz, in_pos) + u_clip.w;
+
+    // A painted face keeps its paint; alpha is the base's either way, exactly
+    // as `triangle_base` hands it to `shade`.
+    vec4 base = u_base;
+    if (u_mode == 0 && in_colour.a > 0.5) {
+        base = vec4(round(in_colour.rgb * 255.0), u_base.a);
+    }
+    if (u_mode == 2) {
+        v_colour = base / 255.0;
+    } else {
+        // `shade`: a headlight plus a constant fill, truncated to a byte the
+        // way the CPU's `as u8` does.
+        float factor = 0.34 + 0.66 * abs(facing);
+        v_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), base.a) / 255.0;
+    }
+    v_tag = min(u_tag_base + in_body + 1u, 65535u);
+}
+"#;
+
+/// A resident mesh's lines -- feature edges, the wireframe, plane marks -- with
+/// the depth bias `line_step` gives a line: a fraction of the mean of its two
+/// ends' keys, which is why each vertex carries the other end as well.
+pub(crate) const LINE_VERTEX: &str = r#"#version 330 core
+layout(location = 0) in vec3 in_pos;
+layout(location = 1) in vec3 in_other;
+layout(location = 2) in uint in_body;
+
+uniform vec2 u_viewport;
+uniform vec2 u_depth;
+uniform vec4 u_row_x;
+uniform vec4 u_row_y;
+uniform vec4 u_row_key;
+uniform vec4 u_colour;
+uniform float u_bias;
+// Whether the line claims its body's tag, or 0 like the wireframe and marks.
+uniform int u_tagged;
+uniform uint u_tag_base;
+uniform vec4 u_clip;
+
+out vec4 v_colour;
+flat out uint v_tag;
+
+void main() {
+    float x = dot(u_row_x.xyz, in_pos) + u_row_x.w;
+    float y = dot(u_row_y.xyz, in_pos) + u_row_y.w;
+    float key = dot(u_row_key.xyz, in_pos) + u_row_key.w;
+    float other = dot(u_row_key.xyz, in_other) + u_row_key.w;
+    key += u_bias * (abs(key) + abs(other)) * 0.5;
+    vec2 ndc = vec2((x / u_viewport.x) * 2.0 - 1.0, (y / u_viewport.y) * 2.0 - 1.0);
+    gl_Position = vec4(ndc, clamp(u_depth.x - key * u_depth.y, -1.0, 1.0), 1.0);
+    gl_ClipDistance[0] = dot(u_clip.xyz, in_pos) + u_clip.w;
+    v_colour = u_colour;
+    v_tag = u_tagged == 1 ? min(u_tag_base + in_body + 1u, 65535u) : 0u;
+}
+"#;

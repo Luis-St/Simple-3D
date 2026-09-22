@@ -12,7 +12,7 @@ mod request;
 pub(crate) use request::*;
 pub use request::{Grid, Item, Request, Style};
 mod frame;
-pub use frame::{prepare_frame, render_prepared, Prepared};
+pub use frame::{prepare_frame, prepare_frame_for, render_prepared, Geometry, Prepared};
 mod step;
 pub(crate) use step::*;
 mod shading;

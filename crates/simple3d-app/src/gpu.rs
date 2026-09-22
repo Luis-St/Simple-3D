@@ -1,10 +1,14 @@
 //! The viewport drawn through OpenGL, as an alternative to `raster.rs`.
 //!
 //! It draws the *same* scene, from the same prepared primitives: `render.rs`
-//! projects, culls, shades and works out the axis rule on the CPU, and this
-//! module only turns the result into pixels. Nothing about what the picture
-//! shows is decided here, which is what keeps the two engines from drifting
-//! apart as the renderer is worked on.
+//! works out the grid, the axis rule, the selection's silhouette and the
+//! section's cap on the CPU, and this module turns the result into pixels.
+//! The one exception is the meshes' own faces and lines, which are kept on the
+//! card (`resident.rs`) and projected, culled and shaded by the shaders with
+//! `render.rs`'s arithmetic -- handing a million projected triangles over on
+//! every frame of an orbit cost as much as drawing them in software. Nothing
+//! else about what the picture shows is decided here, which is what keeps the
+//! two engines from drifting apart as the renderer is worked on.
 //!
 //! The two pictures are alike, not identical, and deliberately so. A GPU draws
 //! a line by rasterizing it, where `raster.rs` walks it pixel by pixel, so a
@@ -30,6 +34,7 @@ pub(crate) use passes::*;
 mod buffers;
 mod draw;
 mod render;
+mod resident;
 pub(crate) use buffers::*;
 
 use eframe::glow;
@@ -46,6 +51,11 @@ pub struct Gpu {
     solid: Program,
     axis: Program,
     background: Program,
+    /// A resident mesh's faces and its lines -- see `resident.rs`.
+    faces: Program,
+    lines: Program,
+    /// The meshes kept on the card, by `Renderable::id`.
+    resident: std::collections::HashMap<u64, resident::Resident>,
     /// The offscreen target, remade whenever the viewport's size changes.
     target: Option<Target>,
     /// The texture the finished frame lands in. Made once and reallocated on a

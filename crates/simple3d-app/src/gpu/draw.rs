@@ -5,10 +5,12 @@ use crate::render::{AxisStep, Request};
 use eframe::glow::{self, HasContext};
 
 impl Gpu {
+    #[allow(clippy::too_many_arguments)]
     pub(super) unsafe fn draw(
         &mut self,
         request: &Request<'_>,
         passes: &Passes,
+        plan: &resident::Plan,
         axes: &[AxisStep],
         tags: usize,
         width: usize,
@@ -79,7 +81,13 @@ impl Gpu {
         gl.depth_mask(true);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
         self.batch(&gl, glow::TRIANGLES, &passes.solids);
+        let (view, section) = (&request.view, request.section);
+        let viewport = [width as f32, height as f32];
+        self.draw_faces(&gl, &plan.solids, view, section, viewport, [offset, scale]);
+        gl.use_program(Some(self.solid.program));
         self.batch(&gl, glow::LINES, &passes.lines);
+        self.draw_lines(&gl, &plan.lines, view, section, viewport, [offset, scale]);
+        gl.use_program(Some(self.solid.program));
 
         // Ghosts, and a tool's preview: blended over what is there, tested
         // against the model and claiming nothing. The preview is here rather
@@ -89,14 +97,18 @@ impl Gpu {
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.batch(&gl, glow::TRIANGLES, &passes.ghosts);
+        self.draw_faces(&gl, &plan.ghosts, view, section, viewport, [offset, scale]);
+        gl.use_program(Some(self.solid.program));
         self.batch(&gl, glow::LINES, &passes.overlay);
 
         // The glow of a body inside another one, over everything and tested
         // against nothing: what is in front of it is exactly what it has to be
         // seen through.
-        if !passes.glow.is_empty() {
+        if !passes.glow.is_empty() || !plan.glows.is_empty() {
             gl.disable(glow::DEPTH_TEST);
             self.batch(&gl, glow::TRIANGLES, &passes.glow);
+            self.draw_faces(&gl, &plan.glows, view, section, viewport, [offset, scale]);
+            gl.use_program(Some(self.solid.program));
             gl.enable(glow::DEPTH_TEST);
         }
 
