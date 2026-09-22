@@ -22,6 +22,7 @@ pub use split::SplitJob;
 #[cfg(test)]
 mod tests;
 
+use crate::render::{Renderable, RenderableCache, Wanted};
 use simple3d_core::eval::{Cancel, Evaluated};
 use simple3d_core::scene::Scene;
 use std::sync::mpsc::{Receiver, Sender};
@@ -31,10 +32,19 @@ struct Job {
     scene: Scene,
     cancel: Cancel,
     generation: u64,
+    /// The node renderables to have ready in `renderables` when the result
+    /// arrives -- see [`EvalWorker::want`].
+    wanted: Vec<Wanted>,
+    renderables: RenderableCache,
 }
 
 pub struct Finished {
     pub result: Evaluated,
+    /// The whole scene prepared for drawing. Made here rather than on the
+    /// interface thread: on a large model it is a weld and several passes over
+    /// every triangle, which the interface used to spend on the frame the
+    /// result arrived in -- every frame, during a drag.
+    pub renderable: Renderable,
     pub generation: u64,
     pub elapsed: Duration,
 }
@@ -60,4 +70,9 @@ pub struct EvalWorker {
     /// say how long it has been going.
     started: Option<Instant>,
     pub last_elapsed: Option<Duration>,
+    /// What the interface draws single nodes with, and which of them it is
+    /// drawing now: the evaluation thread prepares those for each result
+    /// before handing it over.
+    pub renderables: RenderableCache,
+    wanted: Vec<Wanted>,
 }

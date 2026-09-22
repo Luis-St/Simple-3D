@@ -1,6 +1,7 @@
 mod axes;
 mod axes_occlusion;
 mod bands;
+mod cache;
 mod grid;
 mod preview;
 mod section;

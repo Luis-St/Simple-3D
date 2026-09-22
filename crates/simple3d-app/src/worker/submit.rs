@@ -23,7 +23,16 @@ impl EvalWorker {
             pending: None,
             started: None,
             last_elapsed: None,
+            renderables: RenderableCache::default(),
+            wanted: Vec::new(),
         }
+    }
+
+    /// Say which single nodes the viewport draws -- the selection, the ticked
+    /// pieces, the previewed object and the ghosts -- so every evaluation from
+    /// here on prepares them before it is handed over.
+    pub fn want(&mut self, wanted: Vec<Wanted>) {
+        self.wanted = wanted;
     }
 
     /// Ask for a fresh evaluation of the document being edited.
@@ -69,7 +78,13 @@ impl EvalWorker {
         self.current = Some(cancel.clone());
         self.outstanding = Some(self.generation);
         self.started = Some(Instant::now());
-        let job = Job { scene, cancel, generation: self.generation };
+        let job = Job {
+            scene,
+            cancel,
+            generation: self.generation,
+            wanted: self.wanted.clone(),
+            renderables: self.renderables.clone(),
+        };
         // A send failure means the worker thread is gone, which we cannot
         // recover from here; the interface stays usable with the last result.
         let _ = self.jobs.send(job);

@@ -38,3 +38,27 @@ pub(crate) fn renaming_does_not_invalidate_anything() {
     scene.get_mut(id).unwrap().name = "Something else".into();
     assert_eq!(evaluator.subtree_key(&scene, root), before);
 }
+
+#[test]
+pub(crate) fn a_node_that_did_not_change_keeps_its_world_mesh_between_runs() {
+    // What the viewport's renderable cache and the snapping rely on to know a
+    // node's mesh has not changed without comparing a million positions: the
+    // very same `Arc` back. A node that did change must not get it.
+    let mut scene = Scene::new();
+    let root = scene.root();
+    let still = plate(&mut scene, root);
+    let moved = cylinder(&mut scene, root, 6.0, 20.0);
+    let mut evaluator = Evaluator::new();
+    let first = evaluator.evaluate(&scene, &Cancel::new());
+
+    scene.get_mut(moved).unwrap().position = Vec3::new(30.0, 0.0, 0.0);
+    let second = evaluator.evaluate(&scene, &Cancel::new());
+    assert!(std::sync::Arc::ptr_eq(&first.node_meshes[&still], &second.node_meshes[&still]));
+    assert!(!std::sync::Arc::ptr_eq(&first.node_meshes[&moved], &second.node_meshes[&moved]));
+    assert_ne!(first.node_meshes[&moved].bounds(), second.node_meshes[&moved].bounds());
+
+    // Its colour is part of its world mesh as well.
+    scene.get_mut(still).unwrap().colour = Some(crate::scene::Colour([200, 30, 30]));
+    let third = evaluator.evaluate(&scene, &Cancel::new());
+    assert!(!std::sync::Arc::ptr_eq(&second.node_meshes[&still], &third.node_meshes[&still]));
+}

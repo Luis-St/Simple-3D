@@ -121,7 +121,7 @@ pub struct App {
     pub(crate) dirty: bool,
 
     pub scene_renderable: Renderable,
-    pub node_renderables: BTreeMap<NodeId, Renderable>,
+    pub node_renderables: BTreeMap<NodeId, std::sync::Arc<Renderable>>,
     pub(crate) renderable_key: u64,
 
     pub mode: Mode,

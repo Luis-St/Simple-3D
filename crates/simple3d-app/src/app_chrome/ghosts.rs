@@ -1,7 +1,6 @@
 //! The per-node renderables the viewport draws hidden bodies from.
 
 use crate::app::App;
-use crate::render::Renderable;
 use simple3d_core::scene::{NodeId, Visibility};
 use std::hash::{Hash, Hasher};
 
@@ -39,11 +38,48 @@ impl App {
         }
         self.renderable_key = key;
 
+        let wanted = self.wanted_renderables();
+        let cache = self.worker.renderables.clone();
         let mut fresh = std::collections::BTreeMap::new();
+        for &(id, outlined) in &wanted {
+            // The evaluation thread has usually made these already; what is
+            // left -- a node selected since the last evaluation -- is made
+            // here, once, and kept for as long as its mesh is.
+            if let std::collections::btree_map::Entry::Vacant(slot) = fresh.entry(id) {
+                if let Some(renderable) = cache.get(&self.evaluated, (id, outlined)) {
+                    slot.insert(renderable);
+                }
+            }
+        }
+        cache.retain(&wanted);
+        self.node_renderables = fresh;
+        self.invalidate_image();
+    }
+
+    /// Every single node the viewport draws, with whether it needs the
+    /// outline's edge adjacency, in the order it has first claim on a node.
+    pub(crate) fn wanted_renderables(&self) -> Vec<crate::render::Wanted> {
+        let mut wanted: Vec<crate::render::Wanted> = Vec::new();
+        // The selection is drawn as *what each selected node evaluates to*,
+        // and not one row further down. Descending to the children outlined
+        // shapes the result does not contain: a difference's cutter as two
+        // rims hanging in mid-air, an intersection's whole uncut box as a cage
+        // round the small lens it leaves, a pattern's source child standing
+        // where no copy of it does.
+        wanted.extend(self.top_level_selection().into_iter().map(|id| (id, true)));
+        // A ticked piece is outlined the same way, so pointing at one in the
+        // viewport is how a piece is found among thousands (issue 82).
+        wanted.extend(self.piece_ticks.iter().map(|&id| (id, true)));
+        // What a tool is previewing, kept ready whether or not it is selected:
+        // "only what is previewed" draws that object *as* the model, and the
+        // selection can move on to something else while the tool is open
+        // (issue 82).
+        wanted.extend(self.preview_subject().map(|id| (id, true)));
         // Every node the user asked to keep as a ghost, so a subtracted tool
         // body can be seen while it is being positioned (spec section 6.1). A
         // ghost group is drawn as its children, one translucent body each,
-        // because that is the assembly the user is placing.
+        // because that is the assembly the user is placing. Only a node with a
+        // mesh of its own is drawn that way; a group is drawn through them.
         let mut ghosts: Vec<NodeId> = Vec::new();
         for id in self.ghosts() {
             ghosts.extend(std::iter::once(id).chain(self.scene.descendants(id)));
@@ -51,40 +87,12 @@ impl App {
         ghosts.sort_unstable();
         ghosts.dedup();
         for id in ghosts {
-            if let Some(mesh) = self.evaluated.node_meshes.get(&id) {
-                fresh.insert(id, Renderable::prepare(mesh));
+            // A node both ghosted and selected keeps the outlined one it was
+            // claimed with above, as it always has.
+            if self.evaluated.node_meshes.contains_key(&id) && !wanted.iter().any(|&(w, _)| w == id) {
+                wanted.push((id, false));
             }
         }
-        // The selection is drawn as *what each selected node evaluates to*, and
-        // not one row further down. Descending to the children outlined shapes
-        // the result does not contain: a difference's cutter as two rims
-        // hanging in mid-air, an intersection's whole uncut box as a cage round
-        // the small lens it leaves, a pattern's source child standing where no
-        // copy of it does.
-        for id in self.top_level_selection() {
-            if let Some(mesh) = self.evaluated.result_mesh(id) {
-                fresh.insert(id, Renderable::prepare_outlined(&mesh));
-            }
-        }
-        // A ticked piece is outlined the same way, so pointing at one in the
-        // viewport is how a piece is found among thousands (issue 82).
-        for id in self.piece_ticks.clone() {
-            if let Some(mesh) = self.evaluated.result_mesh(id) {
-                fresh.insert(id, Renderable::prepare_outlined(&mesh));
-            }
-        }
-        // What a tool is previewing, kept ready whether or not it is selected:
-        // "only what is previewed" draws that object *as* the model, and the
-        // selection can move on to something else while the tool is open
-        // (issue 82).
-        if let Some(id) = self.preview_subject() {
-            if let std::collections::btree_map::Entry::Vacant(slot) = fresh.entry(id) {
-                if let Some(mesh) = self.evaluated.result_mesh(id) {
-                    slot.insert(Renderable::prepare_outlined(&mesh));
-                }
-            }
-        }
-        self.node_renderables = fresh;
-        self.invalidate_image();
+        wanted
     }
 }

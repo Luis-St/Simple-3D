@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 impl Evaluator {
     pub fn new() -> Evaluator {
-        Evaluator { primitives: BTreeMap::new(), subtrees: BTreeMap::new(), cache_limit: 4096 }
+        Evaluator { primitives: BTreeMap::new(), subtrees: BTreeMap::new(), worlds: BTreeMap::new(), cache_limit: 4096 }
     }
 
     pub fn cached_subtrees(&self) -> usize {
@@ -17,6 +17,24 @@ impl Evaluator {
     pub fn clear(&mut self) {
         self.primitives.clear();
         self.subtrees.clear();
+        self.worlds.clear();
+    }
+
+    /// `source` placed with `frame`, and painted with `tag` when there is one:
+    /// the mesh from the last run if all three are what it was made from.
+    pub(super) fn world_mesh(&mut self, id: NodeId, source: &Arc<Mesh>, frame: Xform, tag: Option<u32>) -> Arc<Mesh> {
+        if let Some(last) = self.worlds.get(&id) {
+            if Arc::ptr_eq(&last.source, source) && last.frame == frame && last.tag == tag {
+                return last.world.clone();
+            }
+        }
+        let mut world = apply(&frame, source);
+        if let Some(tag) = tag {
+            world.set_tag(tag);
+        }
+        let world = Arc::new(world);
+        self.worlds.insert(id, WorldMesh { source: source.clone(), frame, tag, world: world.clone() });
+        world
     }
 
     pub(super) fn trim(&mut self) {
@@ -35,6 +53,8 @@ impl Evaluator {
         let result = self.subtree(scene, scene.root(), cancel);
         let mut collected = Collected::default();
         self.walk(scene, scene.root(), Xform::IDENTITY, &mut collected, cancel);
+        // A node no longer in the tree has nothing to be reused for.
+        self.worlds.retain(|id, _| collected.meshes.contains_key(id));
         self.trim();
         Evaluated {
             mesh: result.mesh.clone(),

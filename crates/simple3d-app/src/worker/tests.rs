@@ -40,7 +40,7 @@ fn an_evaluation_comes_back_from_the_worker() {
     assert!(!worker.is_busy());
     worker.submit(&drilled_plate());
     assert!(worker.is_busy());
-    let result = wait_for(|| worker.poll());
+    let result = wait_for(|| worker.poll().map(|(result, _)| result));
     assert!(result.errors.is_empty());
     assert!(result.mesh.triangle_count() > 0);
     assert!(!worker.is_busy());
@@ -83,7 +83,7 @@ fn a_burst_of_edits_keeps_answering_and_settles_on_the_newest() {
     let mut answers: Vec<f64> = Vec::new();
     let deadline = Instant::now() + Duration::from_secs(20);
     while worker.is_busy() {
-        if let Some(result) = worker.poll() {
+        if let Some(result) = worker.poll().map(|(result, _)| result) {
             answers.push(hole_radius(&result));
         }
         assert!(Instant::now() < deadline, "the worker never finished the burst");
@@ -96,7 +96,7 @@ fn a_burst_of_edits_keeps_answering_and_settles_on_the_newest() {
     let last = *answers.last().unwrap();
     assert!((last - 4.0).abs() < 1e-6, "settled on radius {last}, expected 4mm");
     // Nothing left queued behind it.
-    assert!(worker.poll().is_none());
+    assert!(worker.poll().map(|(result, _)| result).is_none());
     assert!(!worker.is_busy());
 }
 
@@ -115,7 +115,7 @@ fn a_document_shown_supersedes_the_evaluation_of_the_one_left_behind() {
 
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        if let Some(result) = worker.poll() {
+        if let Some(result) = worker.poll().map(|(result, _)| result) {
             let radius = hole_radius(&result);
             assert!((radius - 6.0).abs() < 1e-6, "the document left behind was drawn: radius {radius}");
             break;
@@ -131,11 +131,11 @@ fn the_cache_survives_between_submissions_so_repeat_edits_get_faster() {
     let mut worker = EvalWorker::spawn();
     let scene = drilled_plate();
     worker.submit(&scene);
-    wait_for(|| worker.poll());
+    wait_for(|| worker.poll().map(|(result, _)| result));
     let cold = worker.last_elapsed.unwrap();
     // The identical scene is a pure cache hit on the worker's own evaluator.
     worker.submit(&scene);
-    wait_for(|| worker.poll());
+    wait_for(|| worker.poll().map(|(result, _)| result));
     let warm = worker.last_elapsed.unwrap();
     assert!(warm <= cold, "a repeat evaluation took longer: {cold:?} -> {warm:?}");
 }

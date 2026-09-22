@@ -1,6 +1,7 @@
 //! Taking a finished evaluation back, and abandoning one.
 
 use super::*;
+use crate::render::Renderable;
 use simple3d_core::eval::{Evaluated, Evaluator};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
@@ -8,7 +9,7 @@ use std::time::{Duration, Instant};
 impl EvalWorker {
     /// The newest completed result, if one has arrived. Results from superseded
     /// generations are discarded.
-    pub fn poll(&mut self) -> Option<Evaluated> {
+    pub fn poll(&mut self) -> Option<(Evaluated, Renderable)> {
         let mut newest: Option<Finished> = None;
         loop {
             match self.done.try_recv() {
@@ -34,7 +35,7 @@ impl EvalWorker {
         if let Some(scene) = self.pending.take() {
             self.start(scene);
         }
-        Some(finished.result)
+        Some((finished.result, finished.renderable))
     }
 
     pub fn is_busy(&self) -> bool {
@@ -81,7 +82,12 @@ pub(super) fn evaluation_loop(jobs: Receiver<Job>, done: Sender<Finished>) {
         if result.cancelled {
             continue;
         }
-        if done.send(Finished { result, generation: job.generation, elapsed: started.elapsed() }).is_err() {
+        let renderable = Renderable::prepare(&result.mesh);
+        for &wanted in &job.wanted {
+            job.renderables.get(&result, wanted);
+        }
+        let finished = Finished { result, renderable, generation: job.generation, elapsed: started.elapsed() };
+        if done.send(finished).is_err() {
             return; // the application has closed
         }
     }

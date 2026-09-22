@@ -55,9 +55,8 @@ impl Evaluator {
                 if let Some((lo, hi)) = mesh.bounds() {
                     out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
                 }
-                let mut world = apply(&shifted, &mesh);
-                world.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
-                let world = Arc::new(world);
+                let tag = crate::scene::colour_tag(scene.effective_colour(id));
+                let world = self.world_mesh(id, &mesh, shifted, Some(tag));
                 if let Some(bounds) = world.bounds() {
                     out.world_bounds.insert(id, bounds);
                 }
@@ -74,7 +73,7 @@ impl Evaluator {
                     let (a, b) = (inv.point(lo), inv.point(hi));
                     out.local_bounds.insert(id, (a.min(b), a.max(b)));
                 }
-                let world = Arc::new(apply(&parent, &subtree.mesh));
+                let world = self.world_mesh(id, &subtree.mesh, parent, None);
                 if let Some(bounds) = world.bounds() {
                     out.world_bounds.insert(id, bounds);
                 }
@@ -133,7 +132,7 @@ impl Evaluator {
                 // -- not just the original the child sits at -- selects the
                 // pattern. The child meshes are still collected below, so the
                 // original copy also reaches the child that draws it.
-                let world = Arc::new(apply(&parent, &subtree.mesh));
+                let world = self.world_mesh(id, &subtree.mesh, parent, None);
                 out.meshes.insert(id, world);
                 for &child in &node.children {
                     self.walk(scene, child, shifted, out, cancel);

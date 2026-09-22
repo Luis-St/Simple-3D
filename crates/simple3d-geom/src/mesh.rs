@@ -140,7 +140,11 @@ impl Mesh {
             let s = 1_000_000.0; // 1e-6 mm buckets
             ((p.x * s).round() as i64, (p.y * s).round() as i64, (p.z * s).round() as i64)
         };
-        let mut map: HashMap<(i64, i64, i64), u32> = HashMap::new();
+        // Keyed by a cheap multiplicative hash rather than the standard SipHash:
+        // the keys are coordinates of the model, not input from an adversary,
+        // and on a mesh of millions of vertices the hashing alone was most of
+        // what welding cost.
+        let mut map: HashMap<(i64, i64, i64), u32, std::hash::BuildHasherDefault<CoordHasher>> = HashMap::default();
         let mut positions = Vec::new();
         let mut remap = vec![0u32; self.positions.len()];
         for (i, p) in self.positions.iter().enumerate() {
@@ -194,5 +198,31 @@ impl Mesh {
             }
         }
         None
+    }
+}
+
+/// A hasher for integer keys: each word is folded in with a multiply and a
+/// rotate, the way `rustc`'s own FxHash does. See [`Mesh::weld`] for why it is
+/// not the standard one.
+#[derive(Default)]
+struct CoordHasher(u64);
+
+impl std::hash::Hasher for CoordHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(byte as u64);
+        }
+    }
+
+    fn write_u64(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn write_i64(&mut self, word: i64) {
+        self.write_u64(word as u64);
     }
 }

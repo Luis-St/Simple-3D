@@ -1,9 +1,8 @@
 //! What the renderer is handed: a body's triangles, and the edges worth
 //! drawing on it.
 
-use super::axis_inside_spans;
+use super::{axis_inside_spans, map_in_order};
 use simple3d_geom::{Mesh, Vec3};
-use std::collections::HashMap;
 
 /// An edge of the surface with the triangles that meet at it.
 ///
@@ -101,14 +100,25 @@ impl Renderable {
 
     pub(super) fn prepare_with(mesh: &Mesh, outlined: bool) -> Renderable {
         let welded = mesh.weld();
-        let normals: Vec<Vec3> = welded.indices.iter().map(|tri| welded.triangle_normal(*tri)).collect();
-        let edges = feature_edges(&welded, 20.0);
-        let outline = if outlined { border_edges(&welded) } else { Vec::new() };
-        let bodies = bodies_of(&welded);
+        let normals: Vec<Vec3> =
+            map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
+        // The rest is independent work over the same welded mesh, so it runs
+        // side by side: on a large import each part is a pass over millions of
+        // triangles, and one after another they were most of a second.
+        let (table, bodies, plane_marks) = std::thread::scope(|scope| {
+            let table = scope.spawn(|| EdgeTable::of(&welded));
+            let marks = scope.spawn(|| std::array::from_fn(|axis| plane_marks_of(&welded, axis)));
+            let bodies = bodies_of(&welded);
+            (table.join().expect("the edge table panicked"), bodies, marks.join().expect("the plane marks panicked"))
+        });
+        let (edges, outline, axis_spans) = std::thread::scope(|scope| {
+            let outline = scope.spawn(|| if outlined { table.border_edges() } else { Vec::new() });
+            let spans = scope.spawn(|| std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis)));
+            let edges = table.feature_edges(&normals, 20.0);
+            (edges, outline.join().expect("the outline panicked"), spans.join().expect("the axis spans panicked"))
+        });
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
         let reach = welded.positions.iter().map(|p| p.length()).fold(0.0, f64::max);
-        let axis_spans = std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis));
-        let plane_marks = std::array::from_fn(|axis| plane_marks_of(&welded, axis));
         Renderable {
             mesh: welded,
             normals,
@@ -208,64 +218,114 @@ pub(crate) fn bodies_of(mesh: &Mesh) -> Vec<u16> {
 /// triangle. Drawing *every* triangle edge would cover a cylinder in meridians
 /// and a boolean result in the arbitrary cuts the BSP made across flat faces --
 /// noise rather than information.
+///
+/// The tests' way in: a renderable finds its edges from the normals it has
+/// already worked out.
+#[cfg(test)]
 pub fn feature_edges(mesh: &Mesh, angle_deg: f64) -> Vec<[u32; 2]> {
-    let cos_limit = angle_deg.to_radians().cos();
-    let mut faces: HashMap<(u32, u32), Vec<Vec3>> = HashMap::new();
-    for tri in &mesh.indices {
-        let normal = mesh.triangle_normal(*tri);
-        for k in 0..3 {
-            let (a, b) = (tri[k], tri[(k + 1) % 3]);
-            let key = if a < b { (a, b) } else { (b, a) };
-            faces.entry(key).or_default().push(normal);
-        }
-    }
-    let mut edges: Vec<[u32; 2]> = faces
-        .into_iter()
-        .filter(|(_, normals)| match normals.as_slice() {
-            [a, b] => a.dot(*b) < cos_limit,
-            // One triangle (a boundary of an open mesh) or more than two (a
-            // non-manifold junction): both are worth seeing.
-            _ => true,
-        })
-        .map(|((a, b), _)| [a, b])
-        .collect();
-    // Deterministic order, so successive frames of an unchanged scene are
-    // identical and the image comparison in the tests is meaningful.
-    edges.sort_unstable();
-    edges
+    let normals: Vec<Vec3> = mesh.indices.iter().map(|tri| mesh.triangle_normal(*tri)).collect();
+    EdgeTable::of(mesh).feature_edges(&normals, angle_deg)
 }
 
 /// Every edge of the mesh with the triangles that meet at it, in a
 /// deterministic order.
+#[cfg(test)]
 pub(crate) fn border_edges(mesh: &Mesh) -> Vec<BorderEdge> {
-    let mut faces: HashMap<(u32, u32), [u32; 2]> = HashMap::new();
-    let mut counts: HashMap<(u32, u32), u32> = HashMap::new();
-    for (index, tri) in mesh.indices.iter().enumerate() {
-        for k in 0..3 {
+    EdgeTable::of(mesh).border_edges()
+}
+
+/// Every edge of a mesh with the triangles that meet at it, grouped by edge.
+///
+/// Laid out by the edge's lower vertex, the way a sparse matrix is stored by
+/// row: `entries[start[v]..start[v + 1]]` holds, for every edge whose lower
+/// end is `v`, its upper end and one triangle along it, sorted. The entries of
+/// one edge are then side by side, and walking the table visits the edges in
+/// order of their ends -- the order both callers had sorted their output into.
+///
+/// It replaces a hash map from edge to triangles, which on an import of a
+/// million and a half triangles took most of a second to build and twice that
+/// when the outline needed a second one. A vertex has half a dozen edges, so
+/// each row sorts in a handful of comparisons and the whole table is a few
+/// passes over the triangles.
+struct EdgeTable {
+    start: Vec<u32>,
+    /// Upper end, then triangle.
+    entries: Vec<(u32, u32)>,
+}
+
+impl EdgeTable {
+    fn of(mesh: &Mesh) -> EdgeTable {
+        let lower = |tri: &[u32; 3], k: usize| {
             let (a, b) = (tri[k], tri[(k + 1) % 3]);
-            let key = if a < b { (a, b) } else { (b, a) };
-            let count = counts.entry(key).or_insert(0);
-            let slot = faces.entry(key).or_insert([index as u32; 2]);
-            if *count == 1 {
-                slot[1] = index as u32;
+            if a < b {
+                (a, b)
+            } else {
+                (b, a)
             }
-            // A third triangle on one edge is a non-manifold junction: leave the
-            // first two, and let the count say it is not a plain edge.
-            *count += 1;
+        };
+        let mut start = vec![0u32; mesh.positions.len() + 1];
+        for tri in &mesh.indices {
+            for k in 0..3 {
+                start[lower(tri, k).0 as usize + 1] += 1;
+            }
+        }
+        for v in 0..mesh.positions.len() {
+            start[v + 1] += start[v];
+        }
+        let mut cursor = start.clone();
+        let mut entries = vec![(0u32, 0u32); mesh.indices.len() * 3];
+        for (face, tri) in mesh.indices.iter().enumerate() {
+            for k in 0..3 {
+                let (a, b) = lower(tri, k);
+                entries[cursor[a as usize] as usize] = (b, face as u32);
+                cursor[a as usize] += 1;
+            }
+        }
+        for v in 0..mesh.positions.len() {
+            entries[start[v] as usize..start[v + 1] as usize].sort_unstable();
+        }
+        EdgeTable { start, entries }
+    }
+
+    /// Each edge in order, with the triangles along it in ascending order.
+    fn for_each(&self, mut f: impl FnMut([u32; 2], &[(u32, u32)])) {
+        for a in 0..self.start.len().saturating_sub(1) {
+            let row = &self.entries[self.start[a] as usize..self.start[a + 1] as usize];
+            for run in row.chunk_by(|x, y| x.0 == y.0) {
+                f([a as u32, run[0].0], run);
+            }
         }
     }
-    let mut out: Vec<BorderEdge> = faces
-        .into_iter()
-        .map(|(key, mut pair)| {
-            let count = counts[&key];
-            if count != 2 {
-                // Always drawn: `push_selection` reads a repeated triangle as
-                // "there is no far side to ask about".
-                pair[1] = pair[0];
+
+    fn feature_edges(&self, normals: &[Vec3], angle_deg: f64) -> Vec<[u32; 2]> {
+        let cos_limit = angle_deg.to_radians().cos();
+        let mut edges = Vec::new();
+        self.for_each(|ends, faces| {
+            let keep = match faces {
+                [(_, a), (_, b)] => normals[*a as usize].dot(normals[*b as usize]) < cos_limit,
+                // One triangle (a boundary of an open mesh) or more than two (a
+                // non-manifold junction): both are worth seeing.
+                _ => true,
+            };
+            if keep {
+                edges.push(ends);
             }
-            BorderEdge { ends: [key.0, key.1], faces: pair, junction: count > 2 }
-        })
-        .collect();
-    out.sort_unstable_by_key(|edge| edge.ends);
-    out
+        });
+        edges
+    }
+
+    fn border_edges(&self) -> Vec<BorderEdge> {
+        let mut out = Vec::new();
+        self.for_each(|ends, faces| {
+            // A third triangle on one edge is a non-manifold junction; anything
+            // but two is always drawn, which `push_selection` reads off a
+            // repeated triangle as "there is no far side to ask about".
+            let pair = match faces {
+                [(_, a), (_, b)] => [*a, *b],
+                _ => [faces[0].1; 2],
+            };
+            out.push(BorderEdge { ends, faces: pair, junction: faces.len() > 2 });
+        });
+        out
+    }
 }

@@ -1,7 +1,6 @@
 //! The application as the window system sees it.
 
 use super::*;
-use crate::render::Renderable;
 use std::time::Duration;
 
 impl App {
@@ -31,7 +30,7 @@ impl App {
             self.last_status = self.status.clone();
             self.status_at = std::time::Instant::now();
         }
-        if let Some(result) = self.worker.poll() {
+        if let Some((result, renderable)) = self.worker.poll() {
             self.evaluated = result;
             self.evaluation_generation += 1;
             if std::mem::take(&mut self.frame_when_evaluated) {
@@ -39,11 +38,12 @@ impl App {
                 // evaluated, since framing needs its bounds.
                 self.frame_all();
             }
-            self.scene_renderable = Renderable::prepare(&self.evaluated.mesh);
+            self.scene_renderable = renderable;
             self.renderable_key = u64::MAX;
             self.image_key = u64::MAX;
         }
         if self.dirty {
+            self.worker.want(self.wanted_renderables());
             self.worker.submit(&self.scene);
             self.dirty = false;
         }

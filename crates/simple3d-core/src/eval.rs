@@ -50,6 +50,12 @@ pub struct NodeError {
 pub struct Evaluator {
     primitives: BTreeMap<u64, Arc<Mesh>>,
     subtrees: BTreeMap<u64, Arc<SubtreeResult>>,
+    /// Each node's world-space mesh from the last run, with what it was made
+    /// from. A node whose source mesh, placement and colour are all unchanged
+    /// gets the very same `Arc` back rather than a fresh copy, which is what
+    /// lets the viewport and the snapping recognise it as unchanged by address
+    /// and keep what they worked out from it.
+    worlds: BTreeMap<NodeId, WorldMesh>,
     /// Bounded so a long editing session cannot grow without limit. Entries are
     /// pure functions of their key, so dropping any of them is always safe.
     pub cache_limit: usize,
@@ -59,6 +65,15 @@ impl Default for Evaluator {
     fn default() -> Self {
         Evaluator::new()
     }
+}
+
+struct WorldMesh {
+    /// Held rather than compared by address alone, so it cannot be freed and
+    /// its address handed to a different mesh while this entry remembers it.
+    source: Arc<Mesh>,
+    frame: crate::xform::Xform,
+    tag: Option<u32>,
+    world: Arc<Mesh>,
 }
 
 #[derive(Debug)]
