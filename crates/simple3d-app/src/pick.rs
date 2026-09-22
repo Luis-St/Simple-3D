@@ -7,6 +7,7 @@
 //! clicking the wall of a drilled hole selects the cylinder that cut it, which is
 //! the node you would want to adjust.
 
+mod bvh;
 mod ray;
 pub use ray::ray_mesh;
 mod pick;

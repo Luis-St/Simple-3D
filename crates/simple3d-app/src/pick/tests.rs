@@ -48,7 +48,7 @@ fn the_box_test_rejects_misses_and_accepts_hits() {
 
 #[test]
 fn a_ray_finds_the_near_face_of_a_mesh() {
-    let mesh = primitives::box_mesh(10.0, 10.0, 10.0);
+    let mesh = std::sync::Arc::new(primitives::box_mesh(10.0, 10.0, 10.0));
     let t = ray_mesh(&mesh, Vec3::new(0.0, -50.0, 0.0), Vec3::new(0.0, 1.0, 0.0)).unwrap();
     assert!((t - 45.0).abs() < 1e-6, "got {t}, expected the near wall at y = -5");
 }
@@ -177,4 +177,53 @@ fn a_click_anywhere_on_a_pattern_selects_the_pattern_however_it_was_built() {
             "wrap={wrap}: a repeated copy did not pick the pattern"
         );
     }
+}
+
+#[test]
+fn the_tree_finds_exactly_what_walking_every_triangle_finds() {
+    // A large mesh is cast at through a bounding volume hierarchy. It is only a
+    // way of skipping triangles, so it has to give the very same distance --
+    // to the bit -- for every ray, including the ones that graze an edge or
+    // run straight at a vertex, where a box cut too tight would turn the ray
+    // away from the triangle it should have hit.
+    let mut mesh = primitives::ellipsoid_mesh(30.0, 24.0, 18.0, 64);
+    mesh.append(&primitives::torus_mesh(40.0, 8.0, 360.0, 48).translated(Vec3::new(10.0, 5.0, -3.0)));
+    mesh.append(&primitives::box_mesh(12.0, 12.0, 12.0).translated(Vec3::new(-25.0, 0.0, 0.0)));
+    assert!(mesh.indices.len() >= super::bvh::MIN_TRIANGLES, "the mesh is too small to be given a tree");
+    let mesh = std::sync::Arc::new(mesh);
+
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 11) as f64 / (1u64 << 53) as f64
+    };
+    let mut targets: Vec<Vec3> = Vec::new();
+    // Every vertex, and the middle of every edge of a sample of triangles.
+    targets.extend(mesh.positions.iter().step_by(7).copied());
+    for tri in mesh.indices.iter().step_by(11) {
+        let [a, b, _] = tri.map(|corner| mesh.positions[corner as usize]);
+        targets.push((a + b) * 0.5);
+    }
+    // And points anywhere in and around the model.
+    for _ in 0..2000 {
+        targets.push(Vec3::new(next() * 120.0 - 60.0, next() * 100.0 - 50.0, next() * 60.0 - 30.0));
+    }
+    let mut hits = 0;
+    for (index, &target) in targets.iter().enumerate() {
+        // From every side, including straight down an axis, where the slab
+        // test takes its parallel branch.
+        let dir = match index % 4 {
+            0 => Vec3::new(0.0, 1.0, 0.0),
+            1 => Vec3::new(0.0, 0.0, -1.0),
+            _ => Vec3::new(next() - 0.5, next() - 0.5, next() - 0.5).normalized(),
+        };
+        let origin = target - dir * 200.0;
+        let walked = super::ray::ray_mesh_linear(&mesh, origin, dir);
+        let found = ray_mesh(&mesh, origin, dir);
+        assert_eq!(found.map(f64::to_bits), walked.map(f64::to_bits), "ray {index} at {target:?}");
+        hits += walked.is_some() as usize;
+    }
+    assert!(hits > targets.len() / 2, "only {hits} of {} rays hit anything", targets.len());
 }

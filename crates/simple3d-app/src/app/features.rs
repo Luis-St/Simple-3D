@@ -25,7 +25,7 @@ impl App {
         // that face snapped to them out of nowhere. So the same question the axes
         // have always been asked, "does the picture show this?", is asked of
         // every feature.
-        let shown = |feature: &crate::snap::Feature, _: &Mesh| self.shows(view, feature.point);
+        let shown = |feature: &crate::snap::Feature, _: &std::sync::Arc<Mesh>| self.shows(view, feature.point);
         if let Some((feature, _)) = self.nearest_feature_where(view, cursor, &[], shown) {
             return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
         }
@@ -70,7 +70,7 @@ impl App {
         &self,
         view: &crate::view::View,
         feature: &crate::snap::Feature,
-        mesh: &Mesh,
+        mesh: &std::sync::Arc<Mesh>,
     ) -> bool {
         if self.settings.display_mode == DisplayMode::Wireframe {
             return true;
@@ -101,7 +101,7 @@ impl App {
         view: &crate::view::View,
         cursor: egui::Pos2,
         exclude: &[NodeId],
-        accept: impl Fn(&crate::snap::Feature, &Mesh) -> bool,
+        accept: impl Fn(&crate::snap::Feature, &std::sync::Arc<Mesh>) -> bool,
     ) -> Option<(crate::snap::Feature, f32)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
         let mut near: Vec<(crate::snap::Feature, f32, NodeId)> = Vec::new();
