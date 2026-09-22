@@ -13,6 +13,7 @@ use simple3d_geom::Vec3;
 /// -- is worked out once here rather than once per band. Without that the
 /// parallel path re-derives the whole model for every thread, and a dense mesh
 /// in a small viewport comes out *slower* than drawing it on one core.
+#[derive(Clone, Copy)]
 pub(crate) enum Step {
     Triangle {
         v: [Vertex; 3],
@@ -126,6 +127,11 @@ pub(crate) fn line_step(view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32, 
     // its true screen position, and the depth key puts it behind everything
     // else on its own.
     let (a, b) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
+    projected_line_step(a, b, colour, bias, tag, write_depth)
+}
+
+/// The same, for two ends that have been projected already.
+pub(crate) fn projected_line_step(a: Vertex, b: Vertex, colour: Rgba, bias: f32, tag: u16, write_depth: bool) -> Step {
     let scale = (a.key.abs() + b.key.abs()) * 0.5;
     Step::Line { a, b, colour, bias: bias * scale, tag, write_depth }
 }

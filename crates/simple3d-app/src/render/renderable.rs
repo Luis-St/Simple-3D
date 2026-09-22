@@ -70,6 +70,10 @@ pub struct Renderable {
     /// with the *body* it runs through -- not the tag, because the tag depends
     /// on where this item's bodies start in the frame and the spans do not.
     pub(super) axis_spans: [Vec<((f64, f64), u16)>; 3],
+    /// Per principal plane, numbered by the axis it is perpendicular to, the
+    /// segments where it crosses the surface: the plane marks, which used to be
+    /// found anew on every frame from every triangle, three times over.
+    pub(crate) plane_marks: [Vec<[Vec3; 2]>; 3],
     /// Which renderable this is, unique for the life of the process. What the
     /// GPU renderer keys the copy of the mesh it keeps on the card by: the
     /// renderable never changes once made, so as long as the same one is
@@ -104,7 +108,19 @@ impl Renderable {
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
         let reach = welded.positions.iter().map(|p| p.length()).fold(0.0, f64::max);
         let axis_spans = std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis));
-        Renderable { mesh: welded, normals, edges, outline, bodies, body_count, reach, axis_spans, id: next_id() }
+        let plane_marks = std::array::from_fn(|axis| plane_marks_of(&welded, axis));
+        Renderable {
+            mesh: welded,
+            normals,
+            edges,
+            outline,
+            bodies,
+            body_count,
+            reach,
+            axis_spans,
+            plane_marks,
+            id: next_id(),
+        }
     }
 
     pub fn empty() -> Renderable {
@@ -117,6 +133,7 @@ impl Renderable {
             body_count: 0,
             reach: 0.0,
             axis_spans: [Vec::new(), Vec::new(), Vec::new()],
+            plane_marks: [Vec::new(), Vec::new(), Vec::new()],
             id: next_id(),
         }
     }
@@ -138,6 +155,18 @@ impl Renderable {
 /// its body but cannot know the base, and the two have to agree.
 pub(crate) fn body_tag(body: u16, base: u16) -> u16 {
     base.saturating_add(body).saturating_add(1)
+}
+
+/// Where the plane perpendicular to `axis` through the origin crosses the
+/// surface, one segment per triangle it runs through, in triangle order.
+fn plane_marks_of(mesh: &Mesh, axis: usize) -> Vec<[Vec3; 2]> {
+    mesh.indices
+        .iter()
+        .filter_map(|tri| {
+            let world = tri.map(|corner| mesh.positions[corner as usize]);
+            crate::snap::plane_crossing(world, axis).map(|(a, b)| [a, b])
+        })
+        .collect()
 }
 
 /// Group the vertices of a welded mesh into connected bodies: union-find over

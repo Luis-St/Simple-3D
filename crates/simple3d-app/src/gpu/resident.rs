@@ -198,10 +198,7 @@ impl Resident {
         };
         for (axis, run) in mark_runs.iter_mut().enumerate() {
             let first = marks.len();
-            for tri in &mesh.indices {
-                let world =
-                    [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
-                let Some((a, b)) = crate::snap::plane_crossing(world, axis) else { continue };
+            for &[a, b] in &item.plane_marks[axis] {
                 marks.push(LineVertex { pos: relative(a), other: relative(b), body: 0 });
                 marks.push(LineVertex { pos: relative(b), other: relative(a), body: 0 });
             }

@@ -1,7 +1,7 @@
 //! Previews, glows and the edges of a body.
 
 use super::*;
-use crate::raster::Rgba;
+use crate::raster::{Rgba, Vertex};
 use crate::view::View;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
@@ -37,36 +37,63 @@ pub(crate) fn push_preview(
 /// another solid reads as a shape, and half a shell reads as a hole in one.
 /// The colour is translucent, so what it is inside is still visible through the
 /// glow -- which is how the glow says *where* rather than merely *that*.
-pub(crate) fn push_glow(steps: &mut Vec<Step>, view: &View, item: &Renderable, colour: Rgba, section: Option<Plane>) {
-    for tri in &item.mesh.indices {
-        let world = [
-            item.mesh.positions[tri[0] as usize],
-            item.mesh.positions[tri[1] as usize],
-            item.mesh.positions[tri[2] as usize],
-        ];
-        for piece in kept(section, world).triangles() {
-            steps.push(Step::Glow { v: piece.map(|at| to_vertex(view, view.to_view(at))), colour });
+pub(crate) fn push_glow(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    screen: &[Vertex],
+    colour: Rgba,
+    section: Option<Plane>,
+) {
+    extend_in_order(steps, item.mesh.indices.len(), |range, out| {
+        for index in range {
+            let step = |v| Step::Glow { v, colour };
+            push_faces(out, view, item, screen, item.mesh.indices[index], section, step);
         }
-    }
+    });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn push_edges(
     steps: &mut Vec<Step>,
     view: &View,
     item: &Renderable,
+    screen: &[Vertex],
     colour: Rgba,
     tag_base: u16,
     section: Option<Plane>,
 ) {
-    for edge in &item.edges {
-        let a = item.mesh.positions[edge[0] as usize];
-        let b = item.mesh.positions[edge[1] as usize];
-        let Some((a, b)) = kept_line(section, a, b) else { continue };
-        // Tagged like the faces it creases, so an edge of the solid an axis
-        // goes into does not hide that axis where the faces either side of it
-        // do not.
-        let tag = item.body_tag(edge[0] as usize, tag_base);
-        steps.push(line_step(view, a, b, colour, EDGE_BIAS, tag, true));
+    extend_in_order(steps, item.edges.len(), |range, out| {
+        for edge in &item.edges[range] {
+            // Tagged like the faces it creases, so an edge of the solid an axis
+            // goes into does not hide that axis where the faces either side of
+            // it do not.
+            let tag = item.body_tag(edge[0] as usize, tag_base);
+            push_edge(out, view, item, screen, *edge, section, |a, b| {
+                projected_line_step(a, b, colour, EDGE_BIAS, tag, true)
+            });
+        }
+    });
+}
+
+/// One edge of a mesh as a step: straight from the projected vertices while
+/// there is no section, and cut by the plane when there is.
+pub(crate) fn push_edge(
+    out: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    screen: &[Vertex],
+    edge: [u32; 2],
+    section: Option<Plane>,
+    step: impl Fn(Vertex, Vertex) -> Step,
+) {
+    match section {
+        None => out.push(step(screen[edge[0] as usize], screen[edge[1] as usize])),
+        Some(_) => {
+            let (a, b) = (item.mesh.positions[edge[0] as usize], item.mesh.positions[edge[1] as usize]);
+            let Some((a, b)) = kept_line(section, a, b) else { return };
+            out.push(step(to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b))));
+        }
     }
 }
 

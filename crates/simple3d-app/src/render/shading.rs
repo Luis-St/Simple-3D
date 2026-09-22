@@ -15,6 +15,16 @@ pub(crate) fn to_vertex(view: &View, view_space: Vec3) -> Vertex {
     Vertex { pos, key: -z as f32 }
 }
 
+/// Every vertex of a mesh, projected once for the frame.
+///
+/// A vertex of a closed mesh is a corner of about six triangles, and each of
+/// them used to project it again for itself. Projecting the vertex list once
+/// and looking the corners up is the same arithmetic on the same numbers --
+/// the same vertices come out, to the bit -- done a sixth as often.
+pub(crate) fn project_all(view: &View, positions: &[Vec3]) -> Vec<Vertex> {
+    map_in_order(positions.len(), |index| to_vertex(view, view.to_view(positions[index])))
+}
+
 /// Shade one triangle: a headlight from the camera plus a constant fill, so a
 /// face turned away from the eye is dim but never black.
 pub(crate) fn shade(base: Rgba, normal: Vec3, view_dir: Vec3, alpha: u8) -> Rgba {

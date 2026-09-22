@@ -17,6 +17,8 @@ mod step;
 pub(crate) use step::*;
 mod shading;
 pub(crate) use shading::*;
+mod parallel;
+pub(crate) use parallel::*;
 mod push_solid;
 pub(crate) use push_solid::*;
 mod bias;

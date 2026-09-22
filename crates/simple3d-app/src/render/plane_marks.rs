@@ -40,13 +40,9 @@ pub(crate) fn push_plane_marks(
             if !grid.axes[MARK_AXIS[axis]] {
                 continue;
             }
-            for tri in &item.renderable.mesh.indices {
-                let world = [
-                    item.renderable.mesh.positions[tri[0] as usize],
-                    item.renderable.mesh.positions[tri[1] as usize],
-                    item.renderable.mesh.positions[tri[2] as usize],
-                ];
-                let Some((a, b)) = crate::snap::plane_crossing(world, axis) else { continue };
+            // Where the plane crosses the surface does not depend on the
+            // camera, so the renderable found it once when it was made.
+            for &[a, b] in &item.renderable.plane_marks[axis] {
                 // A mark lies on a surface, so it goes wherever that surface
                 // does.
                 let Some((a, b)) = kept_line(section, a, b) else { continue };

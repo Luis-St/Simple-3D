@@ -169,17 +169,17 @@ pub(crate) fn push_wireframe(
     steps: &mut Vec<Step>,
     view: &View,
     item: &Renderable,
+    screen: &[Vertex],
     colour: Rgba,
     section: Option<Plane>,
 ) {
-    for edge in &item.edges {
-        let a = item.mesh.positions[edge[0] as usize];
-        let b = item.mesh.positions[edge[1] as usize];
-        let Some((a, b)) = kept_line(section, a, b) else { continue };
-        // No depth bias and no filled faces, so the whole wireframe is visible
-        // including the far side -- which is the point of wireframe.
-        // The tag is the wireframe's own: nothing is filled, so nothing owns a
-        // pixel's depth in a way an axis has to see through.
-        steps.push(line_step(view, a, b, colour, 0.0, 0, true));
-    }
+    extend_in_order(steps, item.edges.len(), |range, out| {
+        for edge in &item.edges[range] {
+            // No depth bias and no filled faces, so the whole wireframe is
+            // visible including the far side -- which is the point of
+            // wireframe. The tag is the wireframe's own: nothing is filled, so
+            // nothing owns a pixel's depth in a way an axis has to see through.
+            push_edge(out, view, item, screen, *edge, section, |a, b| projected_line_step(a, b, colour, 0.0, 0, true));
+        }
+    });
 }

@@ -130,24 +130,39 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
     }
     let cut = request.section;
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
+        // Every vertex projected once for everything this item draws from its
+        // mesh: faces and edges share their corners.
+        let needs_screen = steps_too && item.style != Style::Selected && cut.is_none();
+        let screen = if needs_screen { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
+        let screen = &screen[..];
         match item.style {
             Style::Solid => match request.mode {
                 DisplayMode::Wireframe => {
                     if steps_too {
-                        push_wireframe(&mut steps, &view, item.renderable, request.palette.wire, cut);
+                        push_wireframe(&mut steps, &view, item.renderable, screen, request.palette.wire, cut);
                     }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
                 DisplayMode::Shaded => {
                     if steps_too {
-                        push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
+                        push_shaded(
+                            &mut steps,
+                            &view,
+                            item.renderable,
+                            screen,
+                            request.palette.solid,
+                            255,
+                            tag_base,
+                            cut,
+                        );
                     }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
                 DisplayMode::ShadedWithEdges => {
                     if steps_too {
-                        push_shaded(&mut steps, &view, item.renderable, request.palette.solid, 255, tag_base, cut);
-                        push_edges(&mut steps, &view, item.renderable, request.palette.edge, tag_base, cut);
+                        let palette = &request.palette;
+                        push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut);
+                        push_edges(&mut steps, &view, item.renderable, screen, palette.edge, tag_base, cut);
                     }
                     push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
                 }
@@ -169,7 +184,7 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
             }
             Style::Ghost => {
                 if steps_too {
-                    push_ghost(&mut steps, &view, item.renderable, request.palette.ghost, cut);
+                    push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut);
                 }
             }
             // The outline here; the glow itself comes last, after everything
@@ -188,7 +203,8 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
     // Last of all, over the finished model: what a buried body is pointed out
     // with, and the cells of a tool's preview.
     for item in request.items.iter().filter(|item| item.style == Style::Glow && steps_too) {
-        push_glow(&mut steps, &view, item.renderable, request.palette.glow, cut);
+        let screen = if cut.is_none() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
+        push_glow(&mut steps, &view, item.renderable, &screen, request.palette.glow, cut);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
     if steps_too && request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
