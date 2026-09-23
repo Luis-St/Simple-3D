@@ -17,6 +17,12 @@ rust-version = "1.97"
 license = "PolyForm-Noncommercial-1.0.0"
 repository = "https://github.com/Luis-St/Simple-3D"
 
+# The dev build runs every dependency optimised -- egui, the windowing, the
+# image and compression crates are what a frame spends much of its time in --
+# and leaves only the workspace's own crates as the debugger wants them.
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 opt-level = 3
 lto = true
