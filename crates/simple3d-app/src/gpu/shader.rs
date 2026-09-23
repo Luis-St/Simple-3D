@@ -826,8 +826,8 @@ void main() {
     if (dot(towards, u_forward) > 0.0) {
         towards = -towards;
     }
-    uvec3 packed = uvec3(round((towards * 0.5 + 0.5) * 255.0));
-    uint leaf_word = u_leaf | (packed.x << 8) | (packed.y << 16) | (packed.z << 24);
+    uvec3 facing_bytes = uvec3(round((towards * 0.5 + 0.5) * 255.0));
+    uint leaf_word = u_leaf | (facing_bytes.x << 8) | (facing_bytes.y << 16) | (facing_bytes.z << 24);
     for (int k = 0; k < 3; k++) {
         float d = dot(u_plane[k].xyz, v_pos) + u_plane[k].w;
         float across = length(vec2(dFdx(d), dFdy(d)));
