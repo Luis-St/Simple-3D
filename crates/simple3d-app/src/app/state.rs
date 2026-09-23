@@ -214,6 +214,9 @@ pub struct App {
     /// Each body's snap features, kept between frames and keyed on the identity
     /// of the mesh they were found on. See `App::snaps_of`.
     pub(super) snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedSnaps>>,
+    /// Those being found for the meshes the last evaluation brought, off the
+    /// interface thread -- see `App::warm_snaps`.
+    pub(super) snap_warming: Option<SnapWarming>,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.
     pub pending_delete: Option<Vec<NodeId>>,

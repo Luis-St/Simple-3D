@@ -39,6 +39,7 @@ impl App {
                 self.frame_all();
             }
             self.scene_renderable = renderable;
+            self.warm_snaps();
             self.settle();
             self.renderable_key = u64::MAX;
             self.image_key = u64::MAX;
@@ -52,6 +53,7 @@ impl App {
             self.worker.submit(&self.scene);
             self.dirty = false;
         }
+        self.poll_snap_warming();
         self.poll_export();
         self.poll_import();
         self.poll_split();

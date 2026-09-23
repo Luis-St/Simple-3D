@@ -157,25 +157,24 @@ impl App {
     /// pointer is exactly the "has this changed" key: a re-evaluation makes a new
     /// allocation and misses, and anything else hits.
     pub(super) fn snaps_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Snaps {
-        let axes = self.scene.settings.axes_visible;
-        let marked = self.plane_marks_drawn();
-        let mask = (axes[0] as u8) | (axes[1] as u8) << 1 | (axes[2] as u8) << 2 | (marked as u8) << 3;
+        let (axes, marked, mask) = self.snap_settings();
         let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
         if let Some((cached_key, snaps)) = self.snap_features.borrow().get(&id) {
             if *cached_key == key {
                 return snaps.clone();
             }
         }
-        let mut features = crate::snap::features_of(mesh);
-        // Where the world axes run through the body, offered as corners and as
-        // the edge between them (issue 78).
-        features.extend(crate::snap::axis_features(mesh, axes));
-        // And the lines the principal planes leave across it, which are drawn on
-        // the surface and so can be caught along their length.
-        let marks = if marked { crate::snap::plane_mark_lines(mesh, axes) } else { Vec::new() };
-        let snaps = std::rc::Rc::new(BodySnaps { features, marks });
+        let snaps = std::rc::Rc::new(find_snaps(mesh, axes, marked));
         self.snap_features.borrow_mut().insert(id, (key, snaps.clone()));
         snaps
+    }
+
+    /// What a body's snap targets depend on besides its mesh: which axes are
+    /// shown, whether the plane marks are, and the two as the cache's key.
+    pub(super) fn snap_settings(&self) -> ([bool; 3], bool, u8) {
+        let axes = self.scene.settings.axes_visible;
+        let marked = self.plane_marks_drawn();
+        (axes, marked, (axes[0] as u8) | (axes[1] as u8) << 1 | (axes[2] as u8) << 2 | (marked as u8) << 3)
     }
 
     /// Whether the plane marks are on screen: the switch for them, and a display

@@ -112,3 +112,29 @@ pub(crate) fn a_snapped_plane_drag_stays_in_its_plane() {
     assert!(after.z.abs() < 1e-9, "a Z-plane drag moved in Z: {after:?}");
     assert!(after.x.abs() > 1e-6 && after.y.abs() > 1e-6, "the drag did not snap at all: {after:?}");
 }
+
+/// The snap targets of what an evaluation brings are found off the interface
+/// thread and waiting in the cache, so the first frame that snaps does not
+/// have to find them all itself.
+#[test]
+pub(crate) fn an_evaluation_has_its_snap_targets_found_in_the_background() {
+    let mut app = headless_app();
+    let id = app.primary().unwrap();
+    app.warm_snaps();
+    let started = std::time::Instant::now();
+    while app.snap_warming.is_some() && started.elapsed() < std::time::Duration::from_secs(10) {
+        app.poll_snap_warming();
+        std::thread::yield_now();
+    }
+    let mesh = app.evaluated.node_meshes.get(&id).unwrap().clone();
+    let (_, _, mask) = app.snap_settings();
+    let cached = app.snap_features.borrow();
+    let (key, snaps) = cached.get(&id).expect("the body's targets were not found in the background");
+    assert_eq!(*key, (std::sync::Arc::as_ptr(&mesh) as usize, mask));
+    assert!(!snaps.features.is_empty());
+    drop(cached);
+
+    // With nothing new to find, nothing is started.
+    app.warm_snaps();
+    assert!(app.snap_warming.is_none());
+}

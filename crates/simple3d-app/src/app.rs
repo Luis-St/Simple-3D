@@ -15,7 +15,6 @@ pub use measure::{Measure, MeasurePoint, Measurement};
 mod pattern_grip;
 pub use pattern_grip::PatternGrip;
 mod snaps;
-pub use snaps::BodySnaps;
 pub(crate) use snaps::*;
 mod document;
 mod files;

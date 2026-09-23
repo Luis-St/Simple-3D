@@ -25,6 +25,32 @@ pub(crate) type Snaps = std::rc::Rc<BodySnaps>;
 /// targets themselves.
 pub(crate) type CachedSnaps = ((usize, u8), Snaps);
 
+/// Everything `mesh` offers a snap: its own features, where the shown world
+/// axes run through it (issue 78), and the lines the principal planes leave
+/// across it, which are drawn on the surface and so can be caught along
+/// their length.
+pub(crate) fn find_snaps(mesh: &simple3d_geom::Mesh, axes: [bool; 3], marked: bool) -> BodySnaps {
+    let mut features = crate::snap::features_of(mesh);
+    features.extend(crate::snap::axis_features(mesh, axes));
+    let marks = if marked { crate::snap::plane_mark_lines(mesh, axes) } else { Vec::new() };
+    BodySnaps { features, marks }
+}
+
+/// Snap targets being found off the interface thread for the meshes an
+/// evaluation has just brought, so the first frame that snaps finds them
+/// ready -- see `App::warm_snaps`.
+pub(crate) struct SnapWarming {
+    found: std::sync::mpsc::Receiver<(NodeId, (usize, u8), BodySnaps)>,
+    /// Set when the meshes it is working on have been replaced, so it stops.
+    stale: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for SnapWarming {
+    fn drop(&mut self) {
+        self.stale.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// The features of the body a drag is carrying, as far as they have been
 /// found: where its origin stood and the meshes it had when the drag began,
 /// and the offsets from the one to the features of the other once a frame of
@@ -36,6 +62,75 @@ pub(crate) struct SnapSources {
 }
 
 impl App {
+    /// Start finding the snap targets of every shown body whose mesh the
+    /// cache does not hold, on a thread of their own. Called when an
+    /// evaluation lands.
+    ///
+    /// Snapping asks for the targets of every body on screen on its first
+    /// frame, and finding them is a weld and a hash map over every edge of
+    /// each: on a large scene that first frame hung for as long as all of
+    /// them took. An evaluation replaces only the meshes that changed, and
+    /// those are what is found here, while nobody is waiting on them.
+    pub(crate) fn warm_snaps(&mut self) {
+        let (axes, marked, mask) = self.snap_settings();
+        let cached = self.snap_features.borrow();
+        let wanted: Vec<(NodeId, std::sync::Arc<simple3d_geom::Mesh>)> = self
+            .evaluated
+            .node_meshes
+            .iter()
+            .filter(|&(&id, mesh)| {
+                let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
+                self.scene.is_shown(id) && cached.get(&id).is_none_or(|(held, _)| *held != key)
+            })
+            .map(|(&id, mesh)| (id, mesh.clone()))
+            .collect();
+        drop(cached);
+        // Dropping the one before tells it to stop.
+        self.snap_warming = None;
+        if wanted.is_empty() {
+            return;
+        }
+        let (send, found) = std::sync::mpsc::channel();
+        let stale = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop = stale.clone();
+        let spawned = std::thread::Builder::new().name("snap-targets".into()).spawn(move || {
+            for (id, mesh) in wanted {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    return;
+                }
+                let key = (std::sync::Arc::as_ptr(&mesh) as usize, mask);
+                if send.send((id, key, find_snaps(&mesh, axes, marked))).is_err() {
+                    return;
+                }
+            }
+        });
+        if spawned.is_ok() {
+            self.snap_warming = Some(SnapWarming { found, stale });
+        }
+    }
+
+    /// Take in whatever the thread `warm_snaps` started has found so far.
+    /// A body's targets are only kept while the mesh they were found on is
+    /// still the one it has, which the key's address says.
+    pub(crate) fn poll_snap_warming(&mut self) {
+        let Some(warming) = &self.snap_warming else { return };
+        let mut cache = self.snap_features.borrow_mut();
+        loop {
+            match warming.found.try_recv() {
+                Ok((id, key, snaps)) => {
+                    let current = self.evaluated.node_meshes.get(&id).map(|mesh| std::sync::Arc::as_ptr(mesh) as usize);
+                    if current == Some(key.0) {
+                        cache.insert(id, (key, std::rc::Rc::new(snaps)));
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+        drop(cache);
+        self.snap_warming = None;
+    }
+
     /// The dragged node and everything under it: the bodies a drag is carrying,
     /// which geometry snapping must never snap to.
     pub(super) fn drag_subtree(&self, id: NodeId) -> Vec<NodeId> {
