@@ -91,6 +91,7 @@ impl App {
             section_grab: None,
             section_hover: None,
             csg_leaves: std::cell::RefCell::new(std::collections::HashMap::new()),
+            csg_hulls: std::cell::RefCell::new(std::collections::HashMap::new()),
             snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
             pending_delete: None,
             camera_move: None,

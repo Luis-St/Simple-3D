@@ -73,7 +73,8 @@ pub(crate) fn paint_scene(
         // when it goes into a boolean, the boolean left out and drawn per
         // pixel from the shapes that go into it.
         let whole = std::ptr::eq(solid, &app.scene_renderable);
-        let mut live = render::Live::default();
+        let ready = if whole { app.csg_ready() } else { Vec::new() };
+        let mut live = render::Live { ready: ready.iter().map(|shape| &**shape).collect(), ..Default::default() };
         let csg = app.live_csg().filter(|_| whole);
         let dragged = match &csg {
             Some(csg) => Some((csg.carried, csg.range.clone(), csg.xform)),
@@ -83,9 +84,8 @@ pub(crate) fn paint_scene(
             match &csg {
                 Some(csg) => {
                     live.hidden.push((solid.id, part.clone()));
-                    let leaves = csg.leaves.iter().enumerate();
                     live.csg = Some(render::CsgPreview {
-                        leaves: leaves.map(|(index, leaf)| (&**leaf, (index == csg.moved).then_some(*moved))).collect(),
+                        leaves: csg.leaves.iter().map(|(leaf, placed)| (&**leaf, *placed)).collect(),
                         program: csg.program.clone(),
                         tag: solid.bodies.get(part.start as usize).map_or(0, |&body| render::body_tag(body, 0)),
                     });

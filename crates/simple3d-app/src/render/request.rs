@@ -68,6 +68,11 @@ pub struct Live<'a> {
     /// part of the scene it stands for has been left out (`hidden`): what a
     /// drag of one of its operands shows. See `App::live_csg`.
     pub csg: Option<CsgPreview<'a>>,
+    /// The shapes such a boolean would be drawn from if the selection were
+    /// dragged, to be put on the card ahead of it and kept there without
+    /// being drawn, so the drag's first frame has nothing to upload. See
+    /// `App::csg_ready`.
+    pub ready: Vec<&'a Renderable>,
 }
 
 /// A boolean the GPU works out per pixel -- see [`Live::csg`].

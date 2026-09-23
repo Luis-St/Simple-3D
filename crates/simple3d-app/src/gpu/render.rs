@@ -20,6 +20,7 @@ impl Gpu {
             let crossing = Program::with_geometry(&gl, &crossing_vertex(), Some(&crossing_geometry()), SOLID_SOURCE)?;
             let csg_peel = Program::new(&gl, &face_vertex(), CSG_PEEL_FRAGMENT)?;
             let csg_count = Program::new(&gl, &face_vertex(), CSG_COUNT_FRAGMENT)?;
+            let csg_pack = Program::new(&gl, BACKGROUND_VERTEX, CSG_PACK_FRAGMENT)?;
             let csg_resolve = Program::new(&gl, BACKGROUND_VERTEX, CSG_RESOLVE_FRAGMENT)?;
             // As wide as the driver allows, up to a size that keeps a table of
             // a few thousand entries from being mostly padding.
@@ -39,6 +40,7 @@ impl Gpu {
                 crossing,
                 csg_peel,
                 csg_count,
+                csg_pack,
                 csg_resolve,
                 csg_targets: None,
                 csg_half: None,
@@ -79,6 +81,7 @@ impl Gpu {
         // section's half-space as one more (`csg.rs`).
         let leaves = request.live.csg.iter().flat_map(|csg| csg.leaves.iter().map(|(leaf, _)| *leaf));
         extra.extend(leaves.chain(half.iter().map(|(_, shape)| shape)));
+        extra.extend(request.live.ready.iter().copied());
         plan.csg.extend(extra.iter().skip(preview.is_some() as usize).map(|shape| shape.id));
         let kept = unsafe { self.keep_resident(&gl, request, &plan, &extra) };
         self.preview = preview;
@@ -89,6 +92,14 @@ impl Gpu {
             unsafe {
                 self.keep_half_space(&gl)?;
                 self.ensure_csg_targets(&gl, width, height)?;
+            }
+        } else {
+            if let Some(targets) = &self.csg_targets {
+                targets.forget();
+            }
+            // A drag that is about to be drawn this way finds its targets made.
+            if !request.live.ready.is_empty() {
+                unsafe { self.ensure_csg_targets(&gl, width, height)? };
             }
         }
         let mut passes = Passes::default();

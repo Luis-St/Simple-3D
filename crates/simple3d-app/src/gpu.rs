@@ -83,6 +83,7 @@ pub struct Gpu {
     /// A boolean drawn per pixel while a drag changes it -- see `csg.rs`.
     csg_peel: Program,
     csg_count: Program,
+    csg_pack: Program,
     csg_resolve: Program,
     csg_targets: Option<csg::CsgTargets>,
     /// The section's kept half-space as a shape for it, with the hash of what

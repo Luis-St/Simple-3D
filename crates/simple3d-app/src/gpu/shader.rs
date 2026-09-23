@@ -785,6 +785,45 @@ void main() {
 }
 "#;
 
+/// The boolean preview's packing pass, over the whole frame: one group of up
+/// to 32 shapes' counts as the bits of those the layer's point is inside, an
+/// odd count being inside. Written into the group's own channel of the
+/// resolve pass's mask; the other channels are masked off.
+pub(crate) const CSG_PACK_FRAGMENT: &str = r#"#version 330 core
+uniform sampler2D u_count_0;
+uniform sampler2D u_count_1;
+uniform sampler2D u_count_2;
+uniform sampler2D u_count_3;
+uniform sampler2D u_count_4;
+uniform sampler2D u_count_5;
+uniform sampler2D u_count_6;
+uniform sampler2D u_count_7;
+uniform int u_shapes;
+
+layout(location = 0) out uvec4 out_inside;
+
+void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    vec4 counts[8];
+    counts[0] = texelFetch(u_count_0, at, 0);
+    counts[1] = texelFetch(u_count_1, at, 0);
+    counts[2] = texelFetch(u_count_2, at, 0);
+    counts[3] = texelFetch(u_count_3, at, 0);
+    counts[4] = texelFetch(u_count_4, at, 0);
+    counts[5] = texelFetch(u_count_5, at, 0);
+    counts[6] = texelFetch(u_count_6, at, 0);
+    counts[7] = texelFetch(u_count_7, at, 0);
+    uint inside = 0u;
+    for (int j = 0; j < u_shapes; j++) {
+        uint crossings = uint(round(counts[j / 4][j % 4] * 255.0));
+        if ((crossings & 1u) == 1u) {
+            inside |= 1u << uint(j);
+        }
+    }
+    out_inside = uvec4(inside);
+}
+"#;
+
 /// The boolean preview's resolving pass, over the whole frame: where the
 /// layer's point is on the result's surface -- the expression says one thing
 /// just in front of it and the other just behind, which is its own shape's
@@ -795,18 +834,11 @@ pub(crate) const CSG_RESOLVE_FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D u_layer;
 uniform usampler2D u_leaf;
 uniform sampler2D u_colour;
-uniform sampler2D u_count_0;
-uniform sampler2D u_count_1;
-uniform sampler2D u_count_2;
-uniform sampler2D u_count_3;
-uniform sampler2D u_count_4;
-uniform sampler2D u_count_5;
-uniform sampler2D u_count_6;
-uniform sampler2D u_count_7;
-uniform int u_leaves;
+// Which shapes the layer's point is inside, a bit each.
+uniform usampler2D u_inside;
 // The expression in postfix: a leaf by its index, -1 union, -2 difference,
 // -3 intersection.
-uniform int u_program[64];
+uniform int u_program[256];
 uniform int u_length;
 uniform uint u_tag;
 // The section's half-space, when there is one, drawn as the cut.
@@ -816,13 +848,13 @@ layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
 layout(location = 2) out float out_done;
 
-bool evaluate(uint inside) {
+bool evaluate(uvec4 inside) {
     bool stack[32];
     int top = 0;
     for (int i = 0; i < u_length; i++) {
         int op = u_program[i];
         if (op >= 0) {
-            stack[top] = ((inside >> uint(op)) & 1u) == 1u;
+            stack[top] = ((inside[op / 32] >> uint(op % 32)) & 1u) == 1u;
             top += 1;
         } else {
             bool b = stack[top - 1];
@@ -840,24 +872,11 @@ void main() {
     if (depth >= 1.0) {
         discard;
     }
-    vec4 counts[8];
-    counts[0] = texelFetch(u_count_0, at, 0);
-    counts[1] = texelFetch(u_count_1, at, 0);
-    counts[2] = texelFetch(u_count_2, at, 0);
-    counts[3] = texelFetch(u_count_3, at, 0);
-    counts[4] = texelFetch(u_count_4, at, 0);
-    counts[5] = texelFetch(u_count_5, at, 0);
-    counts[6] = texelFetch(u_count_6, at, 0);
-    counts[7] = texelFetch(u_count_7, at, 0);
-    uint inside = 0u;
-    for (int j = 0; j < u_leaves; j++) {
-        uint crossings = uint(round(counts[j / 4][j % 4] * 255.0));
-        if ((crossings & 1u) == 1u) {
-            inside |= 1u << uint(j);
-        }
-    }
+    uvec4 inside = texelFetch(u_inside, at, 0);
     uint leaf = texelFetch(u_leaf, at, 0).r;
-    if (evaluate(inside) == evaluate(inside ^ (1u << leaf))) {
+    uvec4 flipped = inside;
+    flipped[leaf / 32u] ^= 1u << (leaf % 32u);
+    if (evaluate(inside) == evaluate(flipped)) {
         discard;
     }
     out_colour = texelFetch(u_colour, at, 0);

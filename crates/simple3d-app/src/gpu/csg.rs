@@ -39,6 +39,13 @@ use simple3d_geom::{Mesh, Vec3};
 /// left in it, and this bounds a frame of a pathological one.
 const MAX_LAYERS: usize = 32;
 
+/// The most shapes a boolean is drawn from, the section's half-space among
+/// them: a bit each of the 128 the resolve pass reads.
+pub(crate) const MAX_SHAPES: usize = 128;
+
+/// The fewest a frame that does not ask as it goes peels.
+const MIN_LAYERS: usize = 4;
+
 /// What the passes draw into, the size of the frame.
 pub(crate) struct CsgTargets {
     width: usize,
@@ -48,11 +55,37 @@ pub(crate) struct CsgTargets {
     /// Which shape each pixel of the layer is on, and its colour there.
     leaf: glow::Texture,
     colour: glow::Texture,
-    /// The counts, four shapes to a texture.
+    /// The counts, four shapes to a texture, for one group of up to 32 shapes
+    /// at a time.
     counts: [glow::Texture; 8],
+    /// Which shapes the layer's point is inside, a bit each: 32 to a channel,
+    /// one channel per group, packed from the counts (`CSG_PACK_FRAGMENT`).
+    inside: glow::Texture,
     peel: [glow::Framebuffer; 2],
     count: [glow::Framebuffer; 2],
-    query: glow::Query,
+    pack: glow::Framebuffer,
+    /// One per layer: whether it had anything in it. See [`LayerPlan`].
+    queries: Vec<glow::Query>,
+    /// How many layers the last frame drew, and whether it waited on each to
+    /// say so -- `None` when there was no last frame to go by.
+    last: std::cell::Cell<Option<usize>>,
+}
+
+/// How many layers a frame peels, and whether it asks after each one.
+///
+/// Asking whether a layer had anything in it before drawing the next is a
+/// wait for the card to finish it: up to 32 times a frame the processor sat
+/// idle until the card caught up, and the card then sat idle while the next
+/// layer was sent. So a frame instead draws as many layers as the last one
+/// turned out to need, with two to spare, and reads what each held a frame
+/// late, when the answer is long in. A layer beyond the last surface finds
+/// nothing and draws nothing, so the spare ones cost only their passes; and a
+/// frame whose every layer held something is followed by one with twice as
+/// many. Only a frame with nothing to go by -- the first of a drag, or the
+/// first after a resize -- still asks as it goes.
+enum LayerPlan {
+    Asking,
+    Fixed(usize),
 }
 
 impl CsgTargets {
@@ -91,6 +124,7 @@ impl CsgTargets {
             counts.push(texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE)?);
         }
         let counts: [glow::Texture; 8] = counts.try_into().expect("eight made");
+        let inside = texture(glow::RGBA32UI, glow::RGBA_INTEGER, glow::UNSIGNED_INT)?;
         gl.bind_texture(glow::TEXTURE_2D, None);
 
         let framebuffer = |depth: glow::Texture, colours: &[glow::Texture]| -> Result<glow::Framebuffer, String> {
@@ -111,19 +145,66 @@ impl CsgTargets {
         };
         let peel = [framebuffer(depth[0], &[colour, leaf])?, framebuffer(depth[1], &[colour, leaf])?];
         let count = [framebuffer(depth[0], &counts)?, framebuffer(depth[1], &counts)?];
+        // Only the one colour target: a full-frame pass with no depth to test.
+        let pack = gl.create_framebuffer()?;
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(pack));
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(inside), 0);
+        gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
+        if gl.check_framebuffer_status(glow::FRAMEBUFFER) != glow::FRAMEBUFFER_COMPLETE {
+            return Err("the boolean preview's target is not usable".into());
+        }
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-        Ok(CsgTargets { width, height, depth, leaf, colour, counts, peel, count, query: gl.create_query()? })
+        let queries = (0..MAX_LAYERS).map(|_| gl.create_query()).collect::<Result<Vec<_>, _>>()?;
+        Ok(CsgTargets {
+            width,
+            height,
+            depth,
+            leaf,
+            colour,
+            counts,
+            inside,
+            peel,
+            count,
+            pack,
+            queries,
+            last: std::cell::Cell::new(None),
+        })
     }
 
     unsafe fn destroy(&self, gl: &glow::Context) {
-        for framebuffer in self.peel.iter().chain(&self.count) {
+        for framebuffer in self.peel.iter().chain(&self.count).chain([&self.pack]) {
             gl.delete_framebuffer(*framebuffer);
         }
-        let textures = self.depth.iter().chain([&self.leaf, &self.colour]).chain(&self.counts);
+        let textures = self.depth.iter().chain([&self.leaf, &self.colour, &self.inside]).chain(&self.counts);
         for texture in textures {
             gl.delete_texture(*texture);
         }
-        gl.delete_query(self.query);
+        for query in &self.queries {
+            gl.delete_query(*query);
+        }
+    }
+
+    /// What this frame peels, from what the last one's layers turned out to
+    /// hold -- see [`LayerPlan`].
+    unsafe fn plan(&self, gl: &glow::Context) -> LayerPlan {
+        let Some(drawn) = self.last.get() else { return LayerPlan::Asking };
+        // The queries finish in the order they were sent, so the last one in
+        // says they all are.
+        if gl.get_query_parameter_u32(self.queries[drawn - 1], glow::QUERY_RESULT_AVAILABLE) == 0 {
+            return LayerPlan::Fixed(drawn);
+        }
+        let held =
+            (0..drawn).position(|layer| gl.get_query_parameter_u32(self.queries[layer], glow::QUERY_RESULT) == 0);
+        LayerPlan::Fixed(match held {
+            Some(empty) => (empty + 2).clamp(MIN_LAYERS, MAX_LAYERS),
+            None => (drawn * 2).min(MAX_LAYERS),
+        })
+    }
+
+    /// Forget how deep the last boolean went, for a frame that draws none: the
+    /// next one may be a different shape altogether.
+    pub(super) fn forget(&self) {
+        self.last.set(None);
     }
 }
 
@@ -216,10 +297,9 @@ impl Gpu {
             .iter()
             .filter_map(|(leaf, moved)| Some((self.resident.get(&leaf.id)?, Placing::moved(*moved))))
             .collect();
-        if drawn.len() != leaves.len() || leaves.len() > 32 {
+        if drawn.len() != leaves.len() || leaves.len() > MAX_SHAPES {
             return;
         }
-        let textures_used = leaves.len().div_ceil(4);
         let (width, height) = (targets.width as i32, targets.height as i32);
 
         gl.disable(glow::CULL_FACE);
@@ -236,7 +316,13 @@ impl Gpu {
         gl.draw_buffers(&[glow::NONE, glow::NONE, glow::COLOR_ATTACHMENT2]);
         gl.clear_buffer_f32_slice(glow::COLOR, 2, &[0.0; 4]);
 
-        for layer in 0..MAX_LAYERS {
+        let plan = targets.plan(gl);
+        let layers = match plan {
+            LayerPlan::Asking => MAX_LAYERS,
+            LayerPlan::Fixed(layers) => layers,
+        };
+        let mut peeled = layers;
+        for layer in 0..layers {
             let (now, before) = (layer % 2, (layer + 1) % 2);
 
             // The layer: the nearest face behind the one before.
@@ -269,7 +355,7 @@ impl Gpu {
                 let solid = request.palette.solid;
                 gl.uniform_4_f32_slice(Some(at), &[solid[0] as f32, solid[1] as f32, solid[2] as f32, 255.0]);
             }
-            gl.begin_query(glow::ANY_SAMPLES_PASSED, targets.query);
+            gl.begin_query(glow::ANY_SAMPLES_PASSED, targets.queries[layer]);
             for (index, (resident, placing)) in drawn.iter().enumerate() {
                 let Some(faces) = &resident.faces else { continue };
                 set_projection(gl, peel, resident, view, None, placing);
@@ -283,40 +369,68 @@ impl Gpu {
                 gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
             }
             gl.end_query(glow::ANY_SAMPLES_PASSED);
-            if gl.get_query_parameter_u32(targets.query, glow::QUERY_RESULT) == 0 {
+            if matches!(plan, LayerPlan::Asking)
+                && gl.get_query_parameter_u32(targets.queries[layer], glow::QUERY_RESULT) == 0
+            {
+                peeled = layer + 1;
                 break;
             }
 
-            // The counts: each shape's faces in front of the layer, into its
-            // own channel.
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.count[now]));
-            let buffers: Vec<u32> = (0..textures_used as u32).map(|index| glow::COLOR_ATTACHMENT0 + index).collect();
-            gl.draw_buffers(&buffers);
-            for index in 0..textures_used as u32 {
-                gl.clear_buffer_f32_slice(glow::COLOR, index, &[0.0; 4]);
-            }
-            gl.depth_mask(false);
-            gl.enable(glow::BLEND);
-            gl.blend_func(glow::ONE, glow::ONE);
-            let count = &self.csg_count;
-            gl.use_program(Some(count.program));
-            set2(gl, count, "u_viewport", viewport);
-            set2(gl, count, "u_depth", depth);
-            for (index, (resident, placing)) in drawn.iter().enumerate() {
-                let Some(faces) = &resident.faces else { continue };
-                for texture in 0..textures_used {
-                    let on = |channel: usize| texture == index / 4 && channel == index % 4;
-                    gl.color_mask_draw_buffer(texture as u32, on(0), on(1), on(2), on(3));
+            // Which shapes the layer's point is inside, 32 at a time: each
+            // shape's faces in front of the layer counted into its own
+            // channel, and the counts then packed into bits.
+            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.pack));
+            gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0; 4]);
+            for (group, shapes) in drawn.chunks(32).enumerate() {
+                let textures_used = shapes.len().div_ceil(4);
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.count[now]));
+                let buffers: Vec<u32> =
+                    (0..textures_used as u32).map(|index| glow::COLOR_ATTACHMENT0 + index).collect();
+                gl.draw_buffers(&buffers);
+                for index in 0..textures_used as u32 {
+                    gl.clear_buffer_f32_slice(glow::COLOR, index, &[0.0; 4]);
                 }
-                set_projection(gl, count, resident, view, None, placing);
-                gl.bind_vertex_array(Some(faces.array));
-                gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
+                gl.depth_mask(false);
+                gl.enable(glow::BLEND);
+                gl.blend_func(glow::ONE, glow::ONE);
+                let count = &self.csg_count;
+                gl.use_program(Some(count.program));
+                set2(gl, count, "u_viewport", viewport);
+                set2(gl, count, "u_depth", depth);
+                for (index, (resident, placing)) in shapes.iter().enumerate() {
+                    let Some(faces) = &resident.faces else { continue };
+                    for texture in 0..textures_used {
+                        let on = |channel: usize| texture == index / 4 && channel == index % 4;
+                        gl.color_mask_draw_buffer(texture as u32, on(0), on(1), on(2), on(3));
+                    }
+                    set_projection(gl, count, resident, view, None, placing);
+                    gl.bind_vertex_array(Some(faces.array));
+                    gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
+                }
+                for texture in 0..textures_used as u32 {
+                    gl.color_mask_draw_buffer(texture, true, true, true, true);
+                }
+                gl.disable(glow::BLEND);
+                gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+
+                // The group's counts as bits, into its own channel.
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.pack));
+                gl.disable(glow::DEPTH_TEST);
+                let on = |channel: usize| channel == group;
+                gl.color_mask(on(0), on(1), on(2), on(3));
+                let pack = &self.csg_pack;
+                gl.use_program(Some(pack.program));
+                for (unit, texture) in targets.counts.iter().enumerate() {
+                    gl.active_texture(glow::TEXTURE0 + unit as u32);
+                    gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                    set_i32(gl, pack, &format!("u_count_{unit}"), unit as i32);
+                }
+                set_i32(gl, pack, "u_shapes", shapes.len() as i32);
+                gl.bind_vertex_array(Some(self.buffer.array));
+                gl.draw_arrays(glow::TRIANGLES, 0, 3);
+                gl.color_mask(true, true, true, true);
+                gl.enable(glow::DEPTH_TEST);
             }
-            for texture in 0..textures_used as u32 {
-                gl.color_mask_draw_buffer(texture, true, true, true, true);
-            }
-            gl.disable(glow::BLEND);
-            gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
 
             // The layer's points on the result's surface, into the frame.
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene.scene));
@@ -333,25 +447,17 @@ impl Gpu {
             gl.stencil_op(glow::KEEP, glow::REPLACE, glow::REPLACE);
             let resolve = &self.csg_resolve;
             gl.use_program(Some(resolve.program));
-            let textures = [("u_layer", targets.depth[now]), ("u_leaf", targets.leaf), ("u_colour", targets.colour)];
-            let counts = (0..8).map(|index| (index, targets.counts[index.min(textures_used.max(1) - 1)]));
-            let names = [
-                "u_count_0",
-                "u_count_1",
-                "u_count_2",
-                "u_count_3",
-                "u_count_4",
-                "u_count_5",
-                "u_count_6",
-                "u_count_7",
+            let textures = [
+                ("u_layer", targets.depth[now]),
+                ("u_leaf", targets.leaf),
+                ("u_colour", targets.colour),
+                ("u_inside", targets.inside),
             ];
-            let all = textures.into_iter().chain(counts.map(|(index, texture)| (names[index], texture)));
-            for (unit, (name, texture)) in all.enumerate() {
+            for (unit, (name, texture)) in textures.into_iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 set_i32(gl, resolve, name, unit as i32);
             }
-            set_i32(gl, resolve, "u_leaves", leaves.len() as i32);
             set_i32(gl, resolve, "u_length", program.len() as i32);
             if let Some(at) = resolve.at("u_program[0]") {
                 gl.uniform_1_i32_slice(Some(at), &program);
@@ -363,12 +469,14 @@ impl Gpu {
             gl.bind_vertex_array(Some(self.buffer.array));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.disable(glow::STENCIL_TEST);
-            for unit in 0..11 {
+            for unit in 0..8 {
                 gl.active_texture(glow::TEXTURE0 + unit);
                 gl.bind_texture(glow::TEXTURE_2D, None);
             }
             gl.active_texture(glow::TEXTURE0);
         }
+
+        targets.last.set(Some(peeled));
 
         // The model pass's state, as the caller left it.
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene.scene));
