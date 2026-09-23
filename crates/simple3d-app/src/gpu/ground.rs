@@ -87,7 +87,7 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
         }
     });
 
-    let material = axis_material_live(&request.items, grid, request.section, &request.live);
+    let material = axis_material_live(&request.items, grid, &request.section, &request.live);
     let spans: [Vec<[f32; 4]>; 3] = std::array::from_fn(|axis| {
         material.through[axis].iter().map(|&(lo, hi, tag)| [lo as f32, hi as f32, tag as f32, 0.0]).collect()
     });

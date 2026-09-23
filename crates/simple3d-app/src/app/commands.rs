@@ -154,9 +154,26 @@ impl App {
     /// Slide the section plane to `offset`, in millimetres along its own axis.
     /// Nothing about the model changes, so this is not an edit and there is no
     /// undo step for it -- see [`crate::section_tool`].
+    ///
+    /// Which way it went is kept as well, for the kept side that follows the
+    /// plane's motion; a slide that goes nowhere leaves it as it was.
     pub fn set_section_offset(&mut self, offset: f64) {
-        self.scene.settings.section.offset = offset;
+        let section = self.section_mut();
+        if offset != section.offset {
+            section.swept_up = offset > section.offset;
+        }
+        section.offset = offset;
         self.status = Status::Info(crate::section_tool::readout(self));
+    }
+
+    /// The section the window is showing, which is the one its fields and the
+    /// offset setter above act on.
+    pub fn section(&self) -> &simple3d_core::scene::SectionView {
+        self.scene.settings.section_at(self.section_tab)
+    }
+
+    pub fn section_mut(&mut self) -> &mut simple3d_core::scene::SectionView {
+        self.scene.settings.section_at_mut(self.section_tab)
     }
 
     pub(super) fn toggle_axis(&mut self, axis: usize) {

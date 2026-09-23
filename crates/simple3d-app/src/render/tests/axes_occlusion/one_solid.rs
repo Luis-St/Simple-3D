@@ -95,7 +95,7 @@ pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else()
     let prepared = Renderable::prepare(&between);
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
     assert!(
-        axis_material(&items, &req.grid, None).inside.iter().all(|spans| spans.is_empty()),
+        axis_material(&items, &req.grid, &[]).inside.iter().all(|spans| spans.is_empty()),
         "the solid was placed on an axis, so this proves nothing"
     );
 

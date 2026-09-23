@@ -29,7 +29,7 @@ pub(crate) fn one_mesh_of_two_shapes_is_still_two_solids_to_an_axis() {
     assert_eq!(prepared.body_count, 2, "the two shapes welded into one body, so this proves nothing");
 
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
-    let material = axis_material(&items, &req.grid, None);
+    let material = axis_material(&items, &req.grid, &[]);
     for axis in 0..3 {
         let seen = material.through[axis].len();
         assert_eq!(seen, 1, "axis {axis} is seen through {seen} of the two bodies");
@@ -133,7 +133,7 @@ pub(crate) fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
     let items =
         vec![Item { renderable: &centred, style: Style::Solid }, Item { renderable: &beside, style: Style::Solid }];
     let grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-    let material = axis_material(&items, &grid, None);
+    let material = axis_material(&items, &grid, &[]);
 
     let near = |a: f64, b: f64| (a - b).abs() < 1e-6;
     let spans = &material.inside[0];
@@ -153,7 +153,7 @@ pub(crate) fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
     // A solid the axes miss is an ordinary occluder, and cuts nothing.
     let away = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(40.0, 40.0, 0.0)));
     let items = vec![Item { renderable: &away, style: Style::Solid }];
-    let material = axis_material(&items, &grid, None);
+    let material = axis_material(&items, &grid, &[]);
     assert!(material.inside.iter().all(|spans| spans.is_empty()), "a solid off the axes cut one of them");
     assert!(
         material.through.iter().all(|bodies| bodies.is_empty()),
@@ -162,14 +162,14 @@ pub(crate) fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
 
     // A ghost hides nothing: it is see-through, and so is the axis in it.
     let ghosted = vec![Item { renderable: &centred, style: Style::Ghost }];
-    let material = axis_material(&ghosted, &grid, None);
+    let material = axis_material(&ghosted, &grid, &[]);
     assert!(material.through.iter().all(|bodies| bodies.is_empty()), "a ghost was marked see-through");
     assert!(material.inside[0].is_empty(), "a ghost cut the axis");
 
     // An axis that is switched off is not looked for at all.
     let items = vec![Item { renderable: &centred, style: Style::Solid }];
     let off = Grid { axes: [false, true, true], ..grid };
-    assert!(axis_material(&items, &off, None).inside[0].is_empty(), "a switched-off axis was cut out of the model");
+    assert!(axis_material(&items, &off, &[]).inside[0].is_empty(), "a switched-off axis was cut out of the model");
 }
 
 #[test]

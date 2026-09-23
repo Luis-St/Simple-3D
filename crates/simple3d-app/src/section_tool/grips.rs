@@ -1,7 +1,7 @@
 //! The grips the section plane is taken hold of by.
 
 use super::*;
-use crate::panel_properties::{component, set_component};
+use crate::panel_properties::component;
 use simple3d_core::scene::SectionView;
 use simple3d_geom::Vec3;
 use std::hash::{Hash, Hasher};
@@ -12,34 +12,57 @@ pub fn hash_section(section: &SectionView, hasher: &mut impl Hasher) {
     section.enabled.hash(hasher);
     section.axis().hash(hasher);
     section.offset.to_bits().hash(hasher);
-    section.flipped.hash(hasher);
+    section.keep.hash(hasher);
+    section.swept_up.hash(hasher);
+    section.custom_size.hash(hasher);
+    for side in section.size {
+        side.to_bits().hash(hasher);
+    }
+    for turn in section.tilt {
+        turn.to_bits().hash(hasher);
+    }
 }
 
 /// The four corners of the frame, in world space and in order around it.
 ///
 /// It is sized and centred on the model rather than on the origin: a plane
 /// through a part that sits 300 mm out would otherwise be drawn in the middle
-/// of the grid, nowhere near the thing it is cutting.
+/// of the grid, nowhere near the thing it is cutting. A plane given a size of
+/// its own is drawn at that size instead, and the frame is then exactly the
+/// rectangle that cuts.
+///
+/// A tilted plane is the untilted frame turned about the middle of the model,
+/// the same turn [`SectionView::anchor`] gives the plane itself, so the frame
+/// stays in it.
 pub fn frame(section: &SectionView, bounds: Option<(Vec3, Vec3)>) -> [Vec3; 4] {
+    let (u, v) = section.basis();
+    let [width, height] = match section.custom_size {
+        true => section.size,
+        false => auto_size(section, bounds),
+    };
+    let (hu, hv) = (width.max(0.0) * 0.5, height.max(0.0) * 0.5);
+    let middle = section.anchor(bounds);
+    let corner = |su: f64, sv: f64| middle + u * (su * hu) + v * (sv * hv);
+    [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)]
+}
+
+/// The width and height the frame is drawn at while the plane runs through the
+/// whole model: a little wider than the model along each direction it spans.
+///
+/// Turned, the plane crosses the model at a slant, and a frame sized to the two
+/// extents it was standing across can fall short of the shape: it is made
+/// square at the largest of the three instead.
+pub fn auto_size(section: &SectionView, bounds: Option<(Vec3, Vec3)>) -> [f64; 2] {
     let axis = section.axis();
-    // The two directions the plane spans, with the second one upright wherever
-    // the plane is upright: the grip hangs off that edge, and on a standing
-    // plane it belongs at the top of it rather than off one side.
     let (u, v) = match axis {
         1 => (0, 2),
         _ => ((axis + 1) % 3, (axis + 2) % 3),
     };
     let (lo, hi) = bounds.unwrap_or((Vec3::splat(-EMPTY_HALF), Vec3::splat(EMPTY_HALF)));
-    let half = |a: usize| (((component(hi, a) - component(lo, a)) * 0.5) * (1.0 + MARGIN)).max(MIN_HALF);
-    let middle = |a: usize| (component(hi, a) + component(lo, a)) * 0.5;
-    let corner = |su: f64, sv: f64| {
-        let mut at = Vec3::ZERO;
-        set_component(&mut at, axis, section.offset);
-        set_component(&mut at, u, middle(u) + su * half(u));
-        set_component(&mut at, v, middle(v) + sv * half(v));
-        at
-    };
-    [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)]
+    let extent = |a: usize| (((component(hi, a) - component(lo, a)) * 0.5) * (1.0 + MARGIN)).max(MIN_HALF);
+    let widest = extent(0).max(extent(1)).max(extent(2));
+    let half = |a: usize| if section.tilted() { widest } else { extent(a) };
+    [half(u) * 2.0, half(v) * 2.0]
 }
 
 /// The five places the plane can be taken hold of: the middle of each of the
@@ -65,11 +88,9 @@ pub fn grips(corners: &[Vec3; 4]) -> [Vec3; 5] {
     [middle(0, 1), middle(1, 2), middle(2, 3), middle(3, 0), middle(0, 2)]
 }
 
-/// The way the plane travels, which is always the positive axis: the offset is
-/// a coordinate, so flipping which side is cut away must not turn the numbers
-/// round as well.
-pub(crate) fn travel(axis: usize) -> Vec3 {
-    let mut dir = Vec3::ZERO;
-    set_component(&mut dir, axis, 1.0);
-    dir
+/// The way the plane travels: along its own normal, turned with it, and
+/// never reversed by which side the camera is on -- the offset is a place in
+/// the model, so orbiting round it must not turn the numbers round as well.
+pub(crate) fn travel(section: &SectionView) -> Vec3 {
+    section.normal()
 }

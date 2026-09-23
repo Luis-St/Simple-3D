@@ -76,7 +76,7 @@ pub(crate) fn the_selection_outline_goes_all_the_way_round() {
             items,
             preview: Vec::new(),
             live: Live::default(),
-            section: None,
+            section: Vec::new(),
         }
     }
     let ball = primitives::ellipsoid_mesh(50.0, 50.0, 50.0, 32);

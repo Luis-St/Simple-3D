@@ -11,7 +11,16 @@ pub(crate) fn a_section_plane_is_saved_with_the_document_and_absent_while_it_is_
     let mut scene = sample();
     assert!(!to_string(&scene).contains("section"), "an unused section was written to the file");
 
-    scene.settings.section = crate::scene::SectionView { enabled: true, axis: 1, offset: 12.5, flipped: true };
+    scene.settings.section = crate::scene::SectionView {
+        enabled: true,
+        axis: 1,
+        offset: 12.5,
+        tilt: [0.0, 30.0, -12.5],
+        keep: crate::scene::SectionKeep::Motion,
+        swept_up: true,
+        custom_size: true,
+        size: [40.0, 25.0],
+    };
     let text = to_string(&scene);
     let back = from_str(&text).expect("it reads back");
     assert_eq!(back.settings.section, scene.settings.section);

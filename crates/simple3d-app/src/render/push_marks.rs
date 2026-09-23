@@ -11,21 +11,16 @@ use simple3d_geom::Vec3;
 /// Drawn as [`Step::Overlay`]: after the model, tested against it, and claiming
 /// nothing of its own -- so a loop is hidden by the solid it is behind and does
 /// not hide the next loop where two of them cross.
-pub(crate) fn push_preview(
-    steps: &mut Vec<Step>,
-    view: &View,
-    loops: &[Vec<Vec3>],
-    colour: Rgba,
-    section: Option<Plane>,
-) {
+pub(crate) fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour: Rgba, section: &[Plane]) {
     for loop_ in loops {
         for (index, &from) in loop_.iter().enumerate() {
             let to = loop_[(index + 1) % loop_.len()];
-            let Some((from, to)) = kept_line(section, from, to) else { continue };
-            let Step::Line { a, b, bias, .. } = line_step(view, from, to, colour, PREVIEW_BIAS, 0, false) else {
-                unreachable!("a line step is a line");
-            };
-            steps.push(Step::Overlay { a, b, colour, bias });
+            for (from, to) in kept_line(section, from, to).iter().copied() {
+                let Step::Line { a, b, bias, .. } = line_step(view, from, to, colour, PREVIEW_BIAS, 0, false) else {
+                    unreachable!("a line step is a line");
+                };
+                steps.push(Step::Overlay { a, b, colour, bias });
+            }
         }
     }
 }
@@ -43,7 +38,7 @@ pub(crate) fn push_glow(
     item: &Renderable,
     screen: &[Vertex],
     colour: Rgba,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     extend_in_order(steps, item.mesh.indices.len(), |range, out| {
         for index in range {
@@ -61,7 +56,7 @@ pub(crate) fn push_edges(
     screen: &[Vertex],
     colour: Rgba,
     tag_base: u16,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     extend_in_order(steps, item.edges.len(), |range, out| {
         for edge in &item.edges[range] {
@@ -84,16 +79,16 @@ pub(crate) fn push_edge(
     item: &Renderable,
     screen: &[Vertex],
     edge: [u32; 2],
-    section: Option<Plane>,
+    section: &[Plane],
     step: impl Fn(Vertex, Vertex) -> Step,
 ) {
-    match section {
-        None => out.push(step(screen[edge[0] as usize], screen[edge[1] as usize])),
-        Some(_) => {
-            let (a, b) = (item.mesh.positions[edge[0] as usize], item.mesh.positions[edge[1] as usize]);
-            let Some((a, b)) = kept_line(section, a, b) else { return };
-            out.push(step(to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b))));
-        }
+    if section.is_empty() {
+        out.push(step(screen[edge[0] as usize], screen[edge[1] as usize]));
+        return;
+    }
+    let (a, b) = (item.mesh.positions[edge[0] as usize], item.mesh.positions[edge[1] as usize]);
+    for (a, b) in kept_line(section, a, b).iter().copied() {
+        out.push(step(to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b))));
     }
 }
 

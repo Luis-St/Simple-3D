@@ -41,6 +41,9 @@ pub(crate) fn paint_scene(
         // wrong factor -- the model would sit away from its own manipulator.
         let render_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let view = View::new(app.scene.camera, render_rect);
+        // Asked before anything below borrows the scene's renderables, since
+        // whether the plane crosses the model is remembered on the application.
+        let section = crate::section_tool::cut(app, view.forward());
         // A hidden node is hidden: no body, and no selection outline drawn
         // around the body it does not have. Selecting it still gets a
         // manipulator, so it can be put where it belongs before being shown.
@@ -153,8 +156,9 @@ pub(crate) fn paint_scene(
                 .chain(crate::simplify_tool::preview_loops(app))
                 .chain(crate::reassemble_tool::preview_loops(app))
                 .collect(),
-            // The plane the model is cut with, while there is one (issue 71).
-            section: app.scene.settings.section.plane(),
+            // The plane the model is cut with, while there is one (issue 71),
+            // cutting away the side the camera looks from (issue 109).
+            section,
         };
         // The GPU works the whole frame out on the card from the request; the
         // CPU renderer prepares it as primitives first, and only when it is

@@ -11,7 +11,7 @@ pub use palette::{font, metric, token, PAINT_PRESETS};
 mod text;
 pub use text::{header_text, hint, list_scroll_area, numeric, value};
 mod controls;
-pub use controls::{axis_chip, axis_colour, choice, panel_header, toggle, twisty, AXIS_CHIP_WIDTH};
+pub use controls::{axes_chip, axis_chip, axis_colour, choice, panel_header, toggle, twisty, AXIS_CHIP_WIDTH};
 mod apply;
 pub use apply::apply;
 #[cfg(test)]

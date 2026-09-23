@@ -48,7 +48,7 @@ pub(crate) use hints::*;
 mod frame;
 mod run_loop;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::time::Duration;
 

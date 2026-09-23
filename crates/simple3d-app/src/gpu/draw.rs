@@ -66,7 +66,7 @@ impl Gpu {
             gl.uniform_2_f32(Some(at), offset, scale);
         }
 
-        let (view, section) = (&request.view, request.section);
+        let (view, section) = (&request.view, &request.section[..]);
         let viewport = [width as f32, height as f32];
         let depth = [offset, scale];
 
@@ -86,7 +86,7 @@ impl Gpu {
         gl.cull_face(glow::BACK);
         gl.front_face(resident::front_face(&request.view));
         self.draw_faces(&gl, &plan.solids, view, section, viewport, depth);
-        self.draw_caps(&gl, &plan.caps, view, section, viewport, depth);
+        self.draw_caps(&gl, &plan.caps, view, viewport, depth);
         if let Some(csg) = &request.live.csg {
             self.draw_csg(&gl, request, csg, viewport, depth);
         }
@@ -98,7 +98,7 @@ impl Gpu {
             self.draw_csg_edges(&gl, request, csg, colour, viewport, depth);
         }
         self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
-        self.draw_crossings(&gl, &plan.crossings, view, section, viewport, depth);
+        self.draw_crossings(&gl, &plan.crossings, view, viewport, depth);
 
         // Ghosts, and a tool's preview: blended over what is there, tested
         // against the model and claiming nothing. The preview is here rather

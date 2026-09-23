@@ -22,11 +22,24 @@ pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], ty
     let unit = app.unit();
     let params = app.scene.node(id).params().cloned().unwrap_or_default();
 
+    // Which axes each dimension measures along, told by the same drivers the
+    // resize handles use (issue 110). Asked of the type's own defaults rather
+    // than of this node: a cylinder cut to a pie slice withdraws its X and Y
+    // handles, but its diameter is still the width it was, and a chip that came
+    // and went with the sweep would be saying something else.
+    let drivers = (spec.axes)(&spec.default_params());
+    let along = |key: &str| -> Vec<usize> {
+        (0..3).filter(|&axis| drivers[axis].is_some_and(|driver| driver.param == key)).collect()
+    };
+    // A type with no axis to show, a polyhedron, gets no chip column at all.
+    let chips = drivers.iter().any(Option::is_some);
     for param in spec.params {
         if !spec.param_visible(param, &params) {
             continue;
         }
-        param_field(app, ui, targets, id, param, unit, DIMENSION_ROW);
+        let axes = along(param.key);
+        let axes = chips.then_some(axes.as_slice());
+        param_field_on(app, ui, targets, id, param, param.label, unit, DIMENSION_ROW, axes);
     }
 
     if spec.segmented {

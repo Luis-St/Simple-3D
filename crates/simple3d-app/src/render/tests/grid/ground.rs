@@ -63,7 +63,7 @@ pub(crate) fn ground_only(pitch: f64) -> (Image, Palette) {
         items: Vec::new(),
         preview: Vec::new(),
         live: Live::default(),
-        section: None,
+        section: Vec::new(),
     };
     (render(&req), req.palette)
 }

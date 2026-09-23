@@ -64,7 +64,7 @@ fn temp_config_dir(name: &str) -> PathBuf {
 /// An app with one plate in it. The application itself now opens on an
 /// empty document, so the tests below -- which are about what happens *to*
 /// a shape -- put the shape there themselves.
-fn headless_app() -> App {
+pub(crate) fn headless_app() -> App {
     let mut app = app_in(temp_config_dir("headless"));
     let root = app.scene.root();
     let id = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");

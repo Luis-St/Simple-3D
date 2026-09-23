@@ -87,3 +87,24 @@ pub(crate) fn each_origin_axis_has_its_own_switch() {
     app.run(Command::ToggleAxisY);
     assert_eq!(app.scene.settings.axes_visible, [true; 3]);
 }
+
+#[test]
+fn a_section_kept_by_its_motion_keeps_what_lies_ahead_of_it() {
+    // Pushed from the front of the part to the back, what it has passed over
+    // goes and what is still ahead of it stays; pulled back, the other way.
+    let mut app = headless_app();
+    app.scene.settings.section.keep = simple3d_core::scene::SectionKeep::Motion;
+    app.run(Command::ToggleSection);
+    let start = app.scene.settings.section.offset;
+    let (ahead, behind) = (Vec3::new(start + 50.0, 0.0, 0.0), Vec3::new(start - 50.0, 0.0, 0.0));
+    let cut = |app: &App| app.scene.settings.section.plane(app.evaluated.bounds, Vec3::new(0.0, 1.0, 0.0)).unwrap();
+
+    app.set_section_offset(start + 1.0);
+    assert!(cut(&app).keeps(ahead) && !cut(&app).keeps(behind), "slid along X, it kept what it had passed");
+    // A slide that goes nowhere leaves the side as it was.
+    app.set_section_offset(start + 1.0);
+    assert!(cut(&app).keeps(ahead), "standing still turned the cut round");
+
+    app.set_section_offset(start - 1.0);
+    assert!(!cut(&app).keeps(ahead) && cut(&app).keeps(behind), "slid back, it kept what it had passed");
+}

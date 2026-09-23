@@ -166,16 +166,25 @@ pub(super) struct CrossingDraw {
     placing: Placing,
     /// Each plane, and the colour its crossing is drawn in.
     planes: Vec<(Plane, Rgba)>,
-    /// Whether the crossing is cut by the section like everything on the
-    /// model. The edge round the cut lies in the section plane itself, where
-    /// the clip would only fray it.
-    clipped: bool,
+    /// The sections that cut the crossing like everything on the model. The
+    /// edge round a cut lies in that cut's own plane, where its own test would
+    /// only fray it, so it is cut by the others alone.
+    cuts: Vec<Plane>,
+    /// The other walls of the box whose face the line is the edge of: only the
+    /// part on that face is drawn (`BOX_COMMON`'s `u_within`).
+    within: Vec<Plane>,
 }
 
 pub(super) struct CapDraw {
     id: u64,
     placing: Placing,
     pub(super) plane: Plane,
+    /// The other walls of a windowed section's box: the cap is only filled
+    /// where every one of them has a depth of at least zero. Empty for a plane
+    /// that cuts everywhere.
+    pub(super) bounds: Vec<Plane>,
+    /// The other sections, whose cuts are taken out of this one's cap.
+    pub(super) others: Vec<Plane>,
     pub(super) colour: Rgba,
     /// The polygon the plane leaves in the mesh's box, projected: the cap is
     /// this, wherever the cut runs through material.
@@ -219,22 +228,46 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
                 // The cut filled in wherever the mode fills anything, and the
                 // line round it wherever the mode draws the model's lines --
                 // `push_cap`'s two rules.
-                if let Some(plane) = request.section {
-                    if request.mode != DisplayMode::Wireframe {
-                        let colour = shade(palette.cut, plane.normal, request.view.forward(), 255);
-                        plan.caps.push(CapDraw { id, placing, plane, colour, fill: Vec::new() });
-                    }
-                    if request.mode != DisplayMode::Shaded {
-                        let colour = match request.mode {
-                            DisplayMode::Wireframe => palette.wire,
-                            _ => palette.edge,
-                        };
-                        plan.crossings.push(CrossingDraw {
-                            id,
-                            placing,
-                            planes: vec![(plane, colour)],
-                            clipped: false,
-                        });
+                //
+                // One of each per face the cut opens: the plane, or a window's
+                // rectangle and the sides of the box behind it. A side's cap is
+                // only seen from inside the box, so one facing away from the
+                // camera is not filled -- which is also what the cap's winding
+                // count needs, since it counts from the eye through the
+                // opening. Its line is drawn all the same: where that side
+                // meets the surface is the near rim of the opening.
+                let forward = request.view.forward();
+                for (cut, section) in request.section.iter().enumerate() {
+                    let others: Vec<Plane> =
+                        request.section.iter().enumerate().filter(|&(o, _)| o != cut).map(|(_, p)| *p).collect();
+                    for (index, face) in simple3d_geom::section::faces(section).into_iter().enumerate() {
+                        let plane = face.plane;
+                        let facing = index == 0 || plane.normal.dot(forward) < 0.0;
+                        if request.mode != DisplayMode::Wireframe && facing {
+                            let colour = shade(palette.cut, plane.normal, forward, 255);
+                            plan.caps.push(CapDraw {
+                                id,
+                                placing,
+                                plane,
+                                bounds: face.bounds.clone(),
+                                others: others.clone(),
+                                colour,
+                                fill: Vec::new(),
+                            });
+                        }
+                        if request.mode != DisplayMode::Shaded {
+                            let colour = match request.mode {
+                                DisplayMode::Wireframe => palette.wire,
+                                _ => palette.edge,
+                            };
+                            plan.crossings.push(CrossingDraw {
+                                id,
+                                placing,
+                                planes: vec![(plane, colour)],
+                                cuts: others.clone(),
+                                within: face.bounds,
+                            });
+                        }
                     }
                 }
             }
@@ -270,7 +303,13 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
         for item in request.items.iter().filter(|item| item.style == Style::Solid) {
             let id = item.renderable.id;
             let placing = Placing::of(&request.live, id);
-            plan.crossings.push(CrossingDraw { id, placing, planes: planes.clone(), clipped: true });
+            plan.crossings.push(CrossingDraw {
+                id,
+                placing,
+                planes: planes.clone(),
+                cuts: request.section.clone(),
+                within: Vec::new(),
+            });
         }
     }
     plan
@@ -449,6 +488,19 @@ impl Resident {
             Some(plane) => self.plane(&plane, placing).map(|value| -value),
             None => [0.0, 0.0, 0.0, 1.0],
         }
+    }
+
+    /// Every cut's walls as `BOX_COMMON` takes them, and how many are each
+    /// cut's. Past the shaders' room, the rest are left out rather than read
+    /// past the end of the array.
+    fn cuts(&self, cuts: &[Plane], placing: &Placing) -> (Vec<i32>, Vec<[f32; 4]>) {
+        let (mut counts, mut walls) = (Vec::new(), Vec::new());
+        for cut in cuts.iter().take(simple3d_geom::section::MAX_CUTS) {
+            let own = cut.walls();
+            counts.push(own.len() as i32);
+            walls.extend(own.iter().map(|wall| self.plane(wall, placing)));
+        }
+        (counts, walls)
     }
 
     /// The largest coordinate a stored position has, which is what single
@@ -668,16 +720,19 @@ impl Gpu {
     /// Put the section's half-space for a boolean preview on the card, made
     /// after the rest because its size comes from theirs (`csg.rs`).
     pub(super) unsafe fn keep_half_space(&mut self, gl: &glow::Context) -> Result<(), String> {
-        let Some((_, half)) = &self.csg_half else { return Ok(()) };
-        let resident = self.resident.entry(half.id).or_insert_with(|| Resident::new(half));
-        resident.ensure(gl, half, Needs { faces: true, ..Needs::default() }, self.table_width)
+        let Some((_, shapes)) = &self.csg_half else { return Ok(()) };
+        for (half, _) in shapes {
+            let resident = self.resident.entry(half.id).or_insert_with(|| Resident::new(half));
+            resident.ensure(gl, half, Needs { faces: true, ..Needs::default() }, self.table_width)?;
+        }
+        Ok(())
     }
 
     /// Widen the frame's depth range to take in a boolean preview's shapes,
     /// where they are drawn.
     pub(super) fn see_csg(&self, request: &Request<'_>, passes: &mut Passes) {
         let Some(csg) = &request.live.csg else { return };
-        let half = self.csg_half.iter().map(|(_, half)| (half, None));
+        let half = self.csg_half.iter().flat_map(|(_, shapes)| shapes.iter().map(|(half, _)| (half, None)));
         for (shape, moved) in csg.leaves.iter().map(|(leaf, moved)| (*leaf, *moved)).chain(half) {
             let Some(resident) = self.resident.get(&shape.id) else { continue };
             for key in resident.keys(&request.view, &Placing::moved(moved)) {
@@ -691,14 +746,18 @@ impl Gpu {
     pub(super) fn place_caps(&self, view: &View, plan: &mut Plan, passes: &mut Passes) {
         for cap in &mut plan.caps {
             let Some(resident) = self.resident.get(&cap.id) else { continue };
-            let polygon = resident.cap_polygon(&cap.plane, &cap.placing);
-            let projected: Vec<_> = polygon.iter().map(|&p| to_vertex(view, view.to_view(p))).collect();
-            for vertex in &projected {
-                passes.saw(vertex.key);
-            }
-            for index in 1..projected.len().saturating_sub(1) {
-                for vertex in [projected[0], projected[index], projected[index + 1]] {
-                    cap.fill.push(GpuVertex::new(vertex, cap.colour, 0, 0));
+            let polygon = simple3d_geom::section::within(&resident.cap_polygon(&cap.plane, &cap.placing), &cap.bounds);
+            // A handful of triangles, cut by the other sections here rather
+            // than per pixel: the fill is drawn in screen space and has no
+            // world position left to ask about.
+            for index in 1..polygon.len().saturating_sub(1) {
+                let corners = [polygon[0], polygon[index], polygon[index + 1]];
+                for piece in simple3d_geom::section::clip_by_all(&cap.others, corners).triangles() {
+                    for &at in piece {
+                        let vertex = to_vertex(view, view.to_view(at));
+                        passes.saw(vertex.key);
+                        cap.fill.push(GpuVertex::new(vertex, cap.colour, 0, 0));
+                    }
                 }
             }
         }
@@ -711,7 +770,7 @@ impl Gpu {
         gl: &glow::Context,
         draws: &[FaceDraw],
         view: &View,
-        section: Option<Plane>,
+        section: &[Plane],
         viewport: [f32; 2],
         depth: [f32; 2],
     ) {
@@ -765,7 +824,7 @@ impl Gpu {
         gl: &glow::Context,
         draws: &[LineDraw],
         view: &View,
-        section: Option<Plane>,
+        section: &[Plane],
         viewport: [f32; 2],
         depth: [f32; 2],
     ) {
@@ -807,7 +866,7 @@ impl Gpu {
         gl: &glow::Context,
         draws: &[OutlineDraw],
         view: &View,
-        section: Option<Plane>,
+        section: &[Plane],
         viewport: [f32; 2],
         depth: [f32; 2],
     ) {
@@ -870,7 +929,6 @@ impl Gpu {
         gl: &glow::Context,
         draws: &[CrossingDraw],
         view: &View,
-        section: Option<Plane>,
         viewport: [f32; 2],
         depth: [f32; 2],
     ) {
@@ -888,7 +946,8 @@ impl Gpu {
         for draw in draws {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
-            set_projection(gl, program, resident, view, section.filter(|_| draw.clipped), &draw.placing);
+            set_projection(gl, program, resident, view, &draw.cuts, &draw.placing);
+            set_within(gl, program, resident, &draw.placing, &draw.within);
             let planes: Vec<[f32; 4]> =
                 draw.planes.iter().map(|(plane, _)| resident.plane(plane, &draw.placing)).collect();
             let colours: Vec<[f32; 4]> = draw.planes.iter().map(|&(_, colour)| as_float(colour)).collect();
@@ -930,7 +989,6 @@ impl Gpu {
         gl: &glow::Context,
         draws: &[CapDraw],
         view: &View,
-        section: Option<Plane>,
         viewport: [f32; 2],
         depth: [f32; 2],
     ) {
@@ -957,7 +1015,13 @@ impl Gpu {
             gl.enable(glow::CLIP_DISTANCE1);
             set2(gl, program, "u_viewport", viewport);
             set2(gl, program, "u_depth", depth);
-            set_projection(gl, program, resident, view, section, &cap.placing);
+            // Counted against the cap's own face, whole, and against nothing
+            // else: a window's box and the other sections are what the cap is
+            // trimmed by afterwards, not what the material is counted in.
+            set_projection(gl, program, resident, view, &[], &cap.placing);
+            if let Some(at) = program.at("u_clip") {
+                gl.uniform_4_f32_slice(Some(at), &resident.clip(Some(cap.plane), &cap.placing));
+            }
             set_i32(gl, program, "u_mode", GHOST);
             set_i32(gl, program, "u_painted", 0);
             gl.bind_vertex_array(Some(faces.array));
@@ -1018,7 +1082,7 @@ pub(super) unsafe fn set_projection(
     program: &Program,
     resident: &Resident,
     view: &View,
-    section: Option<Plane>,
+    section: &[Plane],
     placing: &Placing,
 ) {
     let rows = resident.rows(view, placing);
@@ -1027,8 +1091,25 @@ pub(super) unsafe fn set_projection(
             gl.uniform_4_f32_slice(Some(at), &row);
         }
     }
+    // The sections are asked per pixel (`BOX_COMMON`); the clip distance is
+    // left for the one pass that clips by a single plane, the cap's count.
     if let Some(at) = program.at("u_clip") {
-        gl.uniform_4_f32_slice(Some(at), &resident.clip(section, placing));
+        gl.uniform_4_f32_slice(Some(at), &resident.clip(None, placing));
+    }
+    if let Some(at) = program.at("u_cut_count") {
+        let (counts, walls) = resident.cuts(section, placing);
+        gl.uniform_1_i32(Some(at), counts.len() as i32);
+        if let Some(at) = program.at("u_cut_walls[0]") {
+            if !counts.is_empty() {
+                gl.uniform_1_i32_slice(Some(at), &counts);
+            }
+        }
+        if let Some(at) = program.at("u_walls[0]") {
+            if !walls.is_empty() {
+                gl.uniform_4_f32_slice(Some(at), walls.as_flattened());
+            }
+        }
+        set_within(gl, program, resident, placing, &[]);
     }
     if let Some(at) = program.at("u_model") {
         // Row by row, and said to be: `Xform` keeps its matrix that way.
@@ -1037,6 +1118,32 @@ pub(super) unsafe fn set_projection(
     }
     if let Some(at) = program.at("u_hide") {
         gl.uniform_2_u32(Some(at), placing.hide[0], placing.hide[1]);
+    }
+}
+
+/// The walls a line has to stay inside, for `BOX_COMMON`'s `u_within`: none
+/// for most, and the rest of its box for the line round one face of one.
+pub(super) unsafe fn set_within(
+    gl: &glow::Context,
+    program: &Program,
+    resident: &Resident,
+    placing: &Placing,
+    within: &[Plane],
+) {
+    let Some(count_at) = program.at("u_within_count") else { return };
+    let walls: Vec<[f32; 4]> = within.iter().take(4).map(|wall| resident.plane(wall, placing)).collect();
+    gl.uniform_1_i32(Some(count_at), walls.len() as i32);
+    if walls.is_empty() {
+        return;
+    }
+    if let Some(at) = program.at("u_within[0]") {
+        gl.uniform_4_f32_slice(Some(at), walls.as_flattened());
+    }
+    if let Some(at) = program.at("u_cut_slack") {
+        // A few times what single precision loses on the numbers in play, as
+        // `u_on_plane` is.
+        let offset = walls.iter().fold(0.0_f64, |most, wall| most.max(wall[3].abs() as f64));
+        gl.uniform_1_f32(Some(at), ((resident.extent() + offset) * 4e-6 + 1e-6) as f32);
     }
 }
 

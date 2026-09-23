@@ -4,12 +4,21 @@ use super::*;
 use crate::app::App;
 use crate::view::View;
 
-/// The plane's frame and its grip, over the finished image.
+/// Every section's frame and grips, over the finished image.
 pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
-    let section = app.scene.settings.section;
-    if !section.enabled {
+    if !app.scene.settings.section.enabled {
         return;
     }
+    let count = app.scene.settings.section_count();
+    for which in 0..count {
+        draw_one(app, painter, view, which, count);
+    }
+}
+
+/// One section's frame and grips. With more than one, each frame carries its
+/// number, which is the tab the window shows it under.
+fn draw_one(app: &App, painter: &egui::Painter, view: &View, which: usize, count: usize) {
+    let section = *app.scene.settings.section_at(which);
     let corners = frame(&section, app.evaluated.bounds);
     let screen: Vec<egui::Pos2> = corners.iter().filter_map(|&at| view.project(at).map(|(p, _)| p)).collect();
     if screen.len() < 4 {
@@ -18,7 +27,8 @@ pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
     // The frame is a reference rather than a selection, so it is drawn in the
     // quiet grey the scene's own bounding box uses -- and brightens to the
     // accent while the plane is under the pointer or being moved.
-    let live = app.section_grab.is_some() || app.section_hover.is_some();
+    let grabbed = app.section_grab.is_some() && app.section_tab == which;
+    let live = grabbed || app.section_hover.is_some_and(|(hovered, _)| hovered == which);
     let colour = match live {
         true => crate::theme::token::ACCENT,
         false => crate::theme::token::TEXT_LO,
@@ -33,6 +43,15 @@ pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
     };
     for (index, &from) in screen.iter().enumerate() {
         painter.line_segment([from, screen[(index + 1) % screen.len()]], egui::Stroke::new(1.0_f32, colour));
+    }
+    if count > 1 {
+        painter.text(
+            screen[3] + egui::vec2(4.0, -4.0),
+            egui::Align2::LEFT_BOTTOM,
+            (which + 1).to_string(),
+            egui::FontId::proportional(crate::theme::font::LABEL),
+            mark,
+        );
     }
     for (index, at) in grips(&corners).into_iter().enumerate() {
         let Some((middle, _)) = view.project(at) else { continue };
@@ -55,10 +74,10 @@ pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
         // line the plane travels: the frame says where the plane is, not which
         // way it slides. On that one grip alone, because five sets of arrows
         // over the model is a diagram of the control rather than the model.
-        if app.section_hover != Some(index) {
+        if app.section_hover != Some((which, index)) {
             continue;
         }
-        let dir = crate::panel_viewport::screen_direction(view, at, travel(section.axis()));
+        let dir = crate::panel_viewport::screen_direction(view, at, travel(&section));
         if dir.length() > 1e-3 {
             let dir = dir / dir.length();
             for way in [1.0_f32, -1.0] {

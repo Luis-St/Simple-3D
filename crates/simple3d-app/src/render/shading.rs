@@ -68,18 +68,13 @@ pub(crate) fn triangle_base(item: &Renderable, index: usize, base: Rgba) -> Rgba
 ///
 /// Every path that draws a face goes through this, so a section cannot cut the
 /// shading and miss the ghosts, or cut the model and miss the glow.
-pub(crate) fn kept(section: Option<Plane>, world: [Vec3; 3]) -> section::Clipped {
-    match section {
-        Some(plane) => section::clip_triangle(&plane, world),
-        None => section::Clipped::untouched(world),
-    }
+pub(crate) fn kept(section: &[Plane], world: [Vec3; 3]) -> section::Clipped {
+    section::clip_by_all(section, world)
 }
 
-/// The same question for a line: the stretch of it on the kept side, or nothing
-/// when the cut took all of it.
-pub(crate) fn kept_line(section: Option<Plane>, a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
-    match section {
-        Some(plane) => section::clip_segment(&plane, a, b),
-        None => Some((a, b)),
-    }
+/// The same question for a line: the stretches of it that stay -- none when
+/// the cut took all of it, and two when a plane cut down to a rectangle took
+/// its middle out.
+pub(crate) fn kept_line(section: &[Plane], a: Vec3, b: Vec3) -> section::Segments {
+    section::kept_by_all(section, a, b)
 }

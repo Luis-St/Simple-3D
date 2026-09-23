@@ -194,13 +194,21 @@ pub struct App {
     pub snap_indicator: Option<Vec3>,
     /// How far the section plane stood from the point the pointer took hold of
     /// it, for as long as its grip is being dragged (issue 71). `None` when the
-    /// plane is not being moved.
+    /// plane is not being moved. The plane being moved is always the one the
+    /// window is showing: taking hold of one makes it so.
     pub section_grab: Option<f64>,
-    /// Which of the section plane's five grips the pointer is on this frame, so
-    /// the frame can say that it can be taken hold of before it is -- and so
-    /// the arrows that say which way it travels are drawn on that grip alone
-    /// (issue 72). `None` when the pointer is on none of them.
-    pub section_hover: Option<usize>,
+    /// Which section, and which of its five grips, the pointer is on this
+    /// frame, so the frame can say that it can be taken hold of before it is --
+    /// and so the arrows that say which way it travels are drawn on that grip
+    /// alone (issue 72). `None` when the pointer is on none of them.
+    pub section_hover: Option<(usize, usize)>,
+    /// Which of the sections the window is showing and editing.
+    pub section_tab: usize,
+    /// Whether each section plane cuts the still part of the model, with the
+    /// key of the scene and the plane it was worked out for -- see
+    /// [`crate::section_tool::cut`]. Asked once per plane rather than once per
+    /// frame, since it walks every vertex of the scene.
+    pub(crate) section_crossing: Vec<(u64, bool)>,
     /// Every feature of the body the current drag is carrying, as offsets from
     /// its origin; taken on `Begin` and found on the first frame that snaps.
     /// See `App::drag_snap_sources`.

@@ -131,3 +131,86 @@ fn two_separate_bodies_are_each_capped() {
     assert_eq!(loops(&mesh, &plane).len(), 2, "one outline per body");
     assert!((area(&cap(&mesh, &plane)) - 200.0).abs() < 1e-6);
 }
+
+fn windowed(half: f64) -> Plane {
+    Plane::new(Vec3::new(0.0, 0.0, 1.0), 0.0).within(Window {
+        centre: Vec3::ZERO,
+        u: Vec3::new(1.0, 0.0, 0.0),
+        v: Vec3::new(0.0, 1.0, 0.0),
+        half: [half, half],
+    })
+}
+
+#[test]
+fn a_window_takes_out_only_the_box_behind_it() {
+    let plane = windowed(1.0);
+    assert!(!plane.keeps(Vec3::new(0.0, 0.0, 5.0)), "straight behind the window stays");
+    assert!(plane.keeps(Vec3::new(3.0, 0.0, 5.0)), "beside the window goes");
+    assert!(plane.keeps(Vec3::new(0.0, 0.0, -5.0)), "in front of the plane goes");
+
+    // A wall standing across the whole cut, in the plane x = 0 from z = -4 to
+    // z = 4 and y = -4 to 4: the window takes a 2 x 4 notch out of its top
+    // half, and every other part of it stays.
+    let quad =
+        [Vec3::new(0.0, -4.0, -4.0), Vec3::new(0.0, 4.0, -4.0), Vec3::new(0.0, 4.0, 4.0), Vec3::new(0.0, -4.0, 4.0)];
+    let mut left = Vec::new();
+    for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
+        let clipped = clip_triangle(&plane, tri);
+        left.extend_from_slice(clipped.triangles());
+    }
+    assert!((area(&left) - (64.0 - 8.0)).abs() < 1e-9, "left {} of the wall", area(&left));
+    assert!(left.iter().flatten().all(|&p| plane.keeps(p) || plane.walls().iter().any(|w| w.depth(p).abs() < 1e-9)));
+}
+
+#[test]
+fn a_segment_through_a_window_loses_its_middle() {
+    let plane = windowed(1.0);
+    let pieces = kept_segments(&plane, Vec3::new(-5.0, 0.0, 2.0), Vec3::new(5.0, 0.0, 2.0));
+    assert_eq!(pieces.len(), 2);
+    assert!((pieces[0].1.x + 1.0).abs() < 1e-9 && (pieces[1].0.x - 1.0).abs() < 1e-9, "{:?}", &*pieces);
+    // Beside the window, or in front of the plane, it is untouched.
+    assert_eq!(kept_segments(&plane, Vec3::new(-5.0, 3.0, 2.0), Vec3::new(5.0, 3.0, 2.0)).len(), 1);
+    assert_eq!(kept_segments(&plane, Vec3::new(-5.0, 0.0, -2.0), Vec3::new(5.0, 0.0, -2.0)).len(), 1);
+}
+
+#[test]
+fn a_window_opens_five_faces_each_bounded_by_the_others() {
+    let plane = windowed(1.0);
+    let opened = faces(&plane);
+    assert_eq!(opened.len(), 5);
+    // The front face, cut down to the window.
+    let big =
+        [Vec3::new(-9.0, -9.0, 0.0), Vec3::new(9.0, -9.0, 0.0), Vec3::new(9.0, 9.0, 0.0), Vec3::new(-9.0, 9.0, 0.0)];
+    let front = within(&big, &opened[0].bounds);
+    assert!(front.iter().all(|p| p.x.abs() <= 1.0 + 1e-9 && p.y.abs() <= 1.0 + 1e-9), "{front:?}");
+    // Only a triangle the plane crosses inside the window touches it.
+    let across = |x: f64| [Vec3::new(x, -0.5, -1.0), Vec3::new(x, 0.5, -1.0), Vec3::new(x, 0.0, 1.0)];
+    assert!(triangle_touches(&plane, across(0.0)));
+    assert!(!triangle_touches(&plane, across(3.0)));
+}
+
+#[test]
+fn several_cuts_take_away_what_any_of_them_does() {
+    // One plane takes the top off, the other the right-hand side: a square in
+    // the plane y = 0, 20 across and centred on the origin, keeps the quarter
+    // that neither of them reaches.
+    let cuts = [Plane::new(Vec3::new(0.0, 0.0, 1.0), 0.0), Plane::new(Vec3::new(1.0, 0.0, 0.0), 0.0)];
+    let square = [
+        Vec3::new(-10.0, 0.0, -10.0),
+        Vec3::new(10.0, 0.0, -10.0),
+        Vec3::new(10.0, 0.0, 10.0),
+        Vec3::new(-10.0, 0.0, 10.0),
+    ];
+    let mut left = Vec::new();
+    for tri in [[square[0], square[1], square[2]], [square[0], square[2], square[3]]] {
+        left.extend_from_slice(clip_by_all(&cuts, tri).triangles());
+    }
+    assert!((area(&left) - 100.0).abs() < 1e-9, "left {} of the square", area(&left));
+    // A line across both loses what either takes.
+    let kept = kept_by_all(&cuts, Vec3::new(-10.0, 0.0, -5.0), Vec3::new(10.0, 0.0, -5.0));
+    assert_eq!(kept.len(), 1);
+    assert!((kept[0].1.x).abs() < 1e-9, "{:?}", &*kept);
+    assert!(kept_by_all(&cuts, Vec3::new(1.0, 0.0, 1.0), Vec3::new(5.0, 0.0, 5.0)).is_empty());
+    // And with no cut, a line is what it was.
+    assert_eq!(kept_by_all(&[], Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)).len(), 1);
+}

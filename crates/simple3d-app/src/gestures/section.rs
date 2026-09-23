@@ -25,6 +25,11 @@ pub(crate) fn every_edge_grip_slides_the_section_plane() {
     harness.state_mut().clear_selection();
     harness.state_mut().run(simple3d_core::keymap::Command::ToggleSection);
     harness.step();
+    // The window is rolled up to its title bar: at the harness's small screen
+    // it stands over the grip on the far edge, and a press on the window is
+    // the window's, which is right in the app and says nothing about the grip.
+    harness.state_mut().popups.entry("section-tool").or_default().collapsed = true;
+    harness.step();
 
     let axis = harness.state().scene.settings.section.axis();
     let mut along = Vec3::ZERO;

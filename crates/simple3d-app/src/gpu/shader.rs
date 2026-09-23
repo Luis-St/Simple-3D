@@ -163,6 +163,71 @@ vec3 position(uint vertex) {
 }
 "#;
 
+/// The sections, asked per pixel. Each cuts away what is past every one of its
+/// walls -- one for a plane through the whole model, five for one cut down to a
+/// rectangle, which takes a box out -- and several of them together cut away
+/// what any of them does. What is left is not a half-space a clip distance can
+/// say, so no clip distance says it. `u_walls` holds every cut's walls one
+/// after another, as distances positive past the wall, the way
+/// `Resident::plane` hands a plane over; `u_cut_walls` says how many are each
+/// cut's.
+///
+/// `u_within` is for the line round a cut on one face of a box: that face's
+/// crossing runs across its whole plane, and only the part on the face --
+/// inside every other wall of its box, to within `u_cut_slack` -- is the cut's.
+const BOX_COMMON: &str = r#"
+uniform int u_cut_count;
+uniform int u_cut_walls[8];
+uniform vec4 u_walls[40];
+uniform int u_within_count;
+uniform vec4 u_within[4];
+uniform float u_cut_slack;
+
+bool cut_away(vec3 p) {
+    int base = 0;
+    for (int c = 0; c < u_cut_count; c++) {
+        bool inside = true;
+        for (int w = 0; w < u_cut_walls[c]; w++) {
+            inside = inside && dot(u_walls[base + w].xyz, p) + u_walls[base + w].w > 0.0;
+        }
+        if (inside) {
+            return true;
+        }
+        base += u_cut_walls[c];
+    }
+    for (int w = 0; w < u_within_count; w++) {
+        if (dot(u_within[w].xyz, p) + u_within[w].w < -u_cut_slack) {
+            return true;
+        }
+    }
+    return false;
+}
+"#;
+
+/// What a resident mesh's lines are coloured with: `SOLID_SOURCE`, with what
+/// the sections cut away asked about each pixel.
+pub(crate) fn line_fragment() -> String {
+    format!(
+        "#version 330 core\n{BOX_COMMON}\n{}",
+        r#"
+in vec4 v_colour;
+flat in uint v_tag;
+in vec3 v_world;
+
+layout(location = 0) out vec4 out_colour;
+layout(location = 1) out uint out_tag;
+
+void main() {
+    if (cut_away(v_world)) {
+        discard;
+    }
+    out_colour = v_colour;
+    out_tag = v_tag;
+}
+"#
+    )
+}
+
 fn resident(stage: &str) -> String {
     format!("#version 330 core\n{RESIDENT_COMMON}\n{stage}")
 }
@@ -213,7 +278,11 @@ void main() {
 /// pixel of a flat triangle -- so no normal has to be stored or uploaded for
 /// it. A painted face's colour comes out of the paint table by the triangle's
 /// index.
-pub(crate) const FACE_FRAGMENT: &str = r#"#version 330 core
+pub(crate) fn face_fragment() -> String {
+    format!("#version 330 core\n{BOX_COMMON}\n{FACE_FRAGMENT_BODY}")
+}
+
+const FACE_FRAGMENT_BODY: &str = r#"
 in vec3 v_pos;
 flat in uint v_tag;
 
@@ -233,6 +302,9 @@ layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
 
 void main() {
+    if (cut_away(v_pos)) {
+        discard;
+    }
     vec3 normal = cross(dFdx(v_pos), dFdy(v_pos));
     float length_ = length(normal);
     float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
@@ -275,6 +347,7 @@ uniform uint u_tag_base;
 uniform vec4 u_clip;
 
 out vec3 g_screen;
+out vec3 g_pos;
 out float g_clip;
 flat out uint g_tag;
 flat out int g_hidden;
@@ -282,6 +355,7 @@ flat out int g_hidden;
 void main() {
     vec3 pos = u_model * in_pos;
     g_screen = project(pos);
+    g_pos = pos;
     g_clip = dot(u_clip.xyz, pos) + u_clip.w;
     g_tag = u_tagged == 1 ? min(u_tag_base + in_body + 1u, 65535u) : 0u;
     g_hidden = hidden(uint(gl_VertexID)) ? 1 : 0;
@@ -298,6 +372,7 @@ layout(lines) in;
 layout(line_strip, max_vertices = 2) out;
 
 in vec3 g_screen[];
+in vec3 g_pos[];
 in float g_clip[];
 flat in uint g_tag[];
 flat in int g_hidden[];
@@ -307,6 +382,7 @@ uniform float u_bias;
 
 out vec4 v_colour;
 flat out uint v_tag;
+out vec3 v_world;
 
 void main() {
     if (g_hidden[0] == 1 || g_hidden[1] == 1) {
@@ -318,6 +394,7 @@ void main() {
         gl_ClipDistance[0] = g_clip[i];
         v_colour = u_colour;
         v_tag = g_tag[0];
+        v_world = g_pos[i];
         EmitVertex();
     }
     EndPrimitive();
@@ -368,6 +445,11 @@ uniform vec4 u_clip;
 
 out vec4 v_colour;
 flat out uint v_tag;
+out vec3 v_world;
+
+// The two ends in the mesh's own coordinates, for the fragment's box test.
+vec3 world_a;
+vec3 world_b;
 
 void face(uint index, out vec3 normal, out vec3 centre) {
     uvec3 corners = texelFetch(u_triangles, cell(index), 0).xyz;
@@ -385,11 +467,13 @@ void line(vec3 a, vec3 b, float clip_a, float clip_b, vec2 shift, float bias, ui
     gl_ClipDistance[0] = clip_a;
     v_colour = u_colour;
     v_tag = tag;
+    v_world = world_a;
     EmitVertex();
     gl_Position = place(b.xy + shift, b.z + bias);
     gl_ClipDistance[0] = clip_b;
     v_colour = u_colour;
     v_tag = tag;
+    v_world = world_b;
     EmitVertex();
     EndPrimitive();
 }
@@ -407,6 +491,8 @@ void main() {
 
     vec3 a = position(edge.x);
     vec3 b = position(edge.y);
+    world_a = a;
+    world_b = b;
     vec3 sa = project(a);
     vec3 sb = project(b);
     float bias = u_bias * (abs(sa.z) + abs(sb.z)) * 0.5;
@@ -483,6 +569,7 @@ uniform vec4 u_clip;
 
 out vec4 v_colour;
 flat out uint v_tag;
+out vec3 v_world;
 
 void main() {
     if (g_hidden[0] == 1 || g_hidden[1] == 1 || g_hidden[2] == 1) {
@@ -525,11 +612,13 @@ void main() {
         gl_ClipDistance[0] = dot(u_clip.xyz, hits[0]) + u_clip.w;
         v_colour = u_plane_colour[k];
         v_tag = 0u;
+        v_world = hits[0];
         EmitVertex();
         gl_Position = place(b.xy, b.z + bias);
         gl_ClipDistance[0] = dot(u_clip.xyz, hits[1]) + u_clip.w;
         v_colour = u_plane_colour[k];
         v_tag = 0u;
+        v_world = hits[1];
         EmitVertex();
         EndPrimitive();
     }
@@ -925,7 +1014,8 @@ uniform usampler2D u_inside;
 uniform int u_program[256];
 uniform int u_length;
 uniform uint u_tag;
-// The section's half-space, when there is one, drawn as the cut.
+// The first of the sections' shapes, when there are any: they come last, and
+// are drawn as the cut rather than as the model.
 uniform int u_half;
 
 layout(location = 0) out vec4 out_colour;
@@ -965,7 +1055,7 @@ void main() {
         discard;
     }
     out_colour = texelFetch(u_colour, at, 0);
-    out_tag = int(leaf) == u_half ? 0u : u_tag;
+    out_tag = (u_half >= 0 && int(leaf) >= u_half) ? 0u : u_tag;
     // Which shape's surface the pixel is, one past its index -- anything
     // written is done -- and the surface's normal: what the edge pass asks.
     vec3 normal = vec3(float((word >> 8) & 255u), float((word >> 16) & 255u), float(word >> 24)) / 255.0;

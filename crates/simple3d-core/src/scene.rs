@@ -17,7 +17,7 @@ mod node;
 pub use node::{Node, Visibility};
 mod node_read;
 mod view_settings;
-pub use view_settings::{AxisStyle, PreviewViewport, SectionView};
+pub use view_settings::{AxisStyle, PreviewViewport, SectionKeep, SectionView};
 mod settings;
 pub use settings::SceneSettings;
 mod camera;

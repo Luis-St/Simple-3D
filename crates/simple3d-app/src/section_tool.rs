@@ -38,6 +38,8 @@ mod interact;
 pub use interact::interact;
 mod draw;
 pub use draw::draw;
+mod crossing;
+pub use crossing::cut;
 mod window;
 pub(crate) use window::*;
 pub use window::{middle_of, readout};

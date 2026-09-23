@@ -9,7 +9,14 @@ use crate::vec3::Vec3;
 /// The usual answer is "all of it" or "none of it" -- a plane crosses a band of
 /// triangles and misses every other one -- so both of those are decided on
 /// three comparisons before anything is worked out.
+///
+/// A windowed plane takes a box out instead, which [`window::clip_box`] cuts;
+/// that leaves no single cut edge, and its caps are found face by face (see
+/// [`faces`]).
 pub fn clip_triangle(plane: &Plane, world: [Vec3; 3]) -> Clipped {
+    if plane.window.is_some() {
+        return super::window::clip_box(&plane.walls(), world);
+    }
     let d = [plane.depth(world[0]), plane.depth(world[1]), plane.depth(world[2])];
     // Wholly kept, which includes a triangle lying *in* the plane: it is the
     // surface the cut runs along, not something the cut removes.
@@ -111,5 +118,118 @@ pub fn clip_segment(plane: &Plane, a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
     match da <= 0.0 {
         true => Some((a, at)),
         false => Some((at, b)),
+    }
+}
+
+/// What is left of a segment once the cuts have had it: nothing, all of it, a
+/// piece off one end -- or, past a windowed plane, the two ends with the box
+/// taken out of the middle, once per windowed plane.
+#[derive(Clone, Copy, Debug)]
+pub struct Segments {
+    pieces: [(Vec3, Vec3); MAX_CUTS + 1],
+    count: usize,
+}
+
+impl Default for Segments {
+    fn default() -> Segments {
+        Segments { pieces: [(Vec3::ZERO, Vec3::ZERO); MAX_CUTS + 1], count: 0 }
+    }
+}
+
+impl Segments {
+    /// A segment nothing cut.
+    pub fn whole(a: Vec3, b: Vec3) -> Segments {
+        let mut out = Segments::default();
+        out.push(a, b);
+        out
+    }
+
+    fn push(&mut self, a: Vec3, b: Vec3) {
+        if (b - a).length() > 1e-12 && self.count < self.pieces.len() {
+            self.pieces[self.count] = (a, b);
+            self.count += 1;
+        }
+    }
+}
+
+impl std::ops::Deref for Segments {
+    type Target = [(Vec3, Vec3)];
+    fn deref(&self) -> &[(Vec3, Vec3)] {
+        &self.pieces[..self.count]
+    }
+}
+
+/// The parts of `a`-`b` that stay, whatever shape the cut is. The stretch the
+/// cut takes out is where the segment is past every wall at once, which is one
+/// interval along it, found by narrowing it wall by wall.
+pub fn kept_segments(plane: &Plane, a: Vec3, b: Vec3) -> Segments {
+    let mut out = Segments::default();
+    if plane.window.is_none() {
+        if let Some((from, to)) = clip_segment(plane, a, b) {
+            out.push(from, to);
+        }
+        return out;
+    }
+    let (mut enter, mut leave) = (0.0_f64, 1.0_f64);
+    for wall in plane.walls().iter() {
+        let (da, db) = (wall.depth(a), wall.depth(b));
+        // Inside the box is where the depth is positive.
+        if da <= 0.0 && db <= 0.0 {
+            out.push(a, b);
+            return out;
+        }
+        if da > 0.0 && db > 0.0 {
+            continue;
+        }
+        let t = da / (da - db);
+        match da <= 0.0 {
+            true => enter = enter.max(t),
+            false => leave = leave.min(t),
+        }
+    }
+    if enter >= leave {
+        out.push(a, b);
+        return out;
+    }
+    let at = |t: f64| a + (b - a) * t;
+    out.push(a, at(enter));
+    out.push(at(leave), b);
+    out
+}
+
+/// The parts of `a`-`b` that every one of `cuts` keeps: each cut in turn, on
+/// what the ones before it left.
+pub fn kept_by_all(cuts: &[Plane], a: Vec3, b: Vec3) -> Segments {
+    let mut kept = Segments::whole(a, b);
+    for cut in cuts {
+        let mut next = Segments::default();
+        for &(from, to) in kept.iter() {
+            for &(from, to) in kept_segments(cut, from, to).iter() {
+                next.push(from, to);
+            }
+        }
+        kept = next;
+        if kept.is_empty() {
+            break;
+        }
+    }
+    kept
+}
+
+/// What is left of a triangle once every one of `cuts` has had it.
+pub fn clip_by_all(cuts: &[Plane], world: [Vec3; 3]) -> Clipped {
+    match cuts {
+        [] => Clipped::untouched(world),
+        [only] => clip_triangle(only, world),
+        _ => {
+            let mut pieces = vec![world];
+            for cut in cuts {
+                pieces = pieces.iter().flat_map(|&piece| clip_triangle(cut, piece).triangles().to_vec()).collect();
+                if pieces.is_empty() {
+                    break;
+                }
+            }
+            Clipped::pieces(pieces)
+        }
     }
 }

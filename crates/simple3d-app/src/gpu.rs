@@ -87,9 +87,9 @@ pub struct Gpu {
     csg_resolve: Program,
     csg_edges: Program,
     csg_targets: Option<csg::CsgTargets>,
-    /// The section's kept half-space as a shape for it, with the hash of what
-    /// it was made from.
-    csg_half: Option<(u64, crate::render::Renderable)>,
+    /// Each section as a shape for it, with the operation that cuts with it,
+    /// and the hash of what they were made from.
+    csg_half: Option<(u64, Vec<(crate::render::Renderable, i32)>)>,
     /// How many texels wide the tables a geometry stage reads a mesh's
     /// topology from are laid out -- see `resident::table`.
     table_width: usize,

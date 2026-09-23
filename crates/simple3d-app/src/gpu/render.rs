@@ -14,10 +14,11 @@ impl Gpu {
             let axis = Program::new(&gl, &axis_vertex(), AXIS_FRAGMENT)?;
             let grid = Program::new(&gl, &grid_vertex(), GRID_FRAGMENT)?;
             let background = Program::new(&gl, BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)?;
-            let faces = Program::new(&gl, &face_vertex(), FACE_FRAGMENT)?;
-            let lines = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), SOLID_SOURCE)?;
-            let outline = Program::with_geometry(&gl, OUTLINE_VERTEX, Some(&outline_geometry()), SOLID_SOURCE)?;
-            let crossing = Program::with_geometry(&gl, &crossing_vertex(), Some(&crossing_geometry()), SOLID_SOURCE)?;
+            let faces = Program::new(&gl, &face_vertex(), &face_fragment())?;
+            let lines = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), &line_fragment())?;
+            let outline = Program::with_geometry(&gl, OUTLINE_VERTEX, Some(&outline_geometry()), &line_fragment())?;
+            let crossing =
+                Program::with_geometry(&gl, &crossing_vertex(), Some(&crossing_geometry()), &line_fragment())?;
             let csg_peel = Program::new(&gl, &face_vertex(), CSG_PEEL_FRAGMENT)?;
             let csg_count = Program::new(&gl, &face_vertex(), CSG_COUNT_FRAGMENT)?;
             let csg_pack = Program::new(&gl, BACKGROUND_VERTEX, CSG_PACK_FRAGMENT)?;
@@ -82,7 +83,7 @@ impl Gpu {
         // A boolean drawn per pixel: the shapes it is drawn from, and the
         // section's half-space as one more (`csg.rs`).
         let leaves = request.live.csg.iter().flat_map(|csg| csg.leaves.iter().map(|(leaf, _)| *leaf));
-        extra.extend(leaves.chain(half.iter().map(|(_, shape)| shape)));
+        extra.extend(leaves.chain(half.iter().flat_map(|(_, shapes)| shapes.iter().map(|(shape, _)| shape))));
         extra.extend(request.live.ready.iter().copied());
         plan.csg.extend(extra.iter().skip(preview.is_some() as usize).map(|shape| shape.id));
         let kept = unsafe { self.keep_resident(&gl, request, &plan, &extra) };

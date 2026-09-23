@@ -41,7 +41,7 @@ pub(crate) fn tag_bases(items: &[Item<'_>]) -> Vec<u16> {
 }
 
 #[cfg(test)]
-pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Plane>) -> AxisMaterial {
+pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: &[Plane]) -> AxisMaterial {
     axis_material_live(items, grid, section, &Live::default())
 }
 
@@ -53,12 +53,7 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
 /// where the axes run through it. The body is left out of the axis rule until
 /// the drag ends and the scene is evaluated with it where it now is -- an axis
 /// is drawn through it for the length of the drag.
-pub(crate) fn axis_material_live(
-    items: &[Item<'_>],
-    grid: &Grid,
-    section: Option<Plane>,
-    live: &Live<'_>,
-) -> AxisMaterial {
+pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: &[Plane], live: &Live<'_>) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
         through: [Vec::new(), Vec::new(), Vec::new()],
@@ -98,12 +93,15 @@ pub(crate) fn axis_material_live(
                 // Material the section took away is no longer in the axis's
                 // way: the line is drawn through the space the cut opened, the
                 // way it is drawn through empty space anywhere else.
-                let Some(span) = section.map_or(Some(span), |plane| trim_span(span, axis, &plane)) else {
-                    continue;
+                let kept = match section.is_empty() {
+                    true => vec![span],
+                    false => trim_spans(span, axis, section),
                 };
-                material.inside[axis].push(span);
-                material.through[axis].push((span.0, span.1, tag));
-                material.tags = material.tags.max(tag as usize + 1);
+                for span in kept {
+                    material.inside[axis].push(span);
+                    material.through[axis].push((span.0, span.1, tag));
+                    material.tags = material.tags.max(tag as usize + 1);
+                }
             }
         }
     }

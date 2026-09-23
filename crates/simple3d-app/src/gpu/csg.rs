@@ -234,10 +234,14 @@ impl Gpu {
     /// changes -- see the module's own note.
     pub(super) fn refresh_half_space(&mut self, request: &Request<'_>) {
         use std::hash::{Hash, Hasher};
-        let (Some(csg), Some(plane)) = (&request.live.csg, request.section) else {
+        let Some(csg) = &request.live.csg else {
             self.csg_half = None;
             return;
         };
+        if request.section.is_empty() {
+            self.csg_half = None;
+            return;
+        }
         // Big enough for every shape wherever the drag takes it, and changed
         // only when the shapes outgrow it, so a drag does not make a new one on
         // every frame.
@@ -259,9 +263,23 @@ impl Gpu {
         let middle = (lo + hi) * 0.5;
         let centre = Vec3::new(snap(middle.x), snap(middle.y), snap(middle.z));
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for value in [plane.normal.x, plane.normal.y, plane.normal.z, plane.offset, reach, centre.x, centre.y, centre.z]
-        {
+        for value in [reach, centre.x, centre.y, centre.z] {
             value.to_bits().hash(&mut hasher);
+        }
+        for plane in &request.section {
+            for value in [plane.normal.x, plane.normal.y, plane.normal.z, plane.offset] {
+                value.to_bits().hash(&mut hasher);
+            }
+            if let Some(window) = plane.window {
+                for at in [window.centre, window.u, window.v] {
+                    for value in [at.x, at.y, at.z] {
+                        value.to_bits().hash(&mut hasher);
+                    }
+                }
+                for value in window.half {
+                    value.to_bits().hash(&mut hasher);
+                }
+            }
         }
         request.palette.cut.hash(&mut hasher);
         let key = hasher.finish();
@@ -269,7 +287,19 @@ impl Gpu {
             return;
         }
         let cut = request.palette.cut;
-        self.csg_half = Some((key, Renderable::surface(half_space(&plane, centre, reach, [cut[0], cut[1], cut[2]]))));
+        // One shape per section, each with the operation that cuts with it.
+        let shapes = request
+            .section
+            .iter()
+            .map(|plane| {
+                let op = match plane.window {
+                    Some(_) => crate::app::CSG_DIFFERENCE,
+                    None => crate::app::CSG_INTERSECTION,
+                };
+                (Renderable::surface(half_space(plane, centre, reach, [cut[0], cut[1], cut[2]])), op)
+            })
+            .collect();
+        self.csg_half = Some((key, shapes));
     }
 
     /// Draw the boolean into the model pass, where the rest of the scene's
@@ -288,12 +318,14 @@ impl Gpu {
         let view = &request.view;
         let mut leaves: Vec<(&Renderable, Option<simple3d_core::xform::Xform>)> = csg.leaves.clone();
         let mut program = csg.program.clone();
-        let half = self.csg_half.as_ref().map(|(_, half)| half);
-        if let Some(half) = half {
-            // The whole, intersected with the half-space kept.
+        // The sections come last: the whole, intersected with each half-space
+        // kept -- or, for a plane cut down to a rectangle, with the box behind
+        // it taken out.
+        let half_leaf = self.csg_half.as_ref().filter(|(_, shapes)| !shapes.is_empty()).map(|_| leaves.len());
+        for (shape, op) in self.csg_half.iter().flat_map(|(_, shapes)| shapes.iter()) {
             program.push(leaves.len() as i32);
-            program.push(crate::app::CSG_INTERSECTION);
-            leaves.push((half, None));
+            program.push(*op);
+            leaves.push((shape, None));
         }
         let drawn: Vec<(&resident::Resident, Placing)> = leaves
             .iter()
@@ -304,7 +336,6 @@ impl Gpu {
         }
         let (width, height) = (targets.width as i32, targets.height as i32);
         let marks = resident::mark_planes(request);
-        let half_leaf = half.map(|_| leaves.len() - 1);
 
         gl.disable(glow::CULL_FACE);
         gl.disable(glow::BLEND);
@@ -369,11 +400,11 @@ impl Gpu {
             gl.begin_query(glow::ANY_SAMPLES_PASSED, targets.queries[layer]);
             for (index, (resident, placing)) in drawn.iter().enumerate() {
                 let Some(faces) = &resident.faces else { continue };
-                set_projection(gl, peel, resident, view, None, placing);
+                set_projection(gl, peel, resident, view, &[], placing);
                 // The section's half-space is the cut, not the model's
                 // surface, and a cut is not marked (`push_plane_marks` marks
                 // solids only).
-                let marked = if Some(index) == half_leaf { 0 } else { marks.len() };
+                let marked = if half_leaf.is_some_and(|first| index >= first) { 0 } else { marks.len() };
                 set_i32(gl, peel, "u_planes", marked as i32);
                 if let Some(at) = peel.at("u_plane[0]") {
                     let mut planes = [[0.0_f32; 4]; 3];
@@ -426,7 +457,7 @@ impl Gpu {
                         let on = |channel: usize| texture == index / 4 && channel == index % 4;
                         gl.color_mask_draw_buffer(texture as u32, on(0), on(1), on(2), on(3));
                     }
-                    set_projection(gl, count, resident, view, None, placing);
+                    set_projection(gl, count, resident, view, &[], placing);
                     gl.bind_vertex_array(Some(faces.array));
                     gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
                 }
@@ -488,7 +519,7 @@ impl Gpu {
             if let Some(at) = resolve.at("u_tag") {
                 gl.uniform_1_u32(Some(at), csg.tag as u32);
             }
-            set_i32(gl, resolve, "u_half", if half.is_some() { leaves.len() as i32 - 1 } else { -1 });
+            set_i32(gl, resolve, "u_half", half_leaf.map_or(-1, |first| first as i32));
             gl.bind_vertex_array(Some(self.buffer.array));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
             gl.disable(glow::STENCIL_TEST);
@@ -557,7 +588,7 @@ impl Gpu {
             if edges.count == 0 {
                 continue;
             }
-            set_projection(gl, program, resident, &request.view, request.section, &Placing::moved(*moved));
+            set_projection(gl, program, resident, &request.view, &request.section, &Placing::moved(*moved));
             if let Some(at) = program.at("u_leaf_code") {
                 gl.uniform_1_f32(Some(at), (index + 1) as f32 / 255.0);
             }
@@ -573,17 +604,26 @@ impl Gpu {
 
 /// The side of `plane` it keeps, as a closed box of `reach` round `centre`
 /// with one face on the plane, painted `colour`.
+///
+/// A plane cut down to a rectangle makes the box it takes out instead: the
+/// rectangle, run back from the plane along its normal into what is cut away,
+/// which the boolean then subtracts.
 fn half_space(plane: &Plane, centre: Vec3, reach: f64, colour: [u8; 3]) -> Mesh {
     let n = plane.normal;
-    let foot = centre - n * plane.depth(centre);
-    let helper = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
-    let u = n.cross(helper).normalized();
-    let v = n.cross(u);
-    // Kept is where `depth` is negative: behind the plane, against its normal.
+    let (foot, u, v, half, depth) = match plane.window {
+        Some(window) => (window.centre, window.u, window.v, window.half, 2.0 * reach),
+        None => {
+            let helper = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+            let u = n.cross(helper).normalized();
+            // Kept is where `depth` is negative: behind the plane, against its
+            // normal.
+            (centre - n * plane.depth(centre), u, n.cross(u), [reach, reach], -2.0 * reach)
+        }
+    };
     let corner = |i: usize| {
-        let a = if i & 1 == 0 { -reach } else { reach };
-        let b = if i & 2 == 0 { -reach } else { reach };
-        let c = if i & 4 == 0 { 0.0 } else { -2.0 * reach };
+        let a = if i & 1 == 0 { -half[0] } else { half[0] };
+        let b = if i & 2 == 0 { -half[1] } else { half[1] };
+        let c = if i & 4 == 0 { 0.0 } else { depth };
         foot + u * a + v * b + n * c
     };
     let mut mesh = Mesh::new();

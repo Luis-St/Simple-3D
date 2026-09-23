@@ -15,7 +15,7 @@ pub(crate) fn push_selection(
     colour: Rgba,
     tag_base: u16,
     mode: DisplayMode,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     // Drawn a second time, one pixel out from the shape, and that is what makes
     // it a line rather than a row of dots.
@@ -41,30 +41,31 @@ pub(crate) fn push_selection(
         // The outline is cut with the shape it outlines: an accent line left
         // hanging in the air where the model has been cut away says the
         // selection is somewhere it no longer is.
-        let Some((a, b)) = kept_line(section, a, b) else { return };
-        let tag = item.body_tag(edge[0] as usize, tag_base);
-        steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
-        let Some(away) = away else { return };
-        let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
-        let along = vb.pos - va.pos;
-        let normal = egui::vec2(-along.y, along.x);
-        if normal.length() < 1e-6 {
-            return;
+        for (a, b) in kept_line(section, a, b).iter().copied() {
+            let tag = item.body_tag(edge[0] as usize, tag_base);
+            steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
+            let Some(away) = away else { continue };
+            let (va, vb) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
+            let along = vb.pos - va.pos;
+            let normal = egui::vec2(-along.y, along.x);
+            if normal.length() < 1e-6 {
+                continue;
+            }
+            // Which way along that perpendicular leads out of the shape, decided in
+            // screen space so a foreshortened face cannot get it backwards.
+            let inward = to_vertex(view, view.to_view(away)).pos - va.pos;
+            let normal = normal / normal.length();
+            let out = if egui::vec2(normal.x, normal.y).dot(inward) > 0.0 { -normal } else { normal };
+            let shift = |v: Vertex| Vertex { pos: v.pos + out, key: v.key };
+            steps.push(Step::Line {
+                a: shift(va),
+                b: shift(vb),
+                colour,
+                bias: SELECTION_BIAS * (va.key.abs() + vb.key.abs()) * 0.5,
+                tag,
+                write_depth: true,
+            });
         }
-        // Which way along that perpendicular leads out of the shape, decided in
-        // screen space so a foreshortened face cannot get it backwards.
-        let inward = to_vertex(view, view.to_view(away)).pos - va.pos;
-        let normal = normal / normal.length();
-        let out = if egui::vec2(normal.x, normal.y).dot(inward) > 0.0 { -normal } else { normal };
-        let shift = |v: Vertex| Vertex { pos: v.pos + out, key: v.key };
-        steps.push(Step::Line {
-            a: shift(va),
-            b: shift(vb),
-            colour,
-            bias: SELECTION_BIAS * (va.key.abs() + vb.key.abs()) * 0.5,
-            tag,
-            write_depth: true,
-        });
     };
     if item.outline.is_empty() {
         // Prepared without the adjacency -- the creases are what there is, and a
@@ -171,7 +172,7 @@ pub(crate) fn push_wireframe(
     item: &Renderable,
     screen: &[Vertex],
     colour: Rgba,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     extend_in_order(steps, item.edges.len(), |range, out| {
         for edge in &item.edges[range] {

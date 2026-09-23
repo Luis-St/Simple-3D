@@ -39,7 +39,7 @@ fn request<'a>(items: Vec<Item<'a>>, mode: DisplayMode) -> Request<'a> {
         items,
         preview: Vec::new(),
         live: Live::default(),
-        section: None,
+        section: Vec::new(),
     }
 }
 

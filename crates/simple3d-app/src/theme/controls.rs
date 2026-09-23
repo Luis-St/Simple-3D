@@ -65,6 +65,23 @@ pub fn axis_chip(ui: &mut egui::Ui, id: egui::Id, axis: usize) -> egui::Response
     response
 }
 
+/// The chip in front of a dimension, which may measure along more than one
+/// axis at once -- a cylinder's diameter is its width in X and in Y -- and so
+/// is split into one band per axis, top to bottom (issue 110).
+///
+/// A dimension along no axis at all, a wall's thickness, still takes the room
+/// and paints nothing, so the fields of a Dimensions section stay in one column
+/// rather than jumping sideways on every row that has no colour to show.
+pub fn axes_chip(ui: &mut egui::Ui, axes: &[usize]) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(AXIS_CHIP_WIDTH, metric::INPUT_ROW - 8.0), egui::Sense::hover());
+    let band = rect.height() / axes.len().max(1) as f32;
+    for (index, &axis) in axes.iter().enumerate() {
+        let top = rect.top() + band * index as f32;
+        let part = egui::Rect::from_min_max(egui::pos2(rect.left(), top), egui::pos2(rect.right(), top + band));
+        ui.painter().rect_filled(part, CornerRadius::same(1), axis_colour(axis).gamma_multiply(0.8));
+    }
+}
+
 /// A control that is on or off, drawn so that it reads as a control while it is
 /// off.
 ///

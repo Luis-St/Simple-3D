@@ -38,7 +38,7 @@ pub struct Prepared {
 }
 
 pub fn prepare_frame(request: &Request<'_>) -> Prepared {
-    let material = axis_material_live(&request.items, &request.grid, request.section, &request.live);
+    let material = axis_material_live(&request.items, &request.grid, &request.section, &request.live);
     let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
     Prepared { steps: prepare_with(request), axes }
 }
@@ -106,11 +106,11 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     if request.grid.visible {
         push_grid(&mut steps, &view, &request.grid, &request.palette);
     }
-    let cut = request.section;
+    let cut = &request.section[..];
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         // Every vertex projected once for everything this item draws from its
         // mesh: faces and edges share their corners.
-        let needs_screen = item.style != Style::Selected && cut.is_none();
+        let needs_screen = item.style != Style::Selected && cut.is_empty();
         let screen = if needs_screen { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         let screen = &screen[..];
         match item.style {
@@ -152,7 +152,7 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     // Last of all, over the finished model: what a buried body is pointed out
     // with, and the cells of a tool's preview.
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {
-        let screen = if cut.is_none() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
+        let screen = if cut.is_empty() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         push_glow(&mut steps, &view, item.renderable, &screen, request.palette.glow, cut);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);

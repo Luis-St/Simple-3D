@@ -32,7 +32,7 @@ pub(crate) fn push_plane_marks(
     items: &[Item<'_>],
     palette: &Palette,
     grid: &Grid,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     let colours = mark_colours(palette);
     for item in items.iter().filter(|i| i.style == Style::Solid) {
@@ -45,8 +45,9 @@ pub(crate) fn push_plane_marks(
             for &[a, b] in &item.renderable.plane_marks()[axis] {
                 // A mark lies on a surface, so it goes wherever that surface
                 // does.
-                let Some((a, b)) = kept_line(section, a, b) else { continue };
-                steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
+                for (a, b) in kept_line(section, a, b).iter().copied() {
+                    steps.push(line_step(view, a, b, colour, MARK_BIAS, 0, true));
+                }
             }
         }
     }

@@ -125,7 +125,7 @@ pub struct Request<'a> {
     /// edges, outlines, ghosts, marks, the stretches of an axis that run
     /// through material -- and the opening it leaves is closed with a cap, so
     /// that a wall reads as a wall rather than as a shell seen from inside.
-    pub section: Option<Plane>,
+    pub section: Vec<Plane>,
 }
 
 /// How many rows a band must have, on average, before splitting the frame

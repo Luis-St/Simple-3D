@@ -16,7 +16,7 @@ pub(crate) fn push_shaded(
     colour_base: Rgba,
     alpha: u8,
     tag_base: u16,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     let forward = view.forward();
     // Back-face culling in world space, where it means something: for a
@@ -50,17 +50,16 @@ pub(crate) fn push_faces(
     item: &Renderable,
     screen: &[Vertex],
     tri: [u32; 3],
-    section: Option<Plane>,
+    section: &[Plane],
     step: impl Fn([Vertex; 3]) -> Step,
 ) {
-    match section {
-        None => out.push(step(tri.map(|corner| screen[corner as usize]))),
-        Some(_) => {
-            let world = tri.map(|corner| item.mesh.positions[corner as usize]);
-            for piece in kept(section, world).triangles() {
-                out.push(step(piece.map(|at| to_vertex(view, view.to_view(at)))));
-            }
-        }
+    if section.is_empty() {
+        out.push(step(tri.map(|corner| screen[corner as usize])));
+        return;
+    }
+    let world = tri.map(|corner| item.mesh.positions[corner as usize]);
+    for piece in kept(section, world).triangles() {
+        out.push(step(piece.map(|at| to_vertex(view, view.to_view(at)))));
     }
 }
 
@@ -80,44 +79,78 @@ pub(crate) fn push_cap(
     view: &View,
     item: &Renderable,
     palette: &Palette,
-    section: Option<Plane>,
+    section: &[Plane],
     mode: DisplayMode,
 ) {
-    let Some(plane) = section else { return };
-    let outlines = section::loops(&item.mesh, &plane);
-    if outlines.is_empty() {
-        return;
+    // Each section is capped on its own, and what another section cuts away
+    // is cut away from its caps too: two planes crossing inside a part show
+    // the corner they leave, not one cap reaching through the other's opening.
+    for (index, plane) in section.iter().enumerate() {
+        let others: Vec<Plane> =
+            section.iter().enumerate().filter(|&(other, _)| other != index).map(|(_, p)| *p).collect();
+        push_cap_of(steps, view, item, palette, plane, &others, mode);
     }
-    // Filled in every mode that fills anything. Wireframe fills nothing, so
-    // there the cut is its outline alone -- without which a wireframe section
-    // is a shape that stops for no stated reason.
-    if mode != DisplayMode::Wireframe {
-        let colour = shade(palette.cut, plane.normal, view.forward(), 255);
-        for piece in section::fill(&outlines, plane.normal) {
-            steps.push(Step::Triangle {
-                v: piece.map(|at| to_vertex(view, view.to_view(at))),
-                colour,
-                // No body: the cap is not a solid an origin axis can be inside
-                // of, and the axis rule is asked about the model, not the cut.
-                tag: 0,
-                write_depth: true,
-            });
+}
+
+/// One section's cap, with what `others` cut away taken out of it.
+fn push_cap_of(
+    steps: &mut Vec<Step>,
+    view: &View,
+    item: &Renderable,
+    palette: &Palette,
+    plane: &Plane,
+    others: &[Plane],
+    mode: DisplayMode,
+) {
+    // One cap per face the cut opens: the plane alone, or -- cut down to a
+    // rectangle -- its front and the four sides of the box behind it, each
+    // capped as a whole plane and then trimmed to its own face.
+    for face in section::faces(plane) {
+        let outlines = section::loops(&item.mesh, &face.plane);
+        if outlines.is_empty() {
+            continue;
         }
-    }
-    // The line round the cut wherever the mode draws the model's own lines: the
-    // edge the cut made is one of them, and the only one with no crease behind
-    // it for the edge pass to find.
-    if mode == DisplayMode::Shaded {
-        return;
-    }
-    let colour = match mode {
-        DisplayMode::Wireframe => palette.wire,
-        _ => palette.edge,
-    };
-    for outline in &outlines {
-        for (index, &from) in outline.iter().enumerate() {
-            let to = outline[(index + 1) % outline.len()];
-            steps.push(line_step(view, from, to, colour, MARK_BIAS, 0, true));
+        // Filled in every mode that fills anything. Wireframe fills nothing,
+        // so there the cut is its outline alone -- without which a wireframe
+        // section is a shape that stops for no stated reason.
+        if mode != DisplayMode::Wireframe {
+            let colour = shade(palette.cut, face.plane.normal, view.forward(), 255);
+            for piece in section::fill(&outlines, face.plane.normal) {
+                let piece = section::within(&piece, &face.bounds);
+                for index in 1..piece.len().saturating_sub(1) {
+                    let corners = [piece[0], piece[index], piece[index + 1]];
+                    for kept in section::clip_by_all(others, corners).triangles() {
+                        steps.push(Step::Triangle {
+                            v: kept.map(|at| to_vertex(view, view.to_view(at))),
+                            colour,
+                            // No body: the cap is not a solid an origin axis
+                            // can be inside of, and the axis rule is asked
+                            // about the model, not the cut.
+                            tag: 0,
+                            write_depth: true,
+                        });
+                    }
+                }
+            }
+        }
+        // The line round the cut wherever the mode draws the model's own
+        // lines: the edge the cut made is one of them, and the only one with no
+        // crease behind it for the edge pass to find.
+        if mode == DisplayMode::Shaded {
+            continue;
+        }
+        let colour = match mode {
+            DisplayMode::Wireframe => palette.wire,
+            _ => palette.edge,
+        };
+        for outline in &outlines {
+            for (index, &from) in outline.iter().enumerate() {
+                let to = outline[(index + 1) % outline.len()];
+                let Some((from, to)) = section::segment_within(from, to, &face.bounds) else { continue };
+                for &(from, to) in section::kept_by_all(others, from, to).iter() {
+                    steps.push(line_step(view, from, to, colour, MARK_BIAS, 0, true));
+                }
+            }
         }
     }
 }
@@ -130,7 +163,7 @@ pub(crate) fn push_ghost(
     item: &Renderable,
     screen: &[Vertex],
     base: Rgba,
-    section: Option<Plane>,
+    section: &[Plane],
 ) {
     let forward = view.forward();
     extend_in_order(steps, item.mesh.indices.len(), |range, out| {

@@ -42,6 +42,25 @@ pub(crate) fn param_field_as(
     unit: Unit,
     style: RowStyle,
 ) {
+    param_field_on(app, ui, targets, id, param, shown_as, unit, style, None);
+}
+
+/// The same row again, with the colour chip of the axes it measures along in
+/// front of a number field (issue 110): `None` for a row with no chip column at
+/// all, and an empty list for a dimension that runs along no axis, which keeps
+/// the chip's room so its field lines up with the ones that do.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn param_field_on(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    targets: &[NodeId],
+    id: NodeId,
+    param: &simple3d_core::primitive::ParamSpec,
+    shown_as: &str,
+    unit: Unit,
+    style: RowStyle,
+    axes: Option<&[usize]>,
+) {
     let value = param_value(app, id, param.key, param.default);
     match param.kind {
         // Radio-style choices where a measurement is ambiguous.
@@ -89,6 +108,9 @@ pub(crate) fn param_field_as(
                 },
             );
             field_row(ui, &name, "", |ui| {
+                if let Some(axes) = axes {
+                    theme::axes_chip(ui, axes);
+                }
                 // A lock toggle where the type offers one: a sphere's three
                 // diameters, a cylinder's two.
                 if param.lock_group != 0 {

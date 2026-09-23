@@ -32,7 +32,7 @@ pub(crate) fn a_section_takes_the_material_past_the_plane_out_of_the_picture() {
     mesh.append(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(60.0, 0.0, 0.0)));
     let prepared = Renderable::prepare(&mesh);
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-    req.section = Some(section_at(0, 0.0));
+    req.section = vec![section_at(0, 0.0)];
     // The axes off: both boxes are centred on X, and an axis drawn through
     // where one of them was would answer the question for it.
     req.grid.axes = [false; 3];
@@ -56,7 +56,7 @@ pub(crate) fn the_cut_is_capped_so_a_sectioned_solid_still_reads_as_solid() {
     let prepared = Renderable::prepare(&mesh);
     let plane = section_at(2, 0.0);
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-    req.section = Some(plane);
+    req.section = vec![plane];
     let frame = render(&req);
     let palette = Palette::dark();
     assert!(
@@ -76,7 +76,7 @@ pub(crate) fn a_wall_reads_as_a_wall_and_not_as_a_full_face() {
     let palette = Palette::dark();
     let covered = |item: &Renderable| {
         let mut req = request(vec![Item { renderable: item, style: Style::Solid }], DisplayMode::Shaded);
-        req.section = Some(plane);
+        req.section = vec![plane];
         let frame = render(&req);
         cap_pixels(&frame, &palette, &plane, &req.view)
     };
@@ -95,7 +95,7 @@ pub(crate) fn a_wireframe_section_says_where_the_shape_was_cut() {
     let items = || vec![Item { renderable: &prepared, style: Style::Solid }];
     let palette = Palette::dark();
     let probe = Vec3::new(20.0, 0.0, 0.0);
-    let drawn = |section: Option<Plane>| {
+    let drawn = |section: Vec<Plane>| {
         let mut req = request(items(), DisplayMode::Wireframe);
         req.grid.axes = [false; 3];
         req.section = section;
@@ -104,8 +104,8 @@ pub(crate) fn a_wireframe_section_says_where_the_shape_was_cut() {
         let index = (at.y as usize) * frame.width + at.x as usize;
         !is_background(&frame, index, &palette)
     };
-    assert!(!drawn(None), "the box already draws a line at the middle of its side, so the probe proves nothing");
-    assert!(drawn(Some(section_at(2, 0.0))), "a wireframe section left no line where the shape was cut");
+    assert!(!drawn(Vec::new()), "the box already draws a line at the middle of its side, so the probe proves nothing");
+    assert!(drawn(vec![section_at(2, 0.0)]), "a wireframe section left no line where the shape was cut");
 }
 
 #[test]
@@ -117,8 +117,8 @@ pub(crate) fn what_the_cut_removed_no_longer_hides_an_origin_axis() {
     let prepared = Renderable::prepare(&mesh);
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
     let grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-    let whole = axis_material(&items, &grid, None);
-    let cut = axis_material(&items, &grid, Some(section_at(2, 0.0)));
+    let whole = axis_material(&items, &grid, &[]);
+    let cut = axis_material(&items, &grid, &[section_at(2, 0.0)]);
     let top = |material: &AxisMaterial| material.inside[2].iter().fold(f64::MIN, |m: f64, span| m.max(span.1));
     assert!((top(&whole) - 20.0).abs() < 1e-6, "the box fills Z up to 20, got {}", top(&whole));
     assert!((top(&cut)).abs() < 1e-6, "the axis is still blocked up to {} above the cut", top(&cut));
@@ -130,12 +130,12 @@ pub(crate) fn a_line_of_the_model_is_cut_with_the_faces() {
     // standing for the rest is fair -- what would break is a path that
     // forgot to ask at all, and this is the check that it asked.
     let plane = section_at(2, 0.0);
-    assert_eq!(kept_line(Some(plane), Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 9.0)), None);
-    let kept = kept_line(Some(plane), Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, 5.0)).expect("half of it");
+    assert!(kept_line(&[plane], Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 9.0)).is_empty());
+    let kept = *kept_line(&[plane], Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, 5.0)).first().expect("half of it");
     assert!((kept.1.z).abs() < 1e-9, "the line was not trimmed at the plane: {kept:?}");
     // And with no section, every line is left exactly as it was.
     let (a, b) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
-    assert_eq!(kept_line(None, a, b), Some((a, b)));
+    assert_eq!(&*kept_line(&[], a, b), &[(a, b)]);
 }
 
 #[test]

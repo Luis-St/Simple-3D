@@ -28,6 +28,23 @@ pub(crate) fn trim_span(span: (f64, f64), axis: usize, plane: &Plane) -> Option<
     (hi - lo > 1e-9).then_some((lo, hi))
 }
 
+/// [`trim_span`] for any number of cuts: a plane cut down to a rectangle can
+/// take a stretch out of the middle of a span and leave both of its ends.
+pub(crate) fn trim_spans(span: (f64, f64), axis: usize, cuts: &[Plane]) -> Vec<(f64, f64)> {
+    if let [plane] = cuts {
+        if plane.window.is_none() {
+            return trim_span(span, axis, plane).into_iter().collect();
+        }
+    }
+    let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
+    let along = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)][axis.min(2)];
+    simple3d_geom::section::kept_by_all(cuts, along * lo, along * hi)
+        .iter()
+        .map(|&(a, b)| (component(a, axis), component(b, axis)))
+        .filter(|(a, b)| b - a > 1e-9)
+        .collect()
+}
+
 /// One arm of an axis: faded along its length like the grid, and drawn over the
 /// frame rather than tested against it -- except where it runs inside material,
 /// which is not drawn at all.
