@@ -45,6 +45,7 @@ pub(crate) use target::*;
 mod passes;
 pub(crate) use passes::*;
 mod buffers;
+mod depth;
 mod draw;
 mod ground;
 mod render;
@@ -90,6 +91,9 @@ pub struct Gpu {
     buffer: Buffers,
     /// What the grid's quad and the axes' arms are drawn from.
     ground: GroundBuffers,
+    /// The faces' depth, read back for the questions asked about the
+    /// picture -- see `depth.rs`.
+    depth: depth::DepthReadback,
     /// What egui knows the colour texture as. Registered once: the texture
     /// object is kept and redrawn into, so the id stays good for the life of
     /// the application and no texture is leaked per frame.

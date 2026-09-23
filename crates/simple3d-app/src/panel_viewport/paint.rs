@@ -26,6 +26,11 @@ pub(crate) fn paint_scene(
         (rect.height() * pixels_per_point).round().max(1.0) as usize,
     ];
 
+    // A question about the picture that the frame on screen could not answer
+    // is answered by drawing it again (`gpu/depth.rs`).
+    if app.gpu.as_ref().is_some_and(|gpu| gpu.depth_wanted()) {
+        app.invalidate_image();
+    }
     let key = image_key(app, size, dark);
     if key != app.image_key || app.texture.is_none() {
         let palette = Palette::for_dark_mode(dark);
@@ -136,7 +141,10 @@ pub(crate) fn paint_scene(
         // the one drawing, so nothing is spent on the CPU for a picture the
         // card is making.
         match app.gpu.as_mut() {
-            Some(gpu) => match gpu.render(&request) {
+            Some(gpu) => match {
+                gpu.place(rect.min, pixels_per_point);
+                gpu.render(&request)
+            } {
                 Ok(id) => app.gpu_texture = Some(id),
                 Err(why) => {
                     // The driver said no. Say so once, and go on drawing in

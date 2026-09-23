@@ -87,6 +87,9 @@ impl Gpu {
         gl.front_face(resident::front_face(&request.view));
         self.draw_faces(&gl, &plan.solids, view, section, viewport, depth);
         self.draw_caps(&gl, &plan.caps, view, section, viewport, depth);
+        // The faces are down and no line is yet: what "what is drawn here"
+        // means to the interface (`depth.rs`).
+        self.copy_depth(&gl, width, height, depth);
         self.draw_lines(&gl, &plan.lines, view, section, viewport, depth);
         self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
         self.draw_crossings(&gl, &plan.crossings, view, section, viewport, depth);

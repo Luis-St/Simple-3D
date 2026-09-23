@@ -23,6 +23,7 @@ impl Gpu {
             let table_width = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).clamp(1024, 8192) as usize;
             let buffer = Buffers::new(&gl)?;
             let ground = GroundBuffers::new(&gl)?;
+            let depth = depth::DepthReadback::new(&gl)?;
             Ok(Gpu {
                 gl,
                 solid,
@@ -40,6 +41,7 @@ impl Gpu {
                 colour: None,
                 buffer,
                 ground,
+                depth,
                 texture_id: None,
             })
         }

@@ -1,7 +1,6 @@
 //! The 3D cursor: where it is put and what it snaps to.
 
 use crate::app::{App, Status};
-use crate::pick;
 use crate::theme::token;
 use crate::view::View;
 use simple3d_geom::Vec3;
@@ -58,8 +57,7 @@ pub(crate) fn place_cursor(app: &mut App, ui: &mut egui::Ui, response: &egui::Re
     };
     // Prefer the surface actually under the pointer: placing a shape against
     // another shape is the reason to move the cursor at all.
-    let (origin, dir) = view.ray(pointer);
-    let hit = pick::ray_mesh(&app.evaluated.mesh, origin, dir).map(|t| origin + dir * t);
+    let hit = app.surface_under(view, pointer);
     let at = hit.or_else(|| view.ray_plane_ahead(pointer, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)));
     match at {
         Some(at) => {

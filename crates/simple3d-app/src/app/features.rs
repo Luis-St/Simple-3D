@@ -32,9 +32,8 @@ impl App {
         if let Some((at, kind, _)) = self.nearest_line_point(view, cursor) {
             return Some(MeasurePoint { at, kind: Some(kind) });
         }
-        let (origin, dir) = view.ray(cursor);
-        if let Some(t) = crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
-            return Some(MeasurePoint { at: origin + dir * t, kind: None });
+        if let Some(at) = self.surface_under(view, cursor) {
+            return Some(MeasurePoint { at, kind: None });
         }
         view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)).map(|at| MeasurePoint { at, kind: None })
     }
@@ -126,8 +125,16 @@ impl App {
     /// what it cuts the axis lines out of, so asking it is asking the same
     /// question the picture answers. A point *inside* a body fails too, since
     /// the body's own near surface is in front of it.
+    ///
+    /// Read off the picture itself when the GPU is drawing it (`gpu/depth.rs`)
+    /// -- the same question, answered without a ray cast through the whole
+    /// scene, and without the tree of every triangle in it a cast needs.
     pub fn in_clear_view(&self, view: &crate::view::View, at: Vec3) -> bool {
         let Some((screen, _)) = view.project(at) else { return false };
+        let key = -view.to_view(at).z as f32;
+        if let Some(seen) = self.gpu.as_ref().and_then(|gpu| gpu.in_sight(screen, key)) {
+            return seen;
+        }
         let (origin, dir) = view.ray(screen);
         let reach = (at - origin).dot(dir);
         match crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir) {
@@ -188,5 +195,21 @@ impl App {
     /// catchable as the line that shows it.
     pub(super) fn shows(&self, view: &crate::view::View, at: Vec3) -> bool {
         self.settings.display_mode == DisplayMode::Wireframe || self.in_clear_view(view, at)
+    }
+
+    /// The point of the model's surface under a point of the interface, or
+    /// `None` where there is none.
+    ///
+    /// Read off the picture when the GPU is drawing it, like `in_clear_view`;
+    /// otherwise a ray cast through the evaluated scene.
+    pub(crate) fn surface_under(&self, view: &crate::view::View, screen: egui::Pos2) -> Option<Vec3> {
+        let (origin, dir) = view.ray(screen);
+        if let Some(drawn) = self.gpu.as_ref().and_then(|gpu| gpu.surface_key(screen)) {
+            // The key is the distance in front of the eye, negated; the ray
+            // starts level with the eye.
+            let key = drawn? as f64;
+            return Some(origin + dir * (-key - (origin - view.eye()).dot(dir)));
+        }
+        crate::pick::ray_mesh(&self.evaluated.mesh, origin, dir).map(|t| origin + dir * t)
     }
 }
