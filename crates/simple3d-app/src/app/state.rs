@@ -202,8 +202,9 @@ pub struct App {
     /// (issue 72). `None` when the pointer is on none of them.
     pub section_hover: Option<usize>,
     /// Every feature of the body the current drag is carrying, as offsets from
-    /// its origin; gathered on `Begin`. See `App::drag_feature_offsets`.
-    pub(super) snap_sources: Vec<Vec3>,
+    /// its origin; taken on `Begin` and found on the first frame that snaps.
+    /// See `App::drag_snap_sources`.
+    pub(super) snap_sources: Option<SnapSources>,
     /// Each body's snap features, kept between frames and keyed on the identity
     /// of the mesh they were found on. See `App::snaps_of`.
     /// The shapes a boolean being dragged is drawn from, with the

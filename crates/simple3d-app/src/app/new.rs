@@ -86,7 +86,7 @@ impl App {
             cursor: None,
             measure: Measure::default(),
             snap_requested: false,
-            snap_sources: Vec::new(),
+            snap_sources: None,
             snap_indicator: None,
             section_grab: None,
             section_hover: None,

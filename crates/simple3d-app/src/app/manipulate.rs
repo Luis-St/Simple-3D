@@ -157,7 +157,7 @@ impl App {
                 self.drag = Drag::begin(&self.scene, gizmo, id, handle, view, cursor);
                 // Before anything has moved, while the evaluated meshes and the
                 // live positions still agree.
-                self.snap_sources = self.drag_feature_offsets(id);
+                self.snap_sources = self.drag_snap_sources(id);
                 self.snap_indicator = None;
             }
             gizmo::DragPhase::Idle => {}

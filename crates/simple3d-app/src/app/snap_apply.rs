@@ -39,8 +39,10 @@ impl App {
             correction
         };
         // Where every feature the carried body offers currently is.
-        let sources: Vec<Vec3> =
-            std::iter::once(Vec3::ZERO).chain(self.snap_sources.iter().copied()).map(|o| world_origin + o).collect();
+        let sources: Vec<Vec3> = std::iter::once(Vec3::ZERO)
+            .chain(self.drag_feature_offsets().iter().copied())
+            .map(|o| world_origin + o)
+            .collect();
         // Brought alongside first, aimed at second: the drag catches on whatever
         // the body has come near, and only when it has come near nothing does the
         // feature the pointer is over get its say.

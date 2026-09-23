@@ -25,6 +25,16 @@ pub(crate) type Snaps = std::rc::Rc<BodySnaps>;
 /// targets themselves.
 pub(crate) type CachedSnaps = ((usize, u8), Snaps);
 
+/// The features of the body a drag is carrying, as far as they have been
+/// found: where its origin stood and the meshes it had when the drag began,
+/// and the offsets from the one to the features of the other once a frame of
+/// the drag has snapped. See `App::drag_snap_sources`.
+pub(crate) struct SnapSources {
+    origin: Vec3,
+    meshes: Vec<(NodeId, std::sync::Arc<simple3d_geom::Mesh>)>,
+    offsets: Option<Vec<Vec3>>,
+}
+
 impl App {
     /// The dragged node and everything under it: the bodies a drag is carrying,
     /// which geometry snapping must never snap to.
@@ -48,15 +58,34 @@ impl App {
     /// was at the last evaluation while `Node::position` is already live. An
     /// offset from the origin is the same either way, being a fact about the
     /// shape rather than about where it currently sits.
-    pub(super) fn drag_feature_offsets(&self, id: NodeId) -> Vec<Vec3> {
-        let Some(frame) = self.evaluated.node_frames.get(&id) else { return Vec::new() };
-        let world_origin = frame.point(self.scene.node(id).position);
-        let mut offsets = Vec::new();
-        for n in self.drag_subtree(id) {
-            let Some(mesh) = self.evaluated.node_meshes.get(&n) else { continue };
-            offsets.extend(self.snaps_of(n, mesh).features.iter().map(|f| f.point - world_origin));
+    ///
+    /// What is taken on `Begin` is only the origin and the meshes, though:
+    /// finding the features of a large curved body is a weld and a hash map
+    /// over every edge -- 64 ms for a 160k-triangle sphere in a release build
+    /// -- and a drag that never snaps would pay it as a hitch the moment it
+    /// started. They are found from those, on the first frame that snaps.
+    pub(super) fn drag_snap_sources(&self, id: NodeId) -> Option<SnapSources> {
+        let frame = self.evaluated.node_frames.get(&id)?;
+        let meshes = self.drag_subtree(id).into_iter();
+        Some(SnapSources {
+            origin: frame.point(self.scene.node(id).position),
+            meshes: meshes.filter_map(|n| Some((n, self.evaluated.node_meshes.get(&n)?.clone()))).collect(),
+            offsets: None,
+        })
+    }
+
+    /// The carried body's features as offsets from its origin, found now if
+    /// this is the first frame of the drag that asks.
+    pub(super) fn drag_feature_offsets(&mut self) -> &[Vec3] {
+        let Some(mut sources) = self.snap_sources.take() else { return &[] };
+        if sources.offsets.is_none() {
+            let mut offsets = Vec::new();
+            for (n, mesh) in &sources.meshes {
+                offsets.extend(self.snaps_of(*n, mesh).features.iter().map(|f| f.point - sources.origin));
+            }
+            sources.offsets = Some(offsets);
         }
-        offsets
+        self.snap_sources.insert(sources).offsets.as_deref().unwrap_or_default()
     }
 
     /// Snap a resize so the face being pulled lands on the nearest feature of
