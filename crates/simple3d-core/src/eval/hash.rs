@@ -18,12 +18,27 @@ impl Evaluator {
         hasher.finish()
     }
 
+    /// Content hash of what a node makes before it is placed: its body and
+    /// everything under it, but not its own position, rotation, scale or
+    /// anchor. What a group's boolean is cached under, so moving the group
+    /// moves the result rather than working it out again.
+    pub(super) fn content_key(&self, scene: &Scene, id: NodeId) -> u64 {
+        let mut hasher = Hasher64::new();
+        self.hash_content(scene, id, &mut hasher);
+        hasher.finish()
+    }
+
     pub(super) fn hash_subtree(&self, scene: &Scene, id: NodeId, hasher: &mut Hasher64) {
         let node = scene.node(id);
         hash_vec3(hasher, node.position);
         hash_vec3(hasher, node.rotation);
         hash_vec3(hasher, crate::scene::Node::sane_scale(node.scale));
         (node.anchor == Anchor::Base).hash(&mut hasher.0);
+        self.hash_content(scene, id, hasher);
+    }
+
+    fn hash_content(&self, scene: &Scene, id: NodeId, hasher: &mut Hasher64) {
+        let node = scene.node(id);
         match &node.body {
             Body::Primitive { type_id, params } => {
                 type_id.hash(&mut hasher.0);

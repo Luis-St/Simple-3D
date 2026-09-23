@@ -143,12 +143,24 @@ void main() {
 /// single-precision arithmetic left here is on small numbers. The screen
 /// coordinates are the rasterizer's own, rows counted down from the top -- see
 /// `VERTEX_SOURCE` for why that is the right way up.
+///
+/// A body being dragged is drawn moved (see `render::Live`): `u_model` is the
+/// linear part of the move, put through every stored position before
+/// anything else is done with it, and the rest of the move is in the rows.
+/// `u_hide` is the stretch of vertices of a mesh that is not drawn at all --
+/// the dragged body's part of the scene -- and is empty otherwise.
 const RESIDENT_COMMON: &str = r#"
 uniform vec2 u_viewport;
 uniform vec2 u_depth;
 uniform vec4 u_row_x;
 uniform vec4 u_row_y;
 uniform vec4 u_row_key;
+uniform mat3 u_model;
+uniform uvec2 u_hide;
+
+bool hidden(uint vertex) {
+    return vertex >= u_hide.x && vertex < u_hide.y;
+}
 
 vec3 project(vec3 p) {
     return vec3(
@@ -178,7 +190,7 @@ ivec2 cell(uint index) {
 }
 
 vec3 position(uint vertex) {
-    return texelFetch(u_positions, cell(vertex), 0).xyz;
+    return u_model * texelFetch(u_positions, cell(vertex), 0).xyz;
 }
 "#;
 
@@ -209,10 +221,14 @@ out vec3 v_pos;
 flat out uint v_tag;
 
 void main() {
-    vec3 screen = project(in_pos);
+    vec3 pos = u_model * in_pos;
+    vec3 screen = project(pos);
     gl_Position = place(screen.xy, screen.z);
-    gl_ClipDistance[0] = dot(u_clip.xyz, in_pos) + u_clip.w;
-    v_pos = in_pos;
+    gl_ClipDistance[0] = dot(u_clip.xyz, pos) + u_clip.w;
+    // A triangle with any corner hidden goes, and a hidden part shares no
+    // corner with anything else -- see `Renderable::parts`.
+    gl_ClipDistance[1] = hidden(uint(gl_VertexID)) ? -1.0 : 1.0;
+    v_pos = pos;
     v_tag = min(u_tag_base + in_body + 1u, 65535u);
 }
 "#,
@@ -288,11 +304,14 @@ uniform vec4 u_clip;
 out vec3 g_screen;
 out float g_clip;
 flat out uint g_tag;
+flat out int g_hidden;
 
 void main() {
-    g_screen = project(in_pos);
-    g_clip = dot(u_clip.xyz, in_pos) + u_clip.w;
+    vec3 pos = u_model * in_pos;
+    g_screen = project(pos);
+    g_clip = dot(u_clip.xyz, pos) + u_clip.w;
     g_tag = u_tagged == 1 ? min(u_tag_base + in_body + 1u, 65535u) : 0u;
+    g_hidden = hidden(uint(gl_VertexID)) ? 1 : 0;
     gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
 }
 "#,
@@ -308,6 +327,7 @@ layout(line_strip, max_vertices = 2) out;
 in vec3 g_screen[];
 in float g_clip[];
 flat in uint g_tag[];
+flat in int g_hidden[];
 
 uniform vec4 u_colour;
 uniform float u_bias;
@@ -316,6 +336,9 @@ out vec4 v_colour;
 flat out uint v_tag;
 
 void main() {
+    if (g_hidden[0] == 1 || g_hidden[1] == 1) {
+        return;
+    }
     float bias = u_bias * (abs(g_screen[0].z) + abs(g_screen[1].z)) * 0.5;
     for (int i = 0; i < 2; i++) {
         gl_Position = place(g_screen[i].xy, g_screen[i].z + bias);
@@ -400,6 +423,9 @@ void line(vec3 a, vec3 b, float clip_a, float clip_b, vec2 shift, float bias, ui
 
 void main() {
     uvec4 edge = g_edge[0];
+    if (hidden(edge.x)) {
+        return;
+    }
     vec3 near_normal, near_centre, far_normal, far_centre;
     face(edge.z, near_normal, near_centre);
     face(edge.w, far_normal, far_centre);
@@ -453,9 +479,11 @@ layout(location = 0) in vec3 in_pos;
 layout(location = 1) in uint in_body;
 
 out vec3 g_pos;
+flat out int g_hidden;
 
 void main() {
-    g_pos = in_pos;
+    g_pos = u_model * in_pos;
+    g_hidden = hidden(uint(gl_VertexID)) ? 1 : 0;
     gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
 }
 "#,
@@ -469,6 +497,7 @@ layout(triangles) in;
 layout(line_strip, max_vertices = 6) out;
 
 in vec3 g_pos[];
+flat in int g_hidden[];
 
 // Up to three planes, each a distance from the stored position, and the
 // colour its crossing is drawn in.
@@ -483,6 +512,9 @@ out vec4 v_colour;
 flat out uint v_tag;
 
 void main() {
+    if (g_hidden[0] == 1 || g_hidden[1] == 1 || g_hidden[2] == 1) {
+        return;
+    }
     for (int k = 0; k < u_planes; k++) {
         float d[3];
         for (int i = 0; i < 3; i++) {

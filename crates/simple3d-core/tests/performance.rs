@@ -90,6 +90,15 @@ fn a_single_value_edit_reuses_the_cache() {
     // immediate. The point of per-subtree caching -- editing one dimension
     // re-evaluates one assembly, not fifty.
     let (mut scene, holes) = big_scene();
+    // Every hole a hair different, so no two assemblies are the same shape.
+    // The fixture's fifty are identical but for where they stand, and a group
+    // that has only moved gets its boolean back from the cache -- which makes
+    // a cold run of the fixture as cheap as an edit, and would leave nothing
+    // here to measure the cache against.
+    for (index, &hole) in holes.iter().enumerate() {
+        let diameter = ParamValue::Length(6.0 + index as f64 * 0.01);
+        scene.get_mut(hole).unwrap().params_mut().unwrap().insert("diameter_x".into(), diameter);
+    }
     let mut evaluator = Evaluator::new();
     let started = Instant::now();
     evaluator.evaluate(&scene, &Cancel::new());
@@ -117,4 +126,40 @@ fn a_repeat_evaluation_of_an_unchanged_scene_is_nearly_free() {
     let repeat = started.elapsed();
     eprintln!("repeat evaluation of an unchanged scene: {repeat:?}");
     assert!(repeat.as_secs_f64() < 0.5, "a pure cache hit took {repeat:?}");
+}
+
+#[test]
+fn moving_a_boolean_group_does_not_run_its_boolean_again() {
+    // Dragging a drilled plate moves it; nothing about the holes has changed,
+    // so the difference must come back from the cache and only be placed. It
+    // used to be keyed by where the group stands, and every step of the drag
+    // ran the whole boolean again.
+    let mut scene = Scene::new();
+    let root = scene.root();
+    let drilled = scene.add_group(GroupOp::Difference, root, 0);
+    scene.add_primitive("plate", drilled, 0).unwrap();
+    for i in 0..4 {
+        let hole = scene.add_primitive("cylinder", drilled, i + 1).unwrap();
+        let params = scene.get_mut(hole).unwrap().params_mut().unwrap();
+        params.insert("diameter_x".into(), ParamValue::Length(5.0 + i as f64 * 0.05));
+        params.insert("diameter_y".into(), ParamValue::Length(5.0));
+        params.insert("height".into(), ParamValue::Length(20.0));
+        let (row, column) = ((i / 2) as f64, (i % 2) as f64);
+        scene.get_mut(hole).unwrap().position = Vec3::new(column * 16.0 - 8.0, row * 16.0 - 8.0, 0.0);
+    }
+    let mut evaluator = Evaluator::new();
+    let started = Instant::now();
+    let before = evaluator.evaluate(&scene, &Cancel::new());
+    let cold = started.elapsed();
+
+    scene.get_mut(drilled).unwrap().position = Vec3::new(30.0, -12.0, 4.0);
+    let started = Instant::now();
+    let after = evaluator.evaluate(&scene, &Cancel::new());
+    let moved = started.elapsed();
+
+    eprintln!("cold {cold:?}, moved {moved:?}");
+    assert_eq!(before.mesh.triangle_count(), after.mesh.triangle_count());
+    let shift = after.mesh.bounds().unwrap().0 - before.mesh.bounds().unwrap().0;
+    assert!((shift - Vec3::new(30.0, -12.0, 4.0)).length() < 1e-9, "{shift:?}");
+    assert!(moved < cold / 5, "moving the group ran its boolean again: cold {cold:?} versus moved {moved:?}");
 }

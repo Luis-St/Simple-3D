@@ -43,11 +43,10 @@ impl Evaluator {
             Anchor::Base => self.subtree(scene, id, cancel).anchor_offset,
             Anchor::Centre => Vec3::ZERO,
         };
-        let own = parent.compose(&Xform::from_pos_rot_scale(
-            node.position,
-            node.rotation,
-            crate::scene::Node::sane_scale(node.scale),
-        ));
+        let placement =
+            Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale));
+        out.placements.insert(id, placement);
+        let own = parent.compose(&placement);
         let shifted = own.compose(&Xform::from_translation(anchor_offset));
         match &node.body {
             Body::Primitive { .. } => {

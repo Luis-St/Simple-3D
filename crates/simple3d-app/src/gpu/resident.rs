@@ -18,13 +18,14 @@
 use super::*;
 use crate::raster::Rgba;
 use crate::render::{
-    mark_colours, shade, tag_bases, to_vertex, Palette, Renderable, Request, Style, EDGE_BIAS, EDGE_ON, MARK_BIAS,
-    SELECTION_BIAS, SELECTION_CREASE,
+    mark_colours, shade, tag_bases, to_vertex, Live, Palette, Renderable, Request, Style, EDGE_BIAS, EDGE_ON,
+    MARK_BIAS, SELECTION_BIAS, SELECTION_CREASE,
 };
 use crate::snap::MARK_AXIS;
 use crate::view::View;
 use eframe::glow::{self, HasContext};
 use simple3d_core::config::DisplayMode;
+use simple3d_core::xform::Xform;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
@@ -76,6 +77,24 @@ pub(super) struct Needs {
     outline: bool,
 }
 
+/// Where a resident is drawn this frame: moved by a drag, and with a
+/// stretch of its vertices left out -- see [`crate::render::Live`]. Neither,
+/// for everything that is not being dragged.
+#[derive(Clone, Copy)]
+pub(super) struct Placing {
+    xform: Xform,
+    hide: [u32; 2],
+}
+
+impl Placing {
+    fn of(live: &Live, id: u64) -> Placing {
+        Placing {
+            xform: live.placed(id).copied().unwrap_or(Xform::IDENTITY),
+            hide: live.hidden(id).map_or([0, 0], |range| [range.start, range.end]),
+        }
+    }
+}
+
 /// What one frame asks of the resident meshes, in the passes that draw it.
 #[derive(Default)]
 pub(super) struct Plan {
@@ -93,6 +112,7 @@ pub(super) struct Plan {
 
 pub(super) struct FaceDraw {
     id: u64,
+    placing: Placing,
     mode: i32,
     base: Rgba,
     tag_base: u16,
@@ -100,6 +120,7 @@ pub(super) struct FaceDraw {
 
 pub(super) struct LineDraw {
     id: u64,
+    placing: Placing,
     colour: Rgba,
     bias: f32,
     tag_base: Option<u16>,
@@ -107,6 +128,7 @@ pub(super) struct LineDraw {
 
 pub(super) struct OutlineDraw {
     id: u64,
+    placing: Placing,
     colour: Rgba,
     tag_base: u16,
     /// Every crease rather than only those facing the eye: wireframe.
@@ -115,6 +137,7 @@ pub(super) struct OutlineDraw {
 
 pub(super) struct CrossingDraw {
     id: u64,
+    placing: Placing,
     /// Each plane, and the colour its crossing is drawn in.
     planes: Vec<(Plane, Rgba)>,
     /// Whether the crossing is cut by the section like everything on the
@@ -125,6 +148,7 @@ pub(super) struct CrossingDraw {
 
 pub(super) struct CapDraw {
     id: u64,
+    placing: Placing,
     pub(super) plane: Plane,
     pub(super) colour: Rgba,
     /// The polygon the plane leaves in the mesh's box, projected: the cap is
@@ -143,18 +167,20 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
     let mut plan = Plan::default();
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         let id = item.renderable.id;
+        let placing = Placing::of(&request.live, id);
         match item.style {
             Style::Solid => {
-                let solid = FaceDraw { id, mode: SOLID, base: opaque(palette.solid), tag_base };
+                let solid = FaceDraw { id, placing, mode: SOLID, base: opaque(palette.solid), tag_base };
                 match request.mode {
                     DisplayMode::Wireframe => {
-                        plan.lines.push(LineDraw { id, colour: palette.wire, bias: 0.0, tag_base: None })
+                        plan.lines.push(LineDraw { id, placing, colour: palette.wire, bias: 0.0, tag_base: None })
                     }
                     DisplayMode::Shaded => plan.solids.push(solid),
                     DisplayMode::ShadedWithEdges => {
                         plan.solids.push(solid);
                         plan.lines.push(LineDraw {
                             id,
+                            placing,
                             colour: palette.edge,
                             bias: EDGE_BIAS,
                             tag_base: Some(tag_base),
@@ -167,27 +193,33 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
                 if let Some(plane) = request.section {
                     if request.mode != DisplayMode::Wireframe {
                         let colour = shade(palette.cut, plane.normal, request.view.forward(), 255);
-                        plan.caps.push(CapDraw { id, plane, colour, fill: Vec::new() });
+                        plan.caps.push(CapDraw { id, placing, plane, colour, fill: Vec::new() });
                     }
                     if request.mode != DisplayMode::Shaded {
                         let colour = match request.mode {
                             DisplayMode::Wireframe => palette.wire,
                             _ => palette.edge,
                         };
-                        plan.crossings.push(CrossingDraw { id, planes: vec![(plane, colour)], clipped: false });
+                        plan.crossings.push(CrossingDraw {
+                            id,
+                            placing,
+                            planes: vec![(plane, colour)],
+                            clipped: false,
+                        });
                     }
                 }
             }
-            Style::Ghost => plan.ghosts.push(FaceDraw { id, mode: GHOST, base: palette.ghost, tag_base: 0 }),
+            Style::Ghost => plan.ghosts.push(FaceDraw { id, placing, mode: GHOST, base: palette.ghost, tag_base: 0 }),
             Style::Glow | Style::Selected => {
                 if item.style == Style::Glow {
-                    plan.glows.push(FaceDraw { id, mode: GLOW, base: palette.glow, tag_base: 0 });
+                    plan.glows.push(FaceDraw { id, placing, mode: GLOW, base: palette.glow, tag_base: 0 });
                 }
                 // Prepared without the adjacency, a body has only its creases
                 // to be outlined by -- `push_selection`'s fallback.
                 if item.renderable.outline.is_empty() {
                     plan.lines.push(LineDraw {
                         id,
+                        placing,
                         colour: palette.selected,
                         bias: SELECTION_BIAS,
                         tag_base: Some(tag_base),
@@ -195,6 +227,7 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
                 } else {
                     plan.outlines.push(OutlineDraw {
                         id,
+                        placing,
                         colour: palette.selected,
                         tag_base,
                         all_creases: request.mode == DisplayMode::Wireframe,
@@ -211,7 +244,9 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
             .collect();
         if !planes.is_empty() {
             for item in request.items.iter().filter(|item| item.style == Style::Solid) {
-                plan.crossings.push(CrossingDraw { id: item.renderable.id, planes: planes.clone(), clipped: true });
+                let id = item.renderable.id;
+                let placing = Placing::of(&request.live, id);
+                plan.crossings.push(CrossingDraw { id, placing, planes: planes.clone(), clipped: true });
             }
         }
     }
@@ -349,11 +384,14 @@ impl Resident {
     /// depth key, each a dot product with the stored position plus a constant.
     /// Exactly `View::to_view` followed by `to_vertex`, folded together with
     /// the offset the positions are stored at, in double precision.
-    fn rows(&self, view: &View) -> [[f32; 4]; 3] {
+    ///
+    /// Moved, the rows are for the moved origin, and are applied to the stored
+    /// position after `u_model` -- the move's linear part -- has been.
+    fn rows(&self, view: &View, placing: &Placing) -> [[f32; 4]; 3] {
         let (right, up) = view.basis();
         let forward = view.forward();
         let s = view.pixels_per_mm();
-        let d = self.origin - view.eye();
+        let d = placing.xform.point(self.origin) - view.eye();
         let row = |v: Vec3, c: f64| [v.x as f32, v.y as f32, v.z as f32, c as f32];
         [
             row(right * s, view.centre.x as f64 + d.dot(right) * s),
@@ -362,18 +400,19 @@ impl Resident {
         ]
     }
 
-    /// A plane as the shaders test it: a distance from the stored position
-    /// that is positive where `Plane::depth` is.
-    fn plane(&self, plane: &Plane) -> [f32; 4] {
+    /// A plane as the shaders test it: a distance from the stored position,
+    /// moved, that is positive where `Plane::depth` is.
+    fn plane(&self, plane: &Plane, placing: &Placing) -> [f32; 4] {
         let n = plane.normal;
-        [n.x as f32, n.y as f32, n.z as f32, (n.dot(self.origin) - plane.offset) as f32]
+        let origin = placing.xform.point(self.origin);
+        [n.x as f32, n.y as f32, n.z as f32, (n.dot(origin) - plane.offset) as f32]
     }
 
     /// The section plane as the shaders clip with it: positive where the model
     /// is kept, which is where `Plane::depth` is negative.
-    fn clip(&self, section: Option<Plane>) -> [f32; 4] {
+    fn clip(&self, section: Option<Plane>, placing: &Placing) -> [f32; 4] {
         match section {
-            Some(plane) => self.plane(&plane).map(|value| -value),
+            Some(plane) => self.plane(&plane, placing).map(|value| -value),
             None => [0.0, 0.0, 0.0, 1.0],
         }
     }
@@ -387,14 +426,15 @@ impl Resident {
     }
 
     /// The depth keys this mesh can reach under `view`: its box's corners.
-    pub(super) fn keys(&self, view: &View) -> impl Iterator<Item = f32> {
-        let [_, _, key] = self.rows(view);
-        let (lo, hi) = (self.lo, self.hi);
+    pub(super) fn keys(&self, view: &View, placing: &Placing) -> impl Iterator<Item = f32> {
+        let [_, _, key] = self.rows(view, placing);
+        let (lo, hi, xform) = (self.lo, self.hi, placing.xform);
         (0..8).map(move |corner| {
             let x = if corner & 1 == 0 { lo.x } else { hi.x };
             let y = if corner & 2 == 0 { lo.y } else { hi.y };
             let z = if corner & 4 == 0 { lo.z } else { hi.z };
-            key[0] * x as f32 + key[1] * y as f32 + key[2] * z as f32 + key[3]
+            let p = xform.vector(Vec3::new(x, y, z));
+            key[0] * p.x as f32 + key[1] * p.y as f32 + key[2] * p.z as f32 + key[3]
         })
     }
 
@@ -402,15 +442,15 @@ impl Resident {
     /// order round it: everything the cap can cover. The box is taken a hair
     /// larger than the mesh, so a cut lying exactly on one of its faces -- a
     /// section at the base of a shape standing on the ground -- still meets it.
-    pub(super) fn cap_polygon(&self, plane: &Plane) -> Vec<Vec3> {
+    pub(super) fn cap_polygon(&self, plane: &Plane, placing: &Placing) -> Vec<Vec3> {
         let margin = Vec3::new(1.0, 1.0, 1.0) * (self.extent() * 1e-3 + 1e-6);
         let (lo, hi) = (self.origin + self.lo - margin, self.origin + self.hi + margin);
         let corner = |index: usize| {
-            Vec3::new(
+            placing.xform.point(Vec3::new(
                 if index & 1 == 0 { lo.x } else { hi.x },
                 if index & 2 == 0 { lo.y } else { hi.y },
                 if index & 4 == 0 { lo.z } else { hi.z },
-            )
+            ))
         };
         let mut points: Vec<Vec3> = Vec::new();
         for a in 0..8 {
@@ -576,7 +616,7 @@ impl Gpu {
     pub(super) fn place_caps(&self, view: &View, plan: &mut Plan, passes: &mut Passes) {
         for cap in &mut plan.caps {
             let Some(resident) = self.resident.get(&cap.id) else { continue };
-            let polygon = resident.cap_polygon(&cap.plane);
+            let polygon = resident.cap_polygon(&cap.plane, &cap.placing);
             let projected: Vec<_> = polygon.iter().map(|&p| to_vertex(view, view.to_view(p))).collect();
             for vertex in &projected {
                 passes.saw(vertex.key);
@@ -606,6 +646,7 @@ impl Gpu {
         let program = &self.faces;
         gl.use_program(Some(program.program));
         gl.enable(glow::CLIP_DISTANCE0);
+        gl.enable(glow::CLIP_DISTANCE1);
         set2(gl, program, "u_viewport", viewport);
         set2(gl, program, "u_depth", depth);
         set_forward(gl, program, view);
@@ -614,7 +655,7 @@ impl Gpu {
         for draw in draws {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
-            set_projection(gl, program, resident, view, section);
+            set_projection(gl, program, resident, view, section, &draw.placing);
             if let Some(at) = program.at("u_base") {
                 gl.uniform_4_f32_slice(Some(at), &draw.base.map(|c| c as f32));
             }
@@ -638,6 +679,7 @@ impl Gpu {
         }
         gl.disable(glow::CULL_FACE);
         gl.disable(glow::CLIP_DISTANCE0);
+        gl.disable(glow::CLIP_DISTANCE1);
         gl.bind_texture(glow::TEXTURE_2D, None);
         gl.bind_vertex_array(Some(self.buffer.array));
     }
@@ -666,7 +708,7 @@ impl Gpu {
             if edges.count == 0 {
                 continue;
             }
-            set_projection(gl, program, resident, view, section);
+            set_projection(gl, program, resident, view, section, &draw.placing);
             if let Some(at) = program.at("u_colour") {
                 gl.uniform_4_f32_slice(Some(at), &as_float(draw.colour));
             }
@@ -722,7 +764,7 @@ impl Gpu {
             if outline.count == 0 {
                 continue;
             }
-            set_projection(gl, program, resident, view, section);
+            set_projection(gl, program, resident, view, section, &draw.placing);
             if let Some(at) = program.at("u_colour") {
                 gl.uniform_4_f32_slice(Some(at), &as_float(draw.colour));
             }
@@ -771,8 +813,9 @@ impl Gpu {
         for draw in draws {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
-            set_projection(gl, program, resident, view, section.filter(|_| draw.clipped));
-            let planes: Vec<[f32; 4]> = draw.planes.iter().map(|(plane, _)| resident.plane(plane)).collect();
+            set_projection(gl, program, resident, view, section.filter(|_| draw.clipped), &draw.placing);
+            let planes: Vec<[f32; 4]> =
+                draw.planes.iter().map(|(plane, _)| resident.plane(plane, &draw.placing)).collect();
             let colours: Vec<[f32; 4]> = draw.planes.iter().map(|&(_, colour)| as_float(colour)).collect();
             set_i32(gl, program, "u_planes", planes.len() as i32);
             if let Some(at) = program.at("u_plane[0]") {
@@ -836,14 +879,16 @@ impl Gpu {
             let program = &self.faces;
             gl.use_program(Some(program.program));
             gl.enable(glow::CLIP_DISTANCE0);
+            gl.enable(glow::CLIP_DISTANCE1);
             set2(gl, program, "u_viewport", viewport);
             set2(gl, program, "u_depth", depth);
-            set_projection(gl, program, resident, view, section);
+            set_projection(gl, program, resident, view, section, &cap.placing);
             set_i32(gl, program, "u_mode", GHOST);
             set_i32(gl, program, "u_painted", 0);
             gl.bind_vertex_array(Some(faces.array));
             gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
             gl.disable(glow::CLIP_DISTANCE0);
+            gl.disable(glow::CLIP_DISTANCE1);
 
             gl.color_mask(true, true, true, true);
             gl.depth_mask(true);
@@ -863,7 +908,8 @@ impl Gpu {
     pub(super) fn see_resident(&self, request: &Request<'_>, passes: &mut Passes) {
         for item in &request.items {
             let Some(resident) = self.resident.get(&item.renderable.id) else { continue };
-            for key in resident.keys(&request.view) {
+            let placing = Placing::of(&request.live, item.renderable.id);
+            for key in resident.keys(&request.view, &placing) {
                 passes.saw(key);
                 passes.saw(key + MARK_BIAS * key.abs());
             }
@@ -896,15 +942,24 @@ unsafe fn set_projection(
     resident: &Resident,
     view: &View,
     section: Option<Plane>,
+    placing: &Placing,
 ) {
-    let rows = resident.rows(view);
+    let rows = resident.rows(view, placing);
     for (name, row) in ["u_row_x", "u_row_y", "u_row_key"].into_iter().zip(rows) {
         if let Some(at) = program.at(name) {
             gl.uniform_4_f32_slice(Some(at), &row);
         }
     }
     if let Some(at) = program.at("u_clip") {
-        gl.uniform_4_f32_slice(Some(at), &resident.clip(section));
+        gl.uniform_4_f32_slice(Some(at), &resident.clip(section, placing));
+    }
+    if let Some(at) = program.at("u_model") {
+        // Row by row, and said to be: `Xform` keeps its matrix that way.
+        let m: Vec<f32> = placing.xform.m.as_flattened().iter().map(|&value| value as f32).collect();
+        gl.uniform_matrix_3_f32_slice(Some(at), true, &m);
+    }
+    if let Some(at) = program.at("u_hide") {
+        gl.uniform_2_u32(Some(at), placing.hide[0], placing.hide[1]);
     }
 }
 

@@ -44,6 +44,20 @@ pub struct Evaluated {
     /// assembly it evaluates to is exactly what a user asking "how big is this"
     /// means.
     pub node_world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
+    /// Which vertices of `mesh` each node's geometry is, for every node whose
+    /// geometry came through into it untouched -- laid beside the rest, or
+    /// unioned with nothing it touched, all the way up to the root. A node
+    /// that went into a boolean with something else, or into a pattern, is
+    /// not here: its geometry is not in `mesh` as it was.
+    ///
+    /// Its triangles are the ones that use those vertices, and they are all
+    /// its own unless another node's geometry shares a position with it, which
+    /// the viewport checks for before relying on it.
+    pub ranges: BTreeMap<NodeId, std::ops::Range<u32>>,
+    /// Each node's own placement in its parent's frame -- position, rotation
+    /// and scale -- as it stood for this evaluation. With `node_frames`, what
+    /// says how far a node has been moved since.
+    pub placements: BTreeMap<NodeId, Xform>,
     /// Nodes whose own evaluation failed. Non-empty means export must refuse.
     pub errors: Vec<NodeError>,
     /// Set when the run was superseded by a later edit; the result is partial

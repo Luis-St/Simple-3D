@@ -40,7 +40,20 @@ pub(crate) fn tag_bases(items: &[Item<'_>]) -> Vec<u16> {
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Plane>) -> AxisMaterial {
+    axis_material_live(items, grid, section, &Live::default())
+}
+
+/// The same, for a frame with a body being dragged (see [`Live`]).
+///
+/// The spans were found where the body stood when the scene was evaluated.
+/// Its stretch of the scene is not drawn, so it is not in the axes' way there
+/// any more; and where it is drawn instead, moved, the spans no longer say
+/// where the axes run through it. The body is left out of the axis rule until
+/// the drag ends and the scene is evaluated with it where it now is -- an axis
+/// is drawn through it for the length of the drag.
+pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: Option<Plane>, live: &Live) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
         through: [Vec::new(), Vec::new(), Vec::new()],
@@ -51,9 +64,20 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
         material.reach = material.reach.max(item.renderable.reach);
         // A ghost is see-through, so the axis inside it is too -- and it never
         // reaches the depth buffer either way.
-        if item.style != Style::Solid {
+        if item.style != Style::Solid || live.placed(item.renderable.id).is_some() {
             continue;
         }
+        // The bodies the drag has taken out of this item.
+        let gone: Vec<u16> = match live.hidden(item.renderable.id) {
+            Some(range) => {
+                let mut bodies: Vec<u16> =
+                    item.renderable.bodies.get(range.start as usize..range.end as usize).unwrap_or(&[]).to_vec();
+                bodies.sort_unstable();
+                bodies.dedup();
+                bodies
+            }
+            None => Vec::new(),
+        };
         for axis in 0..3 {
             if !grid.axes[axis] {
                 continue;
@@ -62,6 +86,9 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
             // runs through a mesh is a property of the mesh, and the mesh has
             // not moved since the renderable was made.
             for &(span, body) in &item.renderable.axis_spans[axis] {
+                if gone.binary_search(&body).is_ok() {
+                    continue;
+                }
                 let tag = body_tag(body, tag_base);
                 // Material the section took away is no longer in the axis's
                 // way: the line is drawn through the space the cut opened, the

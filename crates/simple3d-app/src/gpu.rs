@@ -10,6 +10,12 @@
 //! code paths: what `render.rs` still prepares for both is only what does not
 //! come off a mesh -- the grid, the axes and their rule, a tool's preview.
 //!
+//! A body being dragged is moved on the card as well: its stretch of the
+//! scene is left out and its own renderable is drawn with the drag's
+//! transform (`render::Live`), so a drag that only moves, turns or scales a
+//! body draws every frame without the scene being evaluated, and evaluates it
+//! once when the body is let go.
+//!
 //! The two pictures are alike, not identical, and deliberately so. A GPU draws
 //! a line by rasterizing it, where `raster.rs` walks it pixel by pixel, so a
 //! one-pixel line lands slightly differently; and primitives are batched by

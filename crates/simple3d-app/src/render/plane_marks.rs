@@ -42,7 +42,7 @@ pub(crate) fn push_plane_marks(
             }
             // Where the plane crosses the surface does not depend on the
             // camera, so the renderable found it once when it was made.
-            for &[a, b] in &item.renderable.plane_marks[axis] {
+            for &[a, b] in &item.renderable.plane_marks()[axis] {
                 // A mark lies on a surface, so it goes wherever that surface
                 // does.
                 let Some((a, b)) = kept_line(section, a, b) else { continue };

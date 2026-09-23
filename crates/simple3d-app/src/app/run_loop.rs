@@ -39,10 +39,14 @@ impl App {
                 self.frame_all();
             }
             self.scene_renderable = renderable;
+            self.settle();
             self.renderable_key = u64::MAX;
             self.image_key = u64::MAX;
         }
-        if self.dirty {
+        // A drag the GPU draws for itself is evaluated once, when it ends:
+        // every frame's picture comes from the card, and evaluating the scene
+        // on each would only compete with it (see `App::live_drag`).
+        if self.dirty && self.live_drag().is_none() {
             self.worker.want(self.wanted_renderables());
             self.worker.submit(&self.scene);
             self.dirty = false;

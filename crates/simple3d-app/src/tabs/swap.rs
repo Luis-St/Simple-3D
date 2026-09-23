@@ -108,8 +108,9 @@ impl App {
 
         // Nothing cached about the model on screen survives a change of model.
         self.evaluation_generation += 1;
-        self.scene_renderable = crate::render::Renderable::prepare(&self.evaluated.mesh);
+        self.scene_renderable = crate::render::Renderable::prepare_scene(&self.evaluated.mesh, &self.evaluated.ranges);
         self.node_renderables.clear();
+        self.settling = None;
         self.renderable_key = u64::MAX;
         self.invalidate_image();
 

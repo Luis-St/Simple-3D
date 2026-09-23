@@ -12,7 +12,7 @@ pub use palette::Palette;
 pub(crate) use palette::*;
 mod request;
 pub(crate) use request::*;
-pub use request::{Grid, Item, Request, Style};
+pub use request::{Grid, Item, Live, Request, Style};
 mod frame;
 pub use frame::{prepare_frame, prepare_frame_for, render_prepared, Geometry, Prepared};
 mod step;

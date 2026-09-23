@@ -62,6 +62,7 @@ pub(crate) fn ground_only(pitch: f64) -> (Image, Palette) {
         grid: Grid { visible: true, spacing: 10.0, axes: [false; 3], style: AxisStyle::Grid, plane_marks: false },
         items: Vec::new(),
         preview: Vec::new(),
+        live: Live::default(),
         section: None,
     };
     (render(&req), req.palette)

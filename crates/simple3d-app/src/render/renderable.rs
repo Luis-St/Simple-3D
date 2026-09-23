@@ -2,7 +2,11 @@
 //! drawing on it.
 
 use super::{axis_inside_spans, map_in_order};
+use simple3d_core::scene::NodeId;
 use simple3d_geom::{Mesh, Vec3};
+use std::collections::BTreeMap;
+use std::ops::Range;
+use std::sync::OnceLock;
 
 /// An edge of the surface with the triangles that meet at it.
 ///
@@ -72,7 +76,19 @@ pub struct Renderable {
     /// Per principal plane, numbered by the axis it is perpendicular to, the
     /// segments where it crosses the surface: the plane marks, which used to be
     /// found anew on every frame from every triangle, three times over.
-    pub(crate) plane_marks: [Vec<[Vec3; 2]>; 3],
+    ///
+    /// Found the first time the software renderer asks for them, and only
+    /// then: the GPU finds the marks on the card and never does.
+    plane_marks: OnceLock<[Vec<[Vec3; 2]>; 3]>,
+    /// Which welded vertices are each node's, for every node whose geometry
+    /// is a stretch of this mesh of its own -- untouched by any boolean, see
+    /// `Evaluated::ranges`, and sharing no vertex with anything else. A node's
+    /// triangles and edges are exactly the ones that use its vertices, which
+    /// is what lets the GPU leave a node out of the picture while it is being
+    /// dragged and draw it where the drag has got to instead.
+    ///
+    /// Empty for anything but the whole scene.
+    pub parts: BTreeMap<NodeId, Range<u32>>,
     /// Which renderable this is, unique for the life of the process. What the
     /// GPU renderer keys the copy of the mesh it keeps on the card by: the
     /// renderable never changes once made, so as long as the same one is
@@ -88,28 +104,35 @@ fn next_id() -> u64 {
 
 impl Renderable {
     pub fn prepare(mesh: &Mesh) -> Renderable {
-        Renderable::prepare_with(mesh, false)
+        Renderable::prepare_with(mesh, false, &BTreeMap::new())
+    }
+
+    /// The whole evaluated scene, with where each node that came through the
+    /// evaluation untouched is in it: `ranges` is `Evaluated::ranges`, in
+    /// the scene mesh's own vertices, and comes out as [`Renderable::parts`].
+    pub fn prepare_scene(mesh: &Mesh, ranges: &BTreeMap<NodeId, Range<u32>>) -> Renderable {
+        Renderable::prepare_with(mesh, false, ranges)
     }
 
     /// The same, plus the edge adjacency the selection outline needs. For the
     /// nodes that may be drawn as a selection, which is a handful rather than
     /// the whole scene.
     pub fn prepare_outlined(mesh: &Mesh) -> Renderable {
-        Renderable::prepare_with(mesh, true)
+        Renderable::prepare_with(mesh, true, &BTreeMap::new())
     }
 
-    pub(super) fn prepare_with(mesh: &Mesh, outlined: bool) -> Renderable {
-        let welded = mesh.weld();
+    pub(super) fn prepare_with(mesh: &Mesh, outlined: bool, ranges: &BTreeMap<NodeId, Range<u32>>) -> Renderable {
+        let (welded, remap) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
         // The rest is independent work over the same welded mesh, so it runs
         // side by side: on a large import each part is a pass over millions of
         // triangles, and one after another they were most of a second.
-        let (table, bodies, plane_marks) = std::thread::scope(|scope| {
+        let (table, bodies, parts) = std::thread::scope(|scope| {
             let table = scope.spawn(|| EdgeTable::of(&welded));
-            let marks = scope.spawn(|| std::array::from_fn(|axis| plane_marks_of(&welded, axis)));
+            let parts = scope.spawn(|| parts_of(&remap, welded.positions.len(), ranges));
             let bodies = bodies_of(&welded);
-            (table.join().expect("the edge table panicked"), bodies, marks.join().expect("the plane marks panicked"))
+            (table.join().expect("the edge table panicked"), bodies, parts.join().expect("the parts panicked"))
         });
         let (edges, outline, axis_spans) = std::thread::scope(|scope| {
             let outline = scope.spawn(|| if outlined { table.border_edges() } else { Vec::new() });
@@ -128,7 +151,8 @@ impl Renderable {
             body_count,
             reach,
             axis_spans,
-            plane_marks,
+            plane_marks: OnceLock::new(),
+            parts,
             id: next_id(),
         }
     }
@@ -143,7 +167,8 @@ impl Renderable {
             body_count: 0,
             reach: 0.0,
             axis_spans: [Vec::new(), Vec::new(), Vec::new()],
-            plane_marks: [Vec::new(), Vec::new(), Vec::new()],
+            plane_marks: OnceLock::new(),
+            parts: BTreeMap::new(),
             id: next_id(),
         }
     }
@@ -158,6 +183,53 @@ impl Renderable {
     pub(super) fn body_tag(&self, vertex: usize, base: u16) -> u16 {
         self.bodies.get(vertex).map_or(0, |body| body_tag(*body, base))
     }
+
+    /// The plane marks -- see the field.
+    pub(crate) fn plane_marks(&self) -> &[Vec<[Vec3; 2]>; 3] {
+        self.plane_marks.get_or_init(|| std::array::from_fn(|axis| plane_marks_of(&self.mesh, axis)))
+    }
+}
+
+/// Which welded vertices are each node's -- [`Renderable::parts`] -- from
+/// where the weld sent each of the mesh's own vertices and which of those
+/// were each node's.
+///
+/// Welded vertices are numbered in the order their first copy appears, so a
+/// node whose vertices are a stretch of the mesh and are shared with nothing
+/// outside it welds to a stretch as well: the ones first seen inside its own.
+/// It is kept when that holds -- nothing it welds to was seen before it began
+/// or is used again after it ends -- and dropped when it does not, which is
+/// what two bodies laid side by side and touching do.
+fn parts_of(remap: &[u32], welded: usize, ranges: &BTreeMap<NodeId, Range<u32>>) -> BTreeMap<NodeId, Range<u32>> {
+    if ranges.is_empty() {
+        return BTreeMap::new();
+    }
+    // For each welded vertex, the first and the last of the mesh's vertices
+    // that went into it.
+    let mut first = vec![u32::MAX; welded];
+    let mut last = vec![0u32; welded];
+    for (index, &to) in remap.iter().enumerate() {
+        let to = to as usize;
+        first[to] = first[to].min(index as u32);
+        last[to] = index as u32;
+    }
+    let mut parts = BTreeMap::new();
+    for (&id, range) in ranges {
+        let (start, end) = (range.start as usize, range.end as usize);
+        if start >= end || end > remap.len() {
+            continue;
+        }
+        let lo = remap[start..end].iter().copied().min().unwrap_or(0) as usize;
+        let hi = remap[start..end].iter().copied().max().unwrap_or(0) as usize + 1;
+        // The first copy of every one of them is inside the range -- first
+        // copies come in order, so the lowest and the highest decide -- and
+        // no copy of any of them comes after it.
+        let owned = first[lo] >= range.start && first[hi - 1] < range.end;
+        if owned && last[lo..hi].iter().all(|&at| at < range.end) {
+            parts.insert(id, lo as u32..hi as u32);
+        }
+    }
+    parts
 }
 
 /// The depth-buffer tag a body of one item carries, where `base` is where that

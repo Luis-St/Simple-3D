@@ -85,6 +85,8 @@ pub fn empty_evaluation() -> Evaluated {
         node_frames: BTreeMap::new(),
         node_local_bounds: BTreeMap::new(),
         node_world_bounds: BTreeMap::new(),
+        ranges: BTreeMap::new(),
+        placements: BTreeMap::new(),
         errors: Vec::new(),
         cancelled: false,
     }

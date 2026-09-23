@@ -61,7 +61,7 @@ pub enum Geometry {
 }
 
 pub fn prepare_frame_for(request: &Request<'_>, geometry: Geometry) -> Prepared {
-    let material = axis_material(&request.items, &request.grid, request.section);
+    let material = axis_material_live(&request.items, &request.grid, request.section, &request.live);
     let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
     Prepared { steps: prepare_with(request, geometry), axes }
 }

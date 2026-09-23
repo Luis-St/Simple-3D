@@ -63,6 +63,23 @@ pub(crate) fn paint_scene(
             None => &app.scene_renderable,
         };
         let mut items: Vec<Item> = vec![Item { renderable: solid, style: Style::Solid }];
+        // A body being dragged, drawn where the drag has got to: left out of
+        // the scene and drawn from its own renderable instead, moved.
+        let mut live = render::Live::default();
+        let dragged = app.live_move().filter(|_| std::ptr::eq(solid, &app.scene_renderable));
+        if let Some((id, part, moved)) = &dragged {
+            if let Some(own) = app.node_renderables.get(id) {
+                live.hidden.push((solid.id, part.clone()));
+                items.push(Item { renderable: own, style: Style::Solid });
+            }
+            // Its own renderable, and those of everything under it, wherever
+            // they are drawn -- as the solid, the selection or a ghost.
+            for (other, renderable) in &app.node_renderables {
+                if other == id || app.scene.is_ancestor_of(*id, *other) {
+                    live.placed.push((renderable.id, *moved));
+                }
+            }
+        }
         // Ghosts before the selection outline, so the outline stays readable.
         let ghosts = app.ghosts();
         for (id, renderable) in &app.node_renderables {
@@ -99,6 +116,7 @@ pub(crate) fn paint_scene(
                 plane_marks: app.scene.settings.plane_marks,
             },
             items,
+            live,
             // The split tool's cells, drawn on the model with the depth buffer
             // rather than over the finished picture, so the far side of the
             // shape hides the ones behind it (issue 82).

@@ -102,6 +102,13 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.plane_marks.hash(&mut hasher);
     // The cut is part of the picture, so every number that moves it redraws it.
     crate::section_tool::hash_section(&app.scene.settings.section, &mut hasher);
+    // A body the GPU draws where a drag has got to moves without anything
+    // above changing.
+    if let Some((_, _, moved)) = app.live_move() {
+        for value in moved.m.as_flattened().iter().chain([moved.t.x, moved.t.y, moved.t.z].iter()) {
+            value.to_bits().hash(&mut hasher);
+        }
+    }
     let camera = app.scene.camera;
     for value in
         [camera.target.x, camera.target.y, camera.target.z, camera.distance, camera.yaw, camera.pitch, camera.fov_deg]

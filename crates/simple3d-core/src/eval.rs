@@ -50,6 +50,12 @@ pub struct NodeError {
 pub struct Evaluator {
     primitives: BTreeMap<u64, Arc<Mesh>>,
     subtrees: BTreeMap<u64, Arc<SubtreeResult>>,
+    /// What a group, a split or a pattern makes of its children before it is
+    /// placed, by [`Evaluator::content_key`]. A subtree's own key covers where
+    /// it stands, so moving a group used to miss the cache and run its whole
+    /// boolean again for a result that had only moved; now it misses only the
+    /// cheap last step of placing the result.
+    locals: BTreeMap<u64, Arc<LocalResult>>,
     /// Each node's world-space mesh from the last run, with what it was made
     /// from. A node whose source mesh, placement and colour are all unchanged
     /// gets the very same `Arc` back rather than a fresh copy, which is what
@@ -84,4 +90,29 @@ struct SubtreeResult {
     /// rotation. Kept so the per-node world transforms agree with the mesh.
     anchor_offset: Vec3,
     errors: Vec<NodeError>,
+    /// The children whose geometry is in `mesh` as it came, untouched by the
+    /// node's own operation: each by its place among the visible children,
+    /// with where its first vertex is. See [`Evaluated::ranges`].
+    passed: Vec<(usize, u32)>,
+}
+
+/// A node's geometry in its own frame, before its anchor, scale, rotation and
+/// position -- see `Evaluator::locals`.
+#[derive(Debug)]
+struct LocalResult {
+    mesh: Arc<Mesh>,
+    errors: Vec<NodeError>,
+    passed: Vec<(usize, u32)>,
+    /// The node it was worked out for. Its errors name that node and the ones
+    /// under it, so a result with errors is only handed back to the node it
+    /// names -- another group of the same content works its own out.
+    node: NodeId,
+}
+
+impl SubtreeResult {
+    /// What a run that was abandoned part-way leaves: nothing, and never
+    /// cached.
+    fn abandoned(errors: Vec<NodeError>) -> SubtreeResult {
+        SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors, passed: Vec::new() }
+    }
 }

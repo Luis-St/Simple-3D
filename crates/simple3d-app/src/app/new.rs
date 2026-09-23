@@ -63,6 +63,7 @@ impl App {
             renderable_key: u64::MAX,
             mode: Mode::Move,
             drag: None,
+            settling: None,
             hover_handle: None,
             grabbed: None,
             viewport_rect: egui::Rect::NOTHING,

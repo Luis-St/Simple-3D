@@ -83,7 +83,7 @@ pub(crate) fn a_failing_boolean_names_the_offending_node() {
     let mut sliver = Mesh::new();
     sliver.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
     let mut errors = Vec::new();
-    let out = combine(GroupOp::Union, &[sliver.clone(), sliver], 42, "Bad group", &mut errors, &Cancel::new());
+    let (out, _) = combine(GroupOp::Union, &[sliver.clone(), sliver], 42, "Bad group", &mut errors, &Cancel::new());
     assert_eq!(errors.len(), 1);
     assert_eq!(errors[0].node, 42);
     assert_eq!(errors[0].name, "Bad group");
@@ -115,4 +115,32 @@ pub(crate) fn a_failing_boolean_does_not_stop_the_rest_of_the_scene_previewing()
     let (_, hi) = out.mesh.bounds().unwrap();
     assert!(hi.x > 180.0, "the healthy plate is missing from the preview");
     let _ = bad;
+}
+
+#[test]
+pub(crate) fn two_broken_groups_alike_are_each_named() {
+    // A group's boolean is cached by its content alone, so two groups of the
+    // same content share it wherever they stand. A failed one names the group
+    // it failed in, though, and the other group has to be named for its own.
+    let mut sliver = Mesh::new();
+    sliver.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
+    let mut scene = Scene::new();
+    let root = scene.root();
+    let first = scene.add_group(GroupOp::Union, root, 0);
+    let a = scene.add_mesh("Sliver", crate::mesh_data::MeshData::new(sliver), first, 0);
+    let shared = scene.node(a).body.clone();
+    let b = scene.add_mesh("Sliver", crate::mesh_data::MeshData::new(Mesh::new()), first, 1);
+    scene.get_mut(b).unwrap().body = shared.clone();
+    scene.get_mut(b).unwrap().position = Vec3::new(1.0, 1.0, 0.0);
+    let second = scene.add_group(GroupOp::Union, root, 1);
+    scene.get_mut(second).unwrap().position = Vec3::new(100.0, 0.0, 0.0);
+    for index in 0..2 {
+        let copy = scene.add_mesh("Sliver", crate::mesh_data::MeshData::new(Mesh::new()), second, index);
+        scene.get_mut(copy).unwrap().body = shared.clone();
+        scene.get_mut(copy).unwrap().position = scene.node(if index == 0 { a } else { b }).position;
+    }
+
+    let out = Evaluator::new().evaluate(&scene, &Cancel::new());
+    let named: Vec<NodeId> = out.errors.iter().map(|error| error.node).collect();
+    assert!(named.contains(&first) && named.contains(&second), "{:?}", out.errors);
 }

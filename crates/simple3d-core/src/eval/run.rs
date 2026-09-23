@@ -7,7 +7,13 @@ use std::collections::BTreeMap;
 
 impl Evaluator {
     pub fn new() -> Evaluator {
-        Evaluator { primitives: BTreeMap::new(), subtrees: BTreeMap::new(), worlds: BTreeMap::new(), cache_limit: 4096 }
+        Evaluator {
+            primitives: BTreeMap::new(),
+            subtrees: BTreeMap::new(),
+            locals: BTreeMap::new(),
+            worlds: BTreeMap::new(),
+            cache_limit: 4096,
+        }
     }
 
     pub fn cached_subtrees(&self) -> usize {
@@ -17,6 +23,7 @@ impl Evaluator {
     pub fn clear(&mut self) {
         self.primitives.clear();
         self.subtrees.clear();
+        self.locals.clear();
         self.worlds.clear();
     }
 
@@ -44,6 +51,9 @@ impl Evaluator {
         if self.subtrees.len() > self.cache_limit {
             self.subtrees.clear();
         }
+        if self.locals.len() > self.cache_limit {
+            self.locals.clear();
+        }
         if self.primitives.len() > self.cache_limit {
             self.primitives.clear();
         }
@@ -53,6 +63,8 @@ impl Evaluator {
         let result = self.subtree(scene, scene.root(), cancel);
         let mut collected = Collected::default();
         self.walk(scene, scene.root(), Xform::IDENTITY, &mut collected, cancel);
+        let mut ranges = BTreeMap::new();
+        self.ranges(scene, scene.root(), 0, cancel, &mut ranges);
         // A node no longer in the tree has nothing to be reused for.
         self.worlds.retain(|id, _| collected.meshes.contains_key(id));
         self.trim();
@@ -64,6 +76,8 @@ impl Evaluator {
             node_frames: collected.frames,
             node_local_bounds: collected.local_bounds,
             node_world_bounds: collected.world_bounds,
+            ranges,
+            placements: collected.placements,
             errors: result.errors.clone(),
             cancelled: cancel.is_cancelled(),
         }

@@ -60,6 +60,7 @@ impl App {
     ) {
         match phase {
             gizmo::DragPhase::Cancel => {
+                self.settling = None;
                 if let Some(drag) = self.drag.take() {
                     drag.cancel(&mut self.scene);
                     // The snapshot taken at Begin describes exactly the state the
@@ -73,6 +74,8 @@ impl App {
                 self.snap_indicator = None;
             }
             gizmo::DragPhase::Finish => {
+                // Still drawn where it was let go until that is evaluated.
+                self.settling = self.live_drag().map(|(id, _, _)| id);
                 self.drag = None;
                 self.history.close();
                 self.fields.clear();
@@ -159,4 +162,70 @@ impl App {
             gizmo::DragPhase::Idle => {}
         }
     }
+}
+
+impl App {
+    /// The body a drag is carrying, when the GPU can draw it where the drag
+    /// has got to without the scene being evaluated again (see
+    /// [`crate::render::Live`]): its stretch of the scene's vertices, and the
+    /// move from where the last evaluation put it to where it is now.
+    ///
+    /// Only a drag that moves, turns or scales the body qualifies -- one that
+    /// resizes it changes its geometry, which only an evaluation can say --
+    /// and only a body that came through the evaluation untouched: a body in
+    /// a boolean with anything else is part of a shape that moving it
+    /// changes. Those still wait for the evaluation, as every drag used to.
+    pub(crate) fn live_drag(&self) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
+        let drag = self.drag.as_ref()?;
+        let node = self.scene.get(drag.node)?;
+        if node.params().cloned().unwrap_or_default() != drag.start_params {
+            return None;
+        }
+        self.moved_since_evaluated(drag.node)
+    }
+
+    /// [`App::live_drag`], or the body it has just let go of while the
+    /// evaluation of where it was dropped is still to come: what the viewport
+    /// draws moved.
+    pub(crate) fn live_move(&self) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
+        match self.drag {
+            Some(_) => self.live_drag(),
+            None => self.moved_since_evaluated(self.settling?),
+        }
+    }
+
+    /// Forget a body let go of once the evaluation says it stands where it
+    /// was dropped.
+    pub(crate) fn settle(&mut self) {
+        let Some(id) = self.settling else { return };
+        let caught_up =
+            self.scene.get(id).is_none_or(|node| self.evaluated.placements.get(&id) == Some(&placement(node)));
+        if caught_up {
+            self.settling = None;
+            self.invalidate_image();
+        }
+    }
+
+    /// `id`'s stretch of the scene and how far it has moved since the last
+    /// evaluation, when the GPU is drawing and that stretch is the body's own.
+    fn moved_since_evaluated(&self, id: NodeId) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
+        self.gpu.as_ref()?;
+        let node = self.scene.get(id)?;
+        let part = self.scene_renderable.parts.get(&id)?;
+        self.node_renderables.get(&id)?;
+        let parent = self.evaluated.node_frames.get(&id)?;
+        let then = self.evaluated.placements.get(&id)?;
+        let moved = parent.compose(&placement(node)).compose(&then.inverse()).compose(&parent.inverse());
+        Some((id, part.clone(), moved))
+    }
+}
+
+/// A node's own placement in its parent's frame, as `Evaluated::placements`
+/// records it.
+fn placement(node: &simple3d_core::scene::Node) -> simple3d_core::xform::Xform {
+    simple3d_core::xform::Xform::from_pos_rot_scale(
+        node.position,
+        node.rotation,
+        simple3d_core::scene::Node::sane_scale(node.scale),
+    )
 }

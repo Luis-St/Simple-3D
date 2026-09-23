@@ -4,8 +4,10 @@ use super::*;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
+use simple3d_core::xform::Xform;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
+use std::ops::Range;
 
 pub struct Grid {
     pub visible: bool,
@@ -45,6 +47,35 @@ pub enum Style {
     Glow,
 }
 
+/// A body being dragged, drawn where the drag has got to rather than where
+/// the last evaluation put it.
+///
+/// Moving, turning or scaling a body changes none of its geometry, only where
+/// it stands, and that is a transform the card can apply for nothing. So while
+/// a body is dragged the viewport does not wait for the scene to be evaluated
+/// again: the body's stretch of the scene is left out, and the body's own
+/// renderable is drawn in its place, moved by how far it has gone. Each is
+/// named by its renderable's id.
+#[derive(Clone, Debug, Default)]
+pub struct Live {
+    /// Welded vertices of a renderable to leave out, with every triangle and
+    /// edge that uses them: the dragged body's part of the scene.
+    pub hidden: Vec<(u64, Range<u32>)>,
+    /// Renderables to draw moved: each world position is put through the
+    /// transform first.
+    pub placed: Vec<(u64, Xform)>,
+}
+
+impl Live {
+    pub fn hidden(&self, id: u64) -> Option<&Range<u32>> {
+        self.hidden.iter().find(|(of, _)| *of == id).map(|(_, range)| range)
+    }
+
+    pub fn placed(&self, id: u64) -> Option<&Xform> {
+        self.placed.iter().find(|(of, _)| *of == id).map(|(_, xform)| xform)
+    }
+}
+
 pub struct Request<'a> {
     pub view: View,
     pub size: [usize; 2],
@@ -63,6 +94,9 @@ pub struct Request<'a> {
     /// the eye, because the loops at the ends of a run lie exactly on the
     /// surface they are drawn on and would otherwise lose the tie to it.
     pub preview: Vec<Vec<Vec3>>,
+    /// What a drag has moved since the renderables were made, drawn where it
+    /// has got to. Only the GPU renderer is ever handed any: see [`Live`].
+    pub live: Live,
     /// The plane the model is cut with, or `None` for the whole of it
     /// (issue 71). Everything drawn from the model goes through it -- faces,
     /// edges, outlines, ghosts, marks, the stretches of an axis that run

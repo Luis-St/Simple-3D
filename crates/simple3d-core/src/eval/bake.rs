@@ -3,7 +3,7 @@
 use super::*;
 use crate::scene::{GroupOp, NodeId, Scene};
 use crate::xform::Xform;
-use simple3d_geom::{evaluate_boolean, evaluate_boolean_until, BooleanOp, Mesh, Vec3};
+use simple3d_geom::{evaluate_boolean, evaluate_boolean_traced, BooleanOp, Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -93,6 +93,9 @@ pub fn baked_mesh_in_place(scene: &Scene, id: NodeId, parent: Xform) -> (Mesh, X
     (mesh, placement)
 }
 
+/// The mesh a group's operation makes of its children's, with the children
+/// that came through it untouched and where each one's vertices start in it
+/// -- see [`simple3d_geom::Traced`]. Laid side by side, every child does.
 pub(crate) fn combine(
     op: GroupOp,
     children: &[Mesh],
@@ -100,9 +103,9 @@ pub(crate) fn combine(
     name: &str,
     errors: &mut Vec<NodeError>,
     cancel: &Cancel,
-) -> Mesh {
+) -> simple3d_geom::Traced {
     if children.is_empty() {
-        return Mesh::new();
+        return (Mesh::new(), Vec::new());
     }
     // The boolean is where an evaluation's time goes, and it used to be the one
     // part of it that could not be interrupted: the flag was checked where the
@@ -112,21 +115,16 @@ pub(crate) fn combine(
     // application could not be got out of it -- the footer still said
     // "Evaluating..." with every node deleted.
     let Some(boolean) = op.to_geom() else {
-        let mut side_by_side = Mesh::new();
-        for child in children {
-            side_by_side.append(child);
-        }
-        return side_by_side;
+        return side_by_side(children);
     };
-    let result = evaluate_boolean_until(boolean, children, &|| cancel.is_cancelled());
+    let (mut result, untouched) = evaluate_boolean_traced(boolean, children, &|| cancel.is_cancelled());
     if cancel.is_cancelled() {
         // Not a result: an abandoned boolean is an empty or half-built mesh.
         // Returned as it is rather than reported as non-manifold, which it
         // usually is -- and `subtree` keeps it out of the cache, because the
         // run is dropped but the cache would not be.
-        return result;
+        return (result, Vec::new());
     }
-    let mut result = result;
     if op == GroupOp::Hull {
         // A hull is a new surface stretched over the operands, not a selection
         // of their faces: there is no body a given face came from. It takes the
@@ -146,13 +144,20 @@ pub(crate) fn combine(
         // outliner and export refuses while the error stands (spec section 5.2)
         // -- and the rest of the scene, including this group's own children,
         // still previews, which returning an empty mesh would prevent.
-        let mut fallback = Mesh::new();
-        for child in children {
-            fallback.append(child);
-        }
-        return fallback;
+        return side_by_side(children);
     }
-    result
+    (result, untouched)
+}
+
+/// The children appended one after another, every one of them untouched.
+fn side_by_side(children: &[Mesh]) -> simple3d_geom::Traced {
+    let mut out = Mesh::new();
+    let mut untouched = Vec::with_capacity(children.len());
+    for (index, child) in children.iter().enumerate() {
+        untouched.push((index, out.positions.len() as u32));
+        out.append(child);
+    }
+    (out, untouched)
 }
 
 #[derive(Default)]
@@ -162,6 +167,7 @@ pub(crate) struct Collected {
     pub(super) frames: BTreeMap<NodeId, Xform>,
     pub(super) local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
     pub(super) world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
+    pub(super) placements: BTreeMap<NodeId, Xform>,
 }
 
 pub(crate) fn bounds_of(points: impl Iterator<Item = Vec3>) -> Option<(Vec3, Vec3)> {

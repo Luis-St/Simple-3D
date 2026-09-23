@@ -135,6 +135,13 @@ impl Mesh {
     /// about positions) -- welding recovers a topologically connected mesh
     /// for the manifold check and for smaller PLY/3MF/OBJ output.
     pub fn weld(&self) -> Mesh {
+        self.weld_with_remap().0
+    }
+
+    /// The same, with where each of this mesh's vertices went: the index of
+    /// the welded vertex it was merged into. Welded vertices are numbered in
+    /// the order their first copy appears here.
+    pub fn weld_with_remap(&self) -> (Mesh, Vec<u32>) {
         let key = |p: Vec3| -> (i64, i64, i64) {
             let s = 1_000_000.0; // 1e-6 mm buckets
             ((p.x * s).round() as i64, (p.y * s).round() as i64, (p.z * s).round() as i64)
@@ -163,7 +170,7 @@ impl Mesh {
                 tags.push(self.tag(i));
             }
         }
-        Mesh { positions, indices, tags }
+        (Mesh { positions, indices, tags }, remap)
     }
 
     /// Closedness check on the welded mesh: every directed edge must be

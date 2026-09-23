@@ -126,6 +126,11 @@ pub struct App {
 
     pub mode: Mode,
     pub drag: Option<Drag>,
+    /// A body a drag the GPU drew for itself has let go of, still drawn where
+    /// it was dropped until the evaluation of it standing there comes back --
+    /// see `App::live_move`. Without it the body jumped back to where the
+    /// drag started for as long as the evaluation took.
+    pub(crate) settling: Option<NodeId>,
     pub hover_handle: Option<Handle>,
     /// The handle that was under the pointer when the button went down. What
     /// starts a drag, rather than whatever the pointer has since slipped onto.

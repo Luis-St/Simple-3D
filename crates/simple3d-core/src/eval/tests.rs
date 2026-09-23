@@ -5,6 +5,7 @@ mod cancel;
 mod colour;
 mod groups;
 mod pattern;
+mod ranges;
 mod scale;
 
 use super::*;

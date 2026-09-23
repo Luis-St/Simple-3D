@@ -70,28 +70,48 @@ fn meshes_overlap(a: &Mesh, b: &Mesh) -> bool {
 /// Merging two islands grows the merged box, which can bring it into contact
 /// with an island that was previously clear, so the search restarts until no
 /// part overlaps.
-fn union_all(children: &[Mesh], give_up: Abandon<'_>) -> Mesh {
-    let mut parts: Vec<(Mesh, Bounds)> = Vec::new();
-    for child in children {
+///
+/// Each operand that ends up an island of its own is copied into the result
+/// untouched, and those are reported: see [`Traced`].
+fn union_all(children: &[Mesh], give_up: Abandon<'_>) -> Traced {
+    // Each part, with the operand it is when it is one operand untouched.
+    let mut parts: Vec<(Mesh, Bounds, Option<usize>)> = Vec::new();
+    for (index, child) in children.iter().enumerate() {
         let Some(child_bounds) = child.bounds() else { continue };
         let mut acc = child.clone();
         let mut bounds = child_bounds;
-        while let Some(i) = parts.iter().position(|(_, b)| boxes_overlap(*b, bounds)) {
+        let mut alone = Some(index);
+        while let Some(i) = parts.iter().position(|(_, b, _)| boxes_overlap(*b, bounds)) {
             if give_up() {
-                return Mesh::new();
+                return (Mesh::new(), Vec::new());
             }
-            let (other, other_bounds) = parts.remove(i);
+            let (other, other_bounds, _) = parts.remove(i);
             acc = csg_bsp::union_until(&other, &acc, give_up);
             bounds = merged_bounds(bounds, other_bounds);
+            alone = None;
         }
-        parts.push((acc, bounds));
+        parts.push((acc, bounds, alone));
     }
     let mut out = Mesh::new();
-    for (mesh, _) in &parts {
+    let mut untouched = Vec::new();
+    for (mesh, _, alone) in &parts {
+        if let Some(index) = alone {
+            untouched.push((*index, out.positions.len() as u32));
+        }
         out.append(mesh);
     }
-    out
+    (out, untouched)
 }
+
+/// A boolean's result, with the operands that came through it untouched: for
+/// each, its index among the operands and where its first vertex landed in the
+/// result. Its vertices and triangles follow on from there in their own order,
+/// so a caller can tell which part of the result is which operand.
+///
+/// What lets the viewport move a body without waiting for the boolean to be
+/// run again: a body that went through unchanged is a known stretch of the
+/// result, and the rest of the result does not depend on where it is.
+pub type Traced = (Mesh, Vec<(usize, u32)>);
 
 /// Asked at every point the kernel can safely abandon what it is doing: is this
 /// answer still wanted?
@@ -135,35 +155,48 @@ pub fn evaluate_boolean(op: BooleanOp, children: &[Mesh]) -> Mesh {
 /// wanted. What comes back then is not a result and is never used: the evaluator
 /// marks the whole run cancelled and the worker drops it.
 pub fn evaluate_boolean_until(op: BooleanOp, children: &[Mesh], give_up: Abandon<'_>) -> Mesh {
+    evaluate_boolean_traced(op, children, give_up).0
+}
+
+/// The same, saying which operands came through untouched -- see [`Traced`].
+/// Only a union and a difference ever pass one through: a union each operand
+/// that meets no other, a difference its first when nothing is taken out of
+/// it.
+pub fn evaluate_boolean_traced(op: BooleanOp, children: &[Mesh], give_up: Abandon<'_>) -> Traced {
     match op {
         BooleanOp::Union => union_all(children, give_up),
         BooleanOp::Difference => {
             let mut iter = children.iter();
-            let Some(first) = iter.next() else { return Mesh::new() };
-            iter.fold(first.clone(), |acc, m| {
+            let Some(first) = iter.next() else { return (Mesh::new(), Vec::new()) };
+            let mut untouched = true;
+            let result = iter.fold(first.clone(), |acc, m| {
                 if give_up() {
+                    untouched = false;
                     Mesh::new()
                 } else if meshes_overlap(&acc, m) {
+                    untouched = false;
                     csg_bsp::subtract_until(&acc, m, give_up)
                 } else {
                     acc
                 }
-            })
+            });
+            (result, if untouched { vec![(0, 0)] } else { Vec::new() })
         }
         BooleanOp::Intersection => {
             let mut iter = children.iter();
-            let Some(first) = iter.next() else { return Mesh::new() };
-            iter.fold(first.clone(), |acc, m| {
+            let Some(first) = iter.next() else { return (Mesh::new(), Vec::new()) };
+            let result = iter.fold(first.clone(), |acc, m| {
                 if give_up() || !meshes_overlap(&acc, m) {
                     Mesh::new()
                 } else {
                     csg_bsp::intersect_until(&acc, m, give_up)
                 }
-            })
+            });
+            (result, Vec::new())
         }
         BooleanOp::Hull => {
             let points: Vec<Vec3> = children.iter().flat_map(|m| m.positions.iter().copied()).collect();
-            hull::convex_hull(&points)
+            (hull::convex_hull(&points), Vec::new())
         }
     }
 }
