@@ -85,4 +85,14 @@ impl App {
             SnapMode::WhileHeld => self.holding(Command::SnapToGeometry, key_down, mods),
         }
     }
+
+    /// Whether holding Ctrl is how geometry snapping is asked for -- as it is
+    /// by default (issue 77). Ctrl also resizes a face about its centre, and a
+    /// face pulled onto another body with the snap key held then moved its
+    /// opposite face as well: one key meaning both at once. Where the two
+    /// collide the snap has it, since that is what the key was bound for.
+    pub fn snap_holds_ctrl(&self) -> bool {
+        self.settings.geometry_snap == SnapMode::WhileHeld
+            && self.keymap.binding(Command::SnapToGeometry).is_some_and(|chord| chord.ctrl)
+    }
 }

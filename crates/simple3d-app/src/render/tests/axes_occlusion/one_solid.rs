@@ -6,7 +6,7 @@ use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
 // The tests exercise these modules' own workings, not only what the
 // renderer re-exports.
-use simple3d_geom::primitives;
+use simple3d_geom::{primitives, Vec3};
 
 #[test]
 pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_way_out() {
@@ -140,6 +140,57 @@ pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else()
             assert!(
                 !drawn_at(&covered, &covered_without, at),
                 "axis {axis} drew through a solid in front of it, at {at}"
+            );
+        }
+    }
+}
+
+#[test]
+pub(crate) fn the_axis_in_a_hole_through_a_body_is_behind_the_wall_in_front_of_it() {
+    // A block drilled straight down, with the X axis running through the hole:
+    // material from 14.3 to 17, the hole to 25, material again to 27.7. One
+    // body, two stretches of it on the line.
+    //
+    // The approach was asked of each stretch on its own, so the piece of the
+    // line in the hole was "on the eye's side" of the far stretch and was drawn
+    // over the solid wall in front of it -- from the front, and from above at an
+    // angle, a red line across the middle of a face with nothing but material
+    // behind it. From straight above the hole is open, and the line in it is
+    // seen through it, as anything in an open hole would be.
+    let block = primitives::box_mesh(13.3333, 20.0, 25.0).translated(Vec3::new(21.0, 0.0, 0.0));
+    let hole = primitives::cylinder_mesh(8.0, 8.0, 60.0, 32).translated(Vec3::new(21.0, 0.0, 0.0));
+    let prepared = Renderable::prepare(&simple3d_geom::csg_bsp::subtract(&block, &hole));
+
+    for (yaw, pitch, open) in [(-90.0, 0.0, false), (-55.0, 28.0, false), (-90.0, 90.0, true)] {
+        let camera = Camera { yaw, pitch, distance: 120.0, target: Vec3::new(10.0, 0.0, 0.0), ..Camera::default() };
+        let (w, h) = (500usize, 400usize);
+        let view = View::new(camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w as f32, h as f32)));
+        let frame = |axes: [bool; 3]| {
+            let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
+            req.view = view;
+            req.size = [w, h];
+            req.grid = Grid { visible: true, spacing: 10.0, axes, style: AxisStyle::Grid, plane_marks: false };
+            render(&req)
+        };
+        let (with, without) = (frame([true; 3]), frame([false, true, true]));
+        let drawn_at = |at: f64| {
+            let (pos, _) = view.project(along(0, at)).expect("the sample is in front of the camera");
+            let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
+            let o = (y * w + x) * 4;
+            with.color[o..o + 4] != without.color[o..o + 4]
+        };
+        // The control: the line is there on the way in, on the eye's side of
+        // the block -- +X in all three views.
+        assert!(drawn_at(32.0), "no axis arriving at the block at yaw {yaw}, pitch {pitch}");
+        // Before the fix, the front view drew the whole of 18..24 and the
+        // three-quarter view the part of it clear of the plane marks.
+        for at in [19.0, 21.0, 23.0] {
+            assert_eq!(
+                drawn_at(at),
+                open,
+                "the axis in the hole at {at}, at yaw {yaw}, pitch {pitch}: drawn {}, and the hole is {}",
+                drawn_at(at),
+                if open { "open to the eye" } else { "behind a wall" }
             );
         }
     }

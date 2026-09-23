@@ -21,6 +21,10 @@ mod save_primitive;
 
 use simple3d_core::scene::ExportBody;
 
+/// What the pattern command is called with nothing selected, where it adds an
+/// empty pattern to fill rather than making one of the selection.
+pub(crate) const EMPTY_PATTERN: &str = "Add an empty pattern";
+
 /// What one export-body mark is called, in the picker's button and in its menu.
 fn body_label(body: Option<ExportBody>) -> String {
     match body {

@@ -29,7 +29,6 @@ impl App {
                 "The scene has geometry that could not be evaluated; export will refuse.",
             );
         }
-        ui.separator();
     }
 
     /// The rows the body picker shows: the export's own roots, and the children

@@ -694,13 +694,21 @@ void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
     if (v_depth >= texelFetch(u_depth_tex, at, 0).r) {
         uint owner = texelFetch(u_tag_tex, at, 0).r;
-        bool arriving = false;
+        // On the eye's side of the whole body, not merely of one of its
+        // stretches: the line in a hole drilled through a body is behind the
+        // body's near wall (`render::body_extents`).
+        bool owned = false;
+        bool before = true;
+        bool after = true;
         for (int i = 0; i < u_count; i++) {
             vec4 span = texelFetch(u_spans, ivec2(i, u_row), 0);
             if (uint(span.z) == owner) {
-                arriving = arriving || (u_away > 1e-9 ? v_along <= span.x : (u_away < -1e-9 ? v_along >= span.y : true));
+                owned = true;
+                before = before && v_along <= span.x;
+                after = after && v_along >= span.y;
             }
         }
+        bool arriving = owned && (u_away > 1e-9 ? before : (u_away < -1e-9 ? after : (before || after)));
         if (!arriving) {
             discard;
         }

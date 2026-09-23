@@ -95,3 +95,28 @@ pub(crate) fn looking_straight_down_still_yields_a_usable_basis() {
     assert!(right.length() > 0.9 && up.length() > 0.9);
     assert!(right.dot(up).abs() < 1e-6, "basis is not orthogonal");
 }
+
+#[test]
+pub(crate) fn the_top_and_bottom_views_look_straight_down_and_straight_up() {
+    // The camera's pitch used to stop at 89 degrees, whatever the preset asked
+    // for, so "View: top" looked a degree off vertical: a 25 mm tall block showed
+    // a sliver of its front face, and a hole drilled through it showed its wall.
+    // In a view whose job is to show dimensions, a vertical edge has to project
+    // onto a single point.
+    for (preset, down) in [(ViewPreset::Top, -1.0), (ViewPreset::Bottom, 1.0)] {
+        let (yaw, pitch) = preset.angles();
+        let camera = Camera { yaw, pitch, distance: 100.0, ..Camera::default() };
+        let view = View::new(camera, egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0)));
+        assert!(close(view.forward(), Vec3::new(0.0, 0.0, down)), "{preset:?} looks along {:?}", view.forward());
+        let (low, _) = view.project(Vec3::new(10.0, -10.0, -12.5)).expect("in front");
+        let (high, _) = view.project(Vec3::new(10.0, -10.0, 12.5)).expect("in front");
+        assert!((low - high).length() < 1e-3, "{preset:?} shows a vertical edge {} px long", (low - high).length());
+        // Still the right way round: X to the right, and Y up the screen
+        // from above and down it from below.
+        let (origin, _) = view.project(Vec3::ZERO).expect("in front");
+        let (x, _) = view.project(Vec3::new(10.0, 0.0, 0.0)).expect("in front");
+        let (y, _) = view.project(Vec3::new(0.0, 10.0, 0.0)).expect("in front");
+        assert!(x.x > origin.x + 1.0 && (x.y - origin.y).abs() < 1e-3, "{preset:?} does not put X to the right");
+        assert!((y.y < origin.y) == (down < 0.0), "{preset:?} has Y the wrong way up");
+    }
+}

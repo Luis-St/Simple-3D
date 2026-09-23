@@ -20,8 +20,10 @@ impl App {
         let Some(params) = node.params() else { return Vec::new() };
         let Some(gizmo) = self.gizmo_for(id) else { return Vec::new() };
         let own = gizmo.own;
+        let centre = self.pattern_content_centre(id, &own);
         simple3d_core::pattern::grips(params)
             .into_iter()
+            .map(|grip| on_the_copies(grip, centre))
             .map(|grip| {
                 let along = own.vector(grip.dir);
                 let scale = along.length().max(1e-9);
@@ -48,6 +50,18 @@ impl App {
                 }
             })
             .collect()
+    }
+
+    /// Where the middle of what the pattern `id` repeats sits, in the
+    /// pattern's own frame: read off the last evaluation, which placed the
+    /// children once, where they stand, before any copy was made of them.
+    fn pattern_content_centre(&self, id: NodeId, own: &simple3d_core::xform::Xform) -> Vec3 {
+        let mut bounds: Option<(Vec3, Vec3)> = None;
+        for child in &self.scene.node(id).children {
+            let Some(&(lo, hi)) = self.evaluated.node_world_bounds.get(child) else { continue };
+            bounds = Some(bounds.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))));
+        }
+        bounds.map_or(Vec3::ZERO, |(lo, hi)| own.inverse().point((lo + hi) * 0.5))
     }
 
     /// What the pointer is asking a grip for: a distance along its line, or --
@@ -201,4 +215,36 @@ impl App {
             None => self.status = Status::Warning("That selection cannot be made into a pattern".into()),
         }
     }
+}
+
+/// A grip moved out to the copies it lays out.
+///
+/// The pattern's numbers are measured from its own origin, and each copy is the
+/// children moved by them -- so children standing 21 mm off the origin are
+/// repeated 21 mm further out than the numbers say. The grips were drawn at
+/// the numbers, and a ring of radius 30 put its radius grip 30 mm out while the
+/// copies went round at 51. Carried by where the children are, a sliding grip
+/// sits on the copy it moves and reads back the same number, since it is
+/// measured along its line from the point it was carried to. A span grip turns
+/// about the pattern's own axis, which the children do not move: it only rides
+/// on a ring that much wider, so it stays outside the copies.
+fn on_the_copies(mut grip: simple3d_core::pattern::Grip, centre: Vec3) -> simple3d_core::pattern::Grip {
+    match grip.drive {
+        simple3d_core::pattern::Drive::Angle { .. } => {
+            let axis = grip.dir.normalized();
+            let lift = axis * centre.dot(axis);
+            let out = (centre - lift).length();
+            let reach = grip.at - grip.from;
+            let rise = axis * reach.dot(axis);
+            let widen = if grip.radius > 1e-9 { (grip.radius + out) / grip.radius } else { 1.0 };
+            grip.from = grip.from + lift;
+            grip.at = grip.from + rise + (reach - rise) * widen;
+            grip.radius += out;
+        }
+        _ => {
+            grip.at = grip.at + centre;
+            grip.from = grip.from + centre;
+        }
+    }
+    grip
 }

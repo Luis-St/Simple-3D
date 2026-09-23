@@ -54,6 +54,9 @@ impl App {
             ui.label("Ctrl to resize about the centre or keep proportions.");
             if self.settings.geometry_snap == SnapMode::WhileHeld && !snap_key.is_empty() {
                 ui.label(format!("Hold {snap_key} to snap a drag onto another body."));
+                if self.snap_holds_ctrl() {
+                    ui.label("A face pulled with it held snaps rather than resizing about the centre.");
+                }
             }
         });
     }

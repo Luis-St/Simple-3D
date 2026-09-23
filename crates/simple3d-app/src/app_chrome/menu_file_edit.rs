@@ -117,8 +117,22 @@ impl App {
             self.command_item(ui, Command::Group, has_selection);
             // Beside Group, which is the command it is a variant of. It works
             // with nothing selected too -- an empty pattern to fill later -- so
-            // unlike Group it is never disabled.
-            self.command_item(ui, Command::Pattern, true);
+            // unlike Group it is never disabled, and says which of the two it
+            // is about to do: "of the selection" with nothing selected read as
+            // an entry left enabled by mistake.
+            if has_selection {
+                self.command_item(ui, Command::Pattern, true);
+            } else {
+                let label = ui::menu_label(&self.keymap, Command::Pattern).replacen(
+                    Command::Pattern.label(),
+                    super::EMPTY_PATTERN,
+                    1,
+                );
+                if ui::menu_entry(ui, &label, true).clicked() {
+                    self.run(Command::Pattern);
+                    ui.close();
+                }
+            }
             ui.separator();
             // Baking a shape into the triangles it evaluates to (issue 80), and
             // cutting one into a pattern of pieces (issue 82).

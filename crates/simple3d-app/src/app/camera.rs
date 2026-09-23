@@ -56,18 +56,28 @@ impl App {
 
     pub fn selection_bounds(&self) -> Option<(Vec3, Vec3)> {
         let mut result: Option<(Vec3, Vec3)> = None;
+        let mut grow = |(lo, hi): (Vec3, Vec3)| {
+            result = Some(match result {
+                None => (lo, hi),
+                Some((a, b)) => (a.min(lo), b.max(hi)),
+            });
+        };
         for id in &self.selection {
+            // What the node evaluates to, when that was measured: a difference
+            // is the size of what is left, not of the cutters that went into
+            // it, which put a 60 mm box round a 25 mm drilled block.
+            if let Some(&bounds) = self.evaluated.node_world_bounds.get(id) {
+                grow(bounds);
+                continue;
+            }
             for node in std::iter::once(*id).chain(self.scene.descendants(*id)) {
                 // The nodes with a mesh of their own, measured by the
                 // evaluation rather than here on every frame the box is drawn.
                 if !self.evaluated.node_meshes.contains_key(&node) {
                     continue;
                 }
-                let Some(&(lo, hi)) = self.evaluated.node_world_bounds.get(&node) else { continue };
-                result = Some(match result {
-                    None => (lo, hi),
-                    Some((a, b)) => (a.min(lo), b.max(hi)),
-                });
+                let Some(&bounds) = self.evaluated.node_world_bounds.get(&node) else { continue };
+                grow(bounds);
             }
         }
         result

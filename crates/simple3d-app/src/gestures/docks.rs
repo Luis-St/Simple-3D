@@ -68,3 +68,20 @@ pub(crate) fn clicking_a_panel_header_rolls_it_up_without_moving_it() {
     release(&mut harness, header.center());
     assert!(!harness.state().settings.layout.is_collapsed(Panel::Outliner), "the second click did not unroll it");
 }
+
+#[test]
+pub(crate) fn tab_pressed_again_brings_the_docks_back() {
+    // Tab is bound to hiding the docks, and egui also walks the keyboard focus
+    // with it: the first press hid the docks *and* put the focus on the File
+    // menu, a focused button counts as wanting the keyboard, and so every Tab
+    // after that only walked the menu bar -- the docks never came back, and
+    // Ctrl+W and the rest went nowhere either.
+    let mut harness = harness("docks-tab");
+    key(&mut harness, egui::Key::Tab);
+    assert!(harness.state().settings.layout.docks_hidden, "Tab did not hide the docks");
+    key(&mut harness, egui::Key::Tab);
+    assert!(!harness.state().settings.layout.docks_hidden, "the second Tab did not bring the docks back");
+    key(&mut harness, egui::Key::Tab);
+    assert!(harness.state().settings.layout.docks_hidden, "the third Tab did not hide them again");
+    assert!(harness.ctx.memory(|memory| memory.focused()).is_none(), "Tab left the keyboard on a widget");
+}

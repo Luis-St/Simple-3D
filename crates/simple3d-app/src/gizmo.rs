@@ -16,6 +16,9 @@
 //! | Alt   | drag freely, no snapping |
 //! | Shift | snap coarsely (ten times the increment) |
 //! | Ctrl  | resize about the centre (faces) / preserve proportions (corners) |
+//!
+//! Where Ctrl is also the key held to snap to geometry, a face drag with it
+//! held snaps and does not resize about the centre (`App::snap_holds_ctrl`).
 
 mod mode;
 pub use mode::{Handle, Mode};

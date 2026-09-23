@@ -21,14 +21,23 @@ pub(crate) fn point_in_polygon(p: Point, polygon: &[Point]) -> bool {
 /// a single (self-touching) loop that an ear clipper can eat.
 ///
 /// The bridge runs from the hole's rightmost vertex to the nearest outer vertex
-/// it can reach without crossing any edge of either loop. Both endpoints appear
-/// twice in the result, which is what makes the seam infinitely thin and leaves
-/// the enclosed area unchanged.
+/// it can reach without crossing any edge of either loop -- or of the holes
+/// still waiting to be bridged, `waiting`. Both endpoints appear twice in the
+/// result, which is what makes the seam infinitely thin and leaves the enclosed
+/// area unchanged.
+///
+/// The waiting holes are not in the outer loop yet, so nothing else keeps a
+/// bridge out of them. In a drilled grid the first hole's nearest outer vertex
+/// was a far corner of the plate, and the bridge to it ran straight through the
+/// holes in between: the loop crossed itself, the ear clipper ran out of ears,
+/// and a plate with a hundred holes kept all 37 000 triangles the clipping had
+/// left on each face.
 pub(crate) fn bridge_hole(
     outer: &mut Vec<u32>,
     outer_points: &mut Vec<Point>,
     hole: &[u32],
     hole_points: &[Point],
+    waiting: &[&[Point]],
 ) -> Option<()> {
     let start = (0..hole_points.len())
         .max_by(|&a, &b| hole_points[a].0.partial_cmp(&hole_points[b].0).unwrap_or(std::cmp::Ordering::Equal))?;
@@ -45,7 +54,9 @@ pub(crate) fn bridge_hole(
 
     let target = candidates.into_iter().find(|&c| {
         let to = outer_points[c];
-        !crosses_any(from, to, outer_points) && !crosses_any(from, to, hole_points)
+        !crosses_any(from, to, outer_points)
+            && !crosses_any(from, to, hole_points)
+            && waiting.iter().all(|other| !crosses_any(from, to, other))
     })?;
 
     // outer[..=target] + hole from `start` all the way round + hole[start] + outer[target..]

@@ -18,8 +18,8 @@ impl ViewPreset {
     /// the eye sits at -Y, i.e. yaw = -90 degrees.
     pub fn angles(self) -> (f64, f64) {
         match self {
-            ViewPreset::Top => (-90.0, 89.9),
-            ViewPreset::Bottom => (-90.0, -89.9),
+            ViewPreset::Top => (-90.0, 90.0),
+            ViewPreset::Bottom => (-90.0, -90.0),
             ViewPreset::Front => (-90.0, 0.0),
             ViewPreset::Back => (90.0, 0.0),
             ViewPreset::Right => (0.0, 0.0),

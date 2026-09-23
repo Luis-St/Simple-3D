@@ -58,7 +58,7 @@ pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::R
         let (from_yaw, from_pitch) = app.cube_spin.map_or(camera, |spin| (spin.yaw, spin.pitch));
         app.cube_spin = Some(crate::app::CubeSpin {
             yaw: from_yaw - delta.x as f64 * 0.5,
-            pitch: (from_pitch + delta.y as f64 * 0.5).clamp(-89.9, 89.9),
+            pitch: (from_pitch + delta.y as f64 * 0.5).clamp(-90.0, 90.0),
             camera,
         });
     }
@@ -117,6 +117,13 @@ fn cube_angles(app: &App) -> (f64, f64) {
     app.cube_spin.map_or(camera, |spin| (spin.yaw, spin.pitch))
 }
 
+/// How nearly edge-on a face may be and still be drawn, as the depth of its
+/// normal: about a degree.
+const EDGE_ON: f64 = 0.02;
+
+/// How far a face has to be turned towards the eye for its label to fit on it.
+const LABELLED: f64 = 0.2;
+
 /// Draw the cube, from the camera as it stands at the end of the frame.
 pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
     let box_rect = hit.box_rect;
@@ -159,7 +166,10 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
     for index in order {
         let (normal, _, label) = crate::view::CUBE_FACES[index];
         let (_, at, depth) = faces[index];
-        if depth >= 0.0 {
+        // A face seen edge-on, as the four sides are from straight above, is a
+        // line with nothing to show: drawn, its label hung outside the cube
+        // and was cut off by the frame ("GT" for RGT).
+        if depth >= -EDGE_ON {
             continue;
         }
         // The face as a quad: the four cube corners that share this normal.
@@ -185,7 +195,17 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
         // Pushed a little away from the cube's centre: in an isometric view the
         // three visible face centres meet at the near corner, and that is where
         // the projection dot lives.
-        let text_at = centre + (at - centre) * 1.2;
+        let mut text_at = centre + (at - centre) * 1.2;
+        // A face turned so far away that its label would not fit on it is
+        // named by the faces beside it instead.
+        if depth > -LABELLED {
+            continue;
+        }
+        // Looked at square on, the face's centre is the cube's, and the label
+        // sat under the centre dot ("B.M" for BTM). It goes above it.
+        if (text_at - centre).length() < 9.0 {
+            text_at = centre - egui::vec2(0.0, 9.0);
+        }
         painter.text(text_at, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(9.0), text_colour);
     }
 
@@ -211,7 +231,8 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
     }
 
     // The centre dot: an isometric view, back to where the cube itself is
-    // drawn from. It sits where no face label does, so it never covers one.
+    // drawn from. It sits where no face label does -- a label that would be
+    // under it is moved above it -- so it never covers one.
     let dot = if hit.over_centre { token::ACCENT } else { token::TEXT_LO };
     painter.circle_filled(centre, side * 0.11 * 0.45, dot);
 }

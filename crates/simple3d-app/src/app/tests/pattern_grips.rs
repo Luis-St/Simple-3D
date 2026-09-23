@@ -176,3 +176,39 @@ pub(crate) fn a_dragged_spacing_lands_on_the_documents_step() {
     app.set_pattern_grip(pat, "Spacing", 44.0, gizmo::Mods { coarse: true, ..Default::default() });
     assert_eq!(app.scene.node(pat).params().unwrap().get("step_x"), Some(&ParamValue::Length(20.0)));
 }
+
+#[test]
+pub(crate) fn a_rings_grips_sit_on_the_copies_when_what_it_repeats_is_off_the_origin() {
+    // A pattern moves its children by its numbers, so a box standing 21 mm off
+    // the pattern's origin, in a ring of radius 30, goes round at 51. The
+    // radius grip was drawn at 30 -- inside the ring of copies, on nothing --
+    // and the arc of the span grip went round at 39, through them.
+    use simple3d_core::primitive::ParamValue;
+    let free = gizmo::Mods { free: true, ..Default::default() };
+    let mut app = headless_app();
+    let plate = app.primary().unwrap();
+    app.scene.get_mut(plate).unwrap().position = Vec3::new(21.0, 0.0, 0.0);
+    app.reevaluate_for_test();
+    app.run(Command::Pattern);
+    let pat = app.primary().unwrap();
+    let params = app.scene.get_mut(pat).unwrap().params_mut().unwrap();
+    params.insert("kind".into(), ParamValue::Choice(2));
+    params.insert("circ_radius".into(), ParamValue::Length(30.0));
+    app.reevaluate_for_test();
+
+    let grips = app.pattern_grips(pat);
+    let radius = grips.iter().find(|g| g.label == "Radius").expect("a ring has a radius grip");
+    assert!((radius.at - Vec3::new(51.0, 0.0, 0.0)).length() < 1e-6, "the radius grip is at {:?}", radius.at);
+    let span = grips.iter().find(|g| g.label == "Span").expect("a ring has a span grip");
+    let (_, _, ring) = span.turn.expect("the span grip turns");
+    assert!(ring > 51.0, "the span grip rides a ring of {ring} mm, inside the copies at 51");
+    assert!(span.from.length() < 1e-6, "the ring still turns about the pattern's own axis, not {:?}", span.from);
+
+    // Measured from where it now stands, the grip still sets the number it
+    // shows: dragged out 10 mm further, the radius is 40.
+    app.set_pattern_grip(pat, "Radius", 40.0, free);
+    assert_eq!(app.scene.node(pat).params().unwrap().get("circ_radius"), Some(&ParamValue::Length(40.0)));
+    app.reevaluate_for_test();
+    let radius = app.pattern_grips(pat).into_iter().find(|g| g.label == "Radius").unwrap();
+    assert!((radius.at - Vec3::new(61.0, 0.0, 0.0)).length() < 1e-6, "the radius grip is at {:?}", radius.at);
+}

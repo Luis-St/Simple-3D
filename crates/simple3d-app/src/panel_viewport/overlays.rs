@@ -69,11 +69,11 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // flag is read and ignored); the handle frame was named here after that,
     // and there is one frame now (issue 100). A word that cannot change is not
     // information, and this strip's whole job is to be read at a glance.
-    let galley = painter.layout_no_wrap(
-        app.mode.label().to_string(),
-        egui::FontId::proportional(theme::font::SMALL),
-        token::TEXT_LO,
-    );
+    // The measure tool is held instead of the manipulator while it is open, and
+    // the strip said "Move" through the whole of a measurement.
+    let tool = if app.measure.active { "Measure" } else { app.mode.label() };
+    let galley =
+        painter.layout_no_wrap(tool.to_string(), egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
     let at = rect.left_top() + egui::vec2(10.0, 8.0);
     painter.rect_filled(
         egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0)),
@@ -114,13 +114,21 @@ pub(crate) fn draw_gizmo(
         if app.mode == gizmo::Mode::Resize {
             // Say why, rather than leaving the user wondering.
             let Some((origin, _)) = view.project(gizmo.origin) else { return };
-            painter.text(
-                origin + egui::vec2(12.0, 12.0),
-                egui::Align2::LEFT_TOP,
-                if is_group { "Groups have no resize handles" } else { "This shape has no resizable axis" },
+            // On a plate of its own, like the tool's name in the corner: in the
+            // weak text colour straight onto the model it vanished wherever it
+            // crossed a grey face, and read as hidden behind the shape.
+            let galley = painter.layout_no_wrap(
+                if is_group { "Groups have no resize handles" } else { "This shape has no resizable axis" }.to_string(),
                 egui::FontId::proportional(11.0),
                 ui.visuals().weak_text_color(),
             );
+            let at = origin + egui::vec2(12.0, 12.0);
+            painter.rect_filled(
+                egui::Rect::from_min_size(at, galley.size()).expand2(egui::vec2(6.0, 3.0)),
+                3.0,
+                token::SURFACE_1.gamma_multiply(0.85),
+            );
+            painter.galley(at, galley, ui.visuals().weak_text_color());
         }
         return;
     }

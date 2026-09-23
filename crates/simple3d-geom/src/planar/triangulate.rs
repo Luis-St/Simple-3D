@@ -15,6 +15,20 @@ pub fn triangulate_loops(positions: &[Vec3], normal: Vec3, loops: Vec<Vec<u32>>)
 
 pub(crate) fn triangulate_region(positions: &[Vec3], normal: Vec3, loops: Vec<Vec<u32>>) -> Option<Vec<[u32; 3]>> {
     let (u, v) = plane_basis(normal);
+    triangulate_in(positions, u, v, loops.clone()).or_else(|| {
+        let (s, c) = TURNED.to_radians().sin_cos();
+        triangulate_in(positions, u * c + v * s, v * c - u * s, loops)
+    })
+}
+
+/// The angle a region is looked at from again when the first try fails. Holes
+/// are bridged from their rightmost point, which in a drilled grid lines every
+/// bridge up with a row of tangent points: the clipper then ran its diagonals
+/// along those lines and walled itself into corridors it could not get out of.
+/// Turned by an angle nothing is drawn at, the bridges run across the rows.
+const TURNED: f64 = 37.0;
+
+fn triangulate_in(positions: &[Vec3], u: Vec3, v: Vec3, loops: Vec<Vec<u32>>) -> Option<Vec<[u32; 3]>> {
     let flatten = |ids: &[u32]| -> Vec<Point> {
         ids.iter().map(|&i| (positions[i as usize].dot(u), positions[i as usize].dot(v))).collect()
     };
@@ -63,8 +77,9 @@ pub(crate) fn triangulate_region(positions: &[Vec3], normal: Vec3, loops: Vec<Ve
             let key = |h: usize| holes[h].1.iter().fold(f64::MIN, |m: f64, p| m.max(p.0));
             key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal)
         });
-        for h in mine {
-            bridge_hole(&mut ids, &mut points, &holes[h].0, &holes[h].1)?;
+        for (k, &h) in mine.iter().enumerate() {
+            let waiting: Vec<&[Point]> = mine[k + 1..].iter().map(|&w| holes[w].1.as_slice()).collect();
+            bridge_hole(&mut ids, &mut points, &holes[h].0, &holes[h].1, &waiting)?;
         }
         ear_clip(&ids, &points, &mut out)?;
     }

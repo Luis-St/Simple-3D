@@ -48,7 +48,7 @@ pub fn apply_gesture(camera: &mut Camera, gesture: Gesture, delta: egui::Vec2, v
             // corner does when it is grabbed directly -- one rule for every
             // drag over the picture, whichever of them the hand is on.
             camera.yaw -= delta.x as f64 * 0.4;
-            camera.pitch = (camera.pitch + delta.y as f64 * 0.4).clamp(-89.9, 89.9);
+            camera.pitch = (camera.pitch + delta.y as f64 * 0.4).clamp(-90.0, 90.0);
         }
         Gesture::Pan => {
             // A viewport with no height has no millimetres per pixel to

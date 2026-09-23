@@ -66,6 +66,7 @@ pub(crate) fn push_axis_line(
     // Which way depth runs along this axis: positive when travelling along
     // +axis moves away from the eye.
     let away = component(view.forward(), axis);
+    let extents = body_extents(through, tags);
     let mut seen = vec![false; tags + 1];
     for step in 0..FADE_STEPS {
         let t0 = step as f64 / FADE_STEPS as f64;
@@ -84,32 +85,50 @@ pub(crate) fn push_axis_line(
             }
             let (start, end) = (along(axis, from), along(axis, to));
             let (va, vb) = (to_vertex(view, view.to_view(start)), to_vertex(view, view.to_view(end)));
-            seen_through(&mut seen, through, (from + to) / 2.0, away);
+            seen_through(&mut seen, &extents, (from + to) / 2.0, away);
             out.push(AxisStep { a: va, b: vb, colour: faded, seen: seen.clone().into() });
         }
     }
 }
 
+/// How far along the axis each body reaches, indexed by tag: from the first
+/// surface the axis meets in it to the last.
+///
+/// One body can hold several stretches of the axis -- a block with a hole
+/// drilled across the line is material, then the hole, then material again --
+/// and the approach is the side of the *whole* body. Asked of each stretch on
+/// its own, the piece of the line in the hole was on the eye's side of the far
+/// wall and so counted as arriving, and was drawn over the solid wall in front
+/// of it.
+pub(crate) fn body_extents(through: &[(f64, f64, u16)], tags: usize) -> Vec<Option<(f64, f64)>> {
+    let mut extents: Vec<Option<(f64, f64)>> = vec![None; tags + 1];
+    for &(lo, hi, tag) in through {
+        let Some(slot) = extents.get_mut(tag as usize) else { continue };
+        *slot = Some(slot.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))));
+    }
+    extents
+}
+
 /// Fill `seen`, indexed by body tag, with the bodies that may not hide the piece
 /// of an axis at `at` along it.
 ///
-/// A body qualifies only when that piece is on the eye's side of the stretch the
-/// axis runs through it: the line is being drawn over the shape so that it can
-/// be seen *arriving* at the surface it enters, and past the far surface there
-/// is no arrival left to show -- only a solid the line is genuinely behind.
-/// `away` is how depth runs along the axis; when it is about zero the axis lies
-/// in the screen plane, the two sides are the same distance off, and the
-/// exception applies to both.
-pub(crate) fn seen_through(seen: &mut [bool], through: &[(f64, f64, u16)], at: f64, away: f64) {
-    seen.fill(false);
-    for &(lo, hi, tag) in through {
-        let Some(slot) = seen.get_mut(tag as usize) else { continue };
-        *slot |= if away > 1e-9 {
-            at <= lo
-        } else if away < -1e-9 {
-            at >= hi
-        } else {
-            true
-        };
+/// A body qualifies only when that piece is on the eye's side of all of it (see
+/// [`body_extents`]): the line is being drawn over the shape so that it can be
+/// seen *arriving* at the surface it enters, and past the near surface -- in a
+/// hole inside the body, or out beyond its far side -- there is no arrival left
+/// to show, only a solid the line is genuinely behind. `away` is how depth runs
+/// along the axis; when it is about zero the axis lies in the screen plane, the
+/// two ends are the same distance off, and either may be the approach.
+pub(crate) fn seen_through(seen: &mut [bool], extents: &[Option<(f64, f64)>], at: f64, away: f64) {
+    for (slot, extent) in seen.iter_mut().zip(extents) {
+        *slot = extent.is_some_and(|(lo, hi)| {
+            if away > 1e-9 {
+                at <= lo
+            } else if away < -1e-9 {
+                at >= hi
+            } else {
+                at <= lo || at >= hi
+            }
+        });
     }
 }

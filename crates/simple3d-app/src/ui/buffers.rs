@@ -122,11 +122,21 @@ impl FieldBuffers {
         };
         let painter = ui.painter();
         painter.rect(rect, visuals.corner_radius, fill, stroke, egui::StrokeKind::Inside);
-        painter.text(
+        // A number wider than its box -- four decimals and a sign in a third of
+        // the panel -- is set smaller until it fits, and never drawn past the
+        // box: it used to run out of the left edge and over the axis chip in
+        // front of it.
+        let room = (rect.width() - 8.0).max(1.0);
+        let mut size = crate::theme::font::VALUE;
+        let width = painter.layout_no_wrap(text.to_string(), egui::FontId::monospace(size), text_colour).size().x;
+        if width > room {
+            size = (size * room / width).max(size * 0.7);
+        }
+        painter.with_clip_rect(rect.intersect(painter.clip_rect())).text(
             egui::pos2(rect.right() - 4.0, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             text,
-            egui::FontId::monospace(crate::theme::font::VALUE),
+            egui::FontId::monospace(size),
             text_colour,
         );
         if response.hovered() {

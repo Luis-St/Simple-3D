@@ -9,20 +9,22 @@ use simple3d_export::{BodyMode, Format};
 impl App {
     pub(super) fn export_window(&mut self, ctx: &egui::Context) {
         // Tall enough for the body picker, which is the one part of this
-        // window that is a list rather than a row.
-        let size = if self.export_body_mode() == BodyMode::Selected {
-            egui::vec2(600.0, 560.0)
-        } else {
-            egui::vec2(560.0, 320.0)
-        };
+        // window that is a list rather than a row. Without it the window is as
+        // tall as its rows: a fixed 320 px was shorter than they had grown to,
+        // and the compression note was drawn over the summary line under it.
+        let picking = self.export_body_mode() == BodyMode::Selected;
+        let size = if picking { egui::vec2(600.0, 560.0) } else { egui::vec2(560.0, 320.0) };
         self.dialog(
             ctx,
             DialogSpec {
                 key: "dialog-export",
                 title: "Export",
                 size,
+                // Resizable either way: a window whose resizability changes is
+                // made again by the window system, and egui panics when the
+                // immediate viewport it was building goes away under it.
                 resizable: true,
-                fit_height: false,
+                fit_height: !picking,
                 min_size: None,
             },
             Self::export_body,
@@ -31,6 +33,14 @@ impl App {
     }
 
     pub(super) fn export_body(&mut self, ui: &mut egui::Ui) {
+        // A window as tall as its contents has no room below them to fill:
+        // the summary simply follows the rows.
+        if self.export_body_mode() != BodyMode::Selected {
+            self.export_controls(ui);
+            ui.separator();
+            self.export_summary_line(ui);
+            return;
+        }
         // Bottom-up: the count of what is about to be written is laid out first
         // and ends up at the foot of the contents, just over the buttons, and
         // everything else takes the room left above it. In a `bottom_up` layout
@@ -38,6 +48,7 @@ impl App {
         // summary comes first here.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             self.export_summary_line(ui);
+            ui.separator();
             ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| self.export_controls(ui));
         });
     }

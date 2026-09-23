@@ -42,6 +42,31 @@ pub(crate) fn the_scene_and_the_selection_measure_what_their_meshes_measure() {
             measured = Some(measured.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))));
         }
     }
-    assert!(measured.is_some());
-    assert_eq!(app.selection_bounds(), measured);
+    // A union is the size of its parts. Read off the group's own evaluated
+    // mesh now, so the last digit can differ from the parts' own.
+    let ((lo, hi), (m_lo, m_hi)) = (app.selection_bounds().unwrap(), measured.unwrap());
+    assert!((lo - m_lo).length() < 1e-9 && (hi - m_hi).length() < 1e-9, "{lo:?}..{hi:?} against {m_lo:?}..{m_hi:?}");
+}
+
+#[test]
+pub(crate) fn a_selected_difference_is_boxed_as_what_is_left_not_with_its_cutters() {
+    // The bounding box drawn round the selection took every descendant with a
+    // mesh, and a difference's cutter is one: a 25 mm block drilled by a 60 mm
+    // cylinder was boxed and labelled 60 mm tall, while the properties panel
+    // said 25.
+    let mut app = headless_app();
+    let root = app.scene.root();
+    let group = app.scene.add_group(GroupOp::Difference, root, 0);
+    let block = app.scene.add_primitive("box", group, 0).unwrap();
+    let cutter = app.scene.add_primitive("cylinder", group, 1).unwrap();
+    app.scene.get_mut(cutter).unwrap().scale = Vec3::new(0.4, 0.4, 3.0);
+    app.reevaluate_for_test();
+    let (block_lo, block_hi) = app.evaluated.node_world_bounds[&block];
+    let (cut_lo, cut_hi) = app.evaluated.node_world_bounds[&cutter];
+    assert!(cut_lo.z < block_lo.z && cut_hi.z > block_hi.z, "this test needs a cutter taller than the block");
+
+    app.select_only(group);
+    assert_eq!(app.selection_bounds(), app.evaluated.node_world_bounds.get(&group).copied());
+    let (lo, hi) = app.selection_bounds().expect("the difference has bounds");
+    assert!((lo.z - block_lo.z).abs() < 1e-6 && (hi.z - block_hi.z).abs() < 1e-6, "boxed at {lo:?}..{hi:?}");
 }

@@ -87,6 +87,13 @@ impl App {
                 let Some(cursor) = cursor else { return };
                 let rotate_snap = self.settings.rotate_snap_deg;
                 let unit = self.scene.settings.unit;
+                // Ctrl held to snap a face onto another body is not also a
+                // request to resize that face about the centre.
+                let mut mods = mods;
+                let pulling_face = matches!(self.drag.as_ref().map(|d| d.handle), Some(Handle::ResizeFace(..)));
+                if pulling_face && self.snap_requested && self.snap_holds_ctrl() {
+                    mods.symmetric = false;
+                }
                 let handle = match self.drag.as_mut() {
                     Some(drag) => {
                         drag.update(&mut self.scene, view, cursor, mods, snap, rotate_snap, unit);

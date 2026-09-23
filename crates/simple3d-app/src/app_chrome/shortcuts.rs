@@ -15,6 +15,17 @@ impl App {
             self.shortcut_mods.reset();
             return;
         }
+        // egui walks the keyboard focus with Tab and Ctrl+Tab even though both
+        // are bindings here, so the Tab that hid the docks also put the focus on
+        // the File menu -- and a focused button counts as wanting the keyboard,
+        // so the next Tab only walked the menu bar and every shortcut after it
+        // was swallowed. Only a text field is somewhere to type; the focus a
+        // button picked up that way is let go before anyone draws it.
+        if let Some(id) = ctx.memory(|memory| memory.focused()) {
+            if egui::text_edit::TextEditState::load(ctx, id).is_none() {
+                ctx.memory_mut(|memory| memory.surrender_focus(id));
+            }
+        }
         if ctx.wants_keyboard_input() {
             self.shortcut_mods.reset();
             return;

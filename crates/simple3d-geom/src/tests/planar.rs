@@ -129,3 +129,52 @@ pub(crate) fn an_ear_whose_new_side_runs_through_a_corner_is_not_taken() {
         assert!((covered - area).abs() < 1e-9, "{covered} covered of an outline of {area}");
     }
 }
+
+#[test]
+pub(crate) fn a_plate_drilled_in_a_grid_has_its_faces_rebuilt() {
+    // A 200 mm plate with a ten by ten grid of 5 mm holes. With one to four
+    // holes the top and bottom faces were rebuilt to about 36 triangles a hole;
+    // with a hundred neither was, and the plate came out at 86 584 triangles
+    // where 13 212 describe it -- every one of them carried into the next
+    // boolean, the viewport and the export.
+    //
+    // Two things stood in the way. The first hole's bridge ran from the right
+    // column to a far corner of the plate, straight through holes that had not
+    // been bridged yet, so the loop crossed itself. And with that fixed, every
+    // bridge left from a hole's rightmost point, lined up with a whole row of
+    // tangent points, and the ear clipper walled itself into the corridors
+    // between the rows. Either one alone sent the face back as it came.
+    let mut operands = vec![primitives::box_mesh(200.0, 200.0, 5.0)];
+    for i in 0..10 {
+        for j in 0..10 {
+            let at = Vec3::new(-67.5 + 15.0 * i as f64, -67.5 + 15.0 * j as f64, 0.0);
+            operands.push(primitives::cylinder_mesh(5.0, 5.0, 20.0, 32).translated(at));
+        }
+    }
+    let result = evaluate_boolean(BooleanOp::Difference, &operands);
+    assert_manifold("drilled grid", &result);
+    assert_bounds("drilled grid", &result, Vec3::new(200.0, 200.0, 5.0), 1e-9);
+    let facing = |up: bool| {
+        result
+            .indices
+            .iter()
+            .filter(|t| {
+                let [a, b, c] = t.map(|i| result.positions[i as usize]);
+                let z = (b - a).cross(c - a).normalized().z;
+                if up {
+                    z > 0.99
+                } else {
+                    z < -0.99
+                }
+            })
+            .count()
+    };
+    // A polygon with 100 holes of 32 sides and 4 outer corners is 3402
+    // triangles, and the T-junction pass may add a few.
+    assert!(facing(true) < 4000, "the top face kept {} triangles", facing(true));
+    assert!(facing(false) < 4000, "the bottom face kept {} triangles", facing(false));
+    // And the holes are all still there: the plate less a hundred 32-gons.
+    let hole = 100.0 * 0.5 * 32.0 * 2.5f64.powi(2) * (2.0 * std::f64::consts::PI / 32.0).sin();
+    let expected = (200.0 * 200.0 - hole) * 5.0;
+    assert!((volume(&result) - expected).abs() < 1e-3, "volume {} against {expected}", volume(&result));
+}

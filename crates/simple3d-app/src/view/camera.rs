@@ -55,16 +55,16 @@ impl View {
 impl Projection {
     fn of(camera: Camera, size: egui::Vec2) -> Projection {
         let yaw = camera.yaw.to_radians();
-        let pitch = camera.pitch.to_radians().clamp(-1.5533, 1.5533);
+        // Straight up and straight down are reachable, so Top and Bottom are
+        // exact: at 89 degrees the side faces and the wall of a hole showed as
+        // a sliver, which is wrong in a view whose job is to show dimensions.
+        let pitch = camera.pitch.to_radians().clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
         let offset_dir = Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin());
         let forward = -offset_dir;
-        let mut right = forward.cross(Vec3::new(0.0, 0.0, 1.0));
-        if right.length() < 1e-9 {
-            // Looking straight down or up: any horizontal axis will do, and
-            // picking one keeps the view usable instead of collapsing.
-            right = Vec3::new(1.0, 0.0, 0.0);
-        }
-        let right = right.normalized();
+        // Screen right comes from the yaw alone -- it is `forward x Z`
+        // normalised wherever that is defined, and it stays defined at the
+        // poles, where the yaw still says which way is up on the screen.
+        let right = Vec3::new(-yaw.sin(), yaw.cos(), 0.0);
         let half_height = camera.distance * (camera.fov_deg.to_radians() / 2.0).tan();
         Projection {
             right,

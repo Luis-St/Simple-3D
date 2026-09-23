@@ -18,17 +18,21 @@ pub(crate) fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selecte
     match app.evaluated.node_world_bounds.get(&id).copied() {
         Some((lo, hi)) => {
             field_row(ui, "Size", "", |ui| {
-                ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false).wrap());
+                ui.add(
+                    egui::Label::new(theme::numeric(unit_kept(ui::describe_size(hi - lo, unit))))
+                        .selectable(false)
+                        .wrap(),
+                );
             });
             field_row(ui, "Centre", "", |ui| {
                 ui.add(
-                    egui::Label::new(theme::numeric(format!(
+                    egui::Label::new(theme::numeric(unit_kept(format!(
                         "{}, {}, {} {}",
                         format_length((lo.x + hi.x) / 2.0, unit),
                         format_length((lo.y + hi.y) / 2.0, unit),
                         format_length((lo.z + hi.z) / 2.0, unit),
                         unit.suffix()
-                    )))
+                    ))))
                     .selectable(false)
                     .wrap(),
                 );
@@ -40,5 +44,15 @@ pub(crate) fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selecte
     }
     if let Some(error) = app.evaluated.error_for(id) {
         ui.colored_label(token::DANGER, &error.message);
+    }
+}
+
+/// The same text with the unit held to the number before it. A readout that
+/// wraps in a narrow panel is fine; one that wraps between "25" and "mm" and
+/// puts the unit on a line of its own is not.
+fn unit_kept(text: String) -> String {
+    match text.rfind(' ') {
+        Some(at) => format!("{}\u{a0}{}", &text[..at], &text[at + 1..]),
+        None => text,
     }
 }
