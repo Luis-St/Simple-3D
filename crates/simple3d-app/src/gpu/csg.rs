@@ -117,7 +117,9 @@ impl CsgTargets {
         };
         let depth_texture = || texture(glow::DEPTH_COMPONENT32F, glow::DEPTH_COMPONENT, glow::FLOAT);
         let depth = [depth_texture()?, depth_texture()?];
-        let leaf = texture(glow::R8UI, glow::RED_INTEGER, glow::UNSIGNED_BYTE)?;
+        // The shape in the low byte, and the surface's normal packed above it
+        // for the edge pass (`CSG_EDGE_FRAGMENT`).
+        let leaf = texture(glow::R32UI, glow::RED_INTEGER, glow::UNSIGNED_INT)?;
         let colour = texture(glow::RGBA8, glow::RGBA, glow::UNSIGNED_BYTE)?;
         let mut counts = Vec::with_capacity(8);
         for _ in 0..8 {
@@ -301,6 +303,8 @@ impl Gpu {
             return;
         }
         let (width, height) = (targets.width as i32, targets.height as i32);
+        let marks = resident::mark_planes(request);
+        let half_leaf = half.map(|_| leaves.len() - 1);
 
         gl.disable(glow::CULL_FACE);
         gl.disable(glow::BLEND);
@@ -355,10 +359,29 @@ impl Gpu {
                 let solid = request.palette.solid;
                 gl.uniform_4_f32_slice(Some(at), &[solid[0] as f32, solid[1] as f32, solid[2] as f32, 255.0]);
             }
+            if let Some(at) = peel.at("u_plane_colour[0]") {
+                let mut colours = [[0.0_f32; 4]; 3];
+                for (colour, (_, rgba)) in colours.iter_mut().zip(&marks) {
+                    *colour = as_float(*rgba);
+                }
+                gl.uniform_4_f32_slice(Some(at), colours.as_flattened());
+            }
             gl.begin_query(glow::ANY_SAMPLES_PASSED, targets.queries[layer]);
             for (index, (resident, placing)) in drawn.iter().enumerate() {
                 let Some(faces) = &resident.faces else { continue };
                 set_projection(gl, peel, resident, view, None, placing);
+                // The section's half-space is the cut, not the model's
+                // surface, and a cut is not marked (`push_plane_marks` marks
+                // solids only).
+                let marked = if Some(index) == half_leaf { 0 } else { marks.len() };
+                set_i32(gl, peel, "u_planes", marked as i32);
+                if let Some(at) = peel.at("u_plane[0]") {
+                    let mut planes = [[0.0_f32; 4]; 3];
+                    for (plane, (mark, _)) in planes.iter_mut().zip(&marks) {
+                        *plane = resident.plane(mark, placing);
+                    }
+                    gl.uniform_4_f32_slice(Some(at), planes.as_flattened());
+                }
                 if let Some(at) = peel.at("u_leaf") {
                     gl.uniform_1_u32(Some(at), index as u32);
                 }
@@ -486,6 +509,64 @@ impl Gpu {
         gl.depth_func(glow::LESS);
         gl.depth_mask(true);
         gl.stencil_mask(0xFF);
+        gl.bind_vertex_array(Some(self.buffer.array));
+    }
+
+    /// The boolean's edges, over what `draw_csg` resolved: every shape's own
+    /// feature edges, each kept where the pixel's surface is that shape's
+    /// (`CSG_EDGE_FRAGMENT`). The scene's own lines leave the boolean out --
+    /// it is hidden from them with the rest of the dragged part of the scene
+    /// -- so without these the boolean alone lost its edges while it was
+    /// dragged.
+    ///
+    /// Expects the model pass's state after the lines, and leaves it so.
+    pub(super) unsafe fn draw_csg_edges(
+        &self,
+        gl: &glow::Context,
+        request: &Request<'_>,
+        csg: &CsgPreview<'_>,
+        colour: crate::raster::Rgba,
+        viewport: [f32; 2],
+        depth: [f32; 2],
+    ) {
+        let Some(scene) = &self.target else { return };
+        let program = &self.csg_edges;
+        // Read, not drawn into: taken off the framebuffer for the pass, so
+        // the texture is never both at once.
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT2, glow::TEXTURE_2D, None, 0);
+        gl.use_program(Some(program.program));
+        gl.enable(glow::CLIP_DISTANCE0);
+        set2(gl, program, "u_viewport", viewport);
+        set2(gl, program, "u_depth", depth);
+        if let Some(at) = program.at("u_colour") {
+            gl.uniform_4_f32_slice(Some(at), &as_float(colour));
+        }
+        if let Some(at) = program.at("u_bias") {
+            gl.uniform_1_f32(Some(at), crate::render::EDGE_BIAS);
+        }
+        set_i32(gl, program, "u_tagged", 0);
+        if let Some(at) = program.at("u_tag") {
+            gl.uniform_1_u32(Some(at), csg.tag as u32);
+        }
+        gl.active_texture(glow::TEXTURE0);
+        gl.bind_texture(glow::TEXTURE_2D, Some(scene.done));
+        set_i32(gl, program, "u_done", 0);
+        for (index, (leaf, moved)) in csg.leaves.iter().enumerate() {
+            let Some(resident) = self.resident.get(&leaf.id) else { continue };
+            let Some(edges) = &resident.edges else { continue };
+            if edges.count == 0 {
+                continue;
+            }
+            set_projection(gl, program, resident, &request.view, request.section, &Placing::moved(*moved));
+            if let Some(at) = program.at("u_leaf_code") {
+                gl.uniform_1_f32(Some(at), (index + 1) as f32 / 255.0);
+            }
+            gl.bind_vertex_array(Some(edges.array));
+            gl.draw_elements(glow::LINES, edges.count, glow::UNSIGNED_INT, 0);
+        }
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        gl.disable(glow::CLIP_DISTANCE0);
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT2, glow::TEXTURE_2D, Some(scene.done), 0);
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 }

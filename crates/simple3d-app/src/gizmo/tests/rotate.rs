@@ -86,3 +86,36 @@ pub(crate) fn a_free_rotate_drag_is_not_snapped() {
     assert!(z > 20.0 && z < 45.0, "{z}");
     assert!((z % 15.0).abs() > 1e-6, "a free drag snapped anyway: {z}");
 }
+
+/// Issue 90: a group's origin is wherever the group was made, which can be
+/// nowhere near what it holds. The handle stands in the middle of the
+/// children instead, and a turn of the ring turns the group about that middle
+/// rather than swinging it round an origin off to one side.
+#[test]
+pub(crate) fn a_group_is_handled_and_turned_about_the_middle_of_what_it_holds() {
+    let mut scene = Scene::new();
+    let root = scene.root();
+    let group = scene.add_group(simple3d_core::scene::GroupOp::Union, root, 0);
+    let child = scene.add_primitive("box", group, 0).unwrap();
+    scene.get_mut(child).unwrap().position = Vec3::new(40.0, 20.0, 0.0);
+    scene.camera = Camera { yaw: -55.0, pitch: 28.0, distance: 160.0, ..Camera::default() };
+    let mut evaluator = Evaluator::new();
+    let evaluated = evaluator.evaluate(&scene, &Cancel::new());
+    let view = View::new(scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
+
+    let (lo, hi) = evaluated.node_world_bounds[&group];
+    let middle = (lo + hi) * 0.5;
+    let gizmo = Gizmo::build(&scene, &evaluated, group, Mode::Rotate).unwrap();
+    assert!((gizmo.origin - middle).length() < 1e-9, "the handle is not in the middle: {:?}", gizmo.origin);
+
+    let ring = gizmo.ring_points(2, &view, 72);
+    let from = view.project(ring[0]).unwrap().0;
+    let to = view.project(ring[18]).unwrap().0;
+    let mut drag = Drag::begin(&scene, &gizmo, group, Handle::RotateRing(2), &view, from).unwrap();
+    drag.update(&mut scene, &view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
+    assert!(scene.node(group).rotation.z != 0.0, "the ring did not turn the group");
+
+    let after = evaluator.evaluate(&scene, &Cancel::new());
+    let (lo, hi) = after.node_world_bounds[&group];
+    assert!(((lo + hi) * 0.5 - middle).length() < 1e-6, "the group swung away from its middle");
+}

@@ -22,6 +22,7 @@ impl Gpu {
             let csg_count = Program::new(&gl, &face_vertex(), CSG_COUNT_FRAGMENT)?;
             let csg_pack = Program::new(&gl, BACKGROUND_VERTEX, CSG_PACK_FRAGMENT)?;
             let csg_resolve = Program::new(&gl, BACKGROUND_VERTEX, CSG_RESOLVE_FRAGMENT)?;
+            let csg_edges = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), CSG_EDGE_FRAGMENT)?;
             // As wide as the driver allows, up to a size that keeps a table of
             // a few thousand entries from being mostly padding.
             let table_width = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).clamp(1024, 8192) as usize;
@@ -42,6 +43,7 @@ impl Gpu {
                 csg_count,
                 csg_pack,
                 csg_resolve,
+                csg_edges,
                 csg_targets: None,
                 csg_half: None,
                 table_width,

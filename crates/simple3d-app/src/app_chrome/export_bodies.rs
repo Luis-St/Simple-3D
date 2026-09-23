@@ -14,7 +14,13 @@ impl App {
         if self.evaluated.errors.is_empty() {
             // The count is of what will actually be written -- the scene
             // or the selection -- rather than always of the whole scene.
-            let summary = self.export_summary();
+            let Some(summary) = self.export_summary() else {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Counting what will be written...");
+                });
+                return;
+            };
             let bodies = match summary.bodies {
                 1 => "one body".to_string(),
                 n => format!("{n} bodies"),

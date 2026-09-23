@@ -75,16 +75,18 @@ impl Target {
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
 
+        // Which shape of a boolean preview a pixel's surface is, and that
+        // surface's normal, for its edges (`CSG_EDGE_FRAGMENT`).
         let done = gl.create_texture()?;
         plain(done);
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
-            glow::R8 as i32,
+            glow::RGBA8 as i32,
             w,
             h,
             0,
-            glow::RED,
+            glow::RGBA,
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(None),
         );

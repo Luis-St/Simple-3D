@@ -85,6 +85,7 @@ pub struct Gpu {
     csg_count: Program,
     csg_pack: Program,
     csg_resolve: Program,
+    csg_edges: Program,
     csg_targets: Option<csg::CsgTargets>,
     /// The section's kept half-space as a shape for it, with the hash of what
     /// it was made from.

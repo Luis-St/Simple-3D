@@ -147,17 +147,10 @@ pub(crate) fn draw_gizmo(
                 painter.circle_filled(tip, if highlight(handle) { 6.0 } else { 4.5 }, colour);
             }
             Handle::MovePlane(axis) => {
-                let Some((corner, _)) = view.project(gizmo.handle_point(handle, view)) else { continue };
-                let (u, v) = (axes[0], axes[1]);
-                let arm = gizmo.arm(view) * crate::gizmo::PLANE_FRACTION;
-                let Some((pu, _)) = view.project(gizmo.origin + gizmo.axes[u] * arm) else { continue };
-                let Some((pv, _)) = view.project(gizmo.origin + gizmo.axes[v] * arm) else { continue };
+                // Not drawn edge-on, see `Gizmo::plane_quad`.
+                let Some(quad) = gizmo.plane_quad(axis, view) else { continue };
                 let fill = gizmo::axis_colour(axis).gamma_multiply(if highlight(handle) { 0.55 } else { 0.25 });
-                painter.add(egui::Shape::convex_polygon(
-                    vec![origin, pu, corner, pv],
-                    fill,
-                    egui::Stroke::new(1.0_f32, colour),
-                ));
+                painter.add(egui::Shape::convex_polygon(quad.to_vec(), fill, egui::Stroke::new(1.0_f32, colour)));
             }
             Handle::RotateRing(axis) => {
                 let points: Vec<egui::Pos2> = gizmo

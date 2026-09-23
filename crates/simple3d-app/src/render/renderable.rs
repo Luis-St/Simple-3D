@@ -177,6 +177,19 @@ impl Renderable {
         Renderable { mesh, bodies, ..Renderable::empty() }
     }
 
+    /// [`Renderable::surface`] with its feature edges: what a shape a boolean
+    /// is drawn from needs when the model's lines are drawn, so the boolean
+    /// keeps its edges while it is dragged. Welded to find them, and nothing
+    /// more -- no bodies, spans or outline.
+    pub(crate) fn surface_with_edges(mesh: &Mesh) -> Renderable {
+        let (welded, _) = mesh.weld_with_remap();
+        let normals: Vec<Vec3> =
+            map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
+        let edges = EdgeTable::of(&welded).feature_edges(&normals, 20.0);
+        let bodies = vec![0; welded.positions.len()];
+        Renderable { mesh: welded, normals, edges, bodies, ..Renderable::empty() }
+    }
+
     pub fn empty() -> Renderable {
         Renderable {
             mesh: Mesh::new(),

@@ -114,3 +114,31 @@ pub(crate) fn the_gizmo_is_not_offered_for_the_scene_root() {
     let f = Fixture::new("box");
     assert!(Gizmo::build(&f.scene, &f.evaluated, f.scene.root(), Mode::Move).is_none());
 }
+
+/// Seen from straight in front, the camera looks along the plane that X is
+/// perpendicular to, and its handle collapses onto a line. Drawn anyway, that
+/// line of no area was tessellated with mitre spikes: a pale red line straight
+/// through the handle and across the viewport, at exactly that yaw and gone
+/// the moment the camera turned. Edge-on, a plane handle is neither drawn nor
+/// grabbed; turned away from edge-on, it is both again.
+#[test]
+pub(crate) fn a_plane_handle_seen_edge_on_is_neither_drawn_nor_grabbed() {
+    let mut f = Fixture::new("box");
+    f.scene.camera.yaw = -90.0;
+    f.scene.camera.pitch = 45.0;
+    f.view = View::new(f.scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
+    let gizmo = f.gizmo(Mode::Move);
+    assert!(gizmo.plane_quad(0, &f.view).is_none(), "the edge-on YZ handle is still drawn");
+    assert!(gizmo.plane_quad(1, &f.view).is_some() && gizmo.plane_quad(2, &f.view).is_some());
+    for step in 0..=20 {
+        let t = step as f64 / 20.0;
+        let (u, v) = (gizmo.axes[1], gizmo.axes[2]);
+        let arm = gizmo.arm(&f.view) * crate::gizmo::PLANE_FRACTION;
+        let at = f.view.project(gizmo.origin + (u + v) * (arm * t)).unwrap().0;
+        assert_ne!(gizmo.hit_test(&f.view, at, false), Some(Handle::MovePlane(0)), "the edge-on handle was grabbed");
+    }
+
+    f.scene.camera.yaw = -70.0;
+    f.view = View::new(f.scene.camera, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0)));
+    assert!((0..3).all(|axis| f.gizmo(Mode::Move).plane_quad(axis, &f.view).is_some()), "a turned handle is gone");
+}

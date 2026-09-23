@@ -64,7 +64,7 @@ pub(crate) struct Resident {
     pub(super) faces: Option<Batch>,
     /// One colour tag per triangle, when any triangle is painted.
     pub(super) paint: Option<glow::Texture>,
-    edges: Option<Batch>,
+    pub(super) edges: Option<Batch>,
     tables: Option<Tables>,
     outline: Option<Batch>,
 }
@@ -120,8 +120,12 @@ pub(super) struct Plan {
     /// tool's preview.
     pub(super) overlays: Vec<LineDraw>,
     /// The shapes a boolean preview is drawn from (`csg.rs`), which need
-    /// their faces on the card and nothing else.
+    /// their faces on the card, and their edges too when the model's lines
+    /// are drawn.
     pub(super) csg: Vec<u64>,
+    /// The colour a boolean preview's edges are drawn in, when the display
+    /// mode draws the model's lines at all.
+    pub(super) csg_edges: Option<Rgba>,
 }
 
 pub(super) struct FaceDraw {
@@ -187,6 +191,9 @@ const GLOW: i32 = 2;
 pub(super) fn plan(request: &Request<'_>) -> Plan {
     let palette: &Palette = &request.palette;
     let mut plan = Plan::default();
+    if request.mode == DisplayMode::ShadedWithEdges {
+        plan.csg_edges = Some(palette.edge);
+    }
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         let id = item.renderable.id;
         let placing = Placing::of(&request.live, id);
@@ -258,21 +265,29 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
             }
         }
     }
-    if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
-        let colours = mark_colours(palette);
-        let planes: Vec<(Plane, Rgba)> = (0..3)
-            .filter(|&axis| request.grid.axes[MARK_AXIS[axis]])
-            .map(|axis| (Plane::on_axis(axis, 0.0, false), colours[axis]))
-            .collect();
-        if !planes.is_empty() {
-            for item in request.items.iter().filter(|item| item.style == Style::Solid) {
-                let id = item.renderable.id;
-                let placing = Placing::of(&request.live, id);
-                plan.crossings.push(CrossingDraw { id, placing, planes: planes.clone(), clipped: true });
-            }
+    let planes = mark_planes(request);
+    if !planes.is_empty() {
+        for item in request.items.iter().filter(|item| item.style == Style::Solid) {
+            let id = item.renderable.id;
+            let placing = Placing::of(&request.live, id);
+            plan.crossings.push(CrossingDraw { id, placing, planes: planes.clone(), clipped: true });
         }
     }
     plan
+}
+
+/// The principal planes whose marks this frame draws, each in its colour:
+/// `push_plane_marks`' choice. Shared with the boolean preview, which marks
+/// the surface it finds itself (`gpu/csg.rs`).
+pub(super) fn mark_planes(request: &Request<'_>) -> Vec<(Plane, Rgba)> {
+    if !request.grid.plane_marks || request.mode == DisplayMode::Wireframe {
+        return Vec::new();
+    }
+    let colours = mark_colours(&request.palette);
+    (0..3)
+        .filter(|&axis| request.grid.axes[MARK_AXIS[axis]])
+        .map(|axis| (Plane::on_axis(axis, 0.0, false), colours[axis]))
+        .collect()
 }
 
 impl Plan {
@@ -284,6 +299,11 @@ impl Plan {
         let faces = faces.chain(self.csg.iter().copied());
         for id in faces {
             needs.entry(id).or_default().faces = true;
+        }
+        if self.csg_edges.is_some() {
+            for &id in &self.csg {
+                needs.entry(id).or_default().edges = true;
+            }
         }
         for draw in self.lines.iter().chain(&self.overlays) {
             needs.entry(draw.id).or_default().edges = true;
@@ -416,7 +436,7 @@ impl Resident {
 
     /// A plane as the shaders test it: a distance from the stored position,
     /// moved, that is positive where `Plane::depth` is.
-    fn plane(&self, plane: &Plane, placing: &Placing) -> [f32; 4] {
+    pub(super) fn plane(&self, plane: &Plane, placing: &Placing) -> [f32; 4] {
         let n = plane.normal;
         let origin = placing.xform.point(self.origin);
         [n.x as f32, n.y as f32, n.z as f32, (n.dot(origin) - plane.offset) as f32]

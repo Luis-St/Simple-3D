@@ -113,7 +113,7 @@ impl App {
             export_selection_only: false,
             export_bodies: simple3d_export::BodyMode::One,
             export_compress: true,
-            export_preview: None,
+            export_preview: Default::default(),
             modal: Modal::None,
             dialog_placed: None,
             pending_close: None,

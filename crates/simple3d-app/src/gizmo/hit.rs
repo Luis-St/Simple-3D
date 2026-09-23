@@ -17,6 +17,39 @@ impl Gizmo {
             .collect()
     }
 
+    /// A plane handle's four corners on screen -- the origin, the end of its
+    /// first axis, the far corner and the end of its second -- or `None` while
+    /// the plane is seen too nearly edge-on to be a handle at all.
+    ///
+    /// Edge-on, the square collapses onto a line, and an outlined polygon of no
+    /// area is one egui draws with mitre spikes thousands of pixels long: a
+    /// line straight through the handle and off across the viewport, there at
+    /// exactly one camera angle and gone the moment the camera turns. Grabbing
+    /// such a handle would be no better, since the drag moves in a plane the
+    /// eye cannot see into.
+    pub fn plane_quad(&self, axis: usize, view: &View) -> Option<[egui::Pos2; 4]> {
+        let (u, v) = other_axes(axis);
+        let side = self.arm(view) * PLANE_FRACTION;
+        let corners = [
+            self.origin,
+            self.origin + self.axes[u] * side,
+            self.origin + (self.axes[u] + self.axes[v]) * side,
+            self.origin + self.axes[v] * side,
+        ];
+        let mut quad = [egui::Pos2::ZERO; 4];
+        for (screen, world) in quad.iter_mut().zip(corners) {
+            *screen = view.project(world)?.0;
+        }
+        let twice_area: f32 = (0..4)
+            .map(|i| {
+                let (a, b) = (quad[i], quad[(i + 1) % 4]);
+                a.x * b.y - b.x * a.y
+            })
+            .sum();
+        let facing = (ARM_PIXELS * PLANE_FRACTION).powi(2) as f32;
+        (twice_area.abs() * 0.5 >= facing * PLANE_MIN_FACING).then_some(quad)
+    }
+
     /// The handle under the cursor, if any.
     pub fn hit_test(&self, view: &View, cursor: egui::Pos2, is_group: bool) -> Option<Handle> {
         let mut best: Option<(f32, Handle)> = None;
@@ -35,6 +68,7 @@ impl Gizmo {
                     }
                     nearest
                 }
+                Handle::MovePlane(axis) if self.plane_quad(axis, view).is_none() => continue,
                 other => match view.project(self.handle_point(other, view)) {
                     Some((screen, _)) => (screen - cursor).length(),
                     None => continue,

@@ -66,6 +66,7 @@ impl Drag {
                 // stands, and that is what the rotation field reads.
                 set_axis(&mut rotation, axis, wrap_degrees(get_axis(self.start_rotation, axis) + delta));
                 if let Some(node) = scene.get_mut(self.node) {
+                    node.position = gizmo.position_keeping_pivot(rotation, self.start_scale);
                     node.rotation = rotation;
                 }
                 // Through the same wrap the field uses, and not merely stripped

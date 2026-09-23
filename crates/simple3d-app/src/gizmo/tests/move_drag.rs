@@ -86,3 +86,28 @@ pub(crate) fn a_move_drag_on_a_rotated_child_writes_parent_frame_coordinates() {
     let (lo, hi) = f.world_bounds();
     assert!(((lo.y + hi.y) / 2.0 - 30.0).abs() < 0.3, "{lo:?} {hi:?}");
 }
+
+/// Issue 90, continued: a group's handle stands in the middle of what it
+/// holds, which is measured by the evaluation -- and an evaluation comes back
+/// after the drag has already moved the group. The handle has to go with the
+/// group in the meantime, as a shape's does, not wait at the old middle.
+#[test]
+pub(crate) fn a_group_handle_moves_with_the_group_before_it_is_evaluated_again() {
+    let mut f = Fixture::new("box");
+    let root = f.scene.root();
+    let group = f.scene.add_group(simple3d_core::scene::GroupOp::Union, root, 1);
+    f.scene.reparent(f.node, group, 0).unwrap();
+    f.scene.get_mut(f.node).unwrap().position = Vec3::new(40.0, 0.0, 0.0);
+    f.reevaluate();
+    let before = Gizmo::build(&f.scene, &f.evaluated, group, Mode::Move).unwrap().origin;
+
+    // Moved and turned, with no evaluation since.
+    let node = f.scene.get_mut(group).unwrap();
+    node.position = Vec3::new(0.0, 25.0, 0.0);
+    node.rotation = Vec3::new(0.0, 0.0, 90.0);
+    let stale = Gizmo::build(&f.scene, &f.evaluated, group, Mode::Move).unwrap().origin;
+    f.reevaluate();
+    let fresh = Gizmo::build(&f.scene, &f.evaluated, group, Mode::Move).unwrap().origin;
+    assert!((fresh - before).length() > 10.0, "this test needs the middle to move");
+    assert!((stale - fresh).length() < 1e-6, "the handle stayed at {stale:?}, the group's middle is at {fresh:?}");
+}

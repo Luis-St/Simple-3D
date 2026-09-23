@@ -28,7 +28,21 @@ impl ExportJob {
     ///
     /// `limit` is the point at which the export gives up with a clear message
     /// rather than hanging indefinitely (spec section 9).
+    #[cfg(test)]
     pub fn spawn_parts(path: PathBuf, parts: Vec<(String, Arc<Mesh>)>, options: Options, limit: Duration) -> ExportJob {
+        ExportJob::spawn_building(path, move || parts, options, limit)
+    }
+
+    /// [`ExportJob::spawn_parts`], with the parts worked out on the export's
+    /// own thread first. Working them out means evaluating every body, its
+    /// booleans and the unions that make shared bodies one solid, which on a
+    /// large model froze the window for as long as it took (issue 111).
+    pub fn spawn_building(
+        path: PathBuf,
+        build: impl FnOnce() -> Vec<(String, Arc<Mesh>)> + Send + 'static,
+        options: Options,
+        limit: Duration,
+    ) -> ExportJob {
         let progress = Arc::new(AtomicU32::new(0));
         let cancelled = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
@@ -50,6 +64,7 @@ impl ExportJob {
                     }
                     !worker_cancelled.load(Ordering::Relaxed)
                 };
+                let parts = build();
                 let borrowed: Vec<simple3d_export::Part<'_>> =
                     parts.iter().map(|(name, mesh)| simple3d_export::Part { name, mesh }).collect();
                 let outcome = simple3d_export::write_parts(&worker_path, &borrowed, &options, &mut report);

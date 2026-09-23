@@ -55,6 +55,7 @@ impl Nudge {
                     // it there.
                     let turned = wrap_degrees(get_axis(rotation, axis) + degrees);
                     set_axis(&mut rotation, axis, turned);
+                    node.position = gizmo.position_keeping_pivot(rotation, node.scale);
                     node.rotation = rotation;
                 }
             }

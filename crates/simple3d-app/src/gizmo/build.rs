@@ -12,7 +12,10 @@ use simple3d_geom::Vec3;
 #[derive(Clone, Debug)]
 pub struct Gizmo {
     pub mode: Mode,
-    /// The node's origin in world space -- where move and rotate handles centre.
+    /// Where move and rotate handles centre, in world space: the node's origin,
+    /// or the middle of what a group holds (issue 90) -- a group's origin is
+    /// wherever it was made, which can be nowhere near its children. A rotation
+    /// turns about this point, see `Gizmo::position_keeping_pivot`.
     pub origin: Vec3,
     /// The node's own axes in world space, which the handles stand along.
     pub axes: [Vec3; 3],
@@ -55,9 +58,21 @@ impl Gizmo {
             _ => [None, None, None],
         };
         let axis_scale = [0, 1, 2].map(|a| own.axis_vector(a).length().max(1e-9));
+        // The middle is measured on the last evaluation, but placed with the
+        // group's transform as it stands now: taken into the frame the group
+        // had when it was measured and back out through the live one. A group
+        // dragged ahead of its evaluation otherwise left its handle behind,
+        // where a shape's handle -- its origin, read straight off the node --
+        // goes with it.
+        let origin = match (evaluated.node_world_bounds.get(&id), evaluated.placements.get(&id)) {
+            (Some(&(lo, hi)), Some(measured)) if node.is_group() || node.is_split() => {
+                own.point(parent.compose(measured).inverse().point((lo + hi) * 0.5))
+            }
+            _ => parent.point(node.position),
+        };
         Some(Gizmo {
             mode,
-            origin: parent.point(node.position),
+            origin,
             axes,
             own,
             parent,
@@ -135,6 +150,18 @@ impl Gizmo {
             Handle::ResizeFace(a, positive) => self.own.point(self.face_centre(a, positive)),
             Handle::ResizeCorner(sides) => self.own.point(self.corner(sides)),
         }
+    }
+
+    /// The `Node::position` that keeps `origin` where it stands once the node
+    /// carries `rotation` and `scale` instead of the ones this gizmo was built
+    /// from. For a node whose handle sits on its own origin that is just its
+    /// position; for a group centred elsewhere it is what makes the ring turn
+    /// the group about the middle it is drawn at, rather than swinging it round
+    /// an origin off to one side.
+    pub fn position_keeping_pivot(&self, rotation: Vec3, scale: Vec3) -> Vec3 {
+        let pivot_local = self.own.inverse().point(self.origin);
+        let turned = Xform::from_pos_rot_scale(Vec3::ZERO, rotation, Node::sane_scale(scale));
+        self.parent.inverse().point(self.origin) - turned.vector(pivot_local)
     }
 
     pub(super) fn face_centre(&self, axis: usize, positive: bool) -> Vec3 {

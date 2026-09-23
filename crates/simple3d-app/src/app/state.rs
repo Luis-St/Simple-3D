@@ -207,7 +207,10 @@ pub struct App {
     pub(super) snap_sources: Option<SnapSources>,
     /// The shapes a boolean being dragged is drawn from, with the
     /// evaluation each was taken from -- see `App::live_csg`.
-    pub(super) csg_leaves: std::cell::RefCell<std::collections::HashMap<NodeId, (u64, std::sync::Arc<Renderable>)>>,
+    /// With the evaluation each was made from, and whether it has its edges.
+    #[allow(clippy::type_complexity)]
+    pub(super) csg_leaves:
+        std::cell::RefCell<std::collections::HashMap<NodeId, (u64, bool, std::sync::Arc<Renderable>)>>,
     /// The hulls such a boolean has the dragged body inside of, boiled down
     /// to what each frame's hull is made from -- see `App::csg_hull`.
     pub(super) csg_hulls: std::cell::RefCell<std::collections::HashMap<NodeId, HullCache>>,
@@ -281,8 +284,8 @@ pub struct App {
     /// What the export dialog last counted, and what it counted it for: the
     /// contents choice, the selection and the evaluation it was measured
     /// against. Counting a selection means evaluating it, which must not happen
-    /// on every frame the dialog is open.
-    pub(crate) export_preview: Option<(ExportPreviewKey, ExportSummary)>,
+    /// on every frame the dialog is open, nor on the interface thread at all.
+    pub(crate) export_preview: ExportPreview,
 
     pub modal: Modal,
     /// The dialog window that has already been placed over the middle of the

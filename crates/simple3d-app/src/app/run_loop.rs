@@ -152,6 +152,7 @@ impl App {
         self.dirty
             || self.worker.is_busy()
             || self.export_job.is_some()
+            || self.export_preview.running.is_some()
             || self.split_job.is_some()
             || self.simplify_tool.as_ref().is_some_and(|tool| tool.job.is_some())
             || self.reassemble_tool.as_ref().is_some_and(|tool| tool.job.is_some())

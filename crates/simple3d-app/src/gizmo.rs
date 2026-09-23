@@ -50,5 +50,10 @@ pub const ARM_PIXELS: f64 = 78.0;
 /// Where a plane handle's corner sits along each of its two axes.
 pub const PLANE_FRACTION: f64 = 0.42;
 
+/// How much of its face-on area a plane handle must still show to be drawn
+/// and grabbed: a fifth, which is the plane turned to within about twelve
+/// degrees of edge-on.
+pub const PLANE_MIN_FACING: f32 = 0.2;
+
 /// Click tolerance in pixels.
 pub const GRAB_PIXELS: f32 = 9.0;

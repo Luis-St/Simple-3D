@@ -39,7 +39,6 @@ mod pattern;
 mod pieces;
 mod pieces_extract;
 mod snap_apply;
-pub use export::ExportSummary;
 pub(crate) use export::*;
 mod hints;
 mod import;

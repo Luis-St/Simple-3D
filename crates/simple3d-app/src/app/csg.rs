@@ -264,17 +264,23 @@ impl App {
     }
 
     /// A shape as the last evaluation made it, kept for as long as that
-    /// evaluation is on screen.
+    /// evaluation is on screen -- with its feature edges when the display
+    /// mode draws the model's lines, which the boolean drawn from it then
+    /// keeps while it is dragged (`Gpu::draw_csg_edges`).
     pub(crate) fn csg_leaf(&self, id: NodeId) -> Option<Arc<Renderable>> {
         let generation = self.evaluation_generation;
-        if let Some((made, leaf)) = self.csg_leaves.borrow().get(&id) {
-            if *made == generation {
+        let edged = self.settings.display_mode == simple3d_core::config::DisplayMode::ShadedWithEdges;
+        if let Some((made, with_edges, leaf)) = self.csg_leaves.borrow().get(&id) {
+            if *made == generation && (*with_edges || !edged) {
                 return Some(leaf.clone());
             }
         }
-        let mesh = self.evaluated.result_mesh(id)?.into_owned();
-        let leaf = Arc::new(Renderable::surface(mesh));
-        self.csg_leaves.borrow_mut().insert(id, (generation, leaf.clone()));
+        let mesh = self.evaluated.result_mesh(id)?;
+        let leaf = Arc::new(match edged {
+            true => Renderable::surface_with_edges(&mesh),
+            false => Renderable::surface(mesh.into_owned()),
+        });
+        self.csg_leaves.borrow_mut().insert(id, (generation, edged, leaf.clone()));
         Some(leaf)
     }
 

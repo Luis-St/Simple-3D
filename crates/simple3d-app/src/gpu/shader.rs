@@ -717,6 +717,58 @@ void main() {
 }
 "#;
 
+/// The edges of a boolean drawn per pixel: each shape's own feature edges, kept
+/// only where they are edges of the result. `u_done` holds, per pixel, one
+/// past the index of the shape the resolved surface belongs to and that
+/// surface's normal (`CSG_RESOLVE_FRAGMENT`).
+///
+/// Two things are asked. The pixel's surface has to be the edge's own shape's:
+/// an edge of a cutter standing out in the air, or of an operand swallowed by
+/// another, is on no surface of the result. And the result has to turn or end
+/// there -- a neighbouring pixel on a surface facing another way, or on none
+/// of the boolean at all. Without the second, where two shapes' faces are
+/// coplanar -- two boxes side by side, their tops level -- the pixels along an
+/// edge buried under the shared face resolve to either shape by rounding, and
+/// the edge came through as a row of dashes across a flat face.
+pub(crate) const CSG_EDGE_FRAGMENT: &str = r#"#version 330 core
+in vec4 v_colour;
+flat in uint v_tag;
+
+uniform sampler2D u_done;
+uniform float u_leaf_code;
+uniform uint u_tag;
+
+layout(location = 0) out vec4 out_colour;
+layout(location = 1) out uint out_tag;
+
+// The feature edges' own threshold, 20 degrees.
+const float SAME = 0.94;
+
+void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    vec4 centre = texelFetch(u_done, at, 0);
+    if (abs(centre.r - u_leaf_code) > 0.5 / 255.0) {
+        discard;
+    }
+    vec3 normal = centre.gba * 2.0 - 1.0;
+    ivec2 last = textureSize(u_done, 0) - 1;
+    bool turns = false;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            vec4 other = texelFetch(u_done, clamp(at + ivec2(dx, dy), ivec2(0), last), 0);
+            if (other.r < 0.5 / 255.0 || dot(normal, other.gba * 2.0 - 1.0) < SAME) {
+                turns = true;
+            }
+        }
+    }
+    if (!turns) {
+        discard;
+    }
+    out_colour = v_colour;
+    out_tag = u_tag;
+}
+"#;
+
 /// The boolean preview's layer pass: every face of every shape, keeping at each
 /// pixel the nearest one behind the layer before -- one layer of the shapes'
 /// surfaces, peeled off the front of what is left. What is kept is the face's
@@ -737,13 +789,19 @@ uniform vec4 u_base;
 uniform int u_painted;
 uniform usampler2D u_paint;
 uniform int u_table_width;
+// The plane marks, in the shape's own coordinates as the crossing pass takes
+// them: a boolean drawn per pixel has no mesh of its own for that pass to cut,
+// so its surface is marked here instead, a pixel wide as a grid line is.
+uniform int u_planes;
+uniform vec4 u_plane[3];
+uniform vec4 u_plane_colour[3];
 
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_leaf;
 
 void main() {
     ivec2 pixel = ivec2(gl_FragCoord.xy);
-    if (texelFetch(u_done, pixel, 0).r > 0.5 || gl_FragCoord.z >= texelFetch(u_scene_depth, pixel, 0).r) {
+    if (texelFetch(u_done, pixel, 0).r > 0.5 / 255.0 || gl_FragCoord.z >= texelFetch(u_scene_depth, pixel, 0).r) {
         discard;
     }
     if (u_first == 0 && gl_FragCoord.z <= texelFetch(u_previous, pixel, 0).r) {
@@ -762,7 +820,25 @@ void main() {
     }
     float factor = 0.34 + 0.66 * facing;
     out_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), 255.0) / 255.0;
-    out_leaf = u_leaf;
+    // The normal turned towards the eye, so two coplanar faces agree however
+    // their triangles wind, a byte a component above the shape's index.
+    vec3 towards = length_ > 0.0 ? normal / length_ : vec3(0.0, 0.0, 1.0);
+    if (dot(towards, u_forward) > 0.0) {
+        towards = -towards;
+    }
+    uvec3 packed = uvec3(round((towards * 0.5 + 0.5) * 255.0));
+    uint leaf_word = u_leaf | (packed.x << 8) | (packed.y << 16) | (packed.z << 24);
+    for (int k = 0; k < 3; k++) {
+        float d = dot(u_plane[k].xyz, v_pos) + u_plane[k].w;
+        float across = length(vec2(dFdx(d), dFdy(d)));
+        // A face lying in the plane has no crossing of its own, as in the
+        // crossing pass: its edges are its neighbours' crossings.
+        bool lying = length_ > 0.0 && abs(dot(normal / length_, u_plane[k].xyz)) > 0.9999;
+        if (k < u_planes && !lying && abs(d) <= 0.5 * across) {
+            out_colour = vec4(u_plane_colour[k].rgb, 1.0);
+        }
+    }
+    out_leaf = leaf_word;
 }
 "#;
 
@@ -854,7 +930,7 @@ uniform int u_half;
 
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
-layout(location = 2) out float out_done;
+layout(location = 2) out vec4 out_done;
 
 bool evaluate(uvec4 inside) {
     bool stack[32];
@@ -881,7 +957,8 @@ void main() {
         discard;
     }
     uvec4 inside = texelFetch(u_inside, at, 0);
-    uint leaf = texelFetch(u_leaf, at, 0).r;
+    uint word = texelFetch(u_leaf, at, 0).r;
+    uint leaf = word & 255u;
     uvec4 flipped = inside;
     flipped[leaf / 32u] ^= 1u << (leaf % 32u);
     if (evaluate(inside) == evaluate(flipped)) {
@@ -889,7 +966,10 @@ void main() {
     }
     out_colour = texelFetch(u_colour, at, 0);
     out_tag = int(leaf) == u_half ? 0u : u_tag;
-    out_done = 1.0;
+    // Which shape's surface the pixel is, one past its index -- anything
+    // written is done -- and the surface's normal: what the edge pass asks.
+    vec3 normal = vec3(float((word >> 8) & 255u), float((word >> 16) & 255u), float(word >> 24)) / 255.0;
+    out_done = vec4(float(leaf + 1u) / 255.0, normal);
     gl_FragDepth = depth;
 }
 "#;

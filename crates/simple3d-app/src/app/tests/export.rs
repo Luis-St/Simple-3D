@@ -125,3 +125,41 @@ pub(crate) fn separating_objects_writes_one_per_top_level_node_by_name() {
         "STL holds one body; separating them there is not a thing to promise"
     );
 }
+
+/// Issue 111: the dialog's count of what an export writes means evaluating
+/// every body, and it used to happen on the interface thread each time a
+/// body was picked, freezing the window for as long as that took. It is
+/// worked out on a thread of its own now: asking returns at once, with
+/// nothing until the answer is in, and a change to the marks asks again.
+#[test]
+pub(crate) fn the_export_count_is_worked_out_off_the_interface_thread() {
+    use simple3d_core::scene::ExportBody;
+
+    let mut app = app_in(temp_config_dir("export-count"));
+    let root = app.scene.root();
+    let plate = app.scene.add_primitive("plate", root, 0).expect("the plate is in the registry");
+    let bracket = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    app.scene.get_mut(bracket).unwrap().position = Vec3::new(200.0, 0.0, 0.0);
+    app.reevaluate_for_test();
+    app.export_format = simple3d_export::Format::ThreeMf;
+    app.export_bodies = simple3d_export::BodyMode::Selected;
+
+    let wait = |app: &mut App| {
+        let start = std::time::Instant::now();
+        loop {
+            if let Some(summary) = app.export_summary() {
+                return summary;
+            }
+            assert!(start.elapsed() < std::time::Duration::from_secs(20), "the count never came back");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    assert_eq!(wait(&mut app).bodies, 2, "two unmarked shapes are two bodies");
+
+    app.scene.set_export_body(plate, Some(ExportBody::Shared(1)));
+    app.scene.set_export_body(bracket, Some(ExportBody::Shared(1)));
+    assert!(app.export_summary().is_none(), "a changed mark reused the old count");
+    let summary = wait(&mut app);
+    assert_eq!(summary.bodies, 1, "the two marked shapes are one body");
+    assert!(summary.triangles > 0);
+}

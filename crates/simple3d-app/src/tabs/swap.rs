@@ -86,7 +86,7 @@ impl App {
         // click, which is not what putting the tool away means.
         self.measure = crate::app::Measure::default();
         self.fields.clear();
-        self.export_preview = None;
+        self.export_preview = Default::default();
         // A split in flight is cutting the *other* document's shape and could
         // never be applied to this one -- `poll_split` would refuse it on the
         // tab it was started in -- so it is stopped here rather than left to
