@@ -11,9 +11,9 @@ pub(crate) struct Program {
 pub(crate) struct Buffers {
     pub(super) array: glow::VertexArray,
     pub(super) vertices: glow::Buffer,
-    /// The per-segment table of which bodies an axis may be seen through,
-    /// uploaded as a texture because there are as many entries as there are
-    /// bodies in the scene.
+    /// The stretches of material along each axis, a row per axis, uploaded
+    /// as a texture because there are as many as the axes run through
+    /// bodies -- see `ground::draw_axes`.
     pub(super) seen: glow::Texture,
 }
 
@@ -112,5 +112,24 @@ impl Buffers {
         }
         gl.bind_texture(glow::TEXTURE_2D, None);
         Ok(Buffers { array, vertices, seen })
+    }
+}
+
+/// A vertex array with one attribute, laid out by each draw: the grid's quad
+/// and the axes' arms, a handful of vertices uploaded as they are drawn.
+pub(crate) struct GroundBuffers {
+    pub(super) array: glow::VertexArray,
+    pub(super) vertices: glow::Buffer,
+}
+
+impl GroundBuffers {
+    pub(super) unsafe fn new(gl: &glow::Context) -> Result<GroundBuffers, String> {
+        let array = gl.create_vertex_array()?;
+        let vertices = gl.create_buffer()?;
+        gl.bind_vertex_array(Some(array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertices));
+        gl.enable_vertex_attrib_array(0);
+        gl.bind_vertex_array(None);
+        Ok(GroundBuffers { array, vertices })
     }
 }

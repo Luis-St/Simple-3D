@@ -28,42 +28,19 @@ pub fn render_prepared(request: &Request<'_>, prepared: &Prepared) -> Image {
 /// The scene worked out but not yet drawn: screen-space primitives in drawing
 /// order, and the pieces of the origin axes with the rule that governs them.
 ///
-/// This is where the two renderers meet. Projection, culling, shading, the
-/// grid's falloff and the whole of the axis-through-material question are
-/// decided here, once, on the CPU; what the GPU renderer does differently is
-/// only how the resulting primitives are turned into pixels. Anything decided
-/// here cannot drift between the engines, which is the point of it.
+/// The software renderer's own: projection, culling, shading, the grid's
+/// falloff and the whole of the axis-through-material question decided once,
+/// on the CPU, for every band to draw from. The GPU renderer works all of it
+/// out on the card and is never handed one of these.
 pub struct Prepared {
     pub(crate) steps: Vec<Step>,
     pub(crate) axes: Vec<AxisStep>,
 }
 
 pub fn prepare_frame(request: &Request<'_>) -> Prepared {
-    prepare_frame_for(request, Geometry::Steps)
-}
-
-/// Who draws the items' own faces and lines: the ones that come straight off
-/// a renderable's mesh and do not depend on the camera beyond where it looks
-/// from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Geometry {
-    /// Projected here and handed over as steps, which is what the software
-    /// renderer needs.
-    Steps,
-    /// Left out: the engine keeps the mesh itself and works out on its own
-    /// everything drawn from it -- faces, edges, the selection's silhouette,
-    /// the section's cap and the line round it, the plane marks. That is the
-    /// GPU renderer, which uploads each renderable once and from then on is
-    /// handed only the camera, so a frame costs it no work per triangle on the
-    /// CPU at all. What is left here is what does not come from a mesh: the
-    /// grid, the axes and a tool's preview.
-    Resident,
-}
-
-pub fn prepare_frame_for(request: &Request<'_>, geometry: Geometry) -> Prepared {
     let material = axis_material_live(&request.items, &request.grid, request.section, &request.live);
     let axes = prepare_axes(&request.view, &request.palette, &request.grid, &material);
-    Prepared { steps: prepare_with(request, geometry), axes }
+    Prepared { steps: prepare_with(request), axes }
 }
 
 /// Draw the frame in a given number of bands. The band count must not change
@@ -115,16 +92,15 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
     Image { width, height, color }
 }
 
-/// Everything of the model that is the same whichever rows are being drawn:
-/// projected, culled, shaded and ordered exactly as the drawing order requires.
 /// All of it as steps: the tests' way in.
 #[cfg(test)]
 pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
-    prepare_with(request, Geometry::Steps)
+    prepare_with(request)
 }
 
-pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Step> {
-    let steps_too = geometry == Geometry::Steps;
+/// Everything of the model that is the same whichever rows are being drawn:
+/// projected, culled, shaded and ordered exactly as the drawing order requires.
+pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     let view = request.view;
     let mut steps = Vec::new();
     if request.grid.visible {
@@ -134,70 +110,34 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         // Every vertex projected once for everything this item draws from its
         // mesh: faces and edges share their corners.
-        let needs_screen = steps_too && item.style != Style::Selected && cut.is_none();
+        let needs_screen = item.style != Style::Selected && cut.is_none();
         let screen = if needs_screen { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         let screen = &screen[..];
         match item.style {
-            Style::Solid => match request.mode {
-                DisplayMode::Wireframe => {
-                    if steps_too {
-                        push_wireframe(&mut steps, &view, item.renderable, screen, request.palette.wire, cut);
+            Style::Solid => {
+                let palette = &request.palette;
+                match request.mode {
+                    DisplayMode::Wireframe => {
+                        push_wireframe(&mut steps, &view, item.renderable, screen, palette.wire, cut)
                     }
-                    if steps_too {
-                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    DisplayMode::Shaded => {
+                        push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut)
                     }
-                }
-                DisplayMode::Shaded => {
-                    if steps_too {
-                        push_shaded(
-                            &mut steps,
-                            &view,
-                            item.renderable,
-                            screen,
-                            request.palette.solid,
-                            255,
-                            tag_base,
-                            cut,
-                        );
-                    }
-                    if steps_too {
-                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
-                    }
-                }
-                DisplayMode::ShadedWithEdges => {
-                    if steps_too {
-                        let palette = &request.palette;
+                    DisplayMode::ShadedWithEdges => {
                         push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut);
                         push_edges(&mut steps, &view, item.renderable, screen, palette.edge, tag_base, cut);
                     }
-                    if steps_too {
-                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
-                    }
                 }
-            },
+                push_cap(&mut steps, &view, item.renderable, palette, cut, request.mode);
+            }
             // Always outlined, in every display mode: the selection has to be
             // visible, and an outline reads clearly over a shaded body. A
             // larger bias than the solid's own edges, or the two would tie at
             // equal depth and the outline would lose.
-            Style::Selected if steps_too => {
-                push_selection(
-                    &mut steps,
-                    &view,
-                    item.renderable,
-                    request.palette.selected,
-                    tag_base,
-                    request.mode,
-                    cut,
-                );
-            }
-            Style::Ghost => {
-                if steps_too {
-                    push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut);
-                }
-            }
-            // The outline here; the glow itself comes last, after everything
-            // that could be standing in front of it.
-            Style::Glow if steps_too => push_selection(
+            //
+            // A glowing body is outlined here too; the glow itself comes
+            // last, after everything that could be standing in front of it.
+            Style::Selected | Style::Glow => push_selection(
                 &mut steps,
                 &view,
                 item.renderable,
@@ -206,18 +146,17 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
                 request.mode,
                 cut,
             ),
-            // The card finds the outline itself, from the edges it keeps.
-            Style::Selected | Style::Glow => {}
+            Style::Ghost => push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut),
         }
     }
     // Last of all, over the finished model: what a buried body is pointed out
     // with, and the cells of a tool's preview.
-    for item in request.items.iter().filter(|item| item.style == Style::Glow && steps_too) {
+    for item in request.items.iter().filter(|item| item.style == Style::Glow) {
         let screen = if cut.is_none() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         push_glow(&mut steps, &view, item.renderable, &screen, request.palette.glow, cut);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
-    if steps_too && request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
+    if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
         // After the solids: the mark belongs on the surface, and in wireframe
         // there is no surface for it to sit on.
         push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid, cut);

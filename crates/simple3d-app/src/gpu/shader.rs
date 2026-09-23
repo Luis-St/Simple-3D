@@ -76,37 +76,6 @@ void main() {
 }
 "#;
 
-/// The origin axes, and the one rule that is not just a depth test.
-///
-/// A piece of an axis that loses the depth test is still drawn when the body
-/// that won that pixel is one this piece is arriving at -- `seen`, indexed by
-/// body tag and by which segment of the line this is. That is the whole of
-/// `Frame::put_with`'s `through` argument, moved into a shader.
-pub(crate) const AXIS_SOURCE: &str = r#"#version 330 core
-in vec4 v_colour;
-flat in uint v_segment;
-in float v_depth;
-
-uniform sampler2D u_depth_tex;
-uniform usampler2D u_tag_tex;
-uniform sampler2D u_seen;
-uniform vec2 u_seen_size;
-
-out vec4 out_colour;
-
-void main() {
-    ivec2 at = ivec2(gl_FragCoord.xy);
-    float scene = texelFetch(u_depth_tex, at, 0).r;
-    if (v_depth >= scene) {
-        uint owner = texelFetch(u_tag_tex, at, 0).r;
-        if (float(owner) >= u_seen_size.x) discard;
-        float allowed = texelFetch(u_seen, ivec2(int(owner), int(v_segment)), 0).r;
-        if (allowed < 0.5) discard;
-    }
-    out_colour = v_colour;
-}
-"#;
-
 /// A full-screen gradient, the same one `Palette::background_at` lays down.
 pub(crate) const BACKGROUND_VERTEX: &str = r#"#version 330 core
 out vec2 v_uv;
@@ -564,3 +533,174 @@ void main() {
 "#,
     )
 }
+
+/// The ground grid, worked out per pixel over one quad on the ground: what
+/// `push_grid` lays down as a few hundred lines, each cut into fading steps.
+///
+/// A pixel is on a grid line when the line is within half a pixel of it,
+/// measured across the line on screen -- which is what a one-pixel line
+/// rasterized along it covers. The two levels are the ones `grid_levels`
+/// picks, the finer faded in by its strength and the coarser drawn over it
+/// with every tenth line in the major colour; and every pixel fades with its
+/// distance from the middle of the frame, as each step of a CPU grid line
+/// does. The quad is positioned relative to the coarse level's snapped centre,
+/// which is a multiple of both spacings, so the lines are at multiples of the
+/// spacing in its own coordinates.
+pub(crate) fn grid_vertex() -> String {
+    resident(
+        r#"
+layout(location = 0) in vec2 in_uv;
+
+uniform float u_bias;
+
+out vec2 v_uv;
+
+void main() {
+    vec3 screen = project(vec3(in_uv, 0.0));
+    gl_Position = place(screen.xy, screen.z + u_bias * abs(screen.z));
+    v_uv = in_uv;
+}
+"#,
+    )
+}
+
+pub(crate) const GRID_FRAGMENT: &str = r#"#version 330 core
+in vec2 v_uv;
+
+uniform vec2 u_viewport;
+// The two spacings, the finer's strength, and how far each level's lines run
+// from the centre.
+uniform float u_fine;
+uniform float u_coarse;
+uniform float u_strength;
+uniform vec2 u_half;
+// Which coarse line through the centre each way is, counted in tens, so the
+// majors fall on the world's own multiples of ten.
+uniform vec2 u_major;
+uniform vec4 u_minor_colour;
+uniform vec4 u_major_colour;
+// The distance from the middle of the frame, in pixels, at which the grid has
+// faded out.
+uniform float u_fade;
+
+layout(location = 0) out vec4 out_colour;
+
+// How many pixels from the nearest line at `spacing` the pixel is, across it.
+float pixels_off(float w, float spacing) {
+    float off = abs(w - spacing * round(w / spacing));
+    return off / max(length(vec2(dFdx(w), dFdy(w))), 1e-12);
+}
+
+bool major(float w, float spacing, float centre) {
+    return mod(round(w / spacing) + centre, 10.0) == 0.0;
+}
+
+void main() {
+    float distance_ = length(gl_FragCoord.xy - u_viewport * 0.5);
+    float fade = 1.0 - pow(min(distance_ / u_fade, 1.0), 2.0);
+    if (fade <= 0.03) {
+        discard;
+    }
+    vec4 colour = vec4(0.0);
+    float reach = max(abs(v_uv.x), abs(v_uv.y));
+    if (u_strength > 0.03 && reach <= u_half.x) {
+        if (pixels_off(v_uv.x, u_fine) <= 0.5 || pixels_off(v_uv.y, u_fine) <= 0.5) {
+            colour = vec4(u_minor_colour.rgb, u_minor_colour.a * u_strength);
+        }
+    }
+    if (reach <= u_half.y) {
+        bool along_x = pixels_off(v_uv.x, u_coarse) <= 0.5;
+        bool along_y = pixels_off(v_uv.y, u_coarse) <= 0.5;
+        if (along_x || along_y) {
+            bool is_major = (along_x && major(v_uv.x, u_coarse, u_major.x)) || (along_y && major(v_uv.y, u_coarse, u_major.y));
+            vec4 line = is_major ? u_major_colour : u_minor_colour;
+            // Over the finer line, as the CPU draws it after.
+            float alpha = line.a + colour.a * (1.0 - line.a);
+            vec3 rgb = alpha > 0.0 ? (line.rgb * line.a + colour.rgb * colour.a * (1.0 - line.a)) / alpha : line.rgb;
+            colour = vec4(rgb, alpha);
+        }
+    }
+    if (colour.a <= 0.0) {
+        discard;
+    }
+    out_colour = vec4(colour.rgb, colour.a * fade);
+}
+"#;
+
+/// An arm of an origin axis, and the rule that is not just a depth test --
+/// `push_axis_line` and `Frame::line_through`, asked per pixel.
+///
+/// Each vertex carries where it is along its axis, so every pixel knows where
+/// it is too: it fades with the distance from the arm's centre, is left out
+/// wherever the axis runs through material, and where it loses the depth test
+/// is drawn anyway if the body that won the pixel is one the axis is arriving
+/// at. The spans of material come in a table, one row per axis: where each
+/// runs along the axis, and the tag of the body it is in.
+pub(crate) fn axis_vertex() -> String {
+    resident(
+        r#"
+layout(location = 0) in vec4 in_point;
+
+uniform float u_bias;
+
+out float v_along;
+out float v_depth;
+
+void main() {
+    vec3 screen = project(in_point.xyz);
+    gl_Position = place(screen.xy, screen.z + u_bias);
+    v_along = in_point.w;
+    v_depth = gl_Position.z * 0.5 + 0.5;
+}
+"#,
+    )
+}
+
+pub(crate) const AXIS_FRAGMENT: &str = r#"#version 330 core
+in float v_along;
+in float v_depth;
+
+uniform sampler2D u_depth_tex;
+uniform usampler2D u_tag_tex;
+uniform sampler2D u_spans;
+uniform int u_row;
+uniform int u_count;
+// Where along the axis the arm starts, and the distance its fade is measured
+// against.
+uniform float u_start;
+uniform float u_reach;
+// How the axis points relative to the view, which decides which side of a
+// body is the approach to it.
+uniform float u_away;
+uniform vec4 u_colour;
+
+out vec4 out_colour;
+
+void main() {
+    float fade = 1.0 - pow(min(abs(v_along - u_start) / (u_reach * 0.8), 1.0), 2.0);
+    if (fade <= 0.03) {
+        discard;
+    }
+    for (int i = 0; i < u_count; i++) {
+        vec4 span = texelFetch(u_spans, ivec2(i, u_row), 0);
+        if (v_along > span.x && v_along < span.y) {
+            discard;
+        }
+    }
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    if (v_depth >= texelFetch(u_depth_tex, at, 0).r) {
+        uint owner = texelFetch(u_tag_tex, at, 0).r;
+        bool arriving = false;
+        for (int i = 0; i < u_count; i++) {
+            vec4 span = texelFetch(u_spans, ivec2(i, u_row), 0);
+            if (uint(span.z) == owner) {
+                arriving = arriving || (u_away > 1e-9 ? v_along <= span.x : (u_away < -1e-9 ? v_along >= span.y : true));
+            }
+        }
+        if (!arriving) {
+            discard;
+        }
+    }
+    out_colour = vec4(u_colour.rgb, u_colour.a * fade);
+}
+"#;

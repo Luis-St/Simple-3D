@@ -1,7 +1,7 @@
 //! Drawing one frame on the GPU.
 
 use super::*;
-use crate::render::{Prepared, Request, Step};
+use crate::render::Request;
 use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 
@@ -11,7 +11,8 @@ impl Gpu {
     pub fn new(gl: Arc<glow::Context>) -> Result<Gpu, String> {
         unsafe {
             let solid = Program::new(&gl, VERTEX_SOURCE, SOLID_SOURCE)?;
-            let axis = Program::new(&gl, VERTEX_SOURCE, AXIS_SOURCE)?;
+            let axis = Program::new(&gl, &axis_vertex(), AXIS_FRAGMENT)?;
+            let grid = Program::new(&gl, &grid_vertex(), GRID_FRAGMENT)?;
             let background = Program::new(&gl, BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)?;
             let faces = Program::new(&gl, &face_vertex(), FACE_FRAGMENT)?;
             let lines = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), SOLID_SOURCE)?;
@@ -21,10 +22,12 @@ impl Gpu {
             // a few thousand entries from being mostly padding.
             let table_width = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).clamp(1024, 8192) as usize;
             let buffer = Buffers::new(&gl)?;
+            let ground = GroundBuffers::new(&gl)?;
             Ok(Gpu {
                 gl,
                 solid,
                 axis,
+                grid,
                 background,
                 faces,
                 lines,
@@ -32,9 +35,11 @@ impl Gpu {
                 crossing,
                 table_width,
                 resident: std::collections::HashMap::new(),
+                preview: None,
                 target: None,
                 colour: None,
                 buffer,
+                ground,
                 texture_id: None,
             })
         }
@@ -42,44 +47,30 @@ impl Gpu {
 }
 
 impl Gpu {
-    /// Draw `prepared` into the offscreen texture, and return the id egui can
+    /// Draw `request` into the offscreen texture, and return the id egui can
     /// paint it with.
     ///
-    /// `prepared` is expected to have been made with
-    /// [`crate::render::Geometry::Resident`]: the items' own faces and lines are
-    /// drawn from the copies of their meshes kept on the card, and a step list
-    /// that carried them as well would draw them twice.
-    pub fn render(&mut self, request: &Request<'_>, prepared: &Prepared) -> Result<egui::TextureId, String> {
+    /// Nothing is prepared for it on the CPU: the meshes are on the card, and
+    /// the grid, the axes and a tool's preview are drawn by shaders from the
+    /// handful of numbers that decide them (`ground.rs`).
+    pub fn render(&mut self, request: &Request<'_>) -> Result<egui::TextureId, String> {
         let [width, height] = request.size;
         let (width, height) = (width.max(1), height.max(1));
         let gl = self.gl.clone();
+        self.refresh_preview(request);
         let mut plan = resident::plan(request);
-        unsafe { self.keep_resident(&gl, request, &plan)? };
+        let preview = self.preview.take();
+        let extra: Vec<&crate::render::Renderable> = preview.iter().map(|(_, lines)| lines).collect();
+        if let Some(lines) = extra.first() {
+            plan.overlays.push(resident::LineDraw::preview(lines.id, request.palette.selected));
+        }
+        let kept = unsafe { self.keep_resident(&gl, request, &plan, &extra) };
+        self.preview = preview;
+        kept?;
         let mut passes = Passes::default();
-        self.see_resident(request, &mut passes);
+        self.see_resident(request, &plan, &mut passes);
         self.place_caps(&request.view, &mut plan, &mut passes);
-        for step in &prepared.steps {
-            match *step {
-                Step::Triangle { v, colour, tag, write_depth } => passes.triangle(v, colour, tag, write_depth),
-                Step::Line { a, b, colour, bias, tag, write_depth } => {
-                    passes.line(a, b, colour, bias, tag, write_depth)
-                }
-                Step::Overlay { a, b, colour, bias } => passes.overlay(a, b, colour, bias),
-                Step::Glow { v, colour } => passes.glow(v, colour),
-            }
-        }
-        // The axes carry which segment they are, so the shader can find that
-        // segment's row in the `seen` table.
-        let mut tags = 1usize;
-        for (segment, step) in prepared.axes.iter().enumerate() {
-            let (a, b) = (biased(step.a, AXIS_BIAS), biased(step.b, AXIS_BIAS));
-            passes.axes.push(GpuVertex::new(a, step.colour, 0, segment as u32));
-            passes.axes.push(GpuVertex::new(b, step.colour, 0, segment as u32));
-            passes.saw(a.key);
-            passes.saw(b.key);
-            tags = tags.max(step.seen.len());
-        }
-
-        unsafe { self.draw(request, &passes, &plan, &prepared.axes, tags, width, height) }
+        let ground = ground::prepare(request, &mut passes);
+        unsafe { self.draw(request, &passes, &plan, &ground, width, height) }
     }
 }

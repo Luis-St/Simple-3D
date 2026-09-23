@@ -157,6 +157,18 @@ impl Renderable {
         }
     }
 
+    /// Lines with no surface under them -- a tool's preview loops -- for the
+    /// GPU to keep on the card like any mesh's edges.
+    pub(crate) fn lines(positions: Vec<Vec3>, edges: Vec<[u32; 2]>) -> Renderable {
+        let bodies = vec![0; positions.len()];
+        Renderable {
+            mesh: Mesh { positions, indices: Vec::new(), tags: Vec::new() },
+            bodies,
+            edges,
+            ..Renderable::empty()
+        }
+    }
+
     pub fn empty() -> Renderable {
         Renderable {
             mesh: Mesh::new(),

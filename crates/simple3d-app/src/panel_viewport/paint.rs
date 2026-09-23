@@ -131,12 +131,12 @@ pub(crate) fn paint_scene(
             // The plane the model is cut with, while there is one (issue 71).
             section: app.scene.settings.section.plane(),
         };
-        // One preparation, whichever engine draws it: the projection, the
-        // shading, the grid's falloff and the axis rule are settled here and
-        // the engine only turns the result into pixels. The GPU keeps the
-        // meshes themselves on the card, so it is handed everything but those.
+        // The GPU works the whole frame out on the card from the request; the
+        // CPU renderer prepares it as primitives first, and only when it is
+        // the one drawing, so nothing is spent on the CPU for a picture the
+        // card is making.
         match app.gpu.as_mut() {
-            Some(gpu) => match gpu.render(&request, &render::prepare_frame_for(&request, render::Geometry::Resident)) {
+            Some(gpu) => match gpu.render(&request) {
                 Ok(id) => app.gpu_texture = Some(id),
                 Err(why) => {
                     // The driver said no. Say so once, and go on drawing in

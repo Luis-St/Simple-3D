@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::raster::Rgba;
-use crate::render::AxisStep;
 use eframe::glow::{self, HasContext};
 
 impl Gpu {
@@ -13,33 +12,6 @@ impl Gpu {
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.buffer.vertices));
         gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, as_bytes(vertices), glow::STREAM_DRAW);
         gl.draw_arrays(mode, 0, vertices.len() as i32);
-    }
-
-    /// The table the axis shader reads: one row per segment of an axis, one
-    /// column per body tag, holding whether that segment may be seen through
-    /// that body.
-    pub(super) unsafe fn upload_seen(&self, gl: &glow::Context, axes: &[AxisStep], tags: usize) {
-        let mut table = vec![0u8; tags * axes.len().max(1)];
-        for (segment, step) in axes.iter().enumerate() {
-            for (tag, &allowed) in step.seen.iter().enumerate() {
-                if allowed && tag < tags {
-                    table[segment * tags + tag] = 255;
-                }
-            }
-        }
-        gl.bind_texture(glow::TEXTURE_2D, Some(self.buffer.seen));
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-        gl.tex_image_2d(
-            glow::TEXTURE_2D,
-            0,
-            glow::R8 as i32,
-            tags as i32,
-            axes.len().max(1) as i32,
-            0,
-            glow::RED,
-            glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(&table)),
-        );
     }
 
     /// Make or remake the offscreen target. The colour texture keeps its

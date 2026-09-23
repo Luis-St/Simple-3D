@@ -7,7 +7,7 @@ use simple3d_geom::section::Plane;
 /// go through, and how far from the origin the model reaches.
 pub(crate) struct AxisMaterial {
     /// Per axis, the stretches inside a solid, as coordinates along that axis.
-    pub(super) inside: [Vec<(f64, f64)>; 3],
+    pub(crate) inside: [Vec<(f64, f64)>; 3],
     /// Per axis, the bodies it runs through: the stretch inside each one, with
     /// that body's tag. Per body and per axis both -- a box the Y axis runs
     /// through is still an ordinary occluder for X and Z, and a box the axes
@@ -17,14 +17,14 @@ pub(crate) struct AxisMaterial {
     /// The span is kept, not just the tag, because *where* a stretch of the
     /// line sits relative to it decides whether that body may hide it: only the
     /// approach, on the eye's side of the material, is drawn over the shape.
-    pub(super) through: [Vec<(f64, f64, u16)>; 3],
+    pub(crate) through: [Vec<(f64, f64, u16)>; 3],
     /// One past the largest tag in `through`, so a lookup table indexed by tag
     /// can be sized once.
-    pub(super) tags: usize,
+    pub(crate) tags: usize,
     /// The distance from the origin to the model's furthest vertex. What an
     /// origin axis's arms have to be longer than, or a shape standing on the
     /// origin holds the whole arm and the axis is never seen at all.
-    pub(super) reach: f64,
+    pub(crate) reach: f64,
 }
 
 /// Where each item's body tags start, so no two items share one.

@@ -14,7 +14,7 @@ mod request;
 pub(crate) use request::*;
 pub use request::{Grid, Item, Live, Request, Style};
 mod frame;
-pub use frame::{prepare_frame, prepare_frame_for, render_prepared, Geometry, Prepared};
+pub use frame::{prepare_frame, render_prepared};
 mod step;
 pub(crate) use step::*;
 mod shading;

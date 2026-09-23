@@ -1,7 +1,7 @@
-//! Turning the renderable steps into draw calls.
+//! One frame's passes, in the order they are drawn.
 
 use super::*;
-use crate::render::{AxisStep, Request};
+use crate::render::Request;
 use eframe::glow::{self, HasContext};
 
 impl Gpu {
@@ -11,8 +11,7 @@ impl Gpu {
         request: &Request<'_>,
         passes: &Passes,
         plan: &resident::Plan,
-        axes: &[AxisStep],
-        tags: usize,
+        ground: &ground::Ground,
         width: usize,
         height: usize,
     ) -> Result<egui::TextureId, String> {
@@ -67,13 +66,17 @@ impl Gpu {
             gl.uniform_2_f32(Some(at), offset, scale);
         }
 
+        let (view, section) = (&request.view, request.section);
+        let viewport = [width as f32, height as f32];
+        let depth = [offset, scale];
+
         // The grid: under the model, blended, and never claiming a pixel's
         // depth or its body -- exactly `write_depth: false` in the rasterizer.
         gl.enable(glow::BLEND);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
-        self.batch(&gl, glow::LINES, &passes.grid);
+        self.draw_grid(&gl, ground, view, viewport, depth);
 
         // The model: opaque, writing depth and the body tag an axis will ask
         // about.
@@ -82,18 +85,11 @@ impl Gpu {
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
         gl.cull_face(glow::BACK);
         gl.front_face(resident::front_face(&request.view));
-        self.batch(&gl, glow::TRIANGLES, &passes.solids);
-        let (view, section) = (&request.view, request.section);
-        let viewport = [width as f32, height as f32];
-        let depth = [offset, scale];
         self.draw_faces(&gl, &plan.solids, view, section, viewport, depth);
         self.draw_caps(&gl, &plan.caps, view, section, viewport, depth);
-        gl.use_program(Some(self.solid.program));
-        self.batch(&gl, glow::LINES, &passes.lines);
         self.draw_lines(&gl, &plan.lines, view, section, viewport, depth);
         self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
         self.draw_crossings(&gl, &plan.crossings, view, section, viewport, depth);
-        gl.use_program(Some(self.solid.program));
 
         // Ghosts, and a tool's preview: blended over what is there, tested
         // against the model and claiming nothing. The preview is here rather
@@ -102,56 +98,26 @@ impl Gpu {
         gl.enable(glow::BLEND);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
-        self.batch(&gl, glow::TRIANGLES, &passes.ghosts);
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
-        gl.use_program(Some(self.solid.program));
-        self.batch(&gl, glow::LINES, &passes.overlay);
+        self.draw_lines(&gl, &plan.overlays, view, section, viewport, depth);
 
         // The glow of a body inside another one, over everything and tested
         // against nothing: what is in front of it is exactly what it has to be
         // seen through.
-        if !passes.glow.is_empty() || !plan.glows.is_empty() {
+        if !plan.glows.is_empty() {
             gl.disable(glow::DEPTH_TEST);
-            self.batch(&gl, glow::TRIANGLES, &passes.glow);
             self.draw_faces(&gl, &plan.glows, view, section, viewport, depth);
-            gl.use_program(Some(self.solid.program));
             gl.enable(glow::DEPTH_TEST);
         }
 
         // The axes, in the overlay pass, where the depth and tag buffers are
         // readable rather than attached.
-        if !passes.axes.is_empty() {
-            self.upload_seen(&gl, axes, tags);
-            gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.overlay));
-            gl.viewport(0, 0, width as i32, height as i32);
-            gl.disable(glow::DEPTH_TEST);
-            gl.depth_mask(false);
-            gl.enable(glow::BLEND);
-            gl.use_program(Some(self.axis.program));
-            if let Some(at) = self.axis.at("u_viewport") {
-                gl.uniform_2_f32(Some(at), width as f32, height as f32);
-            }
-            if let Some(at) = self.axis.at("u_depth") {
-                gl.uniform_2_f32(Some(at), offset, scale);
-            }
-            if let Some(at) = self.axis.at("u_seen_size") {
-                gl.uniform_2_f32(Some(at), tags as f32, axes.len().max(1) as f32);
-            }
-            let target = self.target.as_ref().expect("resize leaves a target");
-            for (unit, (name, texture)) in
-                [("u_depth_tex", target.depth), ("u_tag_tex", target.tags), ("u_seen", self.buffer.seen)]
-                    .into_iter()
-                    .enumerate()
-            {
-                gl.active_texture(glow::TEXTURE0 + unit as u32);
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                if let Some(at) = self.axis.at(name) {
-                    gl.uniform_1_i32(Some(at), unit as i32);
-                }
-            }
-            self.batch(&gl, glow::LINES, &passes.axes);
-            gl.active_texture(glow::TEXTURE0);
-        }
+        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.overlay));
+        gl.viewport(0, 0, width as i32, height as i32);
+        gl.disable(glow::DEPTH_TEST);
+        gl.depth_mask(false);
+        gl.enable(glow::BLEND);
+        self.draw_axes(&gl, ground, view, viewport, depth);
 
         // Put the pipeline back the way egui expects to find it.
         gl.bind_vertex_array(None);

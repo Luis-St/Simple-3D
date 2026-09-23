@@ -19,7 +19,7 @@ use super::*;
 use crate::raster::Rgba;
 use crate::render::{
     mark_colours, shade, tag_bases, to_vertex, Live, Palette, Renderable, Request, Style, EDGE_BIAS, EDGE_ON,
-    MARK_BIAS, SELECTION_BIAS, SELECTION_CREASE,
+    MARK_BIAS, PREVIEW_BIAS, SELECTION_BIAS, SELECTION_CREASE,
 };
 use crate::snap::MARK_AXIS;
 use crate::view::View;
@@ -87,6 +87,9 @@ pub(super) struct Placing {
 }
 
 impl Placing {
+    /// Where it stands, all of it.
+    const NONE: Placing = Placing { xform: Xform::IDENTITY, hide: [0, 0] };
+
     fn of(live: &Live, id: u64) -> Placing {
         Placing {
             xform: live.placed(id).copied().unwrap_or(Xform::IDENTITY),
@@ -108,6 +111,9 @@ pub(super) struct Plan {
     pub(super) crossings: Vec<CrossingDraw>,
     /// A section's cap, filled where the cut runs through material.
     pub(super) caps: Vec<CapDraw>,
+    /// Lines drawn over the model, tested against it and claiming nothing: a
+    /// tool's preview.
+    pub(super) overlays: Vec<LineDraw>,
 }
 
 pub(super) struct FaceDraw {
@@ -124,6 +130,14 @@ pub(super) struct LineDraw {
     colour: Rgba,
     bias: f32,
     tag_base: Option<u16>,
+}
+
+impl LineDraw {
+    /// A tool's preview loops, kept as lines (`ground::refresh_preview`):
+    /// biased towards the eye as `push_preview` biases them.
+    pub(super) fn preview(id: u64, colour: Rgba) -> LineDraw {
+        LineDraw { id, placing: Placing::NONE, colour, bias: PREVIEW_BIAS, tag_base: None }
+    }
 }
 
 pub(super) struct OutlineDraw {
@@ -262,7 +276,7 @@ impl Plan {
         for id in faces {
             needs.entry(id).or_default().faces = true;
         }
-        for draw in &self.lines {
+        for draw in self.lines.iter().chain(&self.overlays) {
             needs.entry(draw.id).or_default().edges = true;
         }
         for draw in &self.outlines {
@@ -388,16 +402,7 @@ impl Resident {
     /// Moved, the rows are for the moved origin, and are applied to the stored
     /// position after `u_model` -- the move's linear part -- has been.
     fn rows(&self, view: &View, placing: &Placing) -> [[f32; 4]; 3] {
-        let (right, up) = view.basis();
-        let forward = view.forward();
-        let s = view.pixels_per_mm();
-        let d = placing.xform.point(self.origin) - view.eye();
-        let row = |v: Vec3, c: f64| [v.x as f32, v.y as f32, v.z as f32, c as f32];
-        [
-            row(right * s, view.centre.x as f64 + d.dot(right) * s),
-            row(-(up * s), view.centre.y as f64 - d.dot(up) * s),
-            row(-forward, -d.dot(forward)),
-        ]
+        rows_at(view, placing.xform.point(self.origin))
     }
 
     /// A plane as the shaders test it: a distance from the stored position,
@@ -593,8 +598,11 @@ impl Gpu {
         gl: &glow::Context,
         request: &Request<'_>,
         plan: &Plan,
+        extra: &[&Renderable],
     ) -> Result<(), String> {
-        let wanted: std::collections::HashSet<u64> = request.items.iter().map(|item| item.renderable.id).collect();
+        let drawn: Vec<&Renderable> =
+            request.items.iter().map(|item| item.renderable).chain(extra.iter().copied()).collect();
+        let wanted: std::collections::HashSet<u64> = drawn.iter().map(|renderable| renderable.id).collect();
         let stale: Vec<u64> = self.resident.keys().copied().filter(|id| !wanted.contains(id)).collect();
         for id in stale {
             if let Some(resident) = self.resident.remove(&id) {
@@ -602,11 +610,11 @@ impl Gpu {
             }
         }
         let needs = plan.needs();
-        for item in &request.items {
-            let id = item.renderable.id;
-            let resident = self.resident.entry(id).or_insert_with(|| Resident::new(item.renderable));
+        for renderable in drawn {
+            let id = renderable.id;
+            let resident = self.resident.entry(id).or_insert_with(|| Resident::new(renderable));
             let need = needs.get(&id).copied().unwrap_or_default();
-            resident.ensure(gl, item.renderable, need, self.table_width)?;
+            resident.ensure(gl, renderable, need, self.table_width)?;
         }
         Ok(())
     }
@@ -905,10 +913,12 @@ impl Gpu {
 
     /// Widen the frame's depth range to take in every resident mesh it draws,
     /// with room for the largest bias a line on one gets.
-    pub(super) fn see_resident(&self, request: &Request<'_>, passes: &mut Passes) {
-        for item in &request.items {
-            let Some(resident) = self.resident.get(&item.renderable.id) else { continue };
-            let placing = Placing::of(&request.live, item.renderable.id);
+    pub(super) fn see_resident(&self, request: &Request<'_>, plan: &Plan, passes: &mut Passes) {
+        let items =
+            request.items.iter().map(|item| (item.renderable.id, Placing::of(&request.live, item.renderable.id)));
+        let overlays = plan.overlays.iter().map(|draw| (draw.id, draw.placing));
+        for (id, placing) in items.chain(overlays) {
+            let Some(resident) = self.resident.get(&id) else { continue };
             for key in resident.keys(&request.view, &placing) {
                 passes.saw(key);
                 passes.saw(key + MARK_BIAS * key.abs());
@@ -978,4 +988,21 @@ pub(super) fn front_face(view: &View) -> u32 {
     } else {
         glow::CCW
     }
+}
+
+/// The rows that project a position stored relative to `origin`: screen x,
+/// screen y and the depth key, each a dot product with it plus a constant.
+/// Exactly `View::to_view` followed by `to_vertex`, folded together with the
+/// offset, in double precision.
+pub(super) fn rows_at(view: &View, origin: Vec3) -> [[f32; 4]; 3] {
+    let (right, up) = view.basis();
+    let forward = view.forward();
+    let s = view.pixels_per_mm();
+    let d = origin - view.eye();
+    let row = |v: Vec3, c: f64| [v.x as f32, v.y as f32, v.z as f32, c as f32];
+    [
+        row(right * s, view.centre.x as f64 + d.dot(right) * s),
+        row(-(up * s), view.centre.y as f64 - d.dot(up) * s),
+        row(-forward, -d.dot(forward)),
+    ]
 }

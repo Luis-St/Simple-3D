@@ -5,10 +5,13 @@
 //! and projected, culled and shaded by the shaders, and the selection's
 //! silhouette, the plane marks, the section's cap and the line round the cut
 //! are found there too, from the mesh as it was uploaded. A frame hands the
-//! card a camera and nothing per triangle. The CPU renderer is the fallback for
-//! a machine without a usable GPU, and this one is not held back to share its
-//! code paths: what `render.rs` still prepares for both is only what does not
-//! come off a mesh -- the grid, the axes and their rule, a tool's preview.
+//! card a camera and nothing per triangle. The grid, the axes with their rule
+//! and a tool's preview are drawn by shaders as well (`ground.rs`), so nothing
+//! of the frame is prepared on the CPU: `render.rs`'s steps are the software
+//! renderer's alone. That renderer is the fallback for a machine without a
+//! usable GPU, and this one is not held back to share its code paths; the two
+//! share the rules -- where an axis stands, which grid levels show, what an
+//! outline is -- and not the work.
 //!
 //! A body being dragged is moved on the card as well: its stretch of the
 //! scene is left out and its own renderable is drawn with the drag's
@@ -43,6 +46,7 @@ mod passes;
 pub(crate) use passes::*;
 mod buffers;
 mod draw;
+mod ground;
 mod render;
 mod resident;
 pub(crate) use buffers::*;
@@ -60,6 +64,7 @@ pub struct Gpu {
     gl: Arc<glow::Context>,
     solid: Program,
     axis: Program,
+    grid: Program,
     background: Program,
     /// A resident mesh's faces and its lines -- see `resident.rs`.
     faces: Program,
@@ -72,6 +77,9 @@ pub struct Gpu {
     table_width: usize,
     /// The meshes kept on the card, by `Renderable::id`.
     resident: std::collections::HashMap<u64, resident::Resident>,
+    /// A tool's preview loops as lines, with the hash of the loops they were
+    /// made from -- see `ground::refresh_preview`.
+    preview: Option<(u64, crate::render::Renderable)>,
     /// The offscreen target, remade whenever the viewport's size changes.
     target: Option<Target>,
     /// The texture the finished frame lands in. Made once and reallocated on a
@@ -80,6 +88,8 @@ pub struct Gpu {
     colour: Option<glow::Texture>,
     /// The vertex buffer everything is drawn from, reused between frames.
     buffer: Buffers,
+    /// What the grid's quad and the axes' arms are drawn from.
+    ground: GroundBuffers,
     /// What egui knows the colour texture as. Registered once: the texture
     /// object is kept and redrawn into, so the id stays good for the life of
     /// the application and no texture is leaked per frame.
