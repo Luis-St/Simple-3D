@@ -56,15 +56,17 @@ impl Target {
         let depth = gl.create_texture()?;
         plain(depth);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        // With a stencil alongside: the section's cap is found by counting,
+        // per pixel, how often the cut surface winds round it (`draw_caps`).
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
-            glow::DEPTH_COMPONENT24 as i32,
+            glow::DEPTH24_STENCIL8 as i32,
             w,
             h,
             0,
-            glow::DEPTH_COMPONENT,
-            glow::UNSIGNED_INT,
+            glow::DEPTH_STENCIL,
+            glow::UNSIGNED_INT_24_8,
             glow::PixelUnpackData::Slice(None),
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
@@ -73,7 +75,7 @@ impl Target {
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(colour), 0);
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT1, glow::TEXTURE_2D, Some(tags), 0);
-        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
         let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
         if status != glow::FRAMEBUFFER_COMPLETE {

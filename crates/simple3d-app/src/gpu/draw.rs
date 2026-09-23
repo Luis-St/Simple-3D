@@ -80,13 +80,19 @@ impl Gpu {
         gl.disable(glow::BLEND);
         gl.depth_mask(true);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
+        gl.cull_face(glow::BACK);
+        gl.front_face(resident::front_face(&request.view));
         self.batch(&gl, glow::TRIANGLES, &passes.solids);
         let (view, section) = (&request.view, request.section);
         let viewport = [width as f32, height as f32];
-        self.draw_faces(&gl, &plan.solids, view, section, viewport, [offset, scale]);
+        let depth = [offset, scale];
+        self.draw_faces(&gl, &plan.solids, view, section, viewport, depth);
+        self.draw_caps(&gl, &plan.caps, view, section, viewport, depth);
         gl.use_program(Some(self.solid.program));
         self.batch(&gl, glow::LINES, &passes.lines);
-        self.draw_lines(&gl, &plan.lines, view, section, viewport, [offset, scale]);
+        self.draw_lines(&gl, &plan.lines, view, section, viewport, depth);
+        self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
+        self.draw_crossings(&gl, &plan.crossings, view, section, viewport, depth);
         gl.use_program(Some(self.solid.program));
 
         // Ghosts, and a tool's preview: blended over what is there, tested
@@ -97,7 +103,7 @@ impl Gpu {
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.batch(&gl, glow::TRIANGLES, &passes.ghosts);
-        self.draw_faces(&gl, &plan.ghosts, view, section, viewport, [offset, scale]);
+        self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
         gl.use_program(Some(self.solid.program));
         self.batch(&gl, glow::LINES, &passes.overlay);
 
@@ -107,7 +113,7 @@ impl Gpu {
         if !passes.glow.is_empty() || !plan.glows.is_empty() {
             gl.disable(glow::DEPTH_TEST);
             self.batch(&gl, glow::TRIANGLES, &passes.glow);
-            self.draw_faces(&gl, &plan.glows, view, section, viewport, [offset, scale]);
+            self.draw_faces(&gl, &plan.glows, view, section, viewport, depth);
             gl.use_program(Some(self.solid.program));
             gl.enable(glow::DEPTH_TEST);
         }
@@ -150,6 +156,7 @@ impl Gpu {
         // Put the pipeline back the way egui expects to find it.
         gl.bind_vertex_array(None);
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+        gl.front_face(glow::CCW);
         gl.disable(glow::DEPTH_TEST);
         gl.depth_mask(true);
         gl.use_program(None);

@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::render::{Prepared, Request, Step};
-use eframe::glow::{self};
+use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 
 impl Gpu {
@@ -13,8 +13,13 @@ impl Gpu {
             let solid = Program::new(&gl, VERTEX_SOURCE, SOLID_SOURCE)?;
             let axis = Program::new(&gl, VERTEX_SOURCE, AXIS_SOURCE)?;
             let background = Program::new(&gl, BACKGROUND_VERTEX, BACKGROUND_FRAGMENT)?;
-            let faces = Program::new(&gl, FACE_VERTEX, SOLID_SOURCE)?;
-            let lines = Program::new(&gl, LINE_VERTEX, SOLID_SOURCE)?;
+            let faces = Program::new(&gl, &face_vertex(), FACE_FRAGMENT)?;
+            let lines = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), SOLID_SOURCE)?;
+            let outline = Program::with_geometry(&gl, OUTLINE_VERTEX, Some(&outline_geometry()), SOLID_SOURCE)?;
+            let crossing = Program::with_geometry(&gl, &crossing_vertex(), Some(&crossing_geometry()), SOLID_SOURCE)?;
+            // As wide as the driver allows, up to a size that keeps a table of
+            // a few thousand entries from being mostly padding.
+            let table_width = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).clamp(1024, 8192) as usize;
             let buffer = Buffers::new(&gl)?;
             Ok(Gpu {
                 gl,
@@ -23,6 +28,9 @@ impl Gpu {
                 background,
                 faces,
                 lines,
+                outline,
+                crossing,
+                table_width,
                 resident: std::collections::HashMap::new(),
                 target: None,
                 colour: None,
@@ -45,10 +53,11 @@ impl Gpu {
         let [width, height] = request.size;
         let (width, height) = (width.max(1), height.max(1));
         let gl = self.gl.clone();
-        unsafe { self.keep_resident(&gl, request)? };
-        let plan = resident::plan(request);
+        let mut plan = resident::plan(request);
+        unsafe { self.keep_resident(&gl, request, &plan)? };
         let mut passes = Passes::default();
         self.see_resident(request, &mut passes);
+        self.place_caps(&request.view, &mut plan, &mut passes);
         for step in &prepared.steps {
             match *step {
                 Step::Triangle { v, colour, tag, write_depth } => passes.triangle(v, colour, tag, write_depth),

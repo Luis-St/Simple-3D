@@ -1,14 +1,14 @@
 //! The viewport drawn through OpenGL, as an alternative to `raster.rs`.
 //!
-//! It draws the *same* scene, from the same prepared primitives: `render.rs`
-//! works out the grid, the axis rule, the selection's silhouette and the
-//! section's cap on the CPU, and this module turns the result into pixels.
-//! The one exception is the meshes' own faces and lines, which are kept on the
-//! card (`resident.rs`) and projected, culled and shaded by the shaders with
-//! `render.rs`'s arithmetic -- handing a million projected triangles over on
-//! every frame of an orbit cost as much as drawing them in software. Nothing
-//! else about what the picture shows is decided here, which is what keeps the
-//! two engines from drifting apart as the renderer is worked on.
+//! It draws the *same* scene by the same rules, but everything that comes off
+//! a mesh is worked out on the card: the meshes are kept there (`resident.rs`)
+//! and projected, culled and shaded by the shaders, and the selection's
+//! silhouette, the plane marks, the section's cap and the line round the cut
+//! are found there too, from the mesh as it was uploaded. A frame hands the
+//! card a camera and nothing per triangle. The CPU renderer is the fallback for
+//! a machine without a usable GPU, and this one is not held back to share its
+//! code paths: what `render.rs` still prepares for both is only what does not
+//! come off a mesh -- the grid, the axes and their rule, a tool's preview.
 //!
 //! The two pictures are alike, not identical, and deliberately so. A GPU draws
 //! a line by rasterizing it, where `raster.rs` walks it pixel by pixel, so a
@@ -16,7 +16,11 @@
 //! kind rather than issued one at a time, which reorders the few draws that
 //! depth does not already separate. Everything that decides *what* is visible
 //! -- the depth test, the bias, and the rule that lets an origin axis be seen
-//! through the solid it is arriving at -- is reproduced exactly.
+//! through the solid it is arriving at -- is reproduced. The one place the
+//! rules differ is a section through a mesh that does not close: the CPU
+//! leaves a cut it cannot chain into outlines uncapped, where the card, which
+//! counts windings instead of chaining, caps whatever the open surface winds
+//! round.
 //!
 //! There is no shader to fail to compile on the CPU path, so this one is
 //! allowed to fail: every entry point returns a `Result`, and the viewport
@@ -54,6 +58,12 @@ pub struct Gpu {
     /// A resident mesh's faces and its lines -- see `resident.rs`.
     faces: Program,
     lines: Program,
+    /// A selected body's outline, and where planes cross a mesh.
+    outline: Program,
+    crossing: Program,
+    /// How many texels wide the tables a geometry stage reads a mesh's
+    /// topology from are laid out -- see `resident::table`.
+    table_width: usize,
     /// The meshes kept on the card, by `Renderable::id`.
     resident: std::collections::HashMap<u64, resident::Resident>,
     /// The offscreen target, remade whenever the viewport's size changes.

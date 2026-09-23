@@ -50,13 +50,13 @@ pub enum Geometry {
     /// Projected here and handed over as steps, which is what the software
     /// renderer needs.
     Steps,
-    /// Left out: the engine keeps the mesh itself and projects it on its own.
-    /// That is the GPU renderer, which uploads each renderable once and from
-    /// then on is handed only the camera, so an orbit costs it no work per
-    /// triangle on the CPU at all. Everything that *is* decided per frame --
-    /// the selection's silhouette, the section's cap, the grid, the axes, a
-    /// tool's preview -- still comes through here, so the rules for those stay
-    /// in one place.
+    /// Left out: the engine keeps the mesh itself and works out on its own
+    /// everything drawn from it -- faces, edges, the selection's silhouette,
+    /// the section's cap and the line round it, the plane marks. That is the
+    /// GPU renderer, which uploads each renderable once and from then on is
+    /// handed only the camera, so a frame costs it no work per triangle on the
+    /// CPU at all. What is left here is what does not come from a mesh: the
+    /// grid, the axes and a tool's preview.
     Resident,
 }
 
@@ -143,7 +143,9 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
                     if steps_too {
                         push_wireframe(&mut steps, &view, item.renderable, screen, request.palette.wire, cut);
                     }
-                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    if steps_too {
+                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    }
                 }
                 DisplayMode::Shaded => {
                     if steps_too {
@@ -158,7 +160,9 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
                             cut,
                         );
                     }
-                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    if steps_too {
+                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    }
                 }
                 DisplayMode::ShadedWithEdges => {
                     if steps_too {
@@ -166,14 +170,16 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
                         push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut);
                         push_edges(&mut steps, &view, item.renderable, screen, palette.edge, tag_base, cut);
                     }
-                    push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    if steps_too {
+                        push_cap(&mut steps, &view, item.renderable, &request.palette, cut, request.mode);
+                    }
                 }
             },
-            Style::Selected => {
-                // Always outlined, in every display mode: the selection has to
-                // be visible, and an outline reads clearly over a shaded body.
-                // A larger bias than the solid's own edges, or the two would tie
-                // at equal depth and the outline would lose.
+            // Always outlined, in every display mode: the selection has to be
+            // visible, and an outline reads clearly over a shaded body. A
+            // larger bias than the solid's own edges, or the two would tie at
+            // equal depth and the outline would lose.
+            Style::Selected if steps_too => {
                 push_selection(
                     &mut steps,
                     &view,
@@ -191,7 +197,7 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
             }
             // The outline here; the glow itself comes last, after everything
             // that could be standing in front of it.
-            Style::Glow => push_selection(
+            Style::Glow if steps_too => push_selection(
                 &mut steps,
                 &view,
                 item.renderable,
@@ -200,6 +206,8 @@ pub(crate) fn prepare_with(request: &Request<'_>, geometry: Geometry) -> Vec<Ste
                 request.mode,
                 cut,
             ),
+            // The card finds the outline itself, from the edges it keeps.
+            Style::Selected | Style::Glow => {}
         }
     }
     // Last of all, over the finished model: what a buried body is pointed out

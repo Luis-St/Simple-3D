@@ -19,9 +19,25 @@ pub(crate) struct Buffers {
 
 impl Program {
     pub(super) unsafe fn new(gl: &glow::Context, vertex: &str, fragment: &str) -> Result<Program, String> {
+        Program::with_geometry(gl, vertex, None, fragment)
+    }
+
+    /// A program with a geometry stage between the two: what the resident
+    /// meshes' lines, outlines and plane crossings are drawn with.
+    pub(super) unsafe fn with_geometry(
+        gl: &glow::Context,
+        vertex: &str,
+        geometry: Option<&str>,
+        fragment: &str,
+    ) -> Result<Program, String> {
         let program = gl.create_program()?;
         let mut shaders = Vec::new();
-        for (kind, source) in [(glow::VERTEX_SHADER, vertex), (glow::FRAGMENT_SHADER, fragment)] {
+        let stages = [
+            (glow::VERTEX_SHADER, Some(vertex)),
+            (glow::GEOMETRY_SHADER, geometry),
+            (glow::FRAGMENT_SHADER, Some(fragment)),
+        ];
+        for (kind, source) in stages.into_iter().filter_map(|(kind, source)| Some((kind, source?))) {
             let shader = gl.create_shader(kind)?;
             gl.shader_source(shader, source);
             gl.compile_shader(shader);
