@@ -104,7 +104,7 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     crate::section_tool::hash_section(&app.scene.settings.section, &mut hasher);
     // A body the GPU draws where a drag has got to moves without anything
     // above changing.
-    if let Some((_, _, moved)) = app.live_move() {
+    if let Some(moved) = app.live_csg().map(|csg| csg.xform).or_else(|| app.live_move().map(|(_, _, moved)| moved)) {
         for value in moved.m.as_flattened().iter().chain([moved.t.x, moved.t.y, moved.t.z].iter()) {
             value.to_bits().hash(&mut hasher);
         }

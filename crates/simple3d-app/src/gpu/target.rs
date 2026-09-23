@@ -8,6 +8,10 @@ pub(crate) struct Target {
     /// Which body owns each pixel's depth, the counterpart of `Frame::owner`.
     pub(super) tags: glow::Texture,
     pub(super) depth: glow::Texture,
+    /// Where a boolean preview has found its surface, so its later layers
+    /// leave those pixels alone (`csg.rs`). Attached to the model pass's
+    /// framebuffer and drawn to by nothing else.
+    pub(super) done: glow::Texture,
     /// Colour, tags and depth: what the model is drawn into.
     pub(super) scene: glow::Framebuffer,
     /// Colour alone, so the axis pass can *sample* the depth and tag textures
@@ -71,10 +75,26 @@ impl Target {
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
 
+        let done = gl.create_texture()?;
+        plain(done);
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::R8 as i32,
+            w,
+            h,
+            0,
+            glow::RED,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(None),
+        );
+        gl.bind_texture(glow::TEXTURE_2D, None);
+
         let scene = gl.create_framebuffer()?;
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(scene));
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(colour), 0);
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT1, glow::TEXTURE_2D, Some(tags), 0);
+        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT2, glow::TEXTURE_2D, Some(done), 0);
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_STENCIL_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
         let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
@@ -93,7 +113,7 @@ impl Target {
             return Err(format!("the overlay target is not usable (status {status:#x})"));
         }
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
-        Ok(Target { width, height, tags, depth, scene, overlay })
+        Ok(Target { width, height, tags, depth, done, scene, overlay })
     }
 
     pub(super) unsafe fn destroy(&self, gl: &glow::Context) {
@@ -101,6 +121,7 @@ impl Target {
         gl.delete_framebuffer(self.overlay);
         gl.delete_texture(self.tags);
         gl.delete_texture(self.depth);
+        gl.delete_texture(self.done);
         // The colour texture belongs to egui once it has been registered, so
         // it is deliberately not deleted here -- see `render`, which keeps one
         // texture for the life of the application and reallocates its storage.

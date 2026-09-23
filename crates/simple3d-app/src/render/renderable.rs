@@ -169,6 +169,14 @@ impl Renderable {
         }
     }
 
+    /// A surface to draw and nothing else -- no weld, no edges, no bodies: a
+    /// shape a boolean is drawn from on the card while it is dragged
+    /// (`App::live_csg`), which needs its triangles and its paint only.
+    pub(crate) fn surface(mesh: Mesh) -> Renderable {
+        let bodies = vec![0; mesh.positions.len()];
+        Renderable { mesh, bodies, ..Renderable::empty() }
+    }
+
     pub fn empty() -> Renderable {
         Renderable {
             mesh: Mesh::new(),

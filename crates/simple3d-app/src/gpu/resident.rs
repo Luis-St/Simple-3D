@@ -31,9 +31,9 @@ use simple3d_geom::Vec3;
 
 /// A vertex array and the element or vertex buffer it draws from.
 pub(super) struct Batch {
-    array: glow::VertexArray,
+    pub(super) array: glow::VertexArray,
     buffer: glow::Buffer,
-    count: i32,
+    pub(super) count: i32,
 }
 
 /// The mesh's vertices: position and body, one of each per welded vertex.
@@ -61,9 +61,9 @@ pub(crate) struct Resident {
     lo: Vec3,
     hi: Vec3,
     vertices: Option<Vertices>,
-    faces: Option<Batch>,
+    pub(super) faces: Option<Batch>,
     /// One colour tag per triangle, when any triangle is painted.
-    paint: Option<glow::Texture>,
+    pub(super) paint: Option<glow::Texture>,
     edges: Option<Batch>,
     tables: Option<Tables>,
     outline: Option<Batch>,
@@ -88,7 +88,12 @@ pub(super) struct Placing {
 
 impl Placing {
     /// Where it stands, all of it.
-    const NONE: Placing = Placing { xform: Xform::IDENTITY, hide: [0, 0] };
+    pub(super) const NONE: Placing = Placing { xform: Xform::IDENTITY, hide: [0, 0] };
+
+    /// Moved by `xform`, or where it stands.
+    pub(super) fn moved(xform: Option<Xform>) -> Placing {
+        Placing { xform: xform.unwrap_or(Xform::IDENTITY), hide: [0, 0] }
+    }
 
     fn of(live: &Live, id: u64) -> Placing {
         Placing {
@@ -114,6 +119,9 @@ pub(super) struct Plan {
     /// Lines drawn over the model, tested against it and claiming nothing: a
     /// tool's preview.
     pub(super) overlays: Vec<LineDraw>,
+    /// The shapes a boolean preview is drawn from (`csg.rs`), which need
+    /// their faces on the card and nothing else.
+    pub(super) csg: Vec<u64>,
 }
 
 pub(super) struct FaceDraw {
@@ -273,6 +281,7 @@ impl Plan {
         let mut needs: std::collections::HashMap<u64, Needs> = std::collections::HashMap::new();
         let faces = self.solids.iter().chain(&self.ghosts).chain(&self.glows).map(|draw| draw.id);
         let faces = faces.chain(self.crossings.iter().map(|draw| draw.id)).chain(self.caps.iter().map(|draw| draw.id));
+        let faces = faces.chain(self.csg.iter().copied());
         for id in faces {
             needs.entry(id).or_default().faces = true;
         }
@@ -428,6 +437,23 @@ impl Resident {
         let lo = self.lo.x.abs().max(self.lo.y.abs()).max(self.lo.z.abs());
         let hi = self.hi.x.abs().max(self.hi.y.abs()).max(self.hi.z.abs());
         lo.max(hi)
+    }
+
+    /// The mesh's box in world space, moved as `placing` moves it.
+    pub(super) fn world_box(&self, placing: &Placing) -> (Vec3, Vec3) {
+        let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+        let mut hi = -lo;
+        for corner in 0..8 {
+            let local = Vec3::new(
+                if corner & 1 == 0 { self.lo.x } else { self.hi.x },
+                if corner & 2 == 0 { self.lo.y } else { self.hi.y },
+                if corner & 4 == 0 { self.lo.z } else { self.hi.z },
+            );
+            let world = placing.xform.point(self.origin + local);
+            lo = lo.min(world);
+            hi = hi.max(world);
+        }
+        (lo, hi)
     }
 
     /// The depth keys this mesh can reach under `view`: its box's corners.
@@ -617,6 +643,27 @@ impl Gpu {
             resident.ensure(gl, renderable, need, self.table_width)?;
         }
         Ok(())
+    }
+
+    /// Put the section's half-space for a boolean preview on the card, made
+    /// after the rest because its size comes from theirs (`csg.rs`).
+    pub(super) unsafe fn keep_half_space(&mut self, gl: &glow::Context) -> Result<(), String> {
+        let Some((_, half)) = &self.csg_half else { return Ok(()) };
+        let resident = self.resident.entry(half.id).or_insert_with(|| Resident::new(half));
+        resident.ensure(gl, half, Needs { faces: true, ..Needs::default() }, self.table_width)
+    }
+
+    /// Widen the frame's depth range to take in a boolean preview's shapes,
+    /// where they are drawn.
+    pub(super) fn see_csg(&self, request: &Request<'_>, passes: &mut Passes) {
+        let Some(csg) = &request.live.csg else { return };
+        let half = self.csg_half.iter().map(|(_, half)| (half, None));
+        for (shape, moved) in csg.leaves.iter().map(|(leaf, moved)| (*leaf, *moved)).chain(half) {
+            let Some(resident) = self.resident.get(&shape.id) else { continue };
+            for key in resident.keys(&request.view, &Placing::moved(moved)) {
+                passes.saw(key);
+            }
+        }
     }
 
     /// Work out, for each cap in `plan`, the polygon it is filled over, and
@@ -927,26 +974,26 @@ impl Gpu {
     }
 }
 
-unsafe fn set2(gl: &glow::Context, program: &Program, name: &str, value: [f32; 2]) {
+pub(super) unsafe fn set2(gl: &glow::Context, program: &Program, name: &str, value: [f32; 2]) {
     if let Some(at) = program.at(name) {
         gl.uniform_2_f32(Some(at), value[0], value[1]);
     }
 }
 
-unsafe fn set_i32(gl: &glow::Context, program: &Program, name: &str, value: i32) {
+pub(super) unsafe fn set_i32(gl: &glow::Context, program: &Program, name: &str, value: i32) {
     if let Some(at) = program.at(name) {
         gl.uniform_1_i32(Some(at), value);
     }
 }
 
-unsafe fn set_forward(gl: &glow::Context, program: &Program, view: &View) {
+pub(super) unsafe fn set_forward(gl: &glow::Context, program: &Program, view: &View) {
     let forward = view.forward();
     if let Some(at) = program.at("u_forward") {
         gl.uniform_3_f32(Some(at), forward.x as f32, forward.y as f32, forward.z as f32);
     }
 }
 
-unsafe fn set_projection(
+pub(super) unsafe fn set_projection(
     gl: &glow::Context,
     program: &Program,
     resident: &Resident,

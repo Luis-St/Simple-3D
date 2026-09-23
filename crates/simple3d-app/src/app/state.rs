@@ -206,6 +206,9 @@ pub struct App {
     pub(super) snap_sources: Vec<Vec3>,
     /// Each body's snap features, kept between frames and keyed on the identity
     /// of the mesh they were found on. See `App::snaps_of`.
+    /// The shapes a boolean being dragged is drawn from, with the
+    /// evaluation each was taken from -- see `App::live_csg`.
+    pub(super) csg_leaves: std::cell::RefCell<std::collections::HashMap<NodeId, (u64, std::sync::Arc<Renderable>)>>,
     pub(super) snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedSnaps>>,
     /// A deletion waiting on the outliner's confirmation strip: which nodes,
     /// with the question of what happens to their children still open.

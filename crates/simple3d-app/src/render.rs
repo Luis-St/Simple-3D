@@ -12,7 +12,7 @@ pub use palette::Palette;
 pub(crate) use palette::*;
 mod request;
 pub(crate) use request::*;
-pub use request::{Grid, Item, Live, Request, Style};
+pub use request::{CsgPreview, Grid, Item, Live, Request, Style};
 mod frame;
 pub use frame::{prepare_frame, render_prepared};
 mod step;

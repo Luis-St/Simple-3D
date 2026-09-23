@@ -53,7 +53,12 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: Option<Pla
 /// where the axes run through it. The body is left out of the axis rule until
 /// the drag ends and the scene is evaluated with it where it now is -- an axis
 /// is drawn through it for the length of the drag.
-pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: Option<Plane>, live: &Live) -> AxisMaterial {
+pub(crate) fn axis_material_live(
+    items: &[Item<'_>],
+    grid: &Grid,
+    section: Option<Plane>,
+    live: &Live<'_>,
+) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
         through: [Vec::new(), Vec::new(), Vec::new()],

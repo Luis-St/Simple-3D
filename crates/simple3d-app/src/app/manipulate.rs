@@ -75,7 +75,8 @@ impl App {
             }
             gizmo::DragPhase::Finish => {
                 // Still drawn where it was let go until that is evaluated.
-                self.settling = self.live_drag().map(|(id, _, _)| id);
+                let drawn = self.live_drag().is_some() || self.live_csg().is_some();
+                self.settling = self.drag.as_ref().filter(|_| drawn).map(|drag| drag.node);
                 self.drag = None;
                 self.history.close();
                 self.fields.clear();
@@ -210,13 +211,24 @@ impl App {
     /// evaluation, when the GPU is drawing and that stretch is the body's own.
     fn moved_since_evaluated(&self, id: NodeId) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
         self.gpu.as_ref()?;
-        let node = self.scene.get(id)?;
         let part = self.scene_renderable.parts.get(&id)?;
         self.node_renderables.get(&id)?;
+        Some((id, part.clone(), self.moved_by(id)?))
+    }
+
+    /// How far `id` has moved since the last evaluation: from where that put
+    /// it to where it now stands, in world space.
+    pub(crate) fn moved_by(&self, id: NodeId) -> Option<simple3d_core::xform::Xform> {
+        let node = self.scene.get(id)?;
         let parent = self.evaluated.node_frames.get(&id)?;
         let then = self.evaluated.placements.get(&id)?;
-        let moved = parent.compose(&placement(node)).compose(&then.inverse()).compose(&parent.inverse());
-        Some((id, part.clone(), moved))
+        Some(parent.compose(&placement(node)).compose(&then.inverse()).compose(&parent.inverse()))
+    }
+
+    /// Whether a drag is under way that the GPU draws for itself, so the scene
+    /// is evaluated once when it ends rather than on every frame of it.
+    pub(crate) fn drag_drawn_live(&self) -> bool {
+        self.drag.is_some() && (self.live_drag().is_some() || self.live_csg().is_some())
     }
 }
 

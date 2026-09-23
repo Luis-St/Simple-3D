@@ -87,6 +87,9 @@ impl Gpu {
         gl.front_face(resident::front_face(&request.view));
         self.draw_faces(&gl, &plan.solids, view, section, viewport, depth);
         self.draw_caps(&gl, &plan.caps, view, section, viewport, depth);
+        if let Some(csg) = &request.live.csg {
+            self.draw_csg(&gl, request, csg, viewport, depth);
+        }
         // The faces are down and no line is yet: what "what is drawn here"
         // means to the interface (`depth.rs`).
         self.copy_depth(&gl, width, height, depth);
@@ -99,6 +102,7 @@ impl Gpu {
         // than with the grid because it is drawn *on* the model -- the grid
         // goes under it.
         gl.enable(glow::BLEND);
+        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);

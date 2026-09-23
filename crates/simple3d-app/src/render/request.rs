@@ -56,17 +56,35 @@ pub enum Style {
 /// again: the body's stretch of the scene is left out, and the body's own
 /// renderable is drawn in its place, moved by how far it has gone. Each is
 /// named by its renderable's id.
-#[derive(Clone, Debug, Default)]
-pub struct Live {
+#[derive(Clone, Default)]
+pub struct Live<'a> {
     /// Welded vertices of a renderable to leave out, with every triangle and
     /// edge that uses them: the dragged body's part of the scene.
     pub hidden: Vec<(u64, Range<u32>)>,
     /// Renderables to draw moved: each world position is put through the
     /// transform first.
     pub placed: Vec<(u64, Xform)>,
+    /// A boolean drawn per pixel from the shapes that go into it, where the
+    /// part of the scene it stands for has been left out (`hidden`): what a
+    /// drag of one of its operands shows. See `App::live_csg`.
+    pub csg: Option<CsgPreview<'a>>,
 }
 
-impl Live {
+/// A boolean the GPU works out per pixel -- see [`Live::csg`].
+#[derive(Clone)]
+pub struct CsgPreview<'a> {
+    /// The shapes, in world space, each moved or not.
+    pub leaves: Vec<(&'a Renderable, Option<Xform>)>,
+    /// The expression over them, in postfix: a leaf by its index, or one of
+    /// `CSG_UNION`, `CSG_DIFFERENCE`, `CSG_INTERSECTION` applied to the two
+    /// values before it.
+    pub program: Vec<i32>,
+    /// The body tag the result is drawn with, so an origin axis treats it as
+    /// the body it stands for.
+    pub tag: u16,
+}
+
+impl Live<'_> {
     pub fn hidden(&self, id: u64) -> Option<&Range<u32>> {
         self.hidden.iter().find(|(of, _)| *of == id).map(|(_, range)| range)
     }
@@ -96,7 +114,7 @@ pub struct Request<'a> {
     pub preview: Vec<Vec<Vec3>>,
     /// What a drag has moved since the renderables were made, drawn where it
     /// has got to. Only the GPU renderer is ever handed any: see [`Live`].
-    pub live: Live,
+    pub live: Live<'a>,
     /// The plane the model is cut with, or `None` for the whole of it
     /// (issue 71). Everything drawn from the model goes through it -- faces,
     /// edges, outlines, ghosts, marks, the stretches of an axis that run

@@ -69,13 +69,33 @@ pub(crate) fn paint_scene(
         };
         let mut items: Vec<Item> = vec![Item { renderable: solid, style: Style::Solid }];
         // A body being dragged, drawn where the drag has got to: left out of
-        // the scene and drawn from its own renderable instead, moved.
+        // the scene and drawn from its own renderable instead, moved -- or,
+        // when it goes into a boolean, the boolean left out and drawn per
+        // pixel from the shapes that go into it.
+        let whole = std::ptr::eq(solid, &app.scene_renderable);
         let mut live = render::Live::default();
-        let dragged = app.live_move().filter(|_| std::ptr::eq(solid, &app.scene_renderable));
+        let csg = app.live_csg().filter(|_| whole);
+        let dragged = match &csg {
+            Some(csg) => Some((csg.carried, csg.range.clone(), csg.xform)),
+            None => app.live_move().filter(|_| whole),
+        };
         if let Some((id, part, moved)) = &dragged {
-            if let Some(own) = app.node_renderables.get(id) {
-                live.hidden.push((solid.id, part.clone()));
-                items.push(Item { renderable: own, style: Style::Solid });
+            match &csg {
+                Some(csg) => {
+                    live.hidden.push((solid.id, part.clone()));
+                    let leaves = csg.leaves.iter().enumerate();
+                    live.csg = Some(render::CsgPreview {
+                        leaves: leaves.map(|(index, leaf)| (&**leaf, (index == csg.moved).then_some(*moved))).collect(),
+                        program: csg.program.clone(),
+                        tag: solid.bodies.get(part.start as usize).map_or(0, |&body| render::body_tag(body, 0)),
+                    });
+                }
+                None => {
+                    if let Some(own) = app.node_renderables.get(id) {
+                        live.hidden.push((solid.id, part.clone()));
+                        items.push(Item { renderable: own, style: Style::Solid });
+                    }
+                }
             }
             // Its own renderable, and those of everything under it, wherever
             // they are drawn -- as the solid, the selection or a ghost.

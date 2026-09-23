@@ -17,7 +17,13 @@
 //! scene is left out and its own renderable is drawn with the drag's
 //! transform (`render::Live`), so a drag that only moves, turns or scales a
 //! body draws every frame without the scene being evaluated, and evaluates it
-//! once when the body is let go.
+//! once when the body is let go. A body that goes into a boolean -- a cutter,
+//! a part of a union it meets -- is drawn with the boolean worked out per
+//! pixel from the shapes that go into it (`csg.rs`), for the same reason.
+//!
+//! The interface's questions about the picture -- can this point be seen,
+//! what surface is under the pointer -- are answered from the depth the card
+//! drew (`depth.rs`), not by ray casts through the scene.
 //!
 //! The two pictures are alike, not identical, and deliberately so. A GPU draws
 //! a line by rasterizing it, where `raster.rs` walks it pixel by pixel, so a
@@ -45,6 +51,7 @@ pub(crate) use target::*;
 mod passes;
 pub(crate) use passes::*;
 mod buffers;
+mod csg;
 mod depth;
 mod draw;
 mod ground;
@@ -73,6 +80,14 @@ pub struct Gpu {
     /// A selected body's outline, and where planes cross a mesh.
     outline: Program,
     crossing: Program,
+    /// A boolean drawn per pixel while a drag changes it -- see `csg.rs`.
+    csg_peel: Program,
+    csg_count: Program,
+    csg_resolve: Program,
+    csg_targets: Option<csg::CsgTargets>,
+    /// The section's kept half-space as a shape for it, with the hash of what
+    /// it was made from.
+    csg_half: Option<(u64, crate::render::Renderable)>,
     /// How many texels wide the tables a geometry stage reads a mesh's
     /// topology from are laid out -- see `resident::table`.
     table_width: usize,

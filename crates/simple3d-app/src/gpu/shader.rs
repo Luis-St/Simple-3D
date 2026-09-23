@@ -188,6 +188,10 @@ uniform vec4 u_clip;
 
 out vec3 v_pos;
 flat out uint v_tag;
+// The boolean preview draws the same faces in several programs and compares
+// the depths they land at, which only holds if every program puts a vertex in
+// exactly the same place (`gpu/csg.rs`).
+invariant gl_Position;
 
 void main() {
     vec3 pos = u_model * in_pos;
@@ -702,5 +706,163 @@ void main() {
         }
     }
     out_colour = vec4(u_colour.rgb, u_colour.a * fade);
+}
+"#;
+
+/// The boolean preview's layer pass: every face of every shape, keeping at each
+/// pixel the nearest one behind the layer before -- one layer of the shapes'
+/// surfaces, peeled off the front of what is left. What is kept is the face's
+/// colour, worked out as `FACE_FRAGMENT` works out a solid's, and which shape
+/// it belongs to. See `gpu/csg.rs`.
+pub(crate) const CSG_PEEL_FRAGMENT: &str = r#"#version 330 core
+in vec3 v_pos;
+
+uniform sampler2D u_previous;
+uniform int u_first;
+// The pixels an earlier layer has found the surface at, and the depth of the
+// rest of the scene: a layer behind it can never be seen.
+uniform sampler2D u_done;
+uniform sampler2D u_scene_depth;
+uniform uint u_leaf;
+uniform vec3 u_forward;
+uniform vec4 u_base;
+uniform int u_painted;
+uniform usampler2D u_paint;
+uniform int u_table_width;
+
+layout(location = 0) out vec4 out_colour;
+layout(location = 1) out uint out_leaf;
+
+void main() {
+    ivec2 pixel = ivec2(gl_FragCoord.xy);
+    if (texelFetch(u_done, pixel, 0).r > 0.5 || gl_FragCoord.z >= texelFetch(u_scene_depth, pixel, 0).r) {
+        discard;
+    }
+    if (u_first == 0 && gl_FragCoord.z <= texelFetch(u_previous, pixel, 0).r) {
+        discard;
+    }
+    vec3 normal = cross(dFdx(v_pos), dFdy(v_pos));
+    float length_ = length(normal);
+    float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
+    vec4 base = u_base;
+    if (u_painted == 1) {
+        ivec2 at = ivec2(gl_PrimitiveID % u_table_width, gl_PrimitiveID / u_table_width);
+        uint tag = texelFetch(u_paint, at, 0).r;
+        if ((tag & 0xFF000000u) != 0u) {
+            base = vec4(float((tag >> 16) & 255u), float((tag >> 8) & 255u), float(tag & 255u), u_base.a);
+        }
+    }
+    float factor = 0.34 + 0.66 * facing;
+    out_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), 255.0) / 255.0;
+    out_leaf = u_leaf;
+}
+"#;
+
+/// The boolean preview's counting pass: one shape's faces in front of the
+/// layer, each adding one to that shape's own channel. How many times a ray
+/// from the eye crosses a closed surface before a point says whether the
+/// point is inside it: an odd count is inside.
+pub(crate) const CSG_COUNT_FRAGMENT: &str = r#"#version 330 core
+layout(location = 0) out vec4 out_0;
+layout(location = 1) out vec4 out_1;
+layout(location = 2) out vec4 out_2;
+layout(location = 3) out vec4 out_3;
+layout(location = 4) out vec4 out_4;
+layout(location = 5) out vec4 out_5;
+layout(location = 6) out vec4 out_6;
+layout(location = 7) out vec4 out_7;
+
+void main() {
+    vec4 one = vec4(1.0 / 255.0);
+    out_0 = one;
+    out_1 = one;
+    out_2 = one;
+    out_3 = one;
+    out_4 = one;
+    out_5 = one;
+    out_6 = one;
+    out_7 = one;
+}
+"#;
+
+/// The boolean preview's resolving pass, over the whole frame: where the
+/// layer's point is on the result's surface -- the expression says one thing
+/// just in front of it and the other just behind, which is its own shape's
+/// count with one more crossing -- the point is drawn, at the layer's depth
+/// and in the layer's colour, and the pixel is marked done so no layer behind
+/// it is drawn there.
+pub(crate) const CSG_RESOLVE_FRAGMENT: &str = r#"#version 330 core
+uniform sampler2D u_layer;
+uniform usampler2D u_leaf;
+uniform sampler2D u_colour;
+uniform sampler2D u_count_0;
+uniform sampler2D u_count_1;
+uniform sampler2D u_count_2;
+uniform sampler2D u_count_3;
+uniform sampler2D u_count_4;
+uniform sampler2D u_count_5;
+uniform sampler2D u_count_6;
+uniform sampler2D u_count_7;
+uniform int u_leaves;
+// The expression in postfix: a leaf by its index, -1 union, -2 difference,
+// -3 intersection.
+uniform int u_program[64];
+uniform int u_length;
+uniform uint u_tag;
+// The section's half-space, when there is one, drawn as the cut.
+uniform int u_half;
+
+layout(location = 0) out vec4 out_colour;
+layout(location = 1) out uint out_tag;
+layout(location = 2) out float out_done;
+
+bool evaluate(uint inside) {
+    bool stack[32];
+    int top = 0;
+    for (int i = 0; i < u_length; i++) {
+        int op = u_program[i];
+        if (op >= 0) {
+            stack[top] = ((inside >> uint(op)) & 1u) == 1u;
+            top += 1;
+        } else {
+            bool b = stack[top - 1];
+            bool a = stack[top - 2];
+            top -= 1;
+            stack[top - 1] = op == -1 ? (a || b) : (op == -2 ? (a && !b) : (a && b));
+        }
+    }
+    return stack[0];
+}
+
+void main() {
+    ivec2 at = ivec2(gl_FragCoord.xy);
+    float depth = texelFetch(u_layer, at, 0).r;
+    if (depth >= 1.0) {
+        discard;
+    }
+    vec4 counts[8];
+    counts[0] = texelFetch(u_count_0, at, 0);
+    counts[1] = texelFetch(u_count_1, at, 0);
+    counts[2] = texelFetch(u_count_2, at, 0);
+    counts[3] = texelFetch(u_count_3, at, 0);
+    counts[4] = texelFetch(u_count_4, at, 0);
+    counts[5] = texelFetch(u_count_5, at, 0);
+    counts[6] = texelFetch(u_count_6, at, 0);
+    counts[7] = texelFetch(u_count_7, at, 0);
+    uint inside = 0u;
+    for (int j = 0; j < u_leaves; j++) {
+        uint crossings = uint(round(counts[j / 4][j % 4] * 255.0));
+        if ((crossings & 1u) == 1u) {
+            inside |= 1u << uint(j);
+        }
+    }
+    uint leaf = texelFetch(u_leaf, at, 0).r;
+    if (evaluate(inside) == evaluate(inside ^ (1u << leaf))) {
+        discard;
+    }
+    out_colour = texelFetch(u_colour, at, 0);
+    out_tag = int(leaf) == u_half ? 0u : u_tag;
+    out_done = 1.0;
+    gl_FragDepth = depth;
 }
 "#;

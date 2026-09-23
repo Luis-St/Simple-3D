@@ -45,8 +45,9 @@ impl App {
         }
         // A drag the GPU draws for itself is evaluated once, when it ends:
         // every frame's picture comes from the card, and evaluating the scene
-        // on each would only compete with it (see `App::live_drag`).
-        if self.dirty && self.live_drag().is_none() {
+        // on each would only compete with it (see `App::live_drag` and
+        // `App::live_csg`).
+        if self.dirty && !self.drag_drawn_live() {
             self.worker.want(self.wanted_renderables());
             self.worker.submit(&self.scene);
             self.dirty = false;

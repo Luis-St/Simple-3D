@@ -1,5 +1,6 @@
 mod bounds;
 mod camera;
+mod csg;
 mod document;
 mod drag;
 mod keymap;
