@@ -86,6 +86,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let mut add_custom_pattern = false;
         let mut save_as_primitive = false;
         let mut open_component = false;
+        let mut new_component = false;
         let is_component = app.scene.node(id).is_component();
         let uses_components = app.project.uses_components();
         let mut paint: Option<Option<Colour>> = None;
@@ -169,6 +170,18 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         // A group taken out into a component of its own (issue 113), and the
         // way into one that already is.
         item(ui, &mut blocks, keymap, &mut chosen, Command::MakeComponent, is_group && !is_root && !multiple);
+        // An empty one as well, on every group and the root among them, so a
+        // project that has none yet has a way in from the tree.
+        if is_group && !multiple {
+            blocks.entry(ui);
+            if crate::ui::menu_entry(ui, "New component", true)
+                .on_hover_text("An empty component, opened in a tab of its own, to be placed wherever it is wanted")
+                .clicked()
+            {
+                new_component = true;
+                ui.close();
+            }
+        }
         if is_component && !multiple {
             blocks.entry(ui);
             if crate::ui::menu_entry(ui, "Open the component", true).clicked() {
@@ -317,6 +330,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         }
         if open_component {
             app.open_component_of(id);
+        }
+        if new_component {
+            app.new_component();
         }
         if let Some(command) = chosen {
             app.run(command);
