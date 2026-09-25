@@ -43,7 +43,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
                 tab_menu(&response, index, name, summaries.len(), &others, &mut asked);
             }
-            if plus(ui) {
+            if plus(ui, "New document") {
                 asked = Some(Ask::New);
             }
             // Whatever is left of the row after the tabs. Dragging it carries
@@ -231,8 +231,9 @@ fn rest_of_the_row(ui: &mut egui::Ui, active: usize, others: &[OtherWindow], ask
     });
 }
 
-/// The button at the end of the row: another document.
-pub(crate) fn plus(ui: &mut egui::Ui) -> bool {
+/// The button at the end of the row: another document, or on the row of
+/// components another component.
+pub(crate) fn plus(ui: &mut egui::Ui, hover: &str) -> bool {
     let size = egui::vec2(28.0, ui.available_height());
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
     let colour = if response.hovered() { token::TEXT_HI } else { token::TEXT_LO };
@@ -243,7 +244,7 @@ pub(crate) fn plus(ui: &mut egui::Ui) -> bool {
     let stroke = egui::Stroke::new(1.4_f32, colour);
     ui.painter().hline(centre.x - 5.0..=centre.x + 5.0, centre.y, stroke);
     ui.painter().vline(centre.x, centre.y - 5.0..=centre.y + 5.0, stroke);
-    response.on_hover_text("New document").clicked()
+    response.on_hover_text(hover).clicked()
 }
 
 /// The close cross, drawn rather than typed: a glyph would depend on the font

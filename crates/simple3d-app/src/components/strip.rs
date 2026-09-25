@@ -75,6 +75,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             for (id, name, unsaved) in &tabs {
                 tab(ui, *id, name, *unsaved, *id == active, &mut asked);
             }
+            if crate::tabs::strip::plus(ui, "New component") {
+                asked = Some(Ask::New);
+            }
             list(ui, &listed, &mut asked);
         });
     });
@@ -188,12 +191,21 @@ fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bo
     });
 }
 
-/// The button at the end of the row, which lists every component of the
+/// The arrow at the end of the row, which lists every component of the
 /// project: to open one, to place one in the component on screen, or to
-/// delete one.
+/// delete one. Painted rather than typed, since the interface font has no
+/// small triangles.
 fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
-    ui.add_space(4.0);
-    ui.menu_button(format!("Components ({})", listed.len()), |ui| {
+    let size = egui::vec2(28.0, ui.available_height());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&response));
+    let colour = if response.hovered() || open { token::TEXT_HI } else { token::TEXT_LO };
+    if response.hovered() || open {
+        ui.painter().rect_filled(rect, 0.0, token::SURFACE_2);
+    }
+    theme::twisty(ui.painter(), rect.center(), true, colour);
+    let response = response.on_hover_text(format!("Every component ({})", listed.len()));
+    egui::Popup::menu(&response).show(|ui| {
         // A grid, so the buttons line up in columns down the list -- and so
         // the menu is as wide as its longest name, not as wide as the screen.
         egui::Grid::new("component-list").num_columns(3).spacing(egui::vec2(8.0, 4.0)).show(ui, |ui| {
@@ -226,10 +238,5 @@ fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
                 ui.end_row();
             }
         });
-        ui.separator();
-        if ui.button("New component").on_hover_text("An empty component, opened in a tab of its own").clicked() {
-            *asked = Some(Ask::New);
-            ui.close();
-        }
     });
 }
