@@ -120,18 +120,23 @@ impl App {
         self.status = Status::Info(format!("Made {name}"));
     }
 
-    /// Place component `from` in the component on screen, where a new shape
-    /// would go.
-    pub fn integrate_component(&mut self, from: ComponentId) {
+    /// Place component `from` on outliner row `at`: inside it when it is a
+    /// group, beside it otherwise, the way the row's Add menu adds a shape.
+    pub fn integrate_component_at(&mut self, at: NodeId, from: ComponentId) {
+        let (parent, index) = self.insertion_from_row(at);
+        self.place_component(from, parent, index);
+    }
+
+    fn place_component(&mut self, from: ComponentId, parent: NodeId, index: usize) {
         if let Err(why) = self.can_integrate(from) {
             self.status = Status::Warning(why);
             return;
         }
         let name = self.component_label(from).unwrap_or_default();
         self.edit("Place component", None);
-        let (parent, index) = self.scene.insertion_point(self.primary());
         let id = self.scene.add_integration(from, &name, parent, index);
         self.stand_clear(&[id]);
+        self.collapsed.remove(&parent);
         self.select_only(id);
         self.status = Status::Info(format!("Placed {name}"));
     }

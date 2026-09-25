@@ -2,7 +2,7 @@
 
 use crate::app::App;
 use simple3d_core::keymap::Keymap;
-use simple3d_core::scene::{Colour, GroupOp, NodeId};
+use simple3d_core::scene::{Colour, ComponentId, GroupOp, NodeId, ROOT_COMPONENT};
 
 /// The right-click menu on an outliner row.
 ///
@@ -86,6 +86,16 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let mut add_custom_pattern = false;
         let mut save_as_primitive = false;
         let mut open_component = false;
+        let mut place_component: Option<ComponentId> = None;
+        // Every component that could be placed here, and why not where one
+        // cannot -- none at all until the project has one beyond its root.
+        let placeable: Vec<(ComponentId, String, Option<String>)> = app
+            .project
+            .components
+            .iter()
+            .filter(|c| c.id != ROOT_COMPONENT)
+            .map(|c| (c.id, app.component_label(c.id).unwrap_or_default(), app.can_integrate(c.id).err()))
+            .collect();
         let is_component = app.scene.node(id).is_component();
         let uses_components = app.project.uses_components();
         let mut paint: Option<Option<Colour>> = None;
@@ -135,6 +145,22 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                 ui.close();
             }
             ui.separator();
+            // The project's components, as a category of their own beside the
+            // shapes' (issue 113), and only once there is one to place.
+            if !placeable.is_empty() {
+                ui.menu_button("Components", |ui| {
+                    for (component, name, refusal) in &placeable {
+                        let button = ui.add_enabled(refusal.is_none(), egui::Button::new(name));
+                        if let Some(why) = refusal {
+                            button.on_disabled_hover_text(why);
+                        } else if button.clicked() {
+                            place_component = Some(*component);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.separator();
+            }
             for category in simple3d_core::primitive::categories() {
                 ui.menu_button(category, |ui| {
                     for spec in simple3d_core::primitive::REGISTRY.iter().filter(|s| s.category == category) {
@@ -301,6 +327,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         }
         if add_pattern {
             app.add_pattern_at(id);
+        }
+        if let Some(component) = place_component {
+            app.integrate_component_at(id, component);
         }
         // An empty pattern on this row, and the tool opened on it: adding leaves
         // the new pattern selected, which is what the tool works on -- and which

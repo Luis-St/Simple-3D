@@ -116,7 +116,7 @@ impl App {
     /// beside the pattern instead, which made the row menu disagree with both
     /// the drag-and-drop rule and the document-level Add, and both of those
     /// already say "into".
-    pub(super) fn insertion_from_row(&self, at: NodeId) -> (NodeId, usize) {
+    pub(crate) fn insertion_from_row(&self, at: NodeId) -> (NodeId, usize) {
         let end_of_root = (self.scene.root(), self.scene.node(self.scene.root()).children.len());
         match self.scene.get(at) {
             // Not into a collection: the tree does not open one, so a shape

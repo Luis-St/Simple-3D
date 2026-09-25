@@ -105,12 +105,18 @@ pub(crate) fn a_component_cannot_be_placed_inside_itself() {
     // A second component holding the wheel cannot then go into the wheel.
     app.new_component();
     let axle = app.project.active;
-    app.integrate_component(wheel);
+    {
+        let root = app.scene.root();
+        app.integrate_component_at(root, wheel);
+    }
     assert_eq!(app.scene.integrations_of(wheel).len(), 1);
     app.activate_component(wheel);
     assert!(app.can_integrate(axle).is_err(), "a component holding this one was offered to it");
     let before = app.scene.len();
-    app.integrate_component(axle);
+    {
+        let root = app.scene.root();
+        app.integrate_component_at(root, axle);
+    }
     assert_eq!(app.scene.len(), before, "the refused placement was made anyway");
 }
 
@@ -171,7 +177,10 @@ pub(crate) fn deleting_a_component_removes_every_integration_of_it() {
     let wheel = app.scene.component_of(group).unwrap();
     app.new_component();
     let axle = app.project.active;
-    app.integrate_component(wheel);
+    {
+        let root = app.scene.root();
+        app.integrate_component_at(root, wheel);
+    }
     app.activate_component(ROOT_COMPONENT);
 
     app.ask_delete_component(wheel);
@@ -369,4 +378,20 @@ pub(crate) fn a_new_component_with_a_group_selected_takes_the_group() {
     assert!(node.children.is_empty());
     let component = app.scene.component_of(group).unwrap();
     assert_eq!(app.project.open, vec![ROOT_COMPONENT, component], "the component's tab did not open");
+}
+
+/// A component placed from a group row's Add menu goes inside that group.
+#[test]
+pub(crate) fn a_component_placed_on_a_group_row_goes_inside_it() {
+    let (mut app, group) = app_with_group("components-place-on-row");
+    app.run(Command::MakeComponent);
+    let component = app.scene.component_of(group).unwrap();
+    let root = app.scene.root();
+    let holder = app.scene.add_group(GroupOp::Union, root, 0);
+
+    app.integrate_component_at(holder, component);
+
+    let placed = app.primary().unwrap();
+    assert_eq!(app.scene.component_of(placed), Some(component));
+    assert_eq!(app.scene.node(placed).parent, Some(holder), "the component was not placed inside the row's group");
 }

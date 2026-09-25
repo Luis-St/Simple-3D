@@ -16,8 +16,6 @@ pub fn wanted(app: &App) -> bool {
 struct Listed {
     id: ComponentId,
     name: String,
-    /// Why it cannot be placed in the component on screen, if it cannot.
-    refusal: Option<String>,
 }
 
 /// What the row was asked to do, carried out after it has finished drawing.
@@ -25,7 +23,6 @@ enum Ask {
     Pick(ComponentId),
     Close(ComponentId),
     Rename(ComponentId),
-    Place(ComponentId),
     Delete(ComponentId),
     New,
 }
@@ -55,11 +52,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .project
         .components
         .iter()
-        .map(|c| Listed {
-            id: c.id,
-            name: app.component_label(c.id).unwrap_or_default(),
-            refusal: app.can_integrate(c.id).err(),
-        })
+        .map(|c| Listed { id: c.id, name: app.component_label(c.id).unwrap_or_default() })
         .collect();
     let mut asked: Option<Ask> = None;
 
@@ -90,7 +83,6 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             let root = app.scene.root();
             app.rename = Some((root, app.scene.node(root).name.clone()));
         }
-        Some(Ask::Place(id)) => app.integrate_component(id),
         Some(Ask::Delete(id)) => app.ask_delete_component(id),
         Some(Ask::New) => app.new_component(),
         None => {}
@@ -192,9 +184,8 @@ fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bo
 }
 
 /// The arrow at the end of the row, which lists every component of the
-/// project: to open one, to place one in the component on screen, or to
-/// delete one. Painted rather than typed, since the interface font has no
-/// small triangles.
+/// project: to open one or to delete one. Painted rather than typed, since the
+/// interface font has no small triangles.
 fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     let size = egui::vec2(28.0, ui.available_height());
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -208,21 +199,12 @@ fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     egui::Popup::menu(&response).show(|ui| {
         // A grid, so the buttons line up in columns down the list -- and so
         // the menu is as wide as its longest name, not as wide as the screen.
-        egui::Grid::new("component-list").num_columns(3).spacing(egui::vec2(8.0, 4.0)).show(ui, |ui| {
+        egui::Grid::new("component-list").num_columns(2).spacing(egui::vec2(8.0, 4.0)).show(ui, |ui| {
             for entry in listed {
                 let root = entry.id == ROOT_COMPONENT;
                 let label = if root { format!("{} (root)", entry.name) } else { entry.name.clone() };
                 if ui.add(egui::Button::new(label).frame(false)).on_hover_text("Open it in a tab").clicked() {
                     *asked = Some(Ask::Pick(entry.id));
-                    ui.close();
-                }
-                let place = ui.add_enabled(entry.refusal.is_none(), egui::Button::new("Place").small());
-                let place = match &entry.refusal {
-                    Some(why) => place.on_disabled_hover_text(why),
-                    None => place.on_hover_text("Place it in the component being edited, where a new shape would go"),
-                };
-                if place.clicked() {
-                    *asked = Some(Ask::Place(entry.id));
                     ui.close();
                 }
                 if root {
