@@ -136,14 +136,7 @@ impl App {
             // What a group can be taken out into (issue 113): a part of its own,
             // edited in its own tab, and placed wherever it is wanted.
             self.command_item(ui, Command::MakeComponent, self.primary_is_group());
-            if ui
-                .button("New component")
-                .on_hover_text("An empty component, opened in a tab of its own, to be placed wherever it is wanted")
-                .clicked()
-            {
-                self.new_component();
-                ui.close();
-            }
+            self.command_item(ui, Command::NewComponent, true);
             ui.separator();
             // Baking a shape into the triangles it evaluates to (issue 80), and
             // cutting one into a pattern of pieces (issue 82).

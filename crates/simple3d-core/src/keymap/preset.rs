@@ -38,6 +38,9 @@ impl Keymap {
         // Making a component of a group (issue 113). O for the object it becomes,
         // which no preset spends on anything with a Ctrl and a Shift on it.
         set(MakeComponent, Chord::ctrl_shift("O"));
+        // An empty component (issue 113). C for component, which no preset
+        // spends on anything on its own.
+        set(NewComponent, Chord::key("C"));
         // Baking a shape into the triangles it evaluates to (issue 80).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
         // Dropping detail from a mesh (issue 106). R for "reduce", beside the

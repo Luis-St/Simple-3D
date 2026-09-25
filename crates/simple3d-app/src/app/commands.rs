@@ -53,6 +53,7 @@ impl App {
             Group => self.group_selection(),
             Pattern => self.make_pattern(),
             MakeComponent => self.make_component(),
+            NewComponent => self.new_component(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             SimplifyMesh => self.open_simplify_tool(),
             Reassemble => self.open_reassemble_tool(),

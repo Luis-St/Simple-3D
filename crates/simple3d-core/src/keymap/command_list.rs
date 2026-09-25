@@ -24,6 +24,7 @@ impl Command {
         Command::Group,
         Command::Pattern,
         Command::MakeComponent,
+        Command::NewComponent,
         Command::ConvertToMesh,
         Command::SimplifyMesh,
         Command::Reassemble,

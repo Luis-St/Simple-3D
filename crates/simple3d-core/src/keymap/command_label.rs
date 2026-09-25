@@ -26,6 +26,7 @@ impl Command {
             Group => "Group selection",
             Pattern => "Make a pattern of the selection",
             MakeComponent => "Make a component of the group",
+            NewComponent => "New component",
             ConvertToMesh => "Convert to a mesh",
             SimplifyMesh => "Simplify the mesh",
             Reassemble => "Reassemble into objects",
@@ -75,10 +76,9 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | MakeComponent | ConvertToMesh
-            | SimplifyMesh | Reassemble | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | MoveUp | MoveDown => {
-                Area::Edit
-            }
+            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | MakeComponent | NewComponent
+            | ConvertToMesh | SimplifyMesh | Reassemble | SplitIntoPieces | Rejoin | Rename | ToggleVisibility
+            | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
