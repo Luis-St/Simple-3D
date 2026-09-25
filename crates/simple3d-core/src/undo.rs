@@ -15,7 +15,7 @@ mod history;
 #[cfg(test)]
 mod tests;
 
-use crate::scene::Scene;
+use crate::scene::{ComponentId, Scene};
 use std::time::{Duration, Instant};
 
 const DEFAULT_DEPTH: usize = 200;
@@ -26,6 +26,10 @@ const COALESCE_WINDOW: Duration = Duration::from_millis(900);
 struct Snapshot {
     label: String,
     scene: Scene,
+    /// The components the edit this steps over made (issue 113). A component
+    /// is not part of any one scene, so taking the step back is not enough to
+    /// take it away again: the application asks this, and does the rest.
+    created: Vec<ComponentId>,
 }
 
 pub struct History {

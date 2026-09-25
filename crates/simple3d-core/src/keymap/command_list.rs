@@ -23,6 +23,7 @@ impl Command {
         Command::Delete,
         Command::Group,
         Command::Pattern,
+        Command::MakeComponent,
         Command::ConvertToMesh,
         Command::SimplifyMesh,
         Command::Reassemble,

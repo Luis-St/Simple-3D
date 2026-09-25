@@ -72,6 +72,8 @@ impl App {
         // itself rather than the whole window: the documents belong to the
         // viewport under them, not to the window's chrome.
         crate::tabs::show(self, ctx);
+        // The project's components, under its tab (issue 113).
+        crate::components::strip::show(self, ctx);
         panel_viewport::show(self, ctx);
         // Over the viewport, and drawn after it so it is the layer above: an
         // in-place popup is part of the picture rather than a window in front of

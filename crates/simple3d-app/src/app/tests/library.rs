@@ -38,8 +38,12 @@ pub(crate) fn a_group_saved_as_a_primitive_comes_back_into_a_fresh_document() {
     fresh.add_library_entry(&entry);
     let added = fresh.primary().expect("nothing was added");
     assert_eq!(fresh.scene.node(added).name, "Bracket", "it arrived under some other name");
-    assert!(fresh.scene.node(added).is_group());
-    assert_eq!(fresh.scene.node(added).children.len(), 1, "the group arrived without its child");
+    // A saved primitive is placed as a component of its own (issue 113): one
+    // node here, and the group it was saved from inside the component.
+    assert!(fresh.scene.node(added).is_component(), "it did not arrive as a component");
+    let component = fresh.scene.component_of(added).unwrap();
+    let inside = fresh.component_scene(component).expect("the component is not in the project");
+    assert_eq!(inside.node(inside.root()).children.len(), 1, "the group arrived without its child");
     assert_eq!(fresh.scene.node(added).position, Vec3::ZERO);
 
     // And it can be taken off the palette again.

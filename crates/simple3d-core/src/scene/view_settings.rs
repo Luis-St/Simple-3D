@@ -145,6 +145,14 @@ pub struct SectionView {
     /// size is automatic, so switching back to custom finds it where it was.
     #[serde(default, skip_serializing_if = "is_unsized")]
     pub size: [f64; 2],
+    /// Where in the model the plane is turned about and its rectangle centred,
+    /// fixed when the plane is placed. Without it, both followed the middle of
+    /// the model, so moving any body at all swung a turned plane or slid the
+    /// rectangle off what it was cutting. `None` in a file written before it
+    /// was kept, and until there is a model to take the middle of -- the
+    /// middle of the model stands in for it then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre: Option<Vec3>,
 }
 
 fn is_unsized(size: &[f64; 2]) -> bool {
@@ -202,23 +210,47 @@ impl SectionView {
         axis.rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized()
     }
 
-    /// The point the plane is turned about: the middle of the model, or the
-    /// origin with nothing in the scene.
+    /// The middle of the model, or the origin with nothing in the scene.
     pub fn pivot(bounds: Option<(Vec3, Vec3)>) -> Vec3 {
         bounds.map_or(Vec3::ZERO, |(lo, hi)| (lo + hi) * 0.5)
     }
 
+    /// The point the plane is turned about: its own [`SectionView::centre`],
+    /// or the middle of the model while it has none.
+    pub fn turned_about(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
+        self.centre.unwrap_or_else(|| Self::pivot(bounds))
+    }
+
+    /// Fix the point the plane turns about at the middle of the model, if it
+    /// is not fixed yet and there is a model to take the middle of.
+    pub fn pin_centre(&mut self, bounds: Option<(Vec3, Vec3)>) {
+        if self.centre.is_none() && bounds.is_some() {
+            self.centre = Some(Self::pivot(bounds));
+        }
+    }
+
     /// A point the plane passes through.
     ///
-    /// The untilted plane through the pivot, slid to `offset` along its axis,
-    /// then turned about the pivot: without the tilt that is exactly the plane
-    /// at `offset`, whatever the model's bounds, and with it the plane swings
-    /// about the middle of the shape rather than about the origin -- which for
-    /// a part standing 300 mm out would swing it clean off the model.
+    /// The untilted plane through the centre, slid to `offset` along its axis,
+    /// then turned about the centre: without the tilt that is exactly the plane
+    /// at `offset`, and with it the plane swings about the middle of the shape
+    /// rather than about the origin -- which for a part standing 300 mm out
+    /// would swing it clean off the model.
     pub fn anchor(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
-        let pivot = Self::pivot(bounds);
+        let pivot = self.turned_about(bounds);
         let along = [pivot.x, pivot.y, pivot.z][self.axis()];
         pivot + self.normal() * (self.offset - along)
+    }
+
+    /// Where the frame of a plane running through the whole model is drawn:
+    /// the middle of the model, brought onto the plane. It follows the model,
+    /// since it is only there to show where the plane crosses it; a rectangle
+    /// of the plane's own size is what cuts, and that stands at
+    /// [`SectionView::anchor`].
+    pub fn frame_middle(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
+        let normal = self.normal();
+        let middle = Self::pivot(bounds);
+        middle - normal * normal.dot(middle - self.anchor(bounds))
     }
 
     /// The two directions the plane spans, turned with it: the axes after its

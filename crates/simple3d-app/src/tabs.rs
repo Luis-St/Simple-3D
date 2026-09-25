@@ -45,6 +45,9 @@ pub struct Document {
     /// The last evaluation of this scene, so coming back to a tab shows the
     /// model at once rather than an empty viewport while it is recomputed.
     pub evaluated: Evaluated,
+    /// The rest of the project: every component but the one described above,
+    /// which is the one that was on screen (issue 113).
+    pub project: crate::components::Project,
 }
 
 impl Document {
@@ -62,11 +65,12 @@ impl Document {
             cursor: None,
             frame_when_evaluated: true,
             evaluated: empty_evaluation(),
+            project: crate::components::Project::new(),
         }
     }
 
     fn unsaved(&self) -> bool {
-        self.history.revision() != self.saved_revision
+        self.history.revision() != self.saved_revision || self.project.unsaved()
     }
 
     fn name(&self) -> String {

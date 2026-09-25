@@ -15,6 +15,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     // the tree -- joining a split back together takes a node out of it -- would
     // leave them drawing a row that is no longer there.
     let mut command: Option<simple3d_core::keymap::Command> = None;
+    // Opening a component switches the whole scene the panel reads, so it too
+    // waits until the panel is drawn.
+    let mut open_component = false;
     let (area, restore) = theme::list_scroll_area(ui);
     area.show(ui, |ui| {
         ui.set_style(restore);
@@ -37,6 +40,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
                 Body::Pattern { .. } if targets.len() == 1 => section(ui, "Pattern", |ui| pattern(app, ui, primary)),
                 Body::Mesh { .. } if targets.len() == 1 => section(ui, "Mesh", |ui| mesh_body(app, ui, primary)),
+                Body::Component { .. } if targets.len() == 1 => {
+                    section(ui, "Component", |ui| component_body(app, ui, primary, &mut open_component))
+                }
                 Body::Split { .. } if targets.len() == 1 => {
                     section(ui, "Split", |ui| split_body(app, ui, primary, &mut command));
                     // The pieces are inside the collection rather than in the
@@ -63,6 +69,11 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     });
     if let Some(command) = command {
         app.run(command);
+    }
+    if open_component {
+        if let Some(id) = app.primary() {
+            app.open_component_of(id);
+        }
     }
 }
 

@@ -72,6 +72,11 @@ pub struct NodeData {
     /// cells.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiling: Option<SplitPlan>,
+    /// The component a `component` node stands for, and nothing else's
+    /// (issue 113). Its operation, when it uses one of its own in place of the
+    /// component's, rides in `op`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<ComponentId>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

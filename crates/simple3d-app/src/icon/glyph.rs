@@ -35,6 +35,8 @@ pub enum Glyph {
     Mesh,
     /// A shape cut into smaller pieces (issue 82).
     Split,
+    /// A component placed in the tree (issue 113).
+    Component,
     // Primitive silhouettes.
     Box,
     RoundedBox,

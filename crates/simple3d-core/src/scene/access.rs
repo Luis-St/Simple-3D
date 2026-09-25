@@ -25,7 +25,14 @@ impl Scene {
         };
         let mut nodes = BTreeMap::new();
         nodes.insert(1, root);
-        Scene { nodes, root: 1, next_id: 2, settings: SceneSettings::default(), camera: Camera::default() }
+        Scene {
+            nodes,
+            root: 1,
+            next_id: 2,
+            settings: SceneSettings::default(),
+            camera: Camera::default(),
+            components: Default::default(),
+        }
     }
 
     pub fn root(&self) -> NodeId {

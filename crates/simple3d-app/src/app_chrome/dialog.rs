@@ -186,6 +186,7 @@ impl App {
                 self.modal = Modal::None;
             }
             Modal::ConfirmCloseTab => self.cancel_close_tab(),
+            Modal::ConfirmComponent => self.cancel_component_ask(),
             Modal::Keymap => {
                 self.recording = None;
                 self.modal = Modal::None;

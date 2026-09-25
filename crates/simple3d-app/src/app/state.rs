@@ -32,6 +32,12 @@ pub struct App {
     /// another tab is picked. `crate::tabs` owns the swapping.
     pub tabs: Vec<crate::tabs::Document>,
     pub active: usize,
+    /// The rest of the project on screen: its other components, and which of
+    /// them are open (issue 113). `crate::components` owns it.
+    pub project: crate::components::Project,
+    /// The component question waiting on its dialog: an undo that would take a
+    /// component away with it, or a component about to be deleted.
+    pub(crate) component_ask: Option<crate::components::ComponentAsk>,
     /// Which window this is (issue 107). The shell hands out the id, never
     /// reuses one, and never changes the one a window is wearing -- so the
     /// viewport a window is drawn in can never be a window that has closed.

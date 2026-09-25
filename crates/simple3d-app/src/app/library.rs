@@ -68,7 +68,8 @@ impl App {
         self.modal = Modal::None;
     }
 
-    /// Drop a saved primitive into the scene, at the current placement.
+    /// Place a saved primitive in the scene, at the current placement, as a
+    /// component of its own (issue 113).
     pub fn add_library_entry(&mut self, entry: &library::Entry) {
         let Some(clip) = library::load(&entry.path) else {
             return self.fail(
@@ -76,30 +77,25 @@ impl App {
                 &format!("{}\n\nIt may have been written by a newer version, or edited by hand.", entry.path.display()),
             );
         };
-        self.edit("Add", None);
-        let target = self.primary();
-        let created = clipboard::insert(&mut self.scene, &clip, target, false);
-        self.size_fresh_patterns();
-        if created.is_empty() {
-            self.status = Status::Warning(format!("\u{201C}{}\u{201D} has nothing in it", entry.name));
-            return;
-        }
-        // The saved subtree keeps its own internal arrangement; what moves is
-        // where the whole thing sits.
-        let anchor = self.scene.node(created[0]).position;
-        // Its near side is measured across every node in it, so a saved
-        // primitive stands clear of the selection as a whole rather than
-        // leading with whichever node happens to be first.
-        let near = self.near_face_x(&created).map_or(0.0, |x| x - anchor.x);
+        self.place_primitive(&clip, &entry.name);
+    }
+
+    /// Move freshly added nodes, together, to where a new shape goes.
+    pub(crate) fn stand_clear(&mut self, created: &[NodeId]) {
+        let Some(&first) = created.first() else { return };
+        // The nodes keep their own arrangement; what moves is where the whole
+        // of them sits.
+        let anchor = self.scene.node(first).position;
+        // Its near side is measured across every node in it, so what is added
+        // stands clear of the selection as a whole rather than leading with
+        // whichever node happens to be first.
+        let near = self.near_face_x(created).map_or(0.0, |x| x - anchor.x);
         let at = self.insertion_point_world(near);
-        for id in &created {
+        for id in created {
             if let Some(node) = self.scene.get_mut(*id) {
                 node.position = node.position - anchor + at;
             }
         }
-        self.selection = created;
-        self.on_selection_changed();
-        self.status = Status::Info(format!("Added {}", entry.name));
     }
 
     pub fn delete_library_entry(&mut self, entry: &library::Entry) {

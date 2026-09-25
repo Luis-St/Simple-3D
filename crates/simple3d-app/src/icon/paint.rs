@@ -156,6 +156,12 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.line(&[(0.44, 0.12), (0.44, 0.88)]);
             pen.line(&[(0.62, 0.12), (0.62, 0.88), (0.94, 0.68), (0.94, 0.32), (0.62, 0.12)]);
         }
+        // Two boxes, one standing in front of the other: the thing itself and
+        // another place it is, which is what an integration is.
+        Glyph::Component => {
+            pen.closed(&[(0.10, 0.38), (0.62, 0.38), (0.62, 0.90), (0.10, 0.90)]);
+            pen.line(&[(0.38, 0.38), (0.38, 0.10), (0.90, 0.10), (0.90, 0.62), (0.62, 0.62)]);
+        }
         Glyph::Box => {
             pen.closed(&[(0.10, 0.34), (0.50, 0.14), (0.90, 0.34), (0.90, 0.72), (0.50, 0.92), (0.10, 0.72)]);
             pen.line(&[(0.10, 0.34), (0.50, 0.52), (0.90, 0.34)]);

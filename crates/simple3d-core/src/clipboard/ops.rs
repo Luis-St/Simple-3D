@@ -1,7 +1,7 @@
 //! Copying a selection out and putting it back somewhere else.
 
 use super::*;
-use crate::scene::{NodeId, Scene};
+use crate::scene::{ComponentId, NodeData, NodeId, Scene};
 
 /// Copy the topmost nodes of a selection, in tree order. Selecting a group and
 /// one of its children copies the group only -- otherwise the child would arrive
@@ -19,7 +19,33 @@ pub fn copy(scene: &Scene, selection: &[NodeId]) -> Option<Clip> {
     if tops.is_empty() {
         return None;
     }
-    Some(Clip { format: CLIP_VERSION, nodes: tops.iter().filter_map(|&id| scene.export_subtree(id)).collect() })
+    let nodes: Vec<NodeData> = tops.iter().filter_map(|&id| scene.export_subtree(id)).collect();
+    let components = carried_components(scene, &nodes);
+    Some(Clip { format: CLIP_VERSION, nodes, components, origin: None })
+}
+
+/// The components `nodes` integrate, and the ones those integrate, as the
+/// scene they were copied from sees them.
+pub fn carried_components(scene: &Scene, nodes: &[NodeData]) -> Vec<ClipComponent> {
+    let mut used = std::collections::BTreeSet::new();
+    for node in nodes {
+        node.used_components(&mut used);
+    }
+    let mut out: Vec<ClipComponent> = Vec::new();
+    let mut stack: Vec<ComponentId> = used.into_iter().collect();
+    while let Some(id) = stack.pop() {
+        if out.iter().any(|c| c.id == id) {
+            continue;
+        }
+        let Some(inner) = scene.linked_component(id) else { continue };
+        let Some(root) = inner.export_subtree(inner.root()) else { continue };
+        let mut nested = std::collections::BTreeSet::new();
+        root.used_components(&mut nested);
+        stack.extend(nested);
+        out.push(ClipComponent { id, settings: inner.settings.clone(), root });
+    }
+    out.sort_by_key(|c| c.id);
+    out
 }
 
 /// Paste a clip, following the same target rule as Add: into the selected group,

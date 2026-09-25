@@ -63,7 +63,11 @@ impl Evaluator {
             }
             // A stored mesh: its own geometry in world space, so picking, the
             // selection outline and the ghost display all reach it.
-            Body::Mesh { .. } => {
+            //
+            // An integration is one of those too (issue 113): a single node in
+            // this scene however much is inside it, picked, outlined and moved
+            // as one.
+            Body::Mesh { .. } | Body::Component { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 let inv =
                     Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale))

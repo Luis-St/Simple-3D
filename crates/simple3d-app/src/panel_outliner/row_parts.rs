@@ -52,7 +52,9 @@ pub(crate) fn symbol(op: GroupOp) -> Glyph {
 /// a box in some of them and not others, which is worse than showing up as a
 /// box in all three.
 pub(crate) fn node_glyph(node: &simple3d_core::scene::Node) -> Glyph {
-    if node.is_mesh() {
+    if node.is_component() {
+        Glyph::Component
+    } else if node.is_mesh() {
         Glyph::Mesh
     } else if node.is_split() {
         Glyph::Split

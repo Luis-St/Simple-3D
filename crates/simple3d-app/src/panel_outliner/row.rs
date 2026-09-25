@@ -244,7 +244,10 @@ pub(crate) fn row(
         // followed by a click on another opened a rename on the second one
         // (issue 59). A modifier means the two clicks were building a
         // selection, which is not a request to rename anything either.
-        if response.double_clicked() && same_row_again && !is_root && !ui.input(|i| i.modifiers.any()) {
+        // The root of a component is where the component is named (issue 113), so
+        // it can be renamed once there is more than one component to tell apart.
+        let renamable = !is_root || app.project.uses_components();
+        if response.double_clicked() && same_row_again && renamable && !ui.input(|i| i.modifiers.any()) {
             app.rename = Some((id, name.clone()));
         }
         if response.drag_started() && !is_root {

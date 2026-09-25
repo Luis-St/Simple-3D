@@ -5,7 +5,7 @@ use simple3d_core::clipboard::{self};
 use simple3d_core::scene::NodeId;
 
 impl App {
-    pub(super) fn after_history(&mut self, message: &str) {
+    pub(crate) fn after_history(&mut self, message: &str) {
         self.selection.retain(|id| self.scene.contains(*id));
         self.fields.clear();
         self.rename = None;
@@ -14,10 +14,11 @@ impl App {
     }
 
     pub(super) fn copy_selection(&mut self, cut: bool) {
-        let Some(clip) = clipboard::copy(&self.scene, &self.selection) else {
+        let Some(mut clip) = clipboard::copy(&self.scene, &self.selection) else {
             self.status = Status::Info("Nothing to copy".into());
             return;
         };
+        clip.origin = Some(self.project.origin);
         let count = clip.nodes.len();
         let what = match clip.nodes.as_slice() {
             [only] => only.name.clone(),
@@ -45,7 +46,19 @@ impl App {
             self.status = Status::Info("The clipboard is empty".into());
             return;
         };
+        // A component cannot be pasted into itself, nor into one it holds
+        // (issue 113) -- that is a model inside itself.
+        if let Err(why) = self.clip_fits_here(&clip) {
+            self.status = Status::Warning(why);
+            return;
+        }
+        let (clip, made) = self.bring_in_components(&clip);
         self.edit("Paste", None);
+        // A paste from another project brings its components in as new ones,
+        // and undoing it takes them out again.
+        if !made.is_empty() {
+            self.history.mark_created(&made);
+        }
         let target = self.primary();
         let created = clipboard::paste(&mut self.scene, &clip, target);
         if created.is_empty() {

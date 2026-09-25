@@ -154,6 +154,50 @@ impl Evaluator {
                 }
                 pieces
             }
+            // What the component makes, placed at the integration's own origin
+            // (issue 113). The component is a scene of its own, evaluated as
+            // its own tab evaluates it -- its root's transform and all -- and
+            // this node's placement goes on top of that, as any node's does.
+            Body::Component { component, op } => match scene.linked_component(*component).cloned() {
+                Some(inner) => {
+                    let root = inner.root();
+                    let own = inner.node(root).group_op();
+                    let result = match op {
+                        Some(op) if Some(*op) != own => {
+                            let mut changed = (*inner).clone();
+                            if let Some(root) = changed.get_mut(root) {
+                                root.body = Body::Group { op: *op };
+                            }
+                            self.subtree(&changed, root, cancel)
+                        }
+                        _ => self.subtree(&inner, root, cancel),
+                    };
+                    // The component's own nodes are not in this scene, so what
+                    // is wrong inside it is reported on the node that stands for
+                    // it, naming the node it is wrong with.
+                    errors.extend(result.errors.iter().map(|e| NodeError {
+                        node: id,
+                        name: node.name.clone(),
+                        message: format!("{}: {}", e.name, e.message),
+                    }));
+                    if cancel.is_cancelled() {
+                        return Err(errors);
+                    }
+                    let mut mesh = (*result.mesh).clone();
+                    if let Some(colour) = node.colour {
+                        mesh.set_tag(colour.tag());
+                    }
+                    mesh
+                }
+                None => {
+                    errors.push(NodeError {
+                        node: id,
+                        name: node.name.clone(),
+                        message: "The component it places is no longer in the project".into(),
+                    });
+                    Mesh::new()
+                }
+            },
             Body::Pattern { params } => {
                 // The unit the pattern repeats: its children, placed by their own
                 // positions and appended. A pattern lays copies side by side, it

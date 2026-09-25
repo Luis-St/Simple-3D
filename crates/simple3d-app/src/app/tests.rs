@@ -1,5 +1,6 @@
 mod bounds;
 mod camera;
+mod components;
 mod csg;
 mod document;
 mod drag;
@@ -88,7 +89,7 @@ fn app_in(config_dir: PathBuf) -> App {
 /// Draw one entire frame of the interface into a headless context. A panel
 /// that panics, or a layout that divides by a width it does not have, fails
 /// here rather than in front of someone.
-fn draw_one_frame(app: &mut App) {
+pub(crate) fn draw_one_frame(app: &mut App) {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
     // A real window size: the default raw input has an effectively infinite
@@ -117,7 +118,7 @@ fn draw_frame_with(app: &mut App, modifiers: egui::Modifiers, events: Vec<egui::
 }
 
 impl App {
-    pub(super) fn reevaluate_for_test(&mut self) {
+    pub(crate) fn reevaluate_for_test(&mut self) {
         self.evaluated = Evaluator::new().evaluate(&self.scene, &Cancel::new());
         // The generation moves on with the result, exactly as it does when
         // the worker hands one back: everything that watches for "the model

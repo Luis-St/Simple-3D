@@ -21,6 +21,7 @@ pub fn hash_section(section: &SectionView, hasher: &mut impl Hasher) {
     for turn in section.tilt {
         turn.to_bits().hash(hasher);
     }
+    section.centre.map(|at| [at.x, at.y, at.z].map(f64::to_bits)).hash(hasher);
 }
 
 /// The four corners of the frame, in world space and in order around it.
@@ -31,9 +32,11 @@ pub fn hash_section(section: &SectionView, hasher: &mut impl Hasher) {
 /// its own is drawn at that size instead, and the frame is then exactly the
 /// rectangle that cuts.
 ///
-/// A tilted plane is the untilted frame turned about the middle of the model,
-/// the same turn [`SectionView::anchor`] gives the plane itself, so the frame
-/// stays in it.
+/// A tilted plane is the untilted frame turned about the plane's centre, the
+/// same turn [`SectionView::anchor`] gives the plane itself, so the frame stays
+/// in it. A plane through the whole model is framed round the middle of the
+/// model as it is now, brought onto the plane; a rectangle of its own stands
+/// where it was put, since that rectangle is what cuts.
 pub fn frame(section: &SectionView, bounds: Option<(Vec3, Vec3)>) -> [Vec3; 4] {
     let (u, v) = section.basis();
     let [width, height] = match section.custom_size {
@@ -41,7 +44,10 @@ pub fn frame(section: &SectionView, bounds: Option<(Vec3, Vec3)>) -> [Vec3; 4] {
         false => auto_size(section, bounds),
     };
     let (hu, hv) = (width.max(0.0) * 0.5, height.max(0.0) * 0.5);
-    let middle = section.anchor(bounds);
+    let middle = match section.custom_size {
+        true => section.anchor(bounds),
+        false => section.frame_middle(bounds),
+    };
     let corner = |su: f64, sv: f64| middle + u * (su * hu) + v * (sv * hv);
     [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)]
 }

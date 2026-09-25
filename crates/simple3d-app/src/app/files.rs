@@ -82,9 +82,9 @@ impl App {
                 return self.fail("Could not open the project", &format!("{}\n\n{e}", path.display()));
             }
         };
-        match project::from_str(&text) {
-            Ok(scene) => {
-                self.scene = scene;
+        match project::project_from_str(&text) {
+            Ok(loaded) => {
+                self.take_loaded_project(loaded);
                 // The file's own camera stands, whether it was opened from the
                 // menu or handed to the binary on the command line.
                 self.frame_when_evaluated = false;
@@ -132,17 +132,49 @@ impl App {
         // pressed yet, and a file is the last place it should turn up
         // (issue 106).
         let lifted = self.lift_preview();
-        let text = project::to_string(&self.scene);
+        let text = self.project_text();
         self.drop_preview_back(lifted);
         match std::fs::write(path, text) {
             Ok(()) => {
                 self.path = Some(path.to_path_buf());
                 self.saved_revision = self.history.revision();
+                self.project.saved_structure = self.project.structure_revision;
+                for component in &mut self.project.components {
+                    component.saved_revision = component.history.revision();
+                }
                 self.settings.remember_recent(path);
                 self.status = Status::Info(format!("Saved {}", path.display()));
             }
             Err(e) => self.fail("Could not save the project", &format!("{}\n\n{e}", path.display())),
         }
+    }
+
+    /// The whole project as its file holds it: every component, whichever of
+    /// them is on screen (issue 113).
+    fn project_text(&self) -> String {
+        let root = self.component_scene(simple3d_core::scene::ROOT_COMPONENT).expect("a project always has its root");
+        let others: Vec<(simple3d_core::scene::ComponentId, &simple3d_core::scene::Scene)> = self
+            .project
+            .components
+            .iter()
+            .filter(|c| c.id != simple3d_core::scene::ROOT_COMPONENT)
+            .filter_map(|c| Some((c.id, self.component_scene(c.id)?)))
+            .collect();
+        project::project_to_string(root, &others)
+    }
+
+    /// Make a project read from a file the one on screen, on its root
+    /// component. Only ever called on a tab that is scratch space, so there is
+    /// nothing of the old project to keep.
+    fn take_loaded_project(&mut self, loaded: project::ProjectData) {
+        let mut project = crate::components::Project::new();
+        for (id, scene) in loaded.components {
+            project.next_id = project.next_id.max(id + 1);
+            project.components.push(crate::components::Component::new(id, scene));
+        }
+        self.project = project;
+        self.scene = loaded.root;
+        self.relink_components();
     }
 
     pub fn fail(&mut self, title: &str, detail: &str) {

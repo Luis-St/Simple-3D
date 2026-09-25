@@ -43,22 +43,8 @@ impl App {
             Export => self.modal = Modal::Export,
             Quit => self.request_quit(),
 
-            Undo => match {
-                let label = self.history.undo(&mut self.scene);
-                label
-            } {
-                Some(label) => {
-                    self.after_history(&format!("Undid {label}"));
-                }
-                None => self.status = Status::Info("Nothing to undo".into()),
-            },
-            Redo => match {
-                let label = self.history.redo(&mut self.scene);
-                label
-            } {
-                Some(label) => self.after_history(&format!("Redid {label}")),
-                None => self.status = Status::Info("Nothing to redo".into()),
-            },
+            Undo => self.undo(),
+            Redo => self.redo(),
             Copy => self.copy_selection(false),
             Cut => self.copy_selection(true),
             Paste => self.paste(),
@@ -66,6 +52,7 @@ impl App {
             Delete => self.delete_selection(),
             Group => self.group_selection(),
             Pattern => self.make_pattern(),
+            MakeComponent => self.make_component(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             SimplifyMesh => self.open_simplify_tool(),
             Reassemble => self.open_reassemble_tool(),
@@ -144,6 +131,7 @@ impl App {
         if on && self.scene.settings.section.offset == 0.0 {
             let axis = self.scene.settings.section.axis();
             self.scene.settings.section.offset = crate::section_tool::middle_of(self.evaluated.bounds, axis);
+            self.scene.settings.section.centre = self.model_middle();
         }
         self.status = Status::Info(match on {
             true => crate::section_tool::readout(self),
@@ -164,6 +152,18 @@ impl App {
         }
         section.offset = offset;
         self.status = Status::Info(crate::section_tool::readout(self));
+    }
+
+    /// Stand the section showing about the middle of the model as it is now:
+    /// the point it turns about, and the one its rectangle is centred on.
+    pub fn recentre_section(&mut self) {
+        let middle = self.model_middle();
+        self.section_mut().centre = middle;
+    }
+
+    /// The middle of the model, or nothing while there is no model.
+    fn model_middle(&self) -> Option<simple3d_geom::Vec3> {
+        self.evaluated.bounds.map(|bounds| simple3d_core::scene::SectionView::pivot(Some(bounds)))
     }
 
     /// The section the window is showing, which is the one its fields and the

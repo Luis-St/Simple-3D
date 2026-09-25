@@ -35,6 +35,9 @@ impl Keymap {
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
         set(Pattern, Chord::ctrl_shift("P"));
+        // Making a component of a group (issue 113). O for the object it becomes,
+        // which no preset spends on anything with a Ctrl and a Shift on it.
+        set(MakeComponent, Chord::ctrl_shift("O"));
         // Baking a shape into the triangles it evaluates to (issue 80).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
         // Dropping detail from a mesh (issue 106). R for "reduce", beside the

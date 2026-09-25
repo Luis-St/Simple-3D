@@ -17,7 +17,7 @@ pub(crate) fn the_file_is_readable_and_diffable() {
     let text = to_string(&sample());
     assert!(text.starts_with("{\n"), "not pretty-printed");
     assert!(text.ends_with('\n'), "no trailing newline");
-    assert!(text.contains(&format!("\"format\": {FORMAT_VERSION}")));
+    assert!(text.contains(&format!("\"format\": {PLAIN_FORMAT}")));
     assert!(text.contains("\"Drilled plate\""));
     // Every value on its own line, so a one-dimension change is a one-line diff.
     assert!(text.lines().count() > 30);
@@ -56,4 +56,26 @@ pub(crate) fn switching_the_display_unit_does_not_rescale_the_stored_model() {
     scene.settings.unit = Unit::Metre;
     let after = to_string(&scene).replace("\"unit\": \"m\"", "");
     assert_eq!(before, after);
+}
+
+/// A project with components writes every one of them, and reads back each
+/// under the id its integrations point at (issue 113).
+#[test]
+pub(crate) fn a_project_with_components_round_trips() {
+    let root_scene = {
+        let mut scene = sample();
+        let root = scene.root();
+        scene.add_integration(4, "Leg", root, 0);
+        scene
+    };
+    let part = sample();
+    let text = project_to_string(&root_scene, &[(4, &part)]);
+    assert!(text.contains(&format!("\"format\": {FORMAT_VERSION}")));
+    let back = project_from_str(&text).unwrap();
+    assert_eq!(fingerprint(&back.root), fingerprint(&root_scene));
+    assert_eq!(back.components.len(), 1);
+    assert_eq!(back.components[0].0, 4);
+    assert_eq!(fingerprint(&back.components[0].1), fingerprint(&part));
+    // And a build that reads only the root component still reads it.
+    assert_eq!(fingerprint(&from_str(&text).unwrap()), fingerprint(&root_scene));
 }

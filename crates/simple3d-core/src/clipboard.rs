@@ -11,11 +11,11 @@
 //! Only the name gets a suffix, so the outliner stays readable.
 
 mod ops;
-pub use ops::{copy, insert, paste};
+pub use ops::{carried_components, copy, insert, paste};
 #[cfg(test)]
 mod tests;
 
-use crate::scene::NodeData;
+use crate::scene::{ComponentId, NodeData, SceneSettings};
 use serde::{Deserialize, Serialize};
 
 pub const CLIP_VERSION: u32 = 1;
@@ -26,6 +26,25 @@ pub struct Clip {
     /// A multi-selection copies as a set and pastes as a set, preserving
     /// relative positions and original order.
     pub nodes: Vec<NodeData>,
+    /// Every component an integration in `nodes` stands for, and every one
+    /// those stand for in turn (issue 113), so a clip is whole wherever it is
+    /// put: pasted into another project, or saved to the library and placed
+    /// long after this one is closed. Absent for a clip without integrations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<ClipComponent>,
+    /// The project the clip was taken from, while it is open -- a paste back
+    /// into it means the components it already has rather than copies of them.
+    /// Never written anywhere: a saved primitive belongs to no project.
+    #[serde(skip)]
+    pub origin: Option<u64>,
+}
+
+/// One component a clip carries, under the id it had where it was copied.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct ClipComponent {
+    pub id: ComponentId,
+    pub settings: SceneSettings,
+    pub root: NodeData,
 }
 
 impl Clip {

@@ -48,6 +48,7 @@ impl App {
             cursor: self.cursor.take(),
             frame_when_evaluated: self.frame_when_evaluated,
             evaluated: std::mem::replace(&mut self.evaluated, empty_evaluation()),
+            project: std::mem::take(&mut self.project),
         }
     }
 
@@ -68,7 +69,15 @@ impl App {
         self.cursor = doc.cursor;
         self.frame_when_evaluated = doc.frame_when_evaluated;
         self.evaluated = doc.evaluated;
+        self.project = doc.project;
+        self.relink_components();
+        self.after_switch();
+    }
 
+    /// Put away everything that belonged to the model that was on screen, now
+    /// that another one is -- another document, or another component of the
+    /// same one (issue 113).
+    pub(crate) fn after_switch(&mut self) {
         self.drag = None;
         self.grabbed = None;
         self.hover_handle = None;

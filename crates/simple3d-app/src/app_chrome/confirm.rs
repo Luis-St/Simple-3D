@@ -235,3 +235,74 @@ impl App {
         });
     }
 }
+
+impl App {
+    /// Deleting a component, or undoing the step that made one after it has
+    /// been worked on (issue 113). Neither is a step anything can take back:
+    /// a component is not part of any one component's history.
+    pub(super) fn confirm_component_window(&mut self, ctx: &egui::Context) {
+        let title = match self.component_ask {
+            Some(crate::components::ComponentAsk::Undo(_)) => "Undo making a component",
+            _ => "Delete component",
+        };
+        self.dialog(
+            ctx,
+            DialogSpec {
+                key: "dialog-confirm-component",
+                title,
+                size: egui::vec2(460.0, 150.0),
+                resizable: false,
+                fit_height: true,
+                min_size: None,
+            },
+            Self::confirm_component_body,
+            Self::confirm_component_actions,
+        );
+    }
+
+    pub(super) fn confirm_component_body(&mut self, ui: &mut egui::Ui) {
+        use crate::components::ComponentAsk;
+        let Some(ask) = self.component_ask else {
+            ui.label("There is nothing left to ask about.");
+            return;
+        };
+        let (ComponentAsk::Undo(id) | ComponentAsk::Delete(id)) = ask;
+        let name = self.component_label(id).unwrap_or_default();
+        let used = self.integration_count(id);
+        match ask {
+            ComponentAsk::Undo(_) => {
+                ui.label(format!("Undoing this takes the component {name} away again."));
+                ui.add_space(6.0);
+                ui.label(theme::hint(
+                    "Everything done to it since it was made is discarded with it, and every other place it is \
+                     used is emptied. Redo brings it back as it is now.",
+                ));
+            }
+            ComponentAsk::Delete(_) => {
+                ui.label(format!("Delete the component {name}?"));
+                ui.add_space(6.0);
+                let places = match used {
+                    0 => "It is not used anywhere.".to_string(),
+                    1 => "The one place it is used goes with it.".to_string(),
+                    n => format!("All {n} places it is used go with it."),
+                };
+                ui.label(theme::hint(format!("{places} This cannot be undone.")));
+            }
+        }
+    }
+
+    pub(super) fn confirm_component_actions(&mut self, ui: &mut egui::Ui) {
+        let verb = match self.component_ask {
+            Some(crate::components::ComponentAsk::Undo(_)) => "Undo",
+            _ => "Delete",
+        };
+        if ui::dialog_button(ui, verb, true).clicked() {
+            self.confirm_component_ask();
+        }
+        cancel_at_left(ui, |ui| {
+            if ui::dialog_button(ui, "Cancel", true).clicked() {
+                self.cancel_component_ask();
+            }
+        });
+    }
+}

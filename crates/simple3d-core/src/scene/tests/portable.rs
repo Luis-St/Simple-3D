@@ -70,6 +70,7 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
         mesh: None,
         original: None,
         tiling: None,
+        component: None,
         params: Params::new(),
         children: vec![NodeData {
             name: "From the future".into(),
@@ -88,6 +89,7 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
             mesh: None,
             original: None,
             tiling: None,
+            component: None,
             params: Params::new(),
             children: vec![],
         }],

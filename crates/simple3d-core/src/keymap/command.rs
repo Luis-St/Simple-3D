@@ -28,6 +28,7 @@ pub enum Command {
     Delete,
     Group,
     Pattern,
+    MakeComponent,
     ConvertToMesh,
     SimplifyMesh,
     Reassemble,

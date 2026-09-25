@@ -259,3 +259,53 @@ fn several_sections_cut_at_once_and_one_clear_of_the_model_does_not() {
     app.run(simple3d_core::keymap::Command::ToggleSection);
     assert!(super::cut(&mut app, forward).is_empty());
 }
+
+#[test]
+fn moving_a_body_does_not_move_a_turned_plane_or_its_rectangle() {
+    // The plane used to turn about the middle of the model and centre its
+    // rectangle there, so sliding one body out along Y swung a turned plane
+    // and took the rectangle off the part it was cutting.
+    let near = Some((Vec3::new(-10.0, -10.0, -10.0), Vec3::new(10.0, 10.0, 10.0)));
+    let grown = Some((Vec3::new(-10.0, -10.0, -10.0), Vec3::new(10.0, 110.0, 10.0)));
+    let forward = Vec3::new(0.0, 1.0, 0.0);
+    let mut sized = SectionView { tilt: [0.0, 0.0, 30.0], custom_size: true, size: [8.0, 8.0], ..section(0, 0.0) };
+    sized.pin_centre(near);
+    let (before, after) = (sized.cut(near, forward), sized.cut(grown, forward));
+    assert!(
+        (before.offset - after.offset).abs() < 1e-9,
+        "the turned plane moved: {} to {}",
+        before.offset,
+        after.offset
+    );
+    let (a, b) = (before.window.unwrap().centre, after.window.unwrap().centre);
+    assert!((a - b).length() < 1e-9, "the rectangle moved from {a:?} to {b:?}");
+    // A plane through the whole model is still framed round the model.
+    let whole = SectionView { custom_size: false, ..sized };
+    let corners = frame(&whole, grown);
+    let middle = (corners[0] + corners[2]) * 0.5;
+    // It is the middle of the model brought onto the plane: the two differ only
+    // along the plane's normal.
+    let off = Vec3::new(0.0, 50.0, 0.0) - middle;
+    assert!(
+        (off - whole.normal() * off.dot(whole.normal())).length() < 1e-9,
+        "the frame did not follow the model: {middle:?}"
+    );
+    assert!(
+        corners.iter().all(|c| whole.normal().dot(*c - whole.anchor(grown)).abs() < 1e-9),
+        "the frame left the plane"
+    );
+}
+
+#[test]
+fn the_window_pins_the_plane_and_back_to_the_middle_moves_it_again() {
+    let mut app = crate::app::tests::headless_app();
+    app.run(simple3d_core::keymap::Command::ToggleSection);
+    let pinned = app.section().centre.expect("switching the section on did not fix its centre");
+    let id = app.primary().unwrap();
+    app.scene.get_mut(id).unwrap().position = Vec3::new(0.0, 200.0, 0.0);
+    app.reevaluate_for_test();
+    crate::app::tests::draw_one_frame(&mut app);
+    assert_eq!(app.section().centre, Some(pinned), "moving the model moved the plane's centre");
+    app.recentre_section();
+    assert!(app.section().centre.unwrap().y > pinned.y + 100.0, "back to the middle did not follow the model");
+}

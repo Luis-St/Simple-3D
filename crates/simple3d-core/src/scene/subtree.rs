@@ -21,6 +21,7 @@ impl Scene {
         let mut blob: Option<MeshBlob> = None;
         let mut original: Option<Box<NodeData>> = None;
         let mut tiling: Option<SplitPlan> = None;
+        let mut component: Option<ComponentId> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -33,6 +34,10 @@ impl Scene {
                 original = Some(Box::new((**was).clone()));
                 tiling = plan.clone();
                 ("split".to_string(), None, Params::new())
+            }
+            Body::Component { component: of, op } => {
+                component = Some(*of);
+                ("component".to_string(), *op, Params::new())
             }
         };
         Some(NodeData {
@@ -52,6 +57,7 @@ impl Scene {
             mesh: blob,
             original,
             tiling,
+            component,
             params,
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
         })
@@ -75,6 +81,10 @@ impl Scene {
             "split" => {
                 Body::Split { original: Arc::new((**data.original.as_ref()?).clone()), plan: data.tiling.clone() }
             }
+            // An integration without the component it stands for is refused
+            // like a split without its original: it would be a node that is
+            // nothing at all.
+            "component" => Body::Component { component: data.component?, op: data.op },
             type_id => {
                 let spec = primitive::lookup(type_id)?;
                 Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -124,6 +134,7 @@ impl Scene {
             root.anchor = data.anchor;
             root.visible = data.visible;
             root.segments = data.segments;
+            root.colour = data.colour.as_deref().and_then(Colour::from_hex);
         }
         let root = fresh.root;
         for (i, child) in data.children.iter().enumerate() {

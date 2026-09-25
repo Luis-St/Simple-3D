@@ -85,6 +85,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let mut add_pattern = false;
         let mut add_custom_pattern = false;
         let mut save_as_primitive = false;
+        let mut open_component = false;
+        let is_component = app.scene.node(id).is_component();
+        let uses_components = app.project.uses_components();
         let mut paint: Option<Option<Colour>> = None;
         let keymap = &app.keymap;
         let mut blocks = Blocks { started: false, ruled: false };
@@ -152,7 +155,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             "Beside this node"
         });
         blocks.rule();
-        item(ui, &mut blocks, keymap, &mut chosen, Command::Rename, !is_root && !multiple);
+        item(ui, &mut blocks, keymap, &mut chosen, Command::Rename, (!is_root || uses_components) && !multiple);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Duplicate, !is_root);
         blocks.rule();
         item(ui, &mut blocks, keymap, &mut chosen, Command::Copy, !is_root);
@@ -163,6 +166,16 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         // (issue 94 -- each block of this menu is one kind of action).
         item(ui, &mut blocks, keymap, &mut chosen, Command::Group, !is_root);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Pattern, !is_root);
+        // A group taken out into a component of its own (issue 113), and the
+        // way into one that already is.
+        item(ui, &mut blocks, keymap, &mut chosen, Command::MakeComponent, is_group && !is_root && !multiple);
+        if is_component && !multiple {
+            blocks.entry(ui);
+            if crate::ui::menu_entry(ui, "Open the component", true).clicked() {
+                open_component = true;
+                ui.close();
+            }
+        }
         blocks.rule();
         // What a node can be turned into. Baking a shape into its triangles
         // (issue 80); dropping detail from one already baked, which is the same
@@ -301,6 +314,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         }
         if save_as_primitive {
             app.save_selection_as_primitive();
+        }
+        if open_component {
+            app.open_component_of(id);
         }
         if let Some(command) = chosen {
             app.run(command);

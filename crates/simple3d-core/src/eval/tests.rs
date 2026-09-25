@@ -3,6 +3,7 @@ mod boolean;
 mod cache;
 mod cancel;
 mod colour;
+mod component;
 mod groups;
 mod pattern;
 mod ranges;

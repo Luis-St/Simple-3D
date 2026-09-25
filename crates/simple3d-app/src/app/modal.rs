@@ -23,4 +23,8 @@ pub enum Modal {
     /// Taking a saved pattern kind off the shelf, which is a file on disk and
     /// not something undo reaches (issue 67).
     ConfirmDeleteKind,
+    /// Deleting a component, or undoing the step that made one when that
+    /// throws away work done on it since (issue 113). Neither can be taken
+    /// back.
+    ConfirmComponent,
 }

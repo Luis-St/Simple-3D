@@ -55,8 +55,10 @@ impl App {
         self.dirty = true;
     }
 
+    /// Whether the project on screen has changes that are not in its file: in
+    /// the component being edited, or in any other (issue 113).
     pub fn unsaved(&self) -> bool {
-        self.history.revision() != self.saved_revision
+        self.history.revision() != self.saved_revision || self.project.unsaved()
     }
 
     pub fn status_text(&self) -> String {

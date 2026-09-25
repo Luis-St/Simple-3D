@@ -27,6 +27,8 @@ mod pattern;
 pub(crate) use pattern::*;
 mod body;
 pub(crate) use body::*;
+mod component;
+pub(crate) use component::*;
 mod pieces;
 pub(crate) use pieces::*;
 mod group;

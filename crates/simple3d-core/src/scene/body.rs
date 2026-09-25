@@ -75,4 +75,17 @@ pub enum Body {
         original: Arc<NodeData>,
         plan: Option<SplitPlan>,
     },
+    /// A component placed here (issue 113): one node in the tree, standing for
+    /// the whole of another component's, which is edited in a tab of its own
+    /// and shows up here as it is there.
+    ///
+    /// `op`, when there is one, is used in place of the component's own
+    /// operation on the shapes in it -- the one thing about what is inside
+    /// that an integration may choose for itself. Where it stands, whether it
+    /// is shown and what it is painted are the node's own, as they are for any
+    /// node.
+    Component {
+        component: ComponentId,
+        op: Option<GroupOp>,
+    },
 }

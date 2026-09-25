@@ -22,6 +22,8 @@ mod settings;
 pub use settings::SceneSettings;
 mod camera;
 pub use camera::Camera;
+mod component;
+pub use component::{link, reaches, ComponentId, Components, ROOT_COMPONENT};
 mod access;
 mod add;
 mod arrange;
@@ -65,6 +67,11 @@ pub struct Scene {
     next_id: NodeId,
     pub settings: SceneSettings,
     pub camera: Camera,
+    /// The components this scene integrates, each with the ones it integrates
+    /// in turn (issue 113) -- see [`component`]. Not part of the scene as the
+    /// user edits it: the application puts it here from the rest of the
+    /// project, undo keeps whichever is current, and nothing saves it.
+    pub components: std::sync::Arc<Components>,
 }
 
 impl Default for Scene {

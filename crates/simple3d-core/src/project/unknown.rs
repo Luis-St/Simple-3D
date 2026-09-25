@@ -20,7 +20,7 @@ pub(crate) fn unknown_types(root: &NodeData) -> String {
 /// The node types that are not entries in the primitive registry. Each is a
 /// [`crate::scene::Body`] of its own, so `lookup` will never find one and a
 /// file holding one must not be reported as carrying an unknown shape.
-pub(crate) const BODY_TYPES: &[&str] = &["group", "pattern", "mesh", "split"];
+pub(crate) const BODY_TYPES: &[&str] = &["group", "pattern", "mesh", "split", "component"];
 
 pub(crate) fn collect_unknown(node: &NodeData, out: &mut Vec<String>) {
     if !BODY_TYPES.contains(&node.type_id.as_str()) && crate::primitive::lookup(&node.type_id).is_none() {
@@ -31,6 +31,9 @@ pub(crate) fn collect_unknown(node: &NodeData, out: &mut Vec<String>) {
     // silently missing from whatever gets printed.
     if node.type_id == "mesh" && node.mesh.as_ref().and_then(crate::mesh_data::MeshData::from_blob).is_none() {
         out.push("mesh (its geometry could not be read)".to_string());
+    }
+    if node.type_id == "component" && node.component.is_none() {
+        out.push("component (it does not say which one)".to_string());
     }
     // A split carries the object it was broken from, which is a node like any
     // other: an unknown type in *there* fails the load too, and naming it is

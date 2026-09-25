@@ -42,6 +42,28 @@ impl History {
         self.future.last().map(|s| s.label.as_str())
     }
 
+    /// Say that the step just recorded made `components` (issue 113), so taking
+    /// it back can take them away with it. The one the step placed comes
+    /// first, and the ones it holds after it.
+    pub fn mark_created(&mut self, components: &[ComponentId]) {
+        if let Some(last) = self.past.last_mut() {
+            last.created = components.to_vec();
+        }
+        // A step that made a component is a step of its own: a later edit
+        // coalescing into it would be undone together with the making.
+        self.close();
+    }
+
+    /// The components the step an undo would take back made.
+    pub fn undo_creates(&self) -> &[ComponentId] {
+        self.past.last().map_or(&[], |s| s.created.as_slice())
+    }
+
+    /// The components the step a redo would put back made.
+    pub fn redo_creates(&self) -> &[ComponentId] {
+        self.future.last().map_or(&[], |s| s.created.as_slice())
+    }
+
     pub fn clear(&mut self) {
         self.past.clear();
         self.future.clear();
@@ -69,7 +91,7 @@ impl History {
             return true;
         }
         self.future.clear();
-        self.past.push(Snapshot { label: label.to_string(), scene: scene.clone() });
+        self.past.push(Snapshot { label: label.to_string(), scene: scene.clone(), created: Vec::new() });
         if self.past.len() > self.depth {
             self.past.remove(0);
         }
@@ -100,7 +122,11 @@ impl History {
         let snapshot = self.past.pop()?;
         self.close();
         self.revision += 1;
-        self.future.push(Snapshot { label: snapshot.label.clone(), scene: scene.clone() });
+        self.future.push(Snapshot {
+            label: snapshot.label.clone(),
+            scene: scene.clone(),
+            created: snapshot.created.clone(),
+        });
         restore(scene, snapshot.scene);
         Some(snapshot.label)
     }
@@ -109,7 +135,11 @@ impl History {
         let snapshot = self.future.pop()?;
         self.close();
         self.revision += 1;
-        self.past.push(Snapshot { label: snapshot.label.clone(), scene: scene.clone() });
+        self.past.push(Snapshot {
+            label: snapshot.label.clone(),
+            scene: scene.clone(),
+            created: snapshot.created.clone(),
+        });
         restore(scene, snapshot.scene);
         Some(snapshot.label)
     }
@@ -122,8 +152,16 @@ impl History {
 /// also threw the view back to wherever it happened to be when the move was
 /// made -- which is not what "undo" means to anyone. Undo is over the model;
 /// where you are looking from is not part of it.
+///
+/// The components the scene integrates are kept as they are now as well
+/// (issue 113). They are the other components of the project, edited in tabs
+/// of their own, and a snapshot holds them as they were when it was taken --
+/// so restoring them brought back a component's old contents, or one since
+/// deleted, until the next tab switch linked them again.
 pub(crate) fn restore(scene: &mut Scene, snapshot: Scene) {
     let camera = scene.camera;
+    let components = std::mem::take(&mut scene.components);
     *scene = snapshot;
     scene.camera = camera;
+    scene.components = components;
 }

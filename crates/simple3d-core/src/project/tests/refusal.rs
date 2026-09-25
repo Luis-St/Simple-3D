@@ -5,7 +5,7 @@ use crate::scene::Scene;
 
 #[test]
 pub(crate) fn a_newer_format_is_refused_with_a_clear_message() {
-    let text = to_string(&sample()).replace(&format!("\"format\": {FORMAT_VERSION}"), "\"format\": 99");
+    let text = to_string(&sample()).replace(&format!("\"format\": {PLAIN_FORMAT}"), "\"format\": 99");
     let err = from_str(&text).unwrap_err();
     assert_eq!(err, LoadError::TooNew { found: 99, supported: FORMAT_VERSION });
     assert!(err.to_string().contains("99"));

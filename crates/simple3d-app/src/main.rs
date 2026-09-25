@@ -7,6 +7,7 @@
 
 mod app;
 mod app_chrome;
+mod components;
 mod dock;
 // Pointer gestures, executed rather than only reasoned about. Test-only.
 #[cfg(test)]

@@ -20,6 +20,7 @@ pub(crate) fn a_section_plane_is_saved_with_the_document_and_absent_while_it_is_
         swept_up: true,
         custom_size: true,
         size: [40.0, 25.0],
+        centre: Some(simple3d_geom::Vec3::new(3.0, -4.5, 7.0)),
     };
     let text = to_string(&scene);
     let back = from_str(&text).expect("it reads back");

@@ -86,6 +86,18 @@ impl Evaluator {
                 }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
+            // An integration is whatever its component is, so the component's
+            // whole tree is in its key: an edit made in the component's own tab
+            // misses the cache here the way an edit made in place would.
+            Body::Component { component, op } => {
+                "component".hash(&mut hasher.0);
+                op.map(|op| op as u8).hash(&mut hasher.0);
+                node.colour.map(|c| c.tag()).hash(&mut hasher.0);
+                match scene.linked_component(*component) {
+                    Some(inner) => self.hash_subtree(inner, inner.root(), hasher),
+                    None => component.hash(&mut hasher.0),
+                }
+            }
             Body::Mesh { mesh } => {
                 "mesh".hash(&mut hasher.0);
                 // The geometry itself never changes -- a stored mesh is

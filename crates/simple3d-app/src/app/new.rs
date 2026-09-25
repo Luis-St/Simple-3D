@@ -32,6 +32,8 @@ impl App {
             history: History::new(),
             tabs: vec![crate::tabs::Document::empty()],
             active: 0,
+            project: crate::components::Project::new(),
+            component_ask: None,
             window_id: 0,
             root_window: true,
             window_request: None,

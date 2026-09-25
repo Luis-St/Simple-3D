@@ -49,6 +49,28 @@ impl Node {
         matches!(self.body, Body::Split { .. })
     }
 
+    /// Whether this node is an integration of a component (issue 113).
+    pub fn is_component(&self) -> bool {
+        matches!(self.body, Body::Component { .. })
+    }
+
+    /// The component this node stands for, when it is an integration.
+    pub fn component(&self) -> Option<ComponentId> {
+        match self.body {
+            Body::Component { component, .. } => Some(component),
+            _ => None,
+        }
+    }
+
+    /// The operation an integration uses in place of its component's own, if
+    /// it has chosen one.
+    pub fn component_op(&self) -> Option<GroupOp> {
+        match self.body {
+            Body::Component { op, .. } => op,
+            _ => None,
+        }
+    }
+
     /// The object a split was made from, for a node that is one.
     pub fn split_original(&self) -> Option<&Arc<NodeData>> {
         match &self.body {
@@ -84,6 +106,7 @@ impl Node {
             Body::Pattern { .. } => "pattern",
             Body::Mesh { .. } => "mesh",
             Body::Split { .. } => "split",
+            Body::Component { .. } => "component",
         }
     }
 

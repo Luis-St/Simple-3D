@@ -26,6 +26,13 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     let bounds = app.viewport_rect;
     // A document opened with fewer sections than the last one had.
     app.section_tab = app.section_tab.min(app.scene.settings.section_count() - 1);
+    // A plane from a file written before its centre was kept, or switched on
+    // before there was a model, is fixed where it stands now -- from here on,
+    // moving a body does not move it.
+    let bounds_now = app.evaluated.bounds;
+    for index in 0..app.scene.settings.section_count() {
+        app.scene.settings.section_at_mut(index).pin_centre(bounds_now);
+    }
     // Taken out of the map for the duration, so the popup may hold it mutably
     // while its contents hold the application.
     let mut placement = app.popups.remove(KEY).unwrap_or_default();
@@ -82,6 +89,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
                     // wherever that number happens to land on this one.
                     let middle = middle_of(app.evaluated.bounds, axis);
                     app.set_section_offset(middle);
+                    app.recentre_section();
                 } else {
                     app.status = crate::app::Status::Info(readout(app));
                 }
@@ -100,7 +108,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
             scalar_field(app, ui, field, |app, mm, _| app.set_section_offset(mm));
         });
     });
-    // Turned about the middle of the model, about each axis in turn, so a
+    // Turned about the plane's centre, about each axis in turn, so a
     // wall that runs at a slant can be cut square to it (issue 109). The same
     // three chipped fields a node's rotation has, scrubbed by the same step.
     axis_row(app, ui, "Turn (deg)", |app, ui, axis, name| {
@@ -173,6 +181,7 @@ fn add_section(app: &mut App) {
         enabled: true,
         axis,
         offset: middle_of(app.evaluated.bounds, axis),
+        centre: app.evaluated.bounds.map(|bounds| simple3d_core::scene::SectionView::pivot(Some(bounds))),
         ..Default::default()
     };
     app.section_tab = app.scene.settings.add_section(fresh);
@@ -246,11 +255,12 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         if ui
             .add(egui::Button::new("Back to the middle"))
-            .on_hover_text("Stand the plane in the middle of the model again")
+            .on_hover_text("Stand the plane, and the point it turns about, in the middle of the model again")
             .clicked()
         {
             let middle = middle_of(app.evaluated.bounds, app.section().axis());
             app.set_section_offset(middle);
+            app.recentre_section();
         }
     });
 }
