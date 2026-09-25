@@ -48,7 +48,8 @@ impl App {
     /// The model looks exactly as it did: the group's contents go into the
     /// component as they are, and the node that stood for the group stands for
     /// the component, where the group stood. What changes is that the inside is
-    /// no longer edited here but in the component's own tab.
+    /// no longer edited here but in the component's own tab, which is opened
+    /// beside this one -- the view stays here, on the integration.
     pub fn make_component(&mut self) {
         let Some(id) = self.primary().filter(|&id| id != self.scene.root() && self.scene.node(id).is_group()) else {
             self.status = Status::Warning("Select a group to make a component of it".into());
@@ -72,6 +73,7 @@ impl App {
         self.history.mark_created(&[component]);
         let name = component_name(&scene);
         self.project.components.push(Component::new(component, scene));
+        self.project.open.push(component);
         self.project.structure_revision += 1;
         self.relink_components();
         self.collapsed.remove(&id);
@@ -89,8 +91,15 @@ impl App {
         settings
     }
 
-    /// A new, empty component, opened in its own tab.
+    /// A new component (`Command::NewComponent`): made of the selected group
+    /// when one is selected, since that is what a component made with a group
+    /// in hand is expected to hold, and otherwise empty and opened in its own
+    /// tab.
     pub fn new_component(&mut self) {
+        if self.primary_is_group() {
+            self.make_component();
+            return;
+        }
         let taken: std::collections::HashSet<String> = self
             .project
             .components

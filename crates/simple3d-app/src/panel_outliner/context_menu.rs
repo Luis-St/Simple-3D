@@ -169,8 +169,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         // A group taken out into a component of its own (issue 113), and the
         // way into one that already is.
         item(ui, &mut blocks, keymap, &mut chosen, Command::MakeComponent, is_group && !is_root && !multiple);
-        // An empty one as well, on every group and the root among them, so a
-        // project that has none yet has a way in from the tree.
+        // A new one on every group, the root among them: on the root an empty
+        // one, so a project that has none yet has a way in from the tree, and
+        // on any other group one made of it.
         item(ui, &mut blocks, keymap, &mut chosen, Command::NewComponent, is_group && !multiple);
         if is_component && !multiple {
             blocks.entry(ui);

@@ -354,3 +354,19 @@ pub(crate) fn undoing_a_paste_from_another_project_takes_its_components_away() {
     app.run(Command::Undo);
     assert!(!app.project.uses_components(), "the undone paste left its component in the project");
 }
+
+/// A new component made with a group selected is made of that group: the group
+/// goes into it, an integration is left where it stood, and the component's
+/// tab opens beside the root while the view stays on the integration.
+#[test]
+pub(crate) fn a_new_component_with_a_group_selected_takes_the_group() {
+    let (mut app, group) = app_with_group("components-new-from-group");
+    app.run(Command::NewComponent);
+
+    assert_eq!(app.project.active, ROOT_COMPONENT, "the view left the integration");
+    let node = app.scene.node(group);
+    assert!(node.is_component(), "the group was not taken into the component");
+    assert!(node.children.is_empty());
+    let component = app.scene.component_of(group).unwrap();
+    assert_eq!(app.project.open, vec![ROOT_COMPONENT, component], "the component's tab did not open");
+}
