@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::App;
+use crate::icon::{self, Glyph};
 use crate::theme::{self, metric, token};
 
 /// Whether the second row is drawn at all: only once a project open in this
@@ -16,6 +17,11 @@ pub fn wanted(app: &App) -> bool {
 struct Listed {
     id: ComponentId,
     name: String,
+    /// Whether it is the component on screen.
+    active: bool,
+    /// Whether it has a tab.
+    open: bool,
+    unsaved: bool,
 }
 
 /// What the row was asked to do, carried out after it has finished drawing.
@@ -52,7 +58,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .project
         .components
         .iter()
-        .map(|c| Listed { id: c.id, name: app.component_label(c.id).unwrap_or_default() })
+        .map(|c| {
+            let open = tabs.iter().find(|(id, ..)| *id == c.id);
+            Listed {
+                id: c.id,
+                name: app.component_label(c.id).unwrap_or_default(),
+                active: c.id == active,
+                open: open.is_some(),
+                unsaved: open.map_or_else(|| c.unsaved(), |(.., unsaved)| *unsaved),
+            }
+        })
         .collect();
     let mut asked: Option<Ask> = None;
 
@@ -184,8 +199,8 @@ fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bo
 }
 
 /// The arrow at the end of the row, which lists every component of the
-/// project: to open one or to delete one. Painted rather than typed, since the
-/// interface font has no small triangles.
+/// project: to open one, to delete one or to make a new one. Painted rather
+/// than typed, since the interface font has no small triangles.
 fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     let size = egui::vec2(28.0, ui.available_height());
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -197,28 +212,146 @@ fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     theme::twisty(ui.painter(), rect.center(), true, colour);
     let response = response.on_hover_text(format!("Every component ({})", listed.len()));
     egui::Popup::menu(&response).show(|ui| {
-        // A grid, so the buttons line up in columns down the list -- and so
-        // the menu is as wide as its longest name, not as wide as the screen.
-        egui::Grid::new("component-list").num_columns(2).spacing(egui::vec2(8.0, 4.0)).show(ui, |ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
+        // As wide as the longest name wants, within reason, so the delete
+        // buttons line up down the right edge and a long name is cut short
+        // rather than stretching the menu across the screen.
+        let font = egui::FontId::proportional(theme::font::VALUE);
+        let widest = listed
+            .iter()
+            .map(|entry| {
+                ui.fonts(|fonts| fonts.layout_no_wrap(entry.name.clone(), font.clone(), token::TEXT_HI).size().x)
+            })
+            .fold(0.0_f32, f32::max);
+        let width = (widest + LIST_ROOM).clamp(220.0, 360.0);
+
+        let count = if listed.len() == 1 { "1 component".to_string() } else { format!("{} components", listed.len()) };
+        ui.add(egui::Label::new(theme::hint(count)).selectable(false));
+        ui.add_space(3.0);
+        egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
             for entry in listed {
-                let root = entry.id == ROOT_COMPONENT;
-                let label = if root { format!("{} (root)", entry.name) } else { entry.name.clone() };
-                if ui.add(egui::Button::new(label).frame(false)).on_hover_text("Open it in a tab").clicked() {
-                    *asked = Some(Ask::Pick(entry.id));
-                    ui.close();
-                }
-                if root {
-                    ui.label("");
-                } else if ui
-                    .small_button("Delete")
-                    .on_hover_text("Delete the component, and every place it is used")
-                    .clicked()
-                {
-                    *asked = Some(Ask::Delete(entry.id));
-                    ui.close();
-                }
-                ui.end_row();
+                list_row(ui, entry, width, asked);
             }
         });
+        ui.add_space(2.0);
+        ui.separator();
+        if new_row(ui, width) {
+            *asked = Some(Ask::New);
+        }
+        if asked.is_some() {
+            ui.close();
+        }
     });
+}
+
+/// Room in a row of the list beside its name: the glyph before it, the marks
+/// and the delete button after it.
+const LIST_ROOM: f32 = 96.0;
+
+/// The id of a component's row in the list, so a test can find it.
+pub(crate) fn list_row_id(id: ComponentId) -> egui::Id {
+    egui::Id::new(("component-list-row", id))
+}
+
+/// One component in the list: the whole row opens it, and the bin at its
+/// right end deletes it. The component on screen is lit like the active tab,
+/// and the ones open in a tab are named brighter than the ones put away.
+fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<Ask>) {
+    const BIN: f32 = 20.0;
+    let root = entry.id == ROOT_COMPONENT;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, metric::ROW + 2.0), egui::Sense::hover());
+    let row = ui.interact(rect, list_row_id(entry.id), egui::Sense::click());
+    let bin_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 4.0 - BIN * 0.5, rect.center().y),
+        egui::Vec2::splat(BIN),
+    );
+    let bin = (!root).then(|| ui.interact(bin_rect, list_row_id(entry.id).with("delete"), egui::Sense::click()));
+    let bin_hovered = bin.as_ref().is_some_and(egui::Response::hovered);
+
+    let painter = ui.painter();
+    let radius = egui::CornerRadius::same(3);
+    if row.hovered() || bin_hovered {
+        painter.rect_filled(rect, radius, token::SURFACE_3);
+    } else if entry.active {
+        painter.rect_filled(rect, radius, token::SURFACE_2);
+    }
+    if entry.active {
+        painter.vline(rect.left() + 1.0, rect.y_range().shrink(4.0), egui::Stroke::new(2.0_f32, token::ACCENT));
+    }
+
+    let glyph_colour = if entry.active { token::ACCENT } else { token::TEXT_LO };
+    let glyph_rect =
+        egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), egui::Vec2::splat(12.0));
+    icon::draw(painter, glyph_rect, Glyph::Component, glyph_colour);
+
+    // The name, then what is worth knowing about it in the quieter colour.
+    let text_colour = if entry.active || entry.open || row.hovered() { token::TEXT_HI } else { token::TEXT_LO };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&entry.name, 0.0, egui::TextFormat::simple(egui::FontId::proportional(theme::font::VALUE), text_colour));
+    let marks = match (root, entry.unsaved) {
+        (true, true) => "root \u{2022}",
+        (true, false) => "root",
+        (false, true) => "\u{2022}",
+        (false, false) => "",
+    };
+    if !marks.is_empty() {
+        job.append(
+            marks,
+            6.0,
+            egui::TextFormat::simple(egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO),
+        );
+    }
+    job.wrap.max_width = (bin_rect.left() - 6.0 - (rect.left() + 30.0)).max(8.0);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    let galley = ui.fonts(|fonts| fonts.layout_job(job));
+    painter.galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y * 0.5), galley, text_colour);
+
+    if let Some(bin) = bin {
+        // Quiet until the row is under the pointer, so a column of bins does
+        // not shout louder than the names; red only once it is the bin itself.
+        let colour = if bin.hovered() {
+            painter.rect_filled(bin_rect, radius, token::SURFACE_2);
+            token::DANGER
+        } else if row.hovered() {
+            token::TEXT_LO
+        } else {
+            token::TEXT_LO.gamma_multiply(0.45)
+        };
+        icon::draw(painter, bin_rect.shrink(4.0), Glyph::Delete, colour);
+        if bin.on_hover_text("Delete the component, and every place it is used\u{2026}").clicked() {
+            *asked = Some(Ask::Delete(entry.id));
+            return;
+        }
+    }
+
+    // Only the root says anything on hover: a tooltip under every row would
+    // cover the row below it while the pointer runs down the list.
+    let row =
+        if root { row.on_hover_text("The root component is the project itself, and cannot be deleted") } else { row };
+    if row.clicked() {
+        *asked = Some(Ask::Pick(entry.id));
+    }
+}
+
+/// The last row of the list, the same as the plus at the end of the tabs.
+fn new_row(ui: &mut egui::Ui, width: f32) -> bool {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, metric::ROW + 2.0), egui::Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, egui::CornerRadius::same(3), token::SURFACE_3);
+    }
+    let colour = if response.hovered() { token::TEXT_HI } else { token::TEXT_LO };
+    let centre = egui::pos2(rect.left() + 16.0, rect.center().y);
+    let stroke = egui::Stroke::new(1.4_f32, colour);
+    painter.hline(centre.x - 5.0..=centre.x + 5.0, centre.y, stroke);
+    painter.vline(centre.x, centre.y - 5.0..=centre.y + 5.0, stroke);
+    painter.text(
+        egui::pos2(rect.left() + 30.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "New component",
+        egui::FontId::proportional(theme::font::VALUE),
+        colour,
+    );
+    response.on_hover_text("Make a new, empty component and open it in a tab").clicked()
 }
