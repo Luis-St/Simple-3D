@@ -55,3 +55,13 @@ pub(crate) fn a_name_is_free_across_the_tree_not_only_among_siblings() {
     sorted.dedup();
     assert_eq!(sorted.len(), names.len(), "{names:?}");
 }
+
+#[test]
+pub(crate) fn a_default_name_is_told_from_a_typed_one() {
+    for name in ["Group", "Group 2", "Group 17", "Group copy", "Group copy 4"] {
+        assert!(is_default_name(name, "Group"), "{name} was taken for a typed name");
+    }
+    for name in ["Wheel", "Group A", "Groups", "Group 2b", "Group ", "My Group", "Group copy copy"] {
+        assert!(!is_default_name(name, "Group"), "{name} was taken for a given name");
+    }
+}

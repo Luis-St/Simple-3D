@@ -15,6 +15,20 @@ pub fn copy_name(name: &str) -> String {
     format!("{stem} copy")
 }
 
+/// Whether `name` is one the numbering rule gave out for `base` rather than
+/// one somebody typed: `base` or `base 2`, and the copies of those, `base
+/// copy` and `base copy 2`.
+pub fn is_default_name(name: &str, base: &str) -> bool {
+    let numbered = |name: &str, stem: &str| {
+        name == stem
+            || name
+                .strip_prefix(stem)
+                .and_then(|rest| rest.strip_prefix(' '))
+                .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+    };
+    numbered(name, base) || numbered(name, &format!("{base} copy"))
+}
+
 /// `base`, or `base 2`, `base 3`... -- the first that is not in `taken`.
 ///
 /// The one place the numbering rule lives, so a node added, pasted, duplicated

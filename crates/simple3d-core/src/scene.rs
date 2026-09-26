@@ -6,7 +6,7 @@
 //! deterministic, which matters because evaluation must be (section 5.2).
 
 mod naming;
-pub use naming::{copy_name, free_name};
+pub use naming::{copy_name, free_name, is_default_name};
 mod colour;
 pub use colour::{colour_tag, Colour};
 mod group_op;

@@ -395,3 +395,34 @@ pub(crate) fn a_component_placed_on_a_group_row_goes_inside_it() {
     assert_eq!(app.scene.component_of(placed), Some(component));
     assert_eq!(app.scene.node(placed).parent, Some(holder), "the component was not placed inside the row's group");
 }
+
+/// A group still called what it was given becomes a numbered component, the
+/// node left where it stood renamed with it; a name somebody typed is kept.
+#[test]
+pub(crate) fn a_group_with_its_given_name_becomes_a_numbered_component() {
+    // An empty component first, so the numbering has one to count past.
+    let (mut app, group) = app_with_group("components-default-name");
+    app.clear_selection();
+    app.new_component();
+    app.activate_component(ROOT_COMPONENT);
+    let root = app.scene.root();
+    let mut made = Vec::new();
+    for given in ["Group", "Group 3", "Wheel"] {
+        let group = app.scene.add_group(GroupOp::Union, root, 0);
+        app.scene.get_mut(group).unwrap().name = given.into();
+        app.scene.add_primitive("box", group, 0).unwrap();
+        app.select_only(group);
+        app.run(Command::MakeComponent);
+        made.push(group);
+    }
+
+    let names: Vec<String> = made.iter().map(|&node| app.scene.node(node).name.clone()).collect();
+    assert_eq!(names, ["Component 2", "Component 3", "Wheel"], "the node left in place was named wrong");
+    for &node in &made {
+        let component = app.scene.component_of(node).unwrap();
+        assert_eq!(app.component_label(component), Some(app.scene.node(node).name.clone()));
+    }
+    // The group the root started with was never touched.
+    assert_eq!(app.scene.node(group).name, "Wheel");
+    assert!(!app.scene.node(group).is_component());
+}

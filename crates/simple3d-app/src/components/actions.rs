@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::app::{App, Modal, Status};
-use simple3d_core::scene::{free_name, reaches, SceneSettings};
+use simple3d_core::scene::{free_name, is_default_name, reaches, SceneSettings};
 
 /// A question about a component that waits on a dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,6 +62,15 @@ impl App {
             self.status = Status::Warning("That group cannot be made a component".into());
             return;
         };
+        // A group still called what it was given is named like any other new
+        // component; a name somebody typed is what the component is called.
+        let mut data = data;
+        if is_default_name(&data.name, "Group") {
+            data.name = self.free_component_name();
+            if let Some(node) = self.scene.get_mut(id) {
+                node.name = data.name.clone();
+            }
+        }
         let Some(scene) = Scene::from_root(&data, self.component_settings()) else {
             // The subtree came out of this very scene, so this cannot happen --
             // but if it did, the group is already gone, and the step back is
@@ -91,6 +100,18 @@ impl App {
         settings
     }
 
+    /// `Component`, or `Component 2`, `Component 3`... -- the first no
+    /// component of the project is called.
+    fn free_component_name(&self) -> String {
+        let taken: std::collections::HashSet<String> = self
+            .project
+            .components
+            .iter()
+            .map(|c| self.component_scene(c.id).map(component_name).unwrap_or_default())
+            .collect();
+        free_name(&taken, "Component")
+    }
+
     /// A new component (`Command::NewComponent`): made of the selected group
     /// when one is selected, since that is what a component made with a group
     /// in hand is expected to hold, and otherwise empty and opened in its own
@@ -100,13 +121,7 @@ impl App {
             self.make_component();
             return;
         }
-        let taken: std::collections::HashSet<String> = self
-            .project
-            .components
-            .iter()
-            .map(|c| self.component_scene(c.id).map(component_name).unwrap_or_default())
-            .collect();
-        let name = free_name(&taken, "Component");
+        let name = self.free_component_name();
         let mut scene = Scene::new();
         scene.settings = self.component_settings();
         let root = scene.root();
