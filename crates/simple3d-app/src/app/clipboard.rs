@@ -34,9 +34,9 @@ impl App {
                 self.scene.remove(id);
             }
             self.clear_selection();
-            self.status = Status::Info(format!("Cut {count} node{}", if count == 1 { "" } else { "s" }));
+            self.status = Status::Info(format!("Cut {count} node{}", crate::ui::plural(count)));
         } else {
-            self.status = Status::Info(format!("Copied {count} node{}", if count == 1 { "" } else { "s" }));
+            self.status = Status::Info(format!("Copied {count} node{}", crate::ui::plural(count)));
         }
     }
 

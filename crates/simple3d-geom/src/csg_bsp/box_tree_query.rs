@@ -2,33 +2,24 @@
 
 use super::*;
 use crate::vec3::Vec3;
+use std::ops::ControlFlow;
 
 impl BoxTree {
     /// Whether any polygon's box comes within `EPSILON` of `query`. `stack` is reused, since this runs
     /// per polygon per node and allocation showed up in profiles.
     pub(super) fn meets(&self, query: (Vec3, Vec3), stack: &mut Vec<u32>) -> bool {
-        stack.clear();
-        stack.push(0);
-        while let Some(i) = stack.pop() {
-            let node = &self.nodes[i as usize];
-            if !boxes_meet((node.lo, node.hi), query) {
-                continue;
-            }
-            match node.kind {
-                BoxKind::Split(left, right) => {
-                    stack.push(left);
-                    stack.push(right);
+        self.visit(
+            stack,
+            |lo, hi| boxes_meet((lo, hi), query),
+            |p| {
+                if boxes_meet(self.boxes[p as usize], query) {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
                 }
-                BoxKind::Leaf(from, to) => {
-                    for &p in &self.order[from as usize..to as usize] {
-                        if boxes_meet(self.boxes[p as usize], query) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
-        false
+            },
+        )
+        .is_break()
     }
 
     /// Every polygon whose box the ray from `origin` along `dir` could enter, in no order: the slab test
@@ -56,28 +47,17 @@ impl BoxTree {
             far >= near.max(0.0)
         };
         out.clear();
-        stack.clear();
-        stack.push(0);
-        while let Some(i) = stack.pop() {
-            let node = &self.nodes[i as usize];
-            if !hits(node.lo, node.hi) {
-                continue;
-            }
-            match node.kind {
-                BoxKind::Split(left, right) => {
-                    stack.push(left);
-                    stack.push(right);
+        let _ = self.visit(
+            stack,
+            |lo, hi| hits(lo, hi),
+            |p| {
+                let (lo, hi) = self.boxes[p as usize];
+                if hits(lo, hi) {
+                    out.push(p);
                 }
-                BoxKind::Leaf(from, to) => {
-                    for &p in &self.order[from as usize..to as usize] {
-                        let (lo, hi) = self.boxes[p as usize];
-                        if hits(lo, hi) {
-                            out.push(p);
-                        }
-                    }
-                }
-            }
-        }
+                ControlFlow::Continue(())
+            },
+        );
     }
 }
 

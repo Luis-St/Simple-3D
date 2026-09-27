@@ -54,17 +54,9 @@ impl App {
         if tool.found.as_ref().is_some_and(|found| found.plan == tool.plan) {
             return;
         }
-        match tool.job.as_ref() {
-            // One at a time: a scrub asks every frame, so the running job is stopped and the next frame
-            // starts the newest.
-            Some(job) if job.plan == tool.plan => return,
-            Some(job) => {
-                job.cancel();
-                return;
-            }
-            None => {}
+        if ReassembleJob::idle_for(tool.job.as_ref(), &tool.plan) {
+            tool.job = Some(ReassembleJob::start(tool.mesh.clone(), tool.plan));
         }
-        tool.job = Some(ReassembleJob::spawn(tool.mesh.clone(), tool.plan));
     }
 }
 

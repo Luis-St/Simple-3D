@@ -1,7 +1,6 @@
 //! The grips the section plane is taken hold of by.
 
 use super::*;
-use crate::panel_properties::component;
 use simple3d_core::scene::SectionView;
 use simple3d_geom::Vec3;
 use std::hash::{Hash, Hasher};
@@ -49,7 +48,7 @@ pub fn auto_size(section: &SectionView, bounds: Option<(Vec3, Vec3)>) -> [f64; 2
         _ => ((axis + 1) % 3, (axis + 2) % 3),
     };
     let (lo, hi) = bounds.unwrap_or((Vec3::splat(-EMPTY_HALF), Vec3::splat(EMPTY_HALF)));
-    let extent = |a: usize| (((component(hi, a) - component(lo, a)) * 0.5) * (1.0 + MARGIN)).max(MIN_HALF);
+    let extent = |a: usize| (((hi.get(a) - lo.get(a)) * 0.5) * (1.0 + MARGIN)).max(MIN_HALF);
     let widest = extent(0).max(extent(1)).max(extent(2));
     let half = |a: usize| if section.tilted() { widest } else { extent(a) };
     [half(u) * 2.0, half(v) * 2.0]

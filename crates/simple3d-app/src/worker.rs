@@ -3,6 +3,7 @@
 //! Both run on their own threads with progress and cancellation; an evaluation is superseded by a
 //! newer edit, dropping the stale job rather than finishing it.
 
+mod job;
 mod poll;
 mod submit;
 use poll::*;

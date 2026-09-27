@@ -40,7 +40,7 @@ pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_
         };
 
         // The arm on the eye's side arrives at a surface; the other leaves through the back.
-        let near = -component(req.view.forward(), axis).signum();
+        let near = -req.view.forward().get(axis).signum();
 
         // Inside the box (-15..15): nothing of the line.
         for at in [-12.0, -6.0, 0.0, 6.0, 12.0] {

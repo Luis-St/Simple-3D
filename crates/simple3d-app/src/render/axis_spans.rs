@@ -39,12 +39,12 @@ pub(crate) fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64,
 pub(crate) fn axis_inside_spans(mesh: &Mesh, bodies: &[u16], axis: usize) -> Vec<((f64, f64), u16)> {
     // A solid that does not straddle zero on the other two coordinates cannot be on the axis.
     let Some((lo, hi)) = mesh.bounds() else { return Vec::new() };
-    if (0..3).any(|other| other != axis && (component(lo, other) > 0.0 || component(hi, other) < 0.0)) {
+    if (0..3).any(|other| other != axis && (lo.get(other) > 0.0 || hi.get(other) < 0.0)) {
         return Vec::new();
     }
     let mut crossings: std::collections::BTreeMap<u16, Vec<f64>> = std::collections::BTreeMap::new();
     for tri in &mesh.indices {
-        let world = [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
+        let world = mesh.corners(*tri);
         if let Some(at) = axis_crossing(world, axis) {
             crossings.entry(bodies.get(tri[0] as usize).copied().unwrap_or(0)).or_default().push(at);
         }
@@ -68,35 +68,8 @@ pub(crate) fn along(axis: usize, value: f64) -> Vec3 {
     }
 }
 
-pub(crate) fn component(v: Vec3, axis: usize) -> f64 {
-    match axis {
-        0 => v.x,
-        1 => v.y,
-        _ => v.z,
-    }
-}
-
-/// Where the axis line pierces a triangle, as a coordinate along it: Moller-Trumbore against the
-/// line, so crossings behind the origin count.
+/// Where the axis line pierces a triangle, as a coordinate along it, counting crossings behind
+/// the origin.
 pub(crate) fn axis_crossing(world: [Vec3; 3], axis: usize) -> Option<f64> {
-    let direction = along(axis, 1.0);
-    let (edge1, edge2) = (world[1] - world[0], world[2] - world[0]);
-    let pvec = direction.cross(edge2);
-    let det = edge1.dot(pvec);
-    // Edge-on to the axis: no crossing, and the maths is degenerate.
-    if det.abs() < 1e-12 {
-        return None;
-    }
-    let inv = 1.0 / det;
-    let tvec = -world[0];
-    let u = tvec.dot(pvec) * inv;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let qvec = tvec.cross(edge1);
-    let v = direction.dot(qvec) * inv;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    Some(edge2.dot(qvec) * inv)
+    simple3d_geom::ray::line_triangle(Vec3::ZERO, along(axis, 1.0), world, 0.0)
 }

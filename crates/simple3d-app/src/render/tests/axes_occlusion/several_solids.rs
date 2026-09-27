@@ -4,8 +4,8 @@ use super::*;
 use crate::raster::Image;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
-use simple3d_geom::Vec3;
 use simple3d_geom::primitives;
+use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn one_mesh_of_two_shapes_is_still_two_solids_to_an_axis() {
@@ -68,7 +68,7 @@ pub(crate) fn one_mesh_of_two_shapes_is_still_two_solids_to_an_axis() {
         };
 
         // Just outside the origin box on the eye's side: drawn over its silhouette. Only the near arm.
-        let near = -component(req.view.forward(), axis).signum();
+        let near = -req.view.forward().get(axis).signum();
         // Walk out along the near arm, taking every point the far box does not cover.
         for step in 0..40 {
             let sample = (11.0 + step as f64 * 0.5) * near;

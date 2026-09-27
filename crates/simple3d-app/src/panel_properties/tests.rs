@@ -15,13 +15,7 @@ use simple3d_core::scene::Scene;
 
 /// An `App` on a headless context with a throwaway config directory.
 fn headless_app() -> App {
-    let dir = std::env::temp_dir().join(format!(
-        "simple3d-props-test-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::app::tests::temp_config_dir("props");
     App::with_config_dir(&egui::Context::default(), None, dir)
 }
 

@@ -8,15 +8,9 @@ impl App {
     /// Open the tool on the selection (issue 108): one mesh only, since groups and primitives have
     /// nothing to recover.
     pub fn open_reassemble_tool(&mut self) {
-        let targets = self.top_level_selection();
-        let Some(&id) = targets.first() else {
-            self.status = Status::Warning("Select a mesh to reassemble".into());
+        let Some(id) = self.single_target("Select a mesh to reassemble", "Reassemble one mesh at a time") else {
             return;
         };
-        if targets.len() > 1 {
-            self.status = Status::Warning("Reassemble one mesh at a time".into());
-            return;
-        }
         let Some(mesh) = self.scene.get(id).and_then(|node| node.mesh()).cloned() else {
             self.status =
                 Status::Warning("Only a mesh can be reassembled -- everything else is objects already".into());

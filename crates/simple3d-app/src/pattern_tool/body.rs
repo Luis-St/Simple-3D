@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::app::App;
-use crate::popup::{self, PopupEvent, PopupSpec};
+use crate::popup::{PopupEvent, PopupSpec};
 use crate::theme::{self, token};
 use simple3d_core::pattern;
 use simple3d_core::scene::NodeId;
@@ -56,17 +56,10 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     // Found again while drawing stages; a rolled-up window marks none.
     app.pattern_tool_hover = None;
     let Some(id) = app.pattern_tool_target() else { return };
-    let bounds = app.viewport_rect;
     // Named, since the selection can move on while the window is open.
     let title = format!("Rule for {}", app.scene.node(id).name);
-    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
-    let mut placement = app.popups.remove(KEY).unwrap_or_default();
-    let event = popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: &title, width: WIDTH }, |ui| {
-        // Scrolls on short viewports so the buttons stay reachable.
-        popup::scrolling_body(ui, bounds, |ui| body(app, ui));
-        popup::action_row(ui, |ui| actions(app, ui));
-    });
-    app.popups.insert(KEY, placement);
+    let spec = PopupSpec { key: KEY, title: &title, width: WIDTH };
+    let event = app.tool_popup(ctx, spec, body, actions);
     if event == PopupEvent::Closed {
         app.close_pattern_tool();
     }

@@ -52,11 +52,11 @@ pub(crate) fn cursor_rows(app: &mut App, ui: &mut egui::Ui) {
                 let field_id = ui.id().with(("cursor", axis));
                 // Named like `axis_row`'s fields, so one cannot answer another's gesture.
                 let grip = format!("3D cursor:{axis}");
-                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: at.get(axis), step };
                 // No undo step: the cursor is not part of the scene.
                 scalar_field(app, ui, field, |app, mm, _| {
                     let mut p = app.cursor.unwrap_or(Vec3::ZERO);
-                    set_component(&mut p, axis, mm);
+                    p.set(axis, mm);
                     app.cursor = Some(p);
                 });
             });
@@ -104,11 +104,11 @@ pub(crate) fn view_centre_rows(app: &mut App, ui: &mut egui::Ui) {
                 if locked {
                     ui.disable();
                 }
-                let current = shown_view_centre(component(at, axis));
+                let current = shown_view_centre(at.get(axis));
                 let field = Scalar { grip: &grip, id: field_id, kind: POINT, current, step };
                 // No undo step: no camera gesture records one, so typing a view centre does not either.
                 scalar_field(app, ui, field, |app, mm, _| {
-                    set_component(&mut app.scene.camera.target, axis, mm);
+                    app.scene.camera.target.set(axis, mm);
                 });
             });
         },

@@ -11,15 +11,9 @@ impl App {
     /// Open the tool on the selection (issue 82), on the last split's numbers, or on a split's own
     /// stored plan so cutting again changes its pattern.
     pub fn open_split_tool(&mut self) {
-        let targets = self.top_level_selection();
-        let Some(&id) = targets.first() else {
-            self.status = Status::Warning("Select something to split into pieces".into());
+        let Some(id) = self.single_target("Select something to split into pieces", "Split one object at a time") else {
             return;
         };
-        if targets.len() > 1 {
-            self.status = Status::Warning("Split one object at a time".into());
-            return;
-        }
         if self.split_job.is_some() {
             self.status = Status::Warning("A split is already running".into());
             return;

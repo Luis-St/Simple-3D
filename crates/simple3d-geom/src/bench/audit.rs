@@ -18,14 +18,7 @@ pub(crate) fn bench_boolean_audit() {
         ("torus", primitives::torus_mesh(30.0, 8.0, 360.0, 96)),
         ("plate", primitives::plate_mesh(40.0, 40.0, 4.0)),
     ];
-    let volume = |m: &Mesh| {
-        let mut v = 0.0;
-        for t in &m.indices {
-            let (a, b, c) = (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
-            v += a.dot(b.cross(c)) / 6.0;
-        }
-        v
-    };
+    let volume = Mesh::signed_volume;
     let (mut pairs, mut open) = (0, 0);
     for (na, a) in &shapes {
         for (nb, b) in &shapes {

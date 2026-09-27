@@ -144,7 +144,7 @@ impl Gizmo {
         let mid = (self.local_lo + self.local_hi) * 0.5;
         let edge = if positive { self.local_hi } else { self.local_lo };
         let mut p = mid;
-        set_axis(&mut p, axis, get_axis(edge, axis));
+        p.set(axis, edge.get(axis));
         p
     }
 
@@ -152,7 +152,7 @@ impl Gizmo {
         let mut p = Vec3::ZERO;
         for axis in 0..3 {
             let edge = if sides[axis] { self.local_hi } else { self.local_lo };
-            set_axis(&mut p, axis, get_axis(edge, axis));
+            p.set(axis, edge.get(axis));
         }
         p
     }

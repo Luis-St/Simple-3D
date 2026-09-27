@@ -5,7 +5,8 @@
 
 use super::*;
 use crate::render::{
-    axis_layout, axis_material_live, effective_grid_spacing, grid_levels, grid_radius, Renderable, Request, GRID_BIAS,
+    axis_layout, axis_material_live, effective_grid_spacing, grid_levels, grid_radius, Renderable, Request, AXIS_BIAS,
+    GRID_BIAS,
 };
 use crate::view::View;
 use eframe::glow::{self, HasContext};
@@ -93,10 +94,10 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
     for axis in (0..3).filter(|&axis| grid.axes[axis]) {
         let (centre, length, reach) = axis_layout(view, grid, spacing, radius, material.reach, axis);
         let direction = crate::render::along(axis, 1.0);
-        let start = crate::render::component(centre, axis);
+        let start = centre.get(axis);
         for sign in [-1.0, 1.0] {
             let end = centre + direction * (length * sign);
-            let point = |p: Vec3| [p.x as f32, p.y as f32, p.z as f32, crate::render::component(p, axis) as f32];
+            let point = |p: Vec3| [p.x as f32, p.y as f32, p.z as f32, p.get(axis) as f32];
             for p in [centre, end] {
                 passes.saw(key_of(p) + AXIS_BIAS);
             }
@@ -105,7 +106,7 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
                 ends: [point(centre), point(end)],
                 start,
                 reach,
-                away: crate::render::component(view.forward(), axis),
+                away: view.forward().get(axis),
                 colour: as_float(colours[axis]),
             });
         }
@@ -129,9 +130,7 @@ impl Gpu {
         gl.use_program(Some(program.program));
         let rows = resident::rows_at(view, grid.origin);
         for (name, row) in ["u_row_x", "u_row_y", "u_row_key"].into_iter().zip(rows) {
-            if let Some(at) = program.at(name) {
-                gl.uniform_4_f32_slice(Some(at), &row);
-            }
+            set4(gl, program, name, &row);
         }
         let floats = [
             ("u_bias", GRID_BIAS),
@@ -141,9 +140,7 @@ impl Gpu {
             ("u_fade", grid.fade as f32),
         ];
         for (name, value) in floats {
-            if let Some(at) = program.at(name) {
-                gl.uniform_1_f32(Some(at), value);
-            }
+            set_f32(gl, program, name, value);
         }
         let pairs = [
             ("u_viewport", viewport),
@@ -152,14 +149,10 @@ impl Gpu {
             ("u_major", [grid.major[0] as f32, grid.major[1] as f32]),
         ];
         for (name, value) in pairs {
-            if let Some(at) = program.at(name) {
-                gl.uniform_2_f32(Some(at), value[0], value[1]);
-            }
+            set2(gl, program, name, [value[0], value[1]]);
         }
         for (name, value) in [("u_minor_colour", grid.minor), ("u_major_colour", grid.major_colour)] {
-            if let Some(at) = program.at(name) {
-                gl.uniform_4_f32_slice(Some(at), &value);
-            }
+            set4(gl, program, name, &value);
         }
         let r = grid.reach as f32;
         let quad: [[f32; 2]; 6] = [[-r, -r], [r, -r], [r, r], [-r, -r], [r, r], [-r, r]];
@@ -208,18 +201,12 @@ impl Gpu {
         gl.use_program(Some(program.program));
         let rows = resident::rows_at(view, Vec3::ZERO);
         for (name, row) in ["u_row_x", "u_row_y", "u_row_key"].into_iter().zip(rows) {
-            if let Some(at) = program.at(name) {
-                gl.uniform_4_f32_slice(Some(at), &row);
-            }
+            set4(gl, program, name, &row);
         }
         for (name, value) in [("u_viewport", viewport), ("u_depth", depth)] {
-            if let Some(at) = program.at(name) {
-                gl.uniform_2_f32(Some(at), value[0], value[1]);
-            }
+            set2(gl, program, name, [value[0], value[1]]);
         }
-        if let Some(at) = program.at("u_bias") {
-            gl.uniform_1_f32(Some(at), AXIS_BIAS);
-        }
+        set_f32(gl, program, "u_bias", AXIS_BIAS);
         for (unit, (name, texture)) in
             [("u_depth_tex", target.depth), ("u_tag_tex", target.tags), ("u_spans", self.buffer.seen)]
                 .into_iter()
@@ -227,27 +214,17 @@ impl Gpu {
         {
             gl.active_texture(glow::TEXTURE0 + unit as u32);
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            if let Some(at) = program.at(name) {
-                gl.uniform_1_i32(Some(at), unit as i32);
-            }
+            set_i32(gl, program, name, unit as i32);
         }
         gl.bind_vertex_array(Some(self.ground.array));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.ground.vertices));
         for arm in &ground.axes {
-            if let Some(at) = program.at("u_row") {
-                gl.uniform_1_i32(Some(at), arm.axis as i32);
-            }
-            if let Some(at) = program.at("u_count") {
-                gl.uniform_1_i32(Some(at), ground.spans[arm.axis].len() as i32);
-            }
+            set_i32(gl, program, "u_row", arm.axis as i32);
+            set_i32(gl, program, "u_count", ground.spans[arm.axis].len() as i32);
             for (name, value) in [("u_start", arm.start), ("u_reach", arm.reach), ("u_away", arm.away)] {
-                if let Some(at) = program.at(name) {
-                    gl.uniform_1_f32(Some(at), value as f32);
-                }
+                set_f32(gl, program, name, value as f32);
             }
-            if let Some(at) = program.at("u_colour") {
-                gl.uniform_4_f32_slice(Some(at), &arm.colour);
-            }
+            set4(gl, program, "u_colour", &arm.colour);
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&arm.ends), glow::STREAM_DRAW);
             gl.vertex_attrib_pointer_f32(0, 4, glow::FLOAT, false, 16, 0);
             gl.draw_arrays(glow::LINES, 0, 2);

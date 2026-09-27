@@ -47,7 +47,7 @@ use std::path::PathBuf;
 
 /// A temporary config directory with default settings and keymap, so tests do not depend on the
 /// developer's own config.
-fn temp_config_dir(name: &str) -> PathBuf {
+pub(crate) fn temp_config_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-app-test-{name}-{}-{:?}",
         std::process::id(),
@@ -68,6 +68,20 @@ pub(crate) fn headless_app() -> App {
     app.saved_revision = app.history.revision();
     app.reevaluate_for_test();
     app
+}
+
+/// A fresh app holding two boxes, the second moved to `at` and the first selected.
+pub(crate) fn two_boxes(
+    tag: &str,
+    at: simple3d_geom::Vec3,
+) -> (App, simple3d_core::scene::NodeId, simple3d_core::scene::NodeId) {
+    let mut app = app_in(temp_config_dir(tag));
+    let root = app.scene.root();
+    let a = app.scene.add_primitive("box", root, 0).unwrap();
+    let b = app.scene.add_primitive("box", root, 1).unwrap();
+    app.scene.get_mut(b).unwrap().position = at;
+    app.select_only(a);
+    (app, a, b)
 }
 
 fn app_in(config_dir: PathBuf) -> App {
@@ -111,4 +125,18 @@ impl App {
         // Bump the generation as the worker does, since change watchers key on it.
         self.evaluation_generation += 1;
     }
+}
+
+/// An app with the tool open on a pattern of the starting shape, started from a linear run.
+fn with_rule() -> (App, simple3d_core::scene::NodeId) {
+    let mut app = headless_app();
+    app.open_pattern_tool();
+    let pattern = app.pattern_tool.expect("the tool opened on a pattern");
+    app.start_rule_from(pattern, 0);
+    app.reevaluate_for_test();
+    (app, pattern)
+}
+
+fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primitive::Params {
+    app.scene.node(id).params().cloned().expect("a pattern has parameters")
 }

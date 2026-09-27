@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::app::App;
-use crate::popup::{self, PopupEvent, PopupSpec};
+use crate::popup::{PopupEvent, PopupSpec};
 use crate::ui;
 
 /// The tool's window over the viewport, while open (issue 106).
@@ -11,21 +11,14 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     if app.simplify_tool.is_none() {
         return;
     }
-    let bounds = app.viewport_rect;
     // Named, since the non-modal window can outlive the selection.
     let title = app
         .simplify_tool
         .as_ref()
         .and_then(|tool| app.scene.get(tool.target))
         .map_or_else(|| "Simplify the mesh".to_string(), |node| format!("Simplify {}", node.name));
-    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
-    let mut placement = app.popups.remove(KEY).unwrap_or_default();
-    let event = popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: &title, width: WIDTH }, |ui| {
-        // Scrolls on short viewports so the buttons stay reachable.
-        popup::scrolling_body(ui, bounds, |ui| body(app, ui));
-        popup::action_row(ui, |ui| actions(app, ui));
-    });
-    app.popups.insert(KEY, placement);
+    let spec = PopupSpec { key: KEY, title: &title, width: WIDTH };
+    let event = app.tool_popup(ctx, spec, body, actions);
     if event == PopupEvent::Closed {
         app.cancel_simplify_tool();
     }
@@ -51,8 +44,7 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     if ui::dialog_button(ui, "Simplify", ready).clicked() {
         app.apply_simplify();
     }
-    // Cancel sits at the far end from Simplify, which is laid out from the right.
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+    crate::app_chrome::cancel_at_left(ui, |ui| {
         if ui::dialog_button(ui, "Cancel", true).clicked() {
             app.cancel_simplify_tool();
         }

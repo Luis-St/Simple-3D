@@ -5,7 +5,7 @@ use crate::vec3::Vec3;
 use std::collections::BTreeMap;
 
 pub(crate) fn plane_of(mesh: &Mesh, t: [u32; 3]) -> Option<(Vec3, f64)> {
-    let (a, b, c) = (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
+    let [a, b, c] = mesh.corners(t);
     let n = (b - a).cross(c - a);
     if n.length() < 1e-12 {
         return None;

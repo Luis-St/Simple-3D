@@ -14,7 +14,7 @@
 use super::*;
 use crate::render::{CsgPreview, Renderable, Request};
 use eframe::glow::{self, HasContext};
-use resident::{set2, set_forward, set_i32, set_projection, Placing};
+use resident::{set_forward, set_projection, Placing};
 use simple3d_geom::section::Plane;
 use simple3d_geom::{Mesh, Vec3};
 
@@ -65,14 +65,7 @@ impl CsgTargets {
         let texture = |internal: u32, format: u32, kind: u32| -> Result<glow::Texture, String> {
             let texture = gl.create_texture()?;
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-                (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
+            clamp_texture(gl, glow::NEAREST, glow::NEAREST);
             let (w, h) = (width as i32, height as i32);
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
@@ -372,9 +365,7 @@ impl Gpu {
                     }
                     gl.uniform_4_f32_slice(Some(at), planes.as_flattened());
                 }
-                if let Some(at) = peel.at("u_leaf") {
-                    gl.uniform_1_u32(Some(at), index as u32);
-                }
+                set_u32(gl, peel, "u_leaf", index as u32);
                 set_i32(gl, peel, "u_painted", resident.paint.is_some() as i32);
                 gl.active_texture(glow::TEXTURE0);
                 gl.bind_texture(glow::TEXTURE_2D, resident.paint);
@@ -471,9 +462,7 @@ impl Gpu {
             if let Some(at) = resolve.at("u_program[0]") {
                 gl.uniform_1_i32_slice(Some(at), &program);
             }
-            if let Some(at) = resolve.at("u_tag") {
-                gl.uniform_1_u32(Some(at), csg.tag as u32);
-            }
+            set_u32(gl, resolve, "u_tag", csg.tag as u32);
             set_i32(gl, resolve, "u_half", half_leaf.map_or(-1, |first| first as i32));
             gl.bind_vertex_array(Some(self.buffer.array));
             gl.draw_arrays(glow::TRIANGLES, 0, 3);
@@ -520,16 +509,10 @@ impl Gpu {
         gl.enable(glow::CLIP_DISTANCE0);
         set2(gl, program, "u_viewport", viewport);
         set2(gl, program, "u_depth", depth);
-        if let Some(at) = program.at("u_colour") {
-            gl.uniform_4_f32_slice(Some(at), &as_float(colour));
-        }
-        if let Some(at) = program.at("u_bias") {
-            gl.uniform_1_f32(Some(at), crate::render::EDGE_BIAS);
-        }
+        set4(gl, program, "u_colour", &as_float(colour));
+        set_f32(gl, program, "u_bias", crate::render::EDGE_BIAS);
         set_i32(gl, program, "u_tagged", 0);
-        if let Some(at) = program.at("u_tag") {
-            gl.uniform_1_u32(Some(at), csg.tag as u32);
-        }
+        set_u32(gl, program, "u_tag", csg.tag as u32);
         gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(scene.done));
         set_i32(gl, program, "u_done", 0);
@@ -540,9 +523,7 @@ impl Gpu {
                 continue;
             }
             set_projection(gl, program, resident, &request.view, &request.section, &Placing::moved(*moved));
-            if let Some(at) = program.at("u_leaf_code") {
-                gl.uniform_1_f32(Some(at), (index + 1) as f32 / 255.0);
-            }
+            set_f32(gl, program, "u_leaf_code", (index + 1) as f32 / 255.0);
             gl.bind_vertex_array(Some(edges.array));
             gl.draw_elements(glow::LINES, edges.count, glow::UNSIGNED_INT, 0);
         }

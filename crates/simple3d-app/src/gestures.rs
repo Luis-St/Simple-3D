@@ -45,13 +45,7 @@ fn harness_configured(name: &str, setup: impl FnOnce(&mut App)) -> Harness<'stat
 
 /// The same, with an explicit clock step, since double clicks need two clicks close in time.
 fn harness_stepping(name: &str, step_dt: f32, setup: impl FnOnce(&mut App)) -> Harness<'static, App> {
-    let dir = std::env::temp_dir().join(format!(
-        "simple3d-gesture-test-{name}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::app::tests::temp_config_dir(name);
 
     let mut app = App::with_config_dir(&egui::Context::default(), None, dir);
     // The app opens empty, so add the shape the gestures act on.

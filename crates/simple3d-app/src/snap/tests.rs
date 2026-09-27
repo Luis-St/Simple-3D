@@ -147,7 +147,7 @@ fn a_body_the_principal_planes_cut_carries_their_marks_as_lines() {
         assert!(!lines.is_empty(), "the plane perpendicular to axis {axis} cuts this box and marked nothing");
         for (a, b) in &lines {
             assert!(
-                component(*a, axis).abs() < 1e-9 && component(*b, axis).abs() < 1e-9,
+                (*a).get(axis).abs() < 1e-9 && (*b).get(axis).abs() < 1e-9,
                 "a mark off its own plane: {a:?} {b:?}"
             );
             assert!((*a - *b).length() > 1e-9, "a mark of no length");

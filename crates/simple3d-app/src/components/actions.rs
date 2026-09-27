@@ -205,16 +205,16 @@ impl App {
         }
         let active = self.project.active;
         for component in self.project.components.iter_mut().filter(|c| c.id != active && c.id != id) {
-            let there = component.scene.integrations_of(id);
+            let there = component.model.scene.integrations_of(id);
             if there.is_empty() {
                 continue;
             }
-            component.history.record(&component.scene, label, None);
+            component.model.history.record(&component.model.scene, label, None);
             for node in &there {
-                component.scene.remove(*node);
+                component.model.scene.remove(*node);
             }
-            let scene = &component.scene;
-            component.selection.retain(|n| scene.contains(*n));
+            let scene = &component.model.scene;
+            component.model.selection.retain(|n| scene.contains(*n));
             removed += there.len();
         }
         removed

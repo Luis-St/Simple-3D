@@ -8,27 +8,9 @@ use simple3d_geom::Vec3;
 /// body's geometry. Other tests cover each half; this drives the actual gesture.
 #[test]
 pub(crate) fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
-    let mut harness = harness_configured("snap-while-held", |app| {
-        app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
-        // Two boxes, well apart so the target is unambiguous; a coarse grid step so grid and geometry
-        // landings cannot coincide.
-        let root = app.scene.root();
-        for id in app.scene.node(root).children.clone() {
-            app.scene.remove(id);
-        }
-        let carried = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
-        let target = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
-        app.scene.get_mut(target).unwrap().position = Vec3::new(75.0, 0.0, 0.0);
-        app.scene.settings.snap_step = 10.0;
-        app.select_only(carried);
-    });
+    let mut harness = harness_configured("snap-while-held", two_boxes_apart);
     let carried = harness.state().primary().unwrap();
-    harness.state_mut().mode = crate::gizmo::Mode::Move;
-    harness.step();
-    harness.state_mut().evaluated =
-        Evaluator::new().evaluate(&harness.state().scene, &simple3d_core::eval::Cancel::new());
-    harness.state_mut().frame_all();
-    harness.step();
+    in_mode_and_framed(&mut harness, crate::gizmo::Mode::Move);
 
     let view = harness.state().current_view();
     let gizmo = harness.state().gizmo_for(carried).expect("a gizmo for the selected box");
@@ -67,26 +49,9 @@ pub(crate) fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
 /// and the target at 75, the faces meet at 55, which this drag must reach.
 #[test]
 pub(crate) fn a_snapped_drag_can_put_two_boxes_face_to_face() {
-    let mut harness = harness_configured("snap-face-to-face", |app| {
-        app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
-        let root = app.scene.root();
-        for id in app.scene.node(root).children.clone() {
-            app.scene.remove(id);
-        }
-        let carried = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
-        let target = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
-        app.scene.get_mut(target).unwrap().position = Vec3::new(75.0, 0.0, 0.0);
-        // A grid step that cannot land on 55 by itself.
-        app.scene.settings.snap_step = 10.0;
-        app.select_only(carried);
-    });
+    let mut harness = harness_configured("snap-face-to-face", two_boxes_apart);
     let carried = harness.state().primary().unwrap();
-    harness.state_mut().mode = crate::gizmo::Mode::Move;
-    harness.step();
-    harness.state_mut().evaluated =
-        Evaluator::new().evaluate(&harness.state().scene, &simple3d_core::eval::Cancel::new());
-    harness.state_mut().frame_all();
-    harness.step();
+    in_mode_and_framed(&mut harness, crate::gizmo::Mode::Move);
 
     let view = harness.state().current_view();
     let gizmo = harness.state().gizmo_for(carried).expect("a gizmo for the selected box");
@@ -130,12 +95,7 @@ pub(crate) fn a_face_pulled_with_the_snap_key_held_does_not_resize_about_the_cen
         app.select_only(block);
     });
     let block = harness.state().primary().unwrap();
-    harness.state_mut().mode = crate::gizmo::Mode::Resize;
-    harness.step();
-    harness.state_mut().evaluated =
-        Evaluator::new().evaluate(&harness.state().scene, &simple3d_core::eval::Cancel::new());
-    harness.state_mut().frame_all();
-    harness.step();
+    in_mode_and_framed(&mut harness, crate::gizmo::Mode::Resize);
 
     let view = harness.state().current_view();
     let gizmo = harness.state().gizmo_for(block).expect("a gizmo for the selected box");
@@ -158,4 +118,29 @@ pub(crate) fn a_face_pulled_with_the_snap_key_held_does_not_resize_about_the_cen
     let (lo, hi) = evaluated.node_world_bounds[&block];
     assert!(hi.x > 12.0, "the drag did not pull the +X face out: {lo:?}..{hi:?}");
     assert!((lo.x + 10.0).abs() < 1e-6, "the -X face moved to {} as well: Ctrl resized about the centre", lo.x);
+}
+
+/// Two boxes, the carried one selected at the origin and the target 75 mm along X, so the target is
+/// unambiguous, with Ctrl as the snap key. A 10 mm grid step cannot land where the geometry does.
+fn two_boxes_apart(app: &mut App) {
+    app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
+    let root = app.scene.root();
+    for id in app.scene.node(root).children.clone() {
+        app.scene.remove(id);
+    }
+    let carried = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
+    let target = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
+    app.scene.get_mut(target).unwrap().position = Vec3::new(75.0, 0.0, 0.0);
+    app.scene.settings.snap_step = 10.0;
+    app.select_only(carried);
+}
+
+/// Put the gizmo in `mode` and frame the evaluated scene, so its handles are on screen.
+fn in_mode_and_framed(harness: &mut Harness<'static, App>, mode: crate::gizmo::Mode) {
+    harness.state_mut().mode = mode;
+    harness.step();
+    harness.state_mut().evaluated =
+        Evaluator::new().evaluate(&harness.state().scene, &simple3d_core::eval::Cancel::new());
+    harness.state_mut().frame_all();
+    harness.step();
 }

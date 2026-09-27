@@ -89,15 +89,12 @@ impl App {
     /// Put a split shape back together (issue 82): the original returns and the pieces go. The split's
     /// transform is kept; edits to individual pieces are not. An ordinary undoable step.
     pub fn rejoin_selection(&mut self) {
-        let targets = self.top_level_selection();
-        let Some(&id) = targets.first() else {
-            self.status = Status::Warning("Select a shape that was split into pieces to join back together".into());
+        let Some(id) = self.single_target(
+            "Select a shape that was split into pieces to join back together",
+            "Join one split shape back together at a time",
+        ) else {
             return;
         };
-        if targets.len() > 1 {
-            self.status = Status::Warning("Join one split shape back together at a time".into());
-            return;
-        }
         if !self.scene.node(id).is_split() {
             self.status =
                 Status::Warning("Only something that was split into pieces can be joined back together".into());

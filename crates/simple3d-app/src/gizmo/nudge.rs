@@ -42,8 +42,8 @@ impl Nudge {
                 if let Some(node) = scene.get_mut(id) {
                     let mut rotation = node.rotation;
                     // Wrapped into one turn (issue 84), so holding a key does not wind past 360.
-                    let turned = wrap_degrees(get_axis(rotation, axis) + degrees);
-                    set_axis(&mut rotation, axis, turned);
+                    let turned = wrap_degrees(rotation.get(axis) + degrees);
+                    rotation.set(axis, turned);
                     node.position = gizmo.position_keeping_pivot(rotation, node.scale);
                     node.rotation = rotation;
                 }
@@ -56,7 +56,7 @@ impl Nudge {
             Nudge::Scale { axis, factor } => {
                 if let Some(node) = scene.get_mut(id) {
                     let mut scale = Node::sane_scale(node.scale);
-                    set_axis(&mut scale, axis, factor);
+                    scale.set(axis, factor);
                     node.scale = scale;
                 }
             }
@@ -94,20 +94,20 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
         Mode::Rotate => Nudge::Rotate { axis, degrees: rotate_snap_deg * sign },
         Mode::Resize => match gizmo.drivers[axis] {
             Some(driver) => {
-                let extent = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
+                let extent = gizmo.local_hi.get(axis) - gizmo.local_lo.get(axis);
                 Nudge::Resize { axis, driver, extent: (extent + move_snap * sign).max(MIN_EXTENT) }
             }
             None => Nudge::NoDimension { axis },
         },
         // A scale nudge moves the face by one step, expressed as the factor that achieves it.
         Mode::Scale => {
-            let local = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
+            let local = gizmo.local_hi.get(axis) - gizmo.local_lo.get(axis);
             let world = local * gizmo.axis_scale[axis];
             if world <= MIN_EXTENT {
                 Nudge::NoDimension { axis }
             } else {
                 let factor = ((world + move_snap * sign).max(MIN_EXTENT)) / world;
-                let grown = (get_axis(gizmo.own_scale, axis) * factor).max(Node::MIN_SCALE);
+                let grown = (gizmo.own_scale.get(axis) * factor).max(Node::MIN_SCALE);
                 Nudge::Scale { axis, factor: grown }
             }
         }

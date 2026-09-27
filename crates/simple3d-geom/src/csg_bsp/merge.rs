@@ -16,7 +16,7 @@ pub(crate) fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane, tag
     let mut pos_of: BTreeMap<(i64, i64, i64), Vec3> = BTreeMap::new();
     for &ti in tri_idxs {
         let t = mesh.indices[ti];
-        let pts = [mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]];
+        let pts = mesh.corners(t);
         for k in 0..3 {
             let (a, b) = (pts[k], pts[(k + 1) % 3]);
             let (ka, kb) = (pos_key(a), pos_key(b));

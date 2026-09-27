@@ -12,7 +12,7 @@ impl App {
         if id == self.project.active {
             Some(&self.scene)
         } else {
-            self.project.get(id).map(|c| &c.scene)
+            self.project.get(id).map(|c| &c.model.scene)
         }
     }
 
@@ -26,7 +26,7 @@ impl App {
     pub(crate) fn relink_components(&mut self) {
         let active = self.project.active;
         let scenes: BTreeMap<ComponentId, &Scene> =
-            self.project.components.iter().filter(|c| c.id != active).map(|c| (c.id, &c.scene)).collect();
+            self.project.components.iter().filter(|c| c.id != active).map(|c| (c.id, &c.model.scene)).collect();
         let linked: Components = simple3d_core::scene::link(&scenes);
         self.scene.components = Arc::new(linked);
         self.dirty = true;
@@ -35,8 +35,12 @@ impl App {
     /// Lift the on-screen component off `App`, leaving the project's other state.
     fn take_component(&mut self) -> Component {
         self.cancel_simplify_tool();
-        Component {
-            id: self.project.active,
+        Component { id: self.project.active, model: self.take_model() }
+    }
+
+    /// Lift the model on screen off `App`, leaving it empty.
+    pub(crate) fn take_model(&mut self) -> ModelState {
+        ModelState {
             scene: std::mem::take(&mut self.scene),
             history: std::mem::take(&mut self.history),
             saved_revision: self.saved_revision,
@@ -49,16 +53,17 @@ impl App {
         }
     }
 
-    fn put_component(&mut self, component: Component) {
-        self.scene = component.scene;
-        self.history = component.history;
-        self.saved_revision = component.saved_revision;
-        self.selection = component.selection;
-        self.selection_anchor = component.selection_anchor;
-        self.collapsed = component.collapsed;
-        self.cursor = component.cursor;
-        self.frame_when_evaluated = component.frame_when_evaluated;
-        self.evaluated = component.evaluated;
+    /// Put `model` on screen, replacing what `App` holds.
+    pub(crate) fn put_model(&mut self, model: ModelState) {
+        self.scene = model.scene;
+        self.history = model.history;
+        self.saved_revision = model.saved_revision;
+        self.selection = model.selection;
+        self.selection_anchor = model.selection_anchor;
+        self.collapsed = model.collapsed;
+        self.cursor = model.cursor;
+        self.frame_when_evaluated = model.frame_when_evaluated;
+        self.evaluated = model.evaluated;
     }
 
     /// Show component `id`, opening its tab if needed.
@@ -75,7 +80,7 @@ impl App {
         if !self.project.open.contains(&id) {
             self.project.open.push(id);
         }
-        self.put_component(next);
+        self.put_model(next.model);
         self.relink_components();
         self.after_switch();
         self.status = Status::Info(format!("Editing {}", component_name(&self.scene)));

@@ -109,7 +109,7 @@ fn a_plane_exactly_on_a_face_of_the_model_leaves_it_whole_and_uncapped() {
     let mesh = box_mesh();
     assert!(loops(&mesh, &plane).is_empty(), "a cut that removed nothing produced an outline");
     for tri in &mesh.indices {
-        let world = [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
+        let world = mesh.corners(*tri);
         assert_eq!(clip_triangle(&plane, world).triangles().len(), 1, "a triangle was cut where nothing was");
     }
 }

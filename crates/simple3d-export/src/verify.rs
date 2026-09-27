@@ -30,12 +30,5 @@ pub fn verify(mesh: &Mesh) -> Vec<String> {
 
 /// Six times the signed volume; positive means outward winding for a closed mesh.
 pub fn signed_volume(mesh: &Mesh) -> f64 {
-    let mut total = 0.0;
-    for tri in &mesh.indices {
-        let a = mesh.positions[tri[0] as usize];
-        let b = mesh.positions[tri[1] as usize];
-        let c = mesh.positions[tri[2] as usize];
-        total += a.dot(b.cross(c));
-    }
-    total / 6.0
+    mesh.signed_volume()
 }

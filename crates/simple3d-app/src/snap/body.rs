@@ -64,8 +64,7 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     // Area-weighted centroids, so unevenly triangulated faces report their true middle.
     let mut sums: HashMap<usize, (Vec3, f64)> = HashMap::new();
     for (i, &tri) in welded.indices.iter().enumerate() {
-        let (a, b, c) =
-            (welded.positions[tri[0] as usize], welded.positions[tri[1] as usize], welded.positions[tri[2] as usize]);
+        let [a, b, c] = welded.corners(tri);
         let area = (b - a).cross(c - a).length() * 0.5;
         let centroid = (a + b + c) * (1.0 / 3.0);
         let root = find(&mut parent, i);

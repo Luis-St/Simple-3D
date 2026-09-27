@@ -42,6 +42,7 @@ pub(crate) use export::*;
 mod hints;
 mod import;
 mod persist;
+mod tool_popup;
 pub use hints::insertion_hint;
 pub(crate) use hints::*;
 mod frame;

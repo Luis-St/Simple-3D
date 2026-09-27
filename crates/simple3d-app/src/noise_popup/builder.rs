@@ -174,7 +174,7 @@ fn summary(part: Part, params: &Params, unit: simple3d_core::unit::Unit) -> Stri
             format!("up to {} either way", length(most, unit))
         }
         Part::Turn(axis) => {
-            let turn = [scatter.turn.x, scatter.turn.y, scatter.turn.z][axis.min(2)];
+            let turn = scatter.turn.get(axis);
             format!("up to {} deg about {}", format_number(turn, 1), AXES[axis.min(2)])
         }
         Part::Size => format!("up to \u{00B1}{} %", format_number(scatter.scale * 100.0, 0)),

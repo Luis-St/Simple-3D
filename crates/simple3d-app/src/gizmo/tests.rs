@@ -9,7 +9,6 @@ mod scale;
 use super::axis::*;
 use super::build::*;
 use super::drag::*;
-use super::hit::*;
 use super::mode::*;
 use super::mods::*;
 use super::nudge::*;

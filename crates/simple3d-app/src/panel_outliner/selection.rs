@@ -38,7 +38,7 @@ pub(crate) fn confirm_strip(app: &mut App, ui: &mut egui::Ui) {
             ui.add(
                 egui::Label::new(theme::value(format!(
                     "Delete {what}? It holds {children} node{}.",
-                    if children == 1 { "" } else { "s" }
+                    crate::ui::plural(children)
                 )))
                 .selectable(false)
                 .wrap(),

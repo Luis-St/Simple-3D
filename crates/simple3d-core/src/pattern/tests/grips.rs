@@ -152,11 +152,7 @@ pub(crate) fn a_turning_grip_follows_the_axis_the_pattern_turns_about() {
         let Drive::Angle { axis: about, .. } = span.drive else { panic!("a span grip must turn") };
         assert_eq!(about, axis as usize);
         // It rides in the turn's plane, so the axis component is zero.
-        let along = match axis {
-            0 => span.at.x,
-            1 => span.at.y,
-            _ => span.at.z,
-        };
+        let along = span.at.get(axis as usize);
         assert!(along.abs() < 1e-9, "the span grip left the plane of its own ring: {:?}", span.at);
     }
 }

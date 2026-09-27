@@ -58,6 +58,31 @@ impl Vec3 {
         Vec3::new(self.x.max(o.x), self.y.max(o.y), self.z.max(o.z))
     }
 
+    /// The component along axis 0, 1 or 2; any higher axis reads Z.
+    pub fn get(self, axis: usize) -> f64 {
+        match axis {
+            0 => self.x,
+            1 => self.y,
+            _ => self.z,
+        }
+    }
+
+    /// Set the component along axis 0, 1 or 2; any higher axis sets Z.
+    pub fn set(&mut self, axis: usize, value: f64) {
+        match axis {
+            0 => self.x = value,
+            1 => self.y = value,
+            _ => self.z = value,
+        }
+    }
+
+    /// The unit vector along axis 0, 1 or 2; any higher axis gives Z.
+    pub fn axis(axis: usize) -> Vec3 {
+        let mut v = Vec3::ZERO;
+        v.set(axis, 1.0);
+        v
+    }
+
     /// Rotate by X, then Y, then Z, in degrees (the spec's Node.rotation order).
     pub fn rotate_xyz_deg(self, deg: Vec3) -> Vec3 {
         let rx = deg.x.to_radians();

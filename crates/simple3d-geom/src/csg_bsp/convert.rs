@@ -16,11 +16,8 @@ pub(crate) fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
         .indices
         .iter()
         .map(|t| {
-            Plane::from_points(
-                mesh.positions[t[0] as usize],
-                mesh.positions[t[1] as usize],
-                mesh.positions[t[2] as usize],
-            )
+            let [a, b, c] = mesh.corners(*t);
+            Plane::from_points(a, b, c)
         })
         .collect();
     // Grouped by plane and tag, so coplanar faces of different bodies keep their origin.
@@ -41,8 +38,7 @@ pub(crate) fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
         }
         for &i in tri_idxs {
             let t = mesh.indices[i];
-            let (a, b, c) =
-                (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
+            let [a, b, c] = mesh.corners(t);
             polygons.push(Polygon::new(vec![a, b, c], plane, tag));
         }
     }

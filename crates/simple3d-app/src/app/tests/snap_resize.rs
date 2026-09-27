@@ -9,13 +9,8 @@ use simple3d_geom::Vec3;
 #[test]
 pub(crate) fn a_face_resize_snaps_the_face_it_pulls_onto_another_body() {
     // Issue 68: a resize is a drag too, and pulling a face onto a neighbour should snap like sliding.
-    let mut app = app_in(temp_config_dir("snap-resize"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
     // Half a millimetre off the grid, so only a snap can join the faces.
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.5, 0.0, 0.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-resize", Vec3::new(43.5, 0.0, 0.0));
     app.run(Command::ModeResize);
     app.history.clear();
     app.reevaluate_for_test();
@@ -38,12 +33,7 @@ pub(crate) fn a_face_resize_snaps_the_face_it_pulls_onto_another_body() {
 
 #[test]
 pub(crate) fn a_resize_without_snapping_asked_for_keeps_to_the_grid() {
-    let mut app = app_in(temp_config_dir("snap-resize-off"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.5, 0.0, 0.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-resize-off", Vec3::new(43.5, 0.0, 0.0));
     app.run(Command::ModeResize);
     app.history.clear();
     app.reevaluate_for_test();
@@ -60,12 +50,7 @@ pub(crate) fn a_resize_without_snapping_asked_for_keeps_to_the_grid() {
 #[test]
 pub(crate) fn a_snapped_drag_never_catches_a_feature_round_the_back_of_its_own_body() {
     // A drag must not catch far-side corners, whose projections land on the face in front.
-    let mut app = app_in(temp_config_dir("snap-hidden"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-hidden", Vec3::new(43.0, 0.0, 0.0));
     app.history.clear();
     app.reevaluate_for_test();
     let view = app.current_view();
@@ -90,12 +75,7 @@ pub(crate) fn a_snapped_drag_never_catches_a_feature_round_the_back_of_its_own_b
 #[test]
 pub(crate) fn a_move_drag_without_snapping_asked_for_keeps_to_the_grid() {
     // With snapping off the drag stays on the grid step.
-    let mut app = app_in(temp_config_dir("snap-off"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-off", Vec3::new(43.0, 0.0, 0.0));
     app.history.clear();
     app.reevaluate_for_test();
     let (lo, _) = app.evaluated.node_meshes[&b].bounds().unwrap();

@@ -12,7 +12,7 @@ use std::collections::HashMap;
 pub fn loops(mesh: &Mesh, plane: &Plane) -> Vec<Vec<Vec3>> {
     let mut segments: Vec<[Vec3; 2]> = Vec::new();
     for tri in &mesh.indices {
-        let world = [mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]];
+        let world = mesh.corners(*tri);
         if let Some(cut) = clip_triangle(plane, world).cut {
             segments.push(cut);
         }

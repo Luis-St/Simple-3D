@@ -4,20 +4,14 @@
 //! ([`crate::library`]). The library is per user, so pattern nodes store the numbers themselves
 //! and a project still lays out correctly on a machine without the kind.
 
+use crate::named_files;
+pub use crate::named_files::{remove, Entry};
 use crate::pattern;
 use crate::primitive::Params;
 use std::io;
 use std::path::{Path, PathBuf};
 
 const DIRECTORY: &str = "pattern-kinds";
-const EXTENSION: &str = "json";
-
-/// One saved kind: its name and file.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry {
-    pub name: String,
-    pub path: PathBuf,
-}
 
 pub fn dir(config_dir: &Path) -> PathBuf {
     config_dir.join(DIRECTORY)
@@ -25,22 +19,11 @@ pub fn dir(config_dir: &Path) -> PathBuf {
 
 /// Every saved kind by name; unreadable files are skipped so the picker still draws.
 pub fn list(config_dir: &Path) -> Vec<Entry> {
-    let Ok(entries) = std::fs::read_dir(dir(config_dir)) else { return Vec::new() };
-    let mut out: Vec<Entry> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == EXTENSION))
-        .filter_map(|path| {
-            let name = path.file_stem()?.to_string_lossy().to_string();
-            Some(Entry { name, path })
-        })
-        .collect();
-    out.sort_by_key(|e| e.name.to_lowercase());
-    out
+    named_files::list(&dir(config_dir))
 }
 
 pub fn exists(config_dir: &Path, name: &str) -> bool {
-    path_for(config_dir, name).exists()
+    named_files::path_for(&dir(config_dir), name).exists()
 }
 
 /// Save the custom part of `params` as `name`, replacing any same-named entry.
@@ -48,12 +31,7 @@ pub fn exists(config_dir: &Path, name: &str) -> bool {
 /// Only custom keys are kept, so applying a kind never changes other kinds' numbers on the node.
 /// The scatter is kept when `with_noise` says so (issue 79).
 pub fn save(config_dir: &Path, name: &str, params: &Params, with_noise: bool) -> io::Result<PathBuf> {
-    let name = crate::library::sanitise(name);
-    if name.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "a saved pattern kind needs a name"));
-    }
-    std::fs::create_dir_all(dir(config_dir))?;
-    let path = path_for(config_dir, &name);
+    let path = named_files::prepare_save(&dir(config_dir), name, "saved pattern kind")?;
     let text = serde_json::to_string_pretty(&extract(params, with_noise))
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
     std::fs::write(&path, text + "\n")?;
@@ -90,10 +68,6 @@ pub fn load(path: &Path) -> Option<Params> {
     Some(out)
 }
 
-pub fn remove(path: &Path) -> io::Result<()> {
-    std::fs::remove_file(path)
-}
-
 /// Only a custom rule's parameters, plus its scatter when asked.
 pub fn extract(params: &Params, with_noise: bool) -> Params {
     let noise: &[&str] = if with_noise { pattern::noise_keys() } else { &[] };
@@ -117,20 +91,11 @@ pub fn apply(params: &mut Params, kind: &Params) {
     params.insert("kind".to_string(), crate::primitive::ParamValue::Choice(pattern::CUSTOM));
 }
 
-fn path_for(config_dir: &Path, name: &str) -> PathBuf {
-    dir(config_dir).join(format!("{}.{EXTENSION}", crate::library::sanitise(name)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::primitive::{ParamValue, ParamsExt};
-
-    fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("simple3d-kinds-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
-    }
+    use crate::temp_dir;
 
     #[test]
     fn a_saved_kind_round_trips_through_a_file() {

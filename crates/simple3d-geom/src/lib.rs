@@ -1,9 +1,12 @@
+pub mod aabb;
 pub mod csg_bsp;
 pub mod hull;
 pub mod mesh;
+pub mod number;
 pub mod planar;
 pub mod polyhedra;
 pub mod primitives;
+pub mod ray;
 pub mod reassemble;
 pub mod repair;
 pub mod revolve;

@@ -56,16 +56,12 @@ impl SplitTool {
                 number.to_bits().hash(hasher);
             }
         }
-        for point in [self.bounds.0, self.bounds.1, self.placement.t] {
+        for point in [self.bounds.0, self.bounds.1] {
             for number in [point.x, point.y, point.z] {
                 number.to_bits().hash(hasher);
             }
         }
-        for row in self.placement.m {
-            for number in row {
-                number.to_bits().hash(hasher);
-            }
-        }
+        self.placement.hash_bits(hasher);
     }
 }
 

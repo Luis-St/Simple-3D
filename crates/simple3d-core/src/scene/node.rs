@@ -34,6 +34,29 @@ pub struct Node {
     pub parent: Option<NodeId>,
 }
 
+impl Node {
+    /// A node at the origin with default properties, holding `body`.
+    pub(crate) fn fresh(id: NodeId, name: String, body: Body, parent: Option<NodeId>) -> Node {
+        Node {
+            id,
+            name,
+            position: Vec3::ZERO,
+            rotation: Vec3::ZERO,
+            scale: Vec3::ONE,
+            anchor: Anchor::Centre,
+            visible: true,
+            ghost: false,
+            colour: None,
+            segments: None,
+            export_body: None,
+            extracted: false,
+            body,
+            children: Vec::new(),
+            parent,
+        }
+    }
+}
+
 /// What a node shows in the viewport: the three states the interface offers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Visibility {

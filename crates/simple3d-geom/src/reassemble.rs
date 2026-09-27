@@ -118,10 +118,3 @@ fn span(mesh: &Mesh) -> f64 {
         None => 0.0,
     }
 }
-
-/// The box of a set of points, or nothing for no points.
-fn bounds_of(points: &[Vec3]) -> Option<(Vec3, Vec3)> {
-    let mut it = points.iter();
-    let first = *it.next()?;
-    Some(it.fold((first, first), |(lo, hi), &p| (lo.min(p), hi.max(p))))
-}

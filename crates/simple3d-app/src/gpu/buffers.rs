@@ -30,14 +30,7 @@ impl Gpu {
             }
         };
         gl.bind_texture(glow::TEXTURE_2D, Some(colour));
-        for (name, value) in [
-            (glow::TEXTURE_MIN_FILTER, glow::LINEAR),
-            (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-            (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-            (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-        ] {
-            gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-        }
+        clamp_texture(gl, glow::LINEAR, glow::LINEAR);
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,

@@ -3,6 +3,8 @@
 //!
 //! usage: export_project <project.simple3d> <out-dir> [group-name ...]
 
+mod common;
+
 use simple3d_core::{eval, project, scene::Scene};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -37,16 +39,7 @@ fn main() {
 }
 
 fn write_mesh(path: &Path, mesh: &Arc<simple3d_geom::Mesh>) {
-    let options = simple3d_export::Options {
-        format: simple3d_export::Format::ThreeMf,
-        scale: 1.0,
-        unit: simple3d_export::Unit3mf::Millimeter,
-        allow_invalid: false,
-        bodies: simple3d_export::BodyMode::One,
-        compress: true,
-    };
-    let mut progress = |_: f32| true;
-    match simple3d_export::write(path, mesh, &options, &mut progress) {
+    match common::write_3mf(path, mesh) {
         Ok(()) => println!("wrote {} ({} triangles)", path.display(), mesh.triangle_count()),
         Err(e) => println!("FAILED {}: {e}", path.display()),
     }

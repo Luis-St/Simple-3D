@@ -3,17 +3,11 @@
 use super::*;
 use simple3d_core::config::Placement;
 
+pub(crate) use crate::ui::plural;
+
 /// Whether a colour is one of the fixed palette swatches.
 pub(crate) fn is_preset(rgb: [u8; 3]) -> bool {
     crate::theme::PAINT_PRESETS.iter().any(|(_, colour)| [colour.r(), colour.g(), colour.b()] == rgb)
-}
-
-pub(crate) fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
 }
 
 pub(crate) fn children_plural(n: usize) -> &'static str {

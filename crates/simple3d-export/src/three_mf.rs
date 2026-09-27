@@ -5,19 +5,7 @@ use simple3d_geom::{tag_colour, Mesh};
 
 /// A coordinate trimmed to fixed decimals without float noise, as the property editor shows it.
 pub(crate) fn coord(v: f64) -> String {
-    let mut s = format!("{v:.6}");
-    if s.contains('.') {
-        while s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-    }
-    if s == "-0" {
-        s = "0".into();
-    }
-    s
+    simple3d_geom::number::trimmed(v, 6)
 }
 
 /// The distinct face colours in first-seen order, and each triangle's index into them, per mesh.

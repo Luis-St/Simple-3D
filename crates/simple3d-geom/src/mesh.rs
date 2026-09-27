@@ -80,10 +80,23 @@ impl Mesh {
         Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
     }
 
+    /// The three corner positions of triangle `tri`.
+    pub fn corners(&self, tri: [u32; 3]) -> [Vec3; 3] {
+        [self.positions[tri[0] as usize], self.positions[tri[1] as usize], self.positions[tri[2] as usize]]
+    }
+
+    /// The enclosed volume by the divergence theorem, positive for outward winding on a closed mesh.
+    pub fn signed_volume(&self) -> f64 {
+        let mut total = 0.0;
+        for tri in &self.indices {
+            let [a, b, c] = self.corners(*tri);
+            total += a.dot(b.cross(c));
+        }
+        total / 6.0
+    }
+
     pub fn triangle_normal(&self, tri: [u32; 3]) -> Vec3 {
-        let a = self.positions[tri[0] as usize];
-        let b = self.positions[tri[1] as usize];
-        let c = self.positions[tri[2] as usize];
+        let [a, b, c] = self.corners(tri);
         (b - a).cross(c - a).normalized()
     }
 

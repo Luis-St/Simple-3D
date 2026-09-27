@@ -21,11 +21,7 @@ impl Instance {
 /// Euler angles that turn `angle_deg` about axis 0, 1 or 2.
 pub(crate) fn rotation_about(axis: usize, angle_deg: f64) -> Vec3 {
     let mut r = Vec3::ZERO;
-    match axis {
-        0 => r.x = angle_deg,
-        1 => r.y = angle_deg,
-        _ => r.z = angle_deg,
-    }
+    r.set(axis, angle_deg);
     r
 }
 

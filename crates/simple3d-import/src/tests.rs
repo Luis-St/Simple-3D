@@ -27,14 +27,20 @@ fn read_all(bytes: &[u8], named: Option<Format>) -> Result<Model, ImportError> {
     read_bytes(bytes, named, &mut no_progress())
 }
 
-/// What the exporter writes for `mesh` in `format`, in memory.
-fn exported(mesh: &Mesh, format: simple3d_export::Format) -> Vec<u8> {
+/// This thread's scratch directory, since the exporter writes to disk.
+fn temp_dir() -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-import-test-{}-{:?}",
         std::process::id(),
         std::thread::current().id()
     ));
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// What the exporter writes for `mesh` in `format`, in memory.
+fn exported(mesh: &Mesh, format: simple3d_export::Format) -> Vec<u8> {
+    let dir = temp_dir();
     let path = dir.join(format!("model.{}", format.id()));
     let options = simple3d_export::Options { format, ..Default::default() };
     simple3d_export::write(&path, mesh, &options, &mut no_progress()).unwrap();
@@ -43,12 +49,7 @@ fn exported(mesh: &Mesh, format: simple3d_export::Format) -> Vec<u8> {
 
 /// The same for several named bodies, which only 3MF keeps apart.
 fn exported_parts(parts: &[(&str, Mesh)], format: simple3d_export::Format) -> Vec<u8> {
-    let dir = std::env::temp_dir().join(format!(
-        "simple3d-import-test-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = temp_dir();
     let path = dir.join(format!("parts.{}", format.id()));
     let borrowed: Vec<simple3d_export::Part<'_>> =
         parts.iter().map(|(name, mesh)| simple3d_export::Part { name, mesh }).collect();

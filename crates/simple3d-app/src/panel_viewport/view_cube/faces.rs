@@ -1,6 +1,7 @@
 //! The cube's faces, sorted and drawn.
 
 use crate::view::View;
+use simple3d_geom::aabb::box_corner;
 use simple3d_geom::Vec3;
 
 /// Order a face's corners around its centre, so the quad is not a bow tie.
@@ -13,13 +14,7 @@ pub(crate) fn sort_ring(mut points: Vec<egui::Pos2>, centre: egui::Pos2) -> Vec<
 }
 
 pub(crate) fn draw_box(painter: &egui::Painter, view: &View, lo: Vec3, hi: Vec3, colour: egui::Color32, width: f32) {
-    let corner = |i: usize| {
-        Vec3::new(
-            if i & 1 == 0 { lo.x } else { hi.x },
-            if i & 2 == 0 { lo.y } else { hi.y },
-            if i & 4 == 0 { lo.z } else { hi.z },
-        )
-    };
+    let corner = |i: usize| box_corner(lo, hi, i);
     const EDGES: [(usize, usize); 12] =
         [(0, 1), (1, 3), (3, 2), (2, 0), (4, 5), (5, 7), (7, 6), (6, 4), (0, 4), (1, 5), (2, 6), (3, 7)];
     for (a, b) in EDGES {

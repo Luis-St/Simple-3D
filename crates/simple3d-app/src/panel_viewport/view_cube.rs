@@ -5,6 +5,7 @@ pub(crate) use faces::*;
 
 use crate::app::{App, Status};
 use crate::theme::{self, token};
+use simple3d_geom::aabb::box_corner;
 use simple3d_geom::Vec3;
 
 /// The orientation cube's id, fixed so it is stable and tests can click it.
@@ -117,13 +118,7 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
     let (yaw, pitch) = cube_angles(app);
 
     let project = |v: Vec3| crate::view::cube_project(yaw, pitch, v, reach);
-    let corner = |i: usize| {
-        Vec3::new(
-            if i & 1 == 0 { -1.0 } else { 1.0 },
-            if i & 2 == 0 { -1.0 } else { 1.0 },
-            if i & 4 == 0 { -1.0 } else { 1.0 },
-        )
-    };
+    let corner = |i: usize| box_corner(Vec3::splat(-1.0), Vec3::splat(1.0), i);
     let at_zone = |zone: [i32; 3]| centre + project(Vec3::new(zone[0] as f64, zone[1] as f64, zone[2] as f64)).0;
 
     let hovered_face = hit
@@ -153,10 +148,8 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
         // The face as a quad: the four cube corners sharing this normal.
         let axis = normal.iter().position(|c| *c != 0).unwrap_or(0);
         let sign = normal[axis] as f64;
-        let quad: Vec<egui::Pos2> = (0..8)
-            .filter(|i| crate::gizmo::get_axis(corner(*i), axis) * sign > 0.0)
-            .map(|i| centre + project(corner(i)).0)
-            .collect();
+        let quad: Vec<egui::Pos2> =
+            (0..8).filter(|i| corner(*i).get(axis) * sign > 0.0).map(|i| centre + project(corner(i)).0).collect();
         let quad = sort_ring(quad, at);
         let tint = crate::theme::axis_colour(axis);
         let fill = if hovered_face == Some(index) {

@@ -3,15 +3,6 @@
 use crate::app::{App, Status};
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 use simple3d_core::scene::NodeId;
-use simple3d_geom::Vec3;
-
-pub(crate) fn component(v: Vec3, axis: usize) -> f64 {
-    crate::gizmo::get_axis(v, axis)
-}
-
-pub(crate) fn set_component(v: &mut Vec3, axis: usize, value: f64) {
-    crate::gizmo::set_axis(v, axis, value);
-}
 
 pub(crate) fn set_param(app: &mut App, id: NodeId, key: &str, value: ParamValue) {
     if let Some(params) = app.scene.get_mut(id).and_then(|n| n.params_mut()) {

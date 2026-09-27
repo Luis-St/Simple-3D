@@ -15,6 +15,7 @@ use crate::view::View;
 use eframe::glow::{self, HasContext};
 use simple3d_core::config::DisplayMode;
 use simple3d_core::xform::Xform;
+use simple3d_geom::aabb::box_corner;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
@@ -459,12 +460,7 @@ impl Resident {
         let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
         let mut hi = -lo;
         for corner in 0..8 {
-            let local = Vec3::new(
-                if corner & 1 == 0 { self.lo.x } else { self.hi.x },
-                if corner & 2 == 0 { self.lo.y } else { self.hi.y },
-                if corner & 4 == 0 { self.lo.z } else { self.hi.z },
-            );
-            let world = placing.xform.point(self.origin + local);
+            let world = placing.xform.point(self.origin + box_corner(self.lo, self.hi, corner));
             lo = lo.min(world);
             hi = hi.max(world);
         }
@@ -476,10 +472,7 @@ impl Resident {
         let [_, _, key] = self.rows(view, placing);
         let (lo, hi, xform) = (self.lo, self.hi, placing.xform);
         (0..8).map(move |corner| {
-            let x = if corner & 1 == 0 { lo.x } else { hi.x };
-            let y = if corner & 2 == 0 { lo.y } else { hi.y };
-            let z = if corner & 4 == 0 { lo.z } else { hi.z };
-            let p = xform.vector(Vec3::new(x, y, z));
+            let p = xform.vector(box_corner(lo, hi, corner));
             key[0] * p.x as f32 + key[1] * p.y as f32 + key[2] * p.z as f32 + key[3]
         })
     }
@@ -489,13 +482,7 @@ impl Resident {
     pub(super) fn cap_polygon(&self, plane: &Plane, placing: &Placing) -> Vec<Vec3> {
         let margin = Vec3::new(1.0, 1.0, 1.0) * (self.extent() * 1e-3 + 1e-6);
         let (lo, hi) = (self.origin + self.lo - margin, self.origin + self.hi + margin);
-        let corner = |index: usize| {
-            placing.xform.point(Vec3::new(
-                if index & 1 == 0 { lo.x } else { hi.x },
-                if index & 2 == 0 { lo.y } else { hi.y },
-                if index & 4 == 0 { lo.z } else { hi.z },
-            ))
-        };
+        let corner = |index: usize| placing.xform.point(box_corner(lo, hi, index));
         let mut points: Vec<Vec3> = Vec::new();
         for a in 0..8 {
             for bit in [1, 2, 4] {
@@ -558,14 +545,7 @@ unsafe fn table(
     let rows = count.div_ceil(width).max(1);
     let texture = gl.create_texture()?;
     gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-    for (name, value) in [
-        (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-        (glow::TEXTURE_MAG_FILTER, glow::NEAREST),
-        (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-        (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-    ] {
-        gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-    }
+    clamp_texture(gl, glow::NEAREST, glow::NEAREST);
     gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
     let upload_width = if rows == 1 { count.max(1) } else { width };
     gl.tex_image_2d(
@@ -721,13 +701,9 @@ impl Gpu {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
             set_projection(gl, program, resident, view, section, &draw.placing);
-            if let Some(at) = program.at("u_base") {
-                gl.uniform_4_f32_slice(Some(at), &draw.base.map(|c| c as f32));
-            }
+            set4(gl, program, "u_base", &draw.base.map(|c| c as f32));
             set_i32(gl, program, "u_mode", draw.mode);
-            if let Some(at) = program.at("u_tag_base") {
-                gl.uniform_1_u32(Some(at), draw.tag_base as u32);
-            }
+            set_u32(gl, program, "u_tag_base", draw.tag_base as u32);
             set_i32(gl, program, "u_painted", resident.paint.is_some() as i32);
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, resident.paint);
@@ -772,16 +748,10 @@ impl Gpu {
                 continue;
             }
             set_projection(gl, program, resident, view, section, &draw.placing);
-            if let Some(at) = program.at("u_colour") {
-                gl.uniform_4_f32_slice(Some(at), &as_float(draw.colour));
-            }
-            if let Some(at) = program.at("u_bias") {
-                gl.uniform_1_f32(Some(at), draw.bias);
-            }
+            set4(gl, program, "u_colour", &as_float(draw.colour));
+            set_f32(gl, program, "u_bias", draw.bias);
             set_i32(gl, program, "u_tagged", draw.tag_base.is_some() as i32);
-            if let Some(at) = program.at("u_tag_base") {
-                gl.uniform_1_u32(Some(at), draw.tag_base.unwrap_or(0) as u32);
-            }
+            set_u32(gl, program, "u_tag_base", draw.tag_base.unwrap_or(0) as u32);
             gl.bind_vertex_array(Some(edges.array));
             gl.draw_elements(glow::LINES, edges.count, glow::UNSIGNED_INT, 0);
         }
@@ -809,15 +779,9 @@ impl Gpu {
         set2(gl, program, "u_depth", depth);
         set_forward(gl, program, view);
         set_i32(gl, program, "u_table_width", self.table_width as i32);
-        if let Some(at) = program.at("u_edge_on") {
-            gl.uniform_1_f32(Some(at), EDGE_ON as f32);
-        }
-        if let Some(at) = program.at("u_crease") {
-            gl.uniform_1_f32(Some(at), SELECTION_CREASE.to_radians().cos() as f32);
-        }
-        if let Some(at) = program.at("u_bias") {
-            gl.uniform_1_f32(Some(at), SELECTION_BIAS);
-        }
+        set_f32(gl, program, "u_edge_on", EDGE_ON as f32);
+        set_f32(gl, program, "u_crease", SELECTION_CREASE.to_radians().cos() as f32);
+        set_f32(gl, program, "u_bias", SELECTION_BIAS);
         for (unit, name) in ["u_positions", "u_triangles", "u_bodies"].into_iter().enumerate() {
             set_i32(gl, program, name, unit as i32);
         }
@@ -828,12 +792,8 @@ impl Gpu {
                 continue;
             }
             set_projection(gl, program, resident, view, section, &draw.placing);
-            if let Some(at) = program.at("u_colour") {
-                gl.uniform_4_f32_slice(Some(at), &as_float(draw.colour));
-            }
-            if let Some(at) = program.at("u_tag_base") {
-                gl.uniform_1_u32(Some(at), draw.tag_base as u32);
-            }
+            set4(gl, program, "u_colour", &as_float(draw.colour));
+            set_u32(gl, program, "u_tag_base", draw.tag_base as u32);
             set_i32(gl, program, "u_all_creases", draw.all_creases as i32);
             for (unit, texture) in [tables.positions, tables.triangles, tables.bodies].into_iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
@@ -868,9 +828,7 @@ impl Gpu {
         gl.enable(glow::CLIP_DISTANCE0);
         set2(gl, program, "u_viewport", viewport);
         set2(gl, program, "u_depth", depth);
-        if let Some(at) = program.at("u_bias") {
-            gl.uniform_1_f32(Some(at), MARK_BIAS);
-        }
+        set_f32(gl, program, "u_bias", MARK_BIAS);
         for draw in draws {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
@@ -880,17 +838,11 @@ impl Gpu {
                 draw.planes.iter().map(|(plane, _)| resident.plane(plane, &draw.placing)).collect();
             let colours: Vec<[f32; 4]> = draw.planes.iter().map(|&(_, colour)| as_float(colour)).collect();
             set_i32(gl, program, "u_planes", planes.len() as i32);
-            if let Some(at) = program.at("u_plane[0]") {
-                gl.uniform_4_f32_slice(Some(at), planes.as_flattened());
-            }
-            if let Some(at) = program.at("u_plane_colour[0]") {
-                gl.uniform_4_f32_slice(Some(at), colours.as_flattened());
-            }
+            set4(gl, program, "u_plane[0]", planes.as_flattened());
+            set4(gl, program, "u_plane_colour[0]", colours.as_flattened());
             // A few times the single-precision error of the largest number in play.
             let offset = planes.iter().fold(0.0_f64, |most, plane| most.max(plane[3].abs() as f64));
-            if let Some(at) = program.at("u_on_plane") {
-                gl.uniform_1_f32(Some(at), ((resident.extent() + offset) * 4e-7 + 1e-9) as f32);
-            }
+            set_f32(gl, program, "u_on_plane", ((resident.extent() + offset) * 4e-7 + 1e-9) as f32);
             gl.bind_vertex_array(Some(faces.array));
             gl.draw_elements(glow::TRIANGLES, faces.count, glow::UNSIGNED_INT, 0);
         }
@@ -938,9 +890,7 @@ impl Gpu {
             // Counted against the cap's whole face only: the window box and other sections trim
             // the cap afterwards.
             set_projection(gl, program, resident, view, &[], &cap.placing);
-            if let Some(at) = program.at("u_clip") {
-                gl.uniform_4_f32_slice(Some(at), &resident.clip(Some(cap.plane), &cap.placing));
-            }
+            set4(gl, program, "u_clip", &resident.clip(Some(cap.plane), &cap.placing));
             set_i32(gl, program, "u_mode", GHOST);
             set_i32(gl, program, "u_painted", 0);
             gl.bind_vertex_array(Some(faces.array));
@@ -976,18 +926,6 @@ impl Gpu {
     }
 }
 
-pub(super) unsafe fn set2(gl: &glow::Context, program: &Program, name: &str, value: [f32; 2]) {
-    if let Some(at) = program.at(name) {
-        gl.uniform_2_f32(Some(at), value[0], value[1]);
-    }
-}
-
-pub(super) unsafe fn set_i32(gl: &glow::Context, program: &Program, name: &str, value: i32) {
-    if let Some(at) = program.at(name) {
-        gl.uniform_1_i32(Some(at), value);
-    }
-}
-
 pub(super) unsafe fn set_forward(gl: &glow::Context, program: &Program, view: &View) {
     let forward = view.forward();
     if let Some(at) = program.at("u_forward") {
@@ -1005,14 +943,10 @@ pub(super) unsafe fn set_projection(
 ) {
     let rows = resident.rows(view, placing);
     for (name, row) in ["u_row_x", "u_row_y", "u_row_key"].into_iter().zip(rows) {
-        if let Some(at) = program.at(name) {
-            gl.uniform_4_f32_slice(Some(at), &row);
-        }
+        set4(gl, program, name, &row);
     }
     // Sections are tested per pixel (`BOX_COMMON`); the clip distance is only for the cap count pass.
-    if let Some(at) = program.at("u_clip") {
-        gl.uniform_4_f32_slice(Some(at), &resident.clip(None, placing));
-    }
+    set4(gl, program, "u_clip", &resident.clip(None, placing));
     if let Some(at) = program.at("u_cut_count") {
         let (counts, walls) = resident.cuts(section, placing);
         gl.uniform_1_i32(Some(at), counts.len() as i32);
@@ -1052,9 +986,7 @@ pub(super) unsafe fn set_within(
     if walls.is_empty() {
         return;
     }
-    if let Some(at) = program.at("u_within[0]") {
-        gl.uniform_4_f32_slice(Some(at), walls.as_flattened());
-    }
+    set4(gl, program, "u_within[0]", walls.as_flattened());
     if let Some(at) = program.at("u_cut_slack") {
         // A few times the single-precision error of the numbers in play, as for `u_on_plane`.
         let offset = walls.iter().fold(0.0_f64, |most, wall| most.max(wall[3].abs() as f64));

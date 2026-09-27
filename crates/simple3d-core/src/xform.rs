@@ -22,6 +22,15 @@ impl Default for Xform {
 }
 
 impl Xform {
+    /// Feed the exact bits of the matrix, row by row, then of the translation to `hasher`, for keys
+    /// that must change whenever the placement does.
+    pub fn hash_bits<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        use std::hash::Hash;
+        for number in self.m.as_flattened().iter().chain([self.t.x, self.t.y, self.t.z].iter()) {
+            number.to_bits().hash(hasher);
+        }
+    }
+
     pub const IDENTITY: Xform = Xform { m: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], t: Vec3::ZERO };
 
     pub fn from_translation(t: Vec3) -> Xform {

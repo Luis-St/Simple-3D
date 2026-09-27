@@ -2,6 +2,7 @@
 
 use super::ray::ray_triangle;
 use crate::render::map_in_order;
+use simple3d_geom::ray::ray_box;
 use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -91,7 +92,7 @@ impl Bvh {
         while let Some(at) = stack.pop() {
             let node = &self.nodes[at as usize];
             let limit = nearest.unwrap_or(f64::INFINITY);
-            if enters(origin, dir, node.lo, node.hi, limit).is_none() {
+            if ray_box(origin, dir, node.lo, node.hi, limit).is_none() {
                 continue;
             }
             if node.count > 0 {
@@ -108,8 +109,8 @@ impl Bvh {
             }
             // Push the nearer child last so it is visited first and shrinks the best hit sooner.
             let (left, right) = (node.first, node.first + 1);
-            let near_left = enters(origin, dir, self.nodes[left as usize].lo, self.nodes[left as usize].hi, limit);
-            let near_right = enters(origin, dir, self.nodes[right as usize].lo, self.nodes[right as usize].hi, limit);
+            let near_left = ray_box(origin, dir, self.nodes[left as usize].lo, self.nodes[left as usize].hi, limit);
+            let near_right = ray_box(origin, dir, self.nodes[right as usize].lo, self.nodes[right as usize].hi, limit);
             match (near_left, near_right) {
                 (Some(l), Some(r)) if l <= r => stack.extend([right, left]),
                 (Some(_), Some(_)) => stack.extend([left, right]),
@@ -192,42 +193,10 @@ fn grow(
     }
 }
 
-/// Where the ray enters the box, if before `limit`: `ray_box`'s slab test, clipped at the best hit.
-fn enters(origin: Vec3, dir: Vec3, lo: Vec3, hi: Vec3, limit: f64) -> Option<f64> {
-    let (mut near, mut far) = (0.0_f64, limit);
-    for axis in 0..3 {
-        let (o, d, l, h) = (component(origin, axis), component(dir, axis), component(lo, axis), component(hi, axis));
-        if d.abs() < 1e-12 {
-            if o < l || o > h {
-                return None;
-            }
-            continue;
-        }
-        let (mut a, mut b) = ((l - o) / d, (h - o) / d);
-        if a > b {
-            std::mem::swap(&mut a, &mut b);
-        }
-        near = near.max(a);
-        far = far.min(b);
-        if near > far {
-            return None;
-        }
-    }
-    Some(near)
-}
-
 /// An empty box, for a fold to grow from.
 fn empty() -> (Vec3, Vec3) {
     let (inf, neg) = (f64::INFINITY, f64::NEG_INFINITY);
     (Vec3::new(inf, inf, inf), Vec3::new(neg, neg, neg))
-}
-
-fn component(v: Vec3, axis: usize) -> f64 {
-    match axis {
-        0 => v.x,
-        1 => v.y,
-        _ => v.z,
-    }
 }
 
 /// The tree for a mesh, built on first cast and kept while the mesh lives.

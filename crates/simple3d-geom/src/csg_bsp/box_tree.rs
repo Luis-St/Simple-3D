@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::vec3::Vec3;
+use std::ops::ControlFlow;
 
 /// A BVH over one body's polygons, answering what the BSP answers badly: whether anything comes
 /// near a box (a convex body's chain proves nothing), and whether every polygon is behind a plane
@@ -29,6 +30,37 @@ pub(crate) enum BoxKind {
 pub(crate) const BOX_LEAF: usize = 4;
 
 impl BoxTree {
+    /// Walk the tree depth first, entering the nodes whose box `enter` accepts and handing every
+    /// polygon of an entered leaf to `leaf`, until `leaf` breaks. `stack` is reused across calls.
+    #[inline]
+    pub(super) fn visit(
+        &self,
+        stack: &mut Vec<u32>,
+        mut enter: impl FnMut(Vec3, Vec3) -> bool,
+        mut leaf: impl FnMut(u32) -> ControlFlow<()>,
+    ) -> ControlFlow<()> {
+        stack.clear();
+        stack.push(0);
+        while let Some(i) = stack.pop() {
+            let node = &self.nodes[i as usize];
+            if !enter(node.lo, node.hi) {
+                continue;
+            }
+            match node.kind {
+                BoxKind::Split(left, right) => {
+                    stack.push(left);
+                    stack.push(right);
+                }
+                BoxKind::Leaf(from, to) => {
+                    for &p in &self.order[from as usize..to as usize] {
+                        leaf(p)?;
+                    }
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
     pub(super) fn new(polygons: &[Polygon]) -> Option<BoxTree> {
         if polygons.is_empty() {
             return None;
@@ -62,11 +94,7 @@ impl BoxTree {
             let key = |i: u32| {
                 let b = boxes[i as usize];
                 let c = (b.0 + b.1) / 2.0;
-                match axis {
-                    0 => c.x,
-                    1 => c.y,
-                    _ => c.z,
-                }
+                c.get(axis)
             };
             let mid = from + (to - from) / 2;
             self.order[from..to].select_nth_unstable_by(mid - from, |&a, &b| key(a).total_cmp(&key(b)));

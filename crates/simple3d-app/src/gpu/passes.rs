@@ -1,4 +1,4 @@
-//! The frame's depth range, and the axis bias.
+//! The frame's depth range.
 
 /// Min and max depth key in the frame, widened by everything drawn, mapped onto the depth buffer.
 #[derive(Default)]
@@ -14,6 +14,3 @@ impl Passes {
         });
     }
 }
-
-/// The axis bias, matching `render.rs`.
-pub(crate) const AXIS_BIAS: f32 = -5.0e-4;

@@ -148,13 +148,7 @@ impl SectionView {
 
     /// The plane's normal: its axis turned by the tilt.
     pub fn normal(&self) -> Vec3 {
-        let mut axis = Vec3::ZERO;
-        match self.axis() {
-            0 => axis.x = 1.0,
-            1 => axis.y = 1.0,
-            _ => axis.z = 1.0,
-        }
-        axis.rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized()
+        Vec3::axis(self.axis()).rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized()
     }
 
     /// The middle of the model, or the origin for an empty scene.
@@ -196,15 +190,8 @@ impl SectionView {
             1 => (0, 2),
             _ => ((axis + 1) % 3, (axis + 2) % 3),
         };
-        let unit = |a: usize| {
-            let mut at = Vec3::ZERO;
-            match a {
-                0 => at.x = 1.0,
-                1 => at.y = 1.0,
-                _ => at.z = 1.0,
-            }
-            at.rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized()
-        };
+        let unit =
+            |a: usize| Vec3::axis(a).rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized();
         (unit(u), unit(v))
     }
 

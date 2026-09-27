@@ -4,18 +4,12 @@
 //! project file's schema. Per user, not per document, so nothing here is undoable.
 
 use crate::clipboard::Clip;
+use crate::named_files;
+pub use crate::named_files::{remove, sanitise, Entry};
 use std::io;
 use std::path::{Path, PathBuf};
 
 const DIRECTORY: &str = "library";
-const EXTENSION: &str = "json";
-
-/// One saved primitive: its name and file.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Entry {
-    pub name: String,
-    pub path: PathBuf,
-}
 
 pub fn dir(config_dir: &Path) -> PathBuf {
     config_dir.join(DIRECTORY)
@@ -23,34 +17,17 @@ pub fn dir(config_dir: &Path) -> PathBuf {
 
 /// Every saved primitive by name; unreadable files are skipped so the palette still draws.
 pub fn list(config_dir: &Path) -> Vec<Entry> {
-    let Ok(entries) = std::fs::read_dir(dir(config_dir)) else { return Vec::new() };
-    let mut out: Vec<Entry> = entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|e| e == EXTENSION))
-        .filter_map(|path| {
-            let name = path.file_stem()?.to_string_lossy().to_string();
-            Some(Entry { name, path })
-        })
-        .collect();
-    // Case-insensitive, so the list reads as one.
-    out.sort_by_key(|e| e.name.to_lowercase());
-    out
+    named_files::list(&dir(config_dir))
 }
 
 /// Whether a name is taken, so saving can warn before overwriting.
 pub fn exists(config_dir: &Path, name: &str) -> bool {
-    path_for(config_dir, name).exists()
+    named_files::path_for(&dir(config_dir), name).exists()
 }
 
 /// Write a clip to the library as `name`, replacing any same-named entry.
 pub fn save(config_dir: &Path, name: &str, clip: &Clip) -> io::Result<PathBuf> {
-    let name = sanitise(name);
-    if name.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "a saved primitive needs a name"));
-    }
-    std::fs::create_dir_all(dir(config_dir))?;
-    let path = path_for(config_dir, &name);
+    let path = named_files::prepare_save(&dir(config_dir), name, "saved primitive")?;
     std::fs::write(&path, clip.to_text())?;
     Ok(path)
 }
@@ -59,38 +36,12 @@ pub fn load(path: &Path) -> Option<Clip> {
     Clip::from_text(&std::fs::read_to_string(path).ok()?)
 }
 
-pub fn remove(path: &Path) -> io::Result<()> {
-    std::fs::remove_file(path)
-}
-
-fn path_for(config_dir: &Path, name: &str) -> PathBuf {
-    dir(config_dir).join(format!("{}.{EXTENSION}", sanitise(name)))
-}
-
-/// A name safe as a file name on every platform, since separators or reserved characters would
-/// misplace or lose the entry.
-pub fn sanitise(name: &str) -> String {
-    let cleaned: String =
-        name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
-    cleaned.trim().trim_matches('.').to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::clipboard;
     use crate::scene::Scene;
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "simple3d-library-test-{name}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
+    use crate::temp_dir;
 
     fn a_clip() -> (Scene, Clip) {
         let mut scene = Scene::new();

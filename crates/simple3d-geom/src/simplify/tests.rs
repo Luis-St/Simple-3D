@@ -3,6 +3,7 @@
 use super::*;
 use crate::primitives::{ellipsoid_mesh, plate_mesh};
 use crate::vec3::Vec3;
+use measure::point_to_triangle;
 
 fn sphere() -> Mesh {
     ellipsoid_mesh(20.0, 20.0, 20.0, 24)
@@ -26,33 +27,12 @@ fn exact_deviation(original: &Mesh, result: &Mesh) -> f64 {
                 .indices
                 .iter()
                 .map(|tri| {
-                    let points = tri.map(|v| result.positions[v as usize]);
+                    let points = result.corners(*tri);
                     point_to_triangle(p, points)
                 })
                 .fold(f64::MAX, f64::min)
         })
         .fold(0.0, f64::max)
-}
-
-fn point_to_triangle(p: Vec3, [a, b, c]: [Vec3; 3]) -> f64 {
-    let normal = (b - a).cross(c - a);
-    let area = normal.length();
-    if area > 0.0 {
-        let n = normal * (1.0 / area);
-        let on_plane = p - n * (p - a).dot(n);
-        if [(a, b), (b, c), (c, a)].iter().all(|&(from, to)| (to - from).cross(on_plane - from).dot(n) >= 0.0) {
-            return (p - on_plane).length();
-        }
-    }
-    [(a, b), (b, c), (c, a)]
-        .iter()
-        .map(|&(from, to)| {
-            let along = to - from;
-            let length = along.dot(along);
-            let t = if length > 0.0 { ((p - from).dot(along) / length).clamp(0.0, 1.0) } else { 0.0 };
-            (p - (from + along * t)).length()
-        })
-        .fold(f64::MAX, f64::min)
 }
 
 #[test]

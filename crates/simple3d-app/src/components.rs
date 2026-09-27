@@ -19,9 +19,8 @@ use simple3d_geom::Vec3;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// One component of a project, while it is not the one on screen.
-pub struct Component {
-    pub id: ComponentId,
+/// What `App` holds for the model on screen, lifted off it while that model is put away.
+pub struct ModelState {
     pub scene: Scene,
     pub history: History,
     pub saved_revision: u64,
@@ -30,14 +29,14 @@ pub struct Component {
     pub collapsed: HashSet<NodeId>,
     pub cursor: Option<Vec3>,
     pub frame_when_evaluated: bool,
+    /// The last evaluation, so returning to the model shows it at once.
     pub evaluated: Evaluated,
 }
 
-impl Component {
-    /// A component holding `scene`, never edited or saved.
-    pub fn new(id: ComponentId, scene: Scene) -> Component {
-        Component {
-            id,
+impl ModelState {
+    /// `scene`, never edited or saved.
+    pub fn new(scene: Scene) -> ModelState {
+        ModelState {
             scene,
             history: History::new(),
             saved_revision: 0,
@@ -52,6 +51,23 @@ impl Component {
 
     fn unsaved(&self) -> bool {
         self.history.revision() != self.saved_revision
+    }
+}
+
+/// One component of a project, while it is not the one on screen.
+pub struct Component {
+    pub id: ComponentId,
+    pub model: ModelState,
+}
+
+impl Component {
+    /// A component holding `scene`, never edited or saved.
+    pub fn new(id: ComponentId, scene: Scene) -> Component {
+        Component { id, model: ModelState::new(scene) }
+    }
+
+    fn unsaved(&self) -> bool {
+        self.model.unsaved()
     }
 }
 

@@ -7,19 +7,7 @@ pub fn format_number(value: f64, decimals: usize) -> String {
     if !value.is_finite() {
         return "0".to_string();
     }
-    let mut s = format!("{value:.decimals$}");
-    if s.contains('.') {
-        while s.ends_with('0') {
-            s.pop();
-        }
-        if s.ends_with('.') {
-            s.pop();
-        }
-    }
-    if s == "-0" {
-        s = "0".to_string();
-    }
-    s
+    simple3d_geom::number::trimmed(value, decimals)
 }
 
 /// Format a stored millimetre length in the display unit.

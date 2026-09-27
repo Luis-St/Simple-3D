@@ -40,12 +40,7 @@ pub(crate) fn geometry_snapping_is_asked_for_by_the_mode_and_the_held_key() {
 #[test]
 pub(crate) fn a_move_drag_snaps_a_body_onto_another_bodys_vertex() {
     // Dragging the near box towards a corner of the far one lands exactly on it (issue 68).
-    let mut app = app_in(temp_config_dir("snap-drag"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 0.0, 0.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-drag", Vec3::new(43.0, 0.0, 0.0));
     app.history.clear();
     app.reevaluate_for_test();
 
@@ -81,12 +76,7 @@ pub(crate) fn a_move_drag_snaps_a_body_onto_another_bodys_vertex() {
 #[test]
 pub(crate) fn a_snapped_plane_drag_stays_in_its_plane() {
     // A plane handle moves in its two axes and leaves the third alone.
-    let mut app = app_in(temp_config_dir("snap-plane"));
-    let root = app.scene.root();
-    let a = app.scene.add_primitive("box", root, 0).unwrap();
-    let b = app.scene.add_primitive("box", root, 1).unwrap();
-    app.scene.get_mut(b).unwrap().position = Vec3::new(43.0, 37.0, 25.0);
-    app.select_only(a);
+    let (mut app, a, b) = two_boxes("snap-plane", Vec3::new(43.0, 37.0, 25.0));
     app.history.clear();
     app.reevaluate_for_test();
     let (lo, hi) = app.evaluated.node_meshes[&b].bounds().unwrap();

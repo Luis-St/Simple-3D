@@ -70,10 +70,5 @@ fn landscape(nx: usize, ny: usize) -> Mesh {
 /// Enclosed volume by the divergence theorem; catches leftover interior faces or lost surface that a
 /// triangle count would not.
 fn volume(mesh: &Mesh) -> f64 {
-    let mut total = 0.0;
-    for t in &mesh.indices {
-        let (a, b, c) = (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
-        total += a.dot(b.cross(c)) / 6.0;
-    }
-    total
+    mesh.signed_volume()
 }

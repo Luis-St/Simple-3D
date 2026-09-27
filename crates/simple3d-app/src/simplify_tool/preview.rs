@@ -55,17 +55,9 @@ impl App {
         if tool.shown.as_ref().is_some_and(|shown| shown.plan == tool.plan) {
             return;
         }
-        match tool.job.as_ref() {
-            // One at a time: a scrub asks every frame, so the running job is stopped and the next frame
-            // starts the newest.
-            Some(job) if job.plan == tool.plan => return,
-            Some(job) => {
-                job.cancel();
-                return;
-            }
-            None => {}
+        if SimplifyJob::idle_for(tool.job.as_ref(), &tool.plan) {
+            tool.job = Some(SimplifyJob::start(tool.original.clone(), tool.plan));
         }
-        tool.job = Some(SimplifyJob::spawn(tool.original.clone(), tool.plan));
     }
 }
 

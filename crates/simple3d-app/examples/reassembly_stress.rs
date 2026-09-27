@@ -23,8 +23,10 @@
 //!
 //! usage: reassembly_stress [out.3mf]
 
+mod common;
+
 use simple3d_geom::primitives as gen;
-use simple3d_geom::{BooleanOp, Mesh, Vec3};
+use simple3d_geom::{Mesh, Vec3};
 use std::path::PathBuf;
 
 fn main() {
@@ -137,8 +139,8 @@ fn main() {
     odd(gen::octahedron_mesh(70.0, false), &mut put);
     odd(gen::dodecahedron_mesh(64.0, false), &mut put);
     odd(gen::icosahedron_mesh(64.0, false), &mut put);
-    odd(drilled(), &mut put);
-    odd(bracket(), &mut put);
+    odd(common::drilled(80.0, 16.0, 38.0), &mut put);
+    odd(common::bracket([24.0, 64.0, 74.0], [76.0, 64.0, 22.0], [-27.0, -26.0]), &mut put);
     // One vertex out of place, so the worst point rather than the average must decide.
     odd(dented(&gen::cylinder_mesh(60.0, 60.0, 70.0, 48), 1.4), &mut put);
     odd(dented(&gen::box_mesh(70.0, 50.0, 46.0), 1.1), &mut put);
@@ -191,34 +193,15 @@ fn main() {
         }
     }
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).expect("create the output directory");
+    if let Some(read) = common::write_and_read_back(&path, &model, bodies) {
+        report(&read, bodies);
     }
-    let options = simple3d_export::Options {
-        format: simple3d_export::Format::ThreeMf,
-        scale: 1.0,
-        unit: simple3d_export::Unit3mf::Millimeter,
-        allow_invalid: false,
-        // One object, so the import is one mesh node to reassemble.
-        bodies: simple3d_export::BodyMode::One,
-        compress: true,
-    };
-    let mut progress = |_: f32| true;
-    if let Err(e) = simple3d_export::write(&path, &model, &options, &mut progress) {
-        println!("FAILED {}: {e}", path.display());
-        return;
-    }
-    println!("wrote {} -- {bodies} bodies, {} triangles", path.display(), model.triangle_count());
-    report(&path, bodies);
 }
 
-/// Read the file back as the application does and reassemble it at the default settings and
-/// at a different cap and tolerance, printing what came out.
-fn report(path: &std::path::Path, bodies: usize) {
-    let mut progress = |_: f32| true;
-    let model = simple3d_import::read(path, &mut progress).expect("the file reads back");
-    println!("read back as {} object(s), {} triangles", model.parts.len(), model.triangle_count());
-    let mesh = model.merged();
+/// Reassemble what was read back at the default settings and at a different cap and tolerance,
+/// printing what came out.
+fn report(read: &simple3d_import::Model, bodies: usize) {
+    let mesh = read.merged();
     let default = simple3d_geom::reassemble::Reassemble::default();
     run("default", &mesh, &default, bodies);
     run("no cap", &mesh, &simple3d_geom::reassemble::Reassemble { max_objects: 4000, ..default }, bodies);
@@ -239,31 +222,8 @@ fn run(what: &str, mesh: &Mesh, plan: &simple3d_geom::reassemble::Reassemble, bo
         found.groups.iter().filter(|group| group.len() > 1).count(),
         found.rest_bodies
     );
-    let mut counted: Vec<(&str, usize)> = Vec::new();
-    for part in &found.parts {
-        match counted.iter_mut().find(|(label, _)| *label == part.shape.label()) {
-            Some((_, count)) => *count += 1,
-            None => counted.push((part.shape.label(), 1)),
-        }
-    }
-    counted.sort_by_key(|&(_, count)| std::cmp::Reverse(count));
-    let tally: Vec<String> = counted.iter().map(|(label, count)| format!("{count} {label}")).collect();
+    let tally: Vec<String> = common::tally(&found).iter().map(|(label, count)| format!("{count} {label}")).collect();
     println!("  {}", tally.join(", "));
-}
-
-/// A plate with a hole: every corner lies on its bounding box, so a corners-only measure would
-/// call it a solid box.
-fn drilled() -> Mesh {
-    let plate = gen::box_mesh(80.0, 80.0, 16.0);
-    let drill = gen::cylinder_mesh(38.0, 38.0, 40.0, 48);
-    simple3d_geom::evaluate_boolean(BooleanOp::Difference, &[plate, drill])
-}
-
-/// Two boxes welded into an L, which no single primitive describes.
-fn bracket() -> Mesh {
-    let upright = gen::box_mesh(24.0, 64.0, 74.0).translated(Vec3::new(-27.0, 0.0, 0.0));
-    let foot = gen::box_mesh(76.0, 64.0, 22.0).translated(Vec3::new(0.0, 0.0, -26.0));
-    simple3d_geom::evaluate_boolean(BooleanOp::Union, &[upright, foot])
 }
 
 /// The same body with one corner pushed `by` millimetres along X. Every copy moves, so the

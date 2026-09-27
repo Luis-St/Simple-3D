@@ -120,7 +120,7 @@ impl App {
                 self.saved_revision = self.history.revision();
                 self.project.saved_structure = self.project.structure_revision;
                 for component in &mut self.project.components {
-                    component.saved_revision = component.history.revision();
+                    component.model.saved_revision = component.model.history.revision();
                 }
                 self.settings.remember_recent(path);
                 self.status = Status::Info(format!("Saved {}", path.display()));

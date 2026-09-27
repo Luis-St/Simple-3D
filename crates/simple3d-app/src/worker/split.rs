@@ -1,12 +1,12 @@
 //! The split running on its own thread.
 
+use super::job::Task;
 use simple3d_core::scene::{NodeData, NodeId};
 use simple3d_geom::tiling::SplitPlan;
 use simple3d_geom::Mesh;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::mpsc::{Receiver, TryRecvError};
-use std::sync::{mpsc, Arc};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// A shape being cut into pieces (issue 82), on its own thread since it can be hundreds of
 /// booleans. It reports progress, can be stopped, and leaves the document untouched until it lands.
@@ -20,10 +20,8 @@ pub struct SplitJob {
     pub plan: SplitPlan,
     /// How many cells will be tried over every pass, for the progress bar.
     pub cells: usize,
-    pub(super) done: Arc<AtomicU32>,
-    pub(super) cancelled: Arc<AtomicBool>,
-    pub(super) result: Receiver<Option<Vec<Mesh>>>,
-    pub(super) started: Instant,
+    done: Arc<AtomicU32>,
+    task: Task<Option<Vec<Mesh>>>,
 }
 
 impl SplitJob {
@@ -32,24 +30,16 @@ impl SplitJob {
         // status line and runs evenly.
         let cells = mesh.bounds().map_or(0, |bounds| plan.work(bounds));
         let done = Arc::new(AtomicU32::new(0));
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel();
-
         let worker_done = done.clone();
-        let worker_cancelled = cancelled.clone();
         let plan_for_worker = plan.clone();
-        std::thread::Builder::new()
-            .name("simple3d-split".into())
-            .spawn(move || {
-                let report = || {
-                    worker_done.fetch_add(1, Ordering::Relaxed);
-                };
-                let give_up = || worker_cancelled.load(Ordering::Relaxed);
-                let _ = tx.send(simple3d_geom::tiling::cut_plan(&mesh, &plan_for_worker, &report, &give_up));
-            })
-            .expect("the platform can start a thread");
-
-        SplitJob { node, tab, before, plan, cells, done, cancelled, result: rx, started: Instant::now() }
+        let task = Task::spawn("simple3d-split", move |cancelled| {
+            let report = || {
+                worker_done.fetch_add(1, Ordering::Relaxed);
+            };
+            let give_up = || cancelled.load(Ordering::Relaxed);
+            simple3d_geom::tiling::cut_plan(&mesh, &plan_for_worker, &report, &give_up)
+        });
+        SplitJob { node, tab, before, plan, cells, done, task }
     }
 
     /// The fraction done: real progress, since cells are counted up front.
@@ -61,20 +51,15 @@ impl SplitJob {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+        self.task.cancel();
     }
 
     pub fn elapsed(&self) -> Duration {
-        self.started.elapsed()
+        self.task.elapsed()
     }
 
-    /// The pieces once cut; the inner `None` means stopped, with nothing to change.
+    /// The pieces once cut; the inner `None` means stopped, or a thread that died.
     pub fn poll(&self) -> Option<Option<Vec<Mesh>>> {
-        match self.result.try_recv() {
-            Ok(pieces) => Some(pieces),
-            Err(TryRecvError::Empty) => None,
-            // The thread died: nothing to change the document with.
-            Err(TryRecvError::Disconnected) => Some(None),
-        }
+        self.task.poll(|| None)
     }
 }

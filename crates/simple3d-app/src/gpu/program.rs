@@ -130,3 +130,46 @@ impl GroundBuffers {
         Ok(GroundBuffers { array, vertices })
     }
 }
+
+pub(super) unsafe fn set_f32(gl: &glow::Context, program: &Program, name: &str, value: f32) {
+    if let Some(at) = program.at(name) {
+        gl.uniform_1_f32(Some(at), value);
+    }
+}
+
+pub(super) unsafe fn set_i32(gl: &glow::Context, program: &Program, name: &str, value: i32) {
+    if let Some(at) = program.at(name) {
+        gl.uniform_1_i32(Some(at), value);
+    }
+}
+
+pub(super) unsafe fn set_u32(gl: &glow::Context, program: &Program, name: &str, value: u32) {
+    if let Some(at) = program.at(name) {
+        gl.uniform_1_u32(Some(at), value);
+    }
+}
+
+pub(super) unsafe fn set2(gl: &glow::Context, program: &Program, name: &str, value: [f32; 2]) {
+    if let Some(at) = program.at(name) {
+        gl.uniform_2_f32(Some(at), value[0], value[1]);
+    }
+}
+
+/// One `vec4`, or an array of them from its `[0]` element.
+pub(super) unsafe fn set4(gl: &glow::Context, program: &Program, name: &str, values: &[f32]) {
+    if let Some(at) = program.at(name) {
+        gl.uniform_4_f32_slice(Some(at), values);
+    }
+}
+
+/// Set the bound 2D texture to clamp at its edges, filtered by `min` and `mag`.
+pub(super) unsafe fn clamp_texture(gl: &glow::Context, min: u32, mag: u32) {
+    for (name, value) in [
+        (glow::TEXTURE_MIN_FILTER, min),
+        (glow::TEXTURE_MAG_FILTER, mag),
+        (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
+        (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
+    ] {
+        gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
+    }
+}

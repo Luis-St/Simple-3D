@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::app::App;
-use crate::panel_properties::{axis_row, component, field_row, named, room_left, scalar_field, Scalar, POINT};
-use crate::popup::{self, PopupEvent, PopupSpec};
+use crate::panel_properties::{axis_row, field_row, named, room_left, scalar_field, Scalar, POINT};
+use crate::popup::{PopupEvent, PopupSpec};
 use crate::theme;
 use crate::ui;
 use simple3d_core::keymap::Command;
@@ -18,7 +18,6 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     if !app.scene.settings.section.enabled {
         return;
     }
-    let bounds = app.viewport_rect;
     // A document may have fewer sections than the previous one.
     app.section_tab = app.section_tab.min(app.scene.settings.section_count() - 1);
     // Pin the centre of a plane from an older file, or enabled before there was a model.
@@ -26,15 +25,8 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     for index in 0..app.scene.settings.section_count() {
         app.scene.settings.section_at_mut(index).pin_centre(bounds_now);
     }
-    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
-    let mut placement = app.popups.remove(KEY).unwrap_or_default();
-    let event =
-        popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: "Section", width: WIDTH }, |ui| {
-            // Scrolls on short viewports rather than pushing the button off screen.
-            popup::scrolling_body(ui, bounds, |ui| body(app, ui));
-            popup::action_row(ui, |ui| actions(app, ui));
-        });
-    app.popups.insert(KEY, placement);
+    let spec = PopupSpec { key: KEY, title: "Section", width: WIDTH };
+    let event = app.tool_popup(ctx, spec, body, actions);
     // The cross turns the section off, like the row's button.
     if event == PopupEvent::Closed && app.scene.settings.section.enabled {
         app.run(Command::ToggleSection);
@@ -261,7 +253,7 @@ pub fn readout(app: &App) -> String {
 /// The model's middle along `axis`. Used when enabling, since offset zero may cut nothing.
 pub fn middle_of(bounds: Option<(Vec3, Vec3)>, axis: usize) -> f64 {
     match bounds {
-        Some((lo, hi)) => (component(lo, axis) + component(hi, axis)) * 0.5,
+        Some((lo, hi)) => (lo.get(axis) + hi.get(axis)) * 0.5,
         None => 0.0,
     }
 }

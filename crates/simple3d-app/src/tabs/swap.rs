@@ -2,8 +2,6 @@
 
 use super::*;
 use crate::app::App;
-use simple3d_core::scene::Scene;
-use simple3d_core::undo::History;
 
 impl App {
     pub fn tab_count(&self) -> usize {
@@ -29,33 +27,14 @@ impl App {
     pub(super) fn detach(&mut self) -> Document {
         // Undo the simplify preview first, or the tab would return holding an unaccepted result (issue 106).
         self.cancel_simplify_tool();
-        Document {
-            scene: std::mem::replace(&mut self.scene, Scene::new()),
-            history: std::mem::replace(&mut self.history, History::new()),
-            path: self.path.take(),
-            saved_revision: self.saved_revision,
-            selection: std::mem::take(&mut self.selection),
-            selection_anchor: self.selection_anchor.take(),
-            collapsed: std::mem::take(&mut self.collapsed),
-            cursor: self.cursor.take(),
-            frame_when_evaluated: self.frame_when_evaluated,
-            evaluated: std::mem::replace(&mut self.evaluated, empty_evaluation()),
-            project: std::mem::take(&mut self.project),
-        }
+        let model = self.take_model();
+        Document { model, path: self.path.take(), project: std::mem::take(&mut self.project) }
     }
 
     /// Make `doc` the document on screen, dropping half-done interactions that belonged to the previous one.
     pub(super) fn attach(&mut self, doc: Document) {
-        self.scene = doc.scene;
-        self.history = doc.history;
+        self.put_model(doc.model);
         self.path = doc.path;
-        self.saved_revision = doc.saved_revision;
-        self.selection = doc.selection;
-        self.selection_anchor = doc.selection_anchor;
-        self.collapsed = doc.collapsed;
-        self.cursor = doc.cursor;
-        self.frame_when_evaluated = doc.frame_when_evaluated;
-        self.evaluated = doc.evaluated;
         self.project = doc.project;
         self.relink_components();
         self.after_switch();

@@ -47,7 +47,7 @@ impl Grid {
             Grid { cell, lo, extent: ((0, 0, 0), (0, 0, 0)), buckets: HashMap::new(), everywhere: Vec::new() };
         grid.extent = (grid.cell_of(lo), grid.cell_of(hi));
         for (index, tri) in mesh.indices.iter().enumerate() {
-            let points = tri.map(|v| mesh.positions[v as usize]);
+            let points = mesh.corners(*tri);
             let (tlo, thi) = points.iter().fold((points[0], points[0]), |(lo, hi), &p| (lo.min(p), hi.max(p)));
             let (a, b) = (grid.cell_of(tlo), grid.cell_of(thi));
             if (b.0 - a.0).max(b.1 - a.1).max(b.2 - a.2) > SPAN {
@@ -75,7 +75,7 @@ impl Grid {
     fn distance(&self, mesh: &Mesh, p: Vec3) -> f64 {
         let mut best = f64::MAX;
         for &index in &self.everywhere {
-            best = best.min(point_to_triangle(p, tri_points(mesh, index)));
+            best = best.min(point_to_triangle(p, mesh.corners(mesh.indices[index as usize])));
         }
         let at = self.cell_of(p);
         let (lo, hi) = self.extent;
@@ -100,7 +100,7 @@ impl Grid {
                         }
                         let Some(bucket) = self.buckets.get(&(x, y, z)) else { continue };
                         for &index in bucket {
-                            best = best.min(point_to_triangle(p, tri_points(mesh, index)));
+                            best = best.min(point_to_triangle(p, mesh.corners(mesh.indices[index as usize])));
                         }
                     }
                 }
@@ -110,13 +110,9 @@ impl Grid {
     }
 }
 
-fn tri_points(mesh: &Mesh, index: u32) -> [Vec3; 3] {
-    mesh.indices[index as usize].map(|v| mesh.positions[v as usize])
-}
-
 /// The distance from a point to a triangle: to the face if the projection lands inside, else to
 /// the nearest edge.
-fn point_to_triangle(p: Vec3, tri: [Vec3; 3]) -> f64 {
+pub(super) fn point_to_triangle(p: Vec3, tri: [Vec3; 3]) -> f64 {
     let [a, b, c] = tri;
     let normal = (b - a).cross(c - a);
     let area = normal.length();

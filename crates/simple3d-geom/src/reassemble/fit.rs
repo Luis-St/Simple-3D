@@ -12,7 +12,7 @@ use crate::simplify::measure;
 
 /// Work out what one body is; an unrecognised body keeps its triangles.
 pub(super) fn part_of(body: &Mesh, plan: &Reassemble, give_up: Abandon<'_>) -> Option<Part> {
-    let bounds = bounds_of(&body.positions)?;
+    let bounds = crate::aabb::bounds_of(body.positions.iter().copied())?;
     let middle = (bounds.0 + bounds.1) * 0.5;
     let kept = |centre: Vec3, shape: Shape, rotation: Vec3, deviation: f64| Part {
         mesh: body.translated(-centre),
@@ -154,7 +154,7 @@ fn as_box(body: &Mesh, axis: Vec3, facings: &[frame::Facing]) -> Option<Fitted> 
         .map_or(Vec3::ZERO, |facing| facing.normal);
     let frame = frame::squared_to_world(Frame::new(axis, square));
     let local: Vec<Vec3> = body.positions.iter().map(|&p| frame.local(p)).collect();
-    let (lo, hi) = bounds_of(&local)?;
+    let (lo, hi) = crate::aabb::bounds_of(local.iter().copied())?;
     let size = hi - lo;
     (size.x > 0.0 && size.y > 0.0 && size.z > 0.0).then_some(Fitted {
         shape: Shape::Box { width: size.x, depth: size.y, height: size.z },
@@ -230,7 +230,7 @@ fn as_sphere(body: &Mesh, axis: Vec3) -> Option<Fitted> {
     }
     let frame = plain.turned(phase);
     let local: Vec<Vec3> = body.positions.iter().map(|&p| frame.local(p - centre)).collect();
-    let (lo, hi) = bounds_of(&local)?;
+    let (lo, hi) = crate::aabb::bounds_of(local.iter().copied())?;
     let size = hi - lo;
     (size.x > 0.0 && size.y > 0.0 && size.z > 0.0).then_some(Fitted {
         shape: Shape::Sphere { diameter_x: size.x, diameter_y: size.y, diameter_z: size.z, segments: sides },

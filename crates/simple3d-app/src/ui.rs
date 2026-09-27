@@ -17,6 +17,7 @@ pub use menu::{dialog_button, key_from_name, menu_entry, menu_label};
 mod chord;
 pub use chord::{keys_down, ChordHold};
 mod describe;
+pub(crate) use describe::plural;
 pub use describe::{describe_counts, describe_elapsed, describe_point, describe_size};
 #[cfg(test)]
 mod tests;

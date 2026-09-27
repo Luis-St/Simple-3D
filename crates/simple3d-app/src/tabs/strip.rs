@@ -91,22 +91,59 @@ fn tab(
     active: bool,
     carried: bool,
 ) -> (egui::Response, Option<Ask>) {
-    const MIN: f32 = 96.0;
-    const MAX: f32 = 220.0;
+    // Click to pick, drag to move between windows; egui tells them apart by travel.
+    let look = TabLook { min: 96.0, max: 220.0, closable: true, active, carried, sense: egui::Sense::click_and_drag() };
+    let (response, close) = paint_tab(ui, tab_id(index), name, unsaved, look);
+    let closed = close.is_some_and(|close| close.clicked());
+    let response =
+        response.on_hover_text(if unsaved { format!("{name} \u{2022} unsaved changes") } else { name.to_string() });
+
+    let hit = if closed || response.middle_clicked() {
+        Some(Ask::Close(index))
+    } else if response.drag_started() {
+        let pos = response.interact_pointer_pos().unwrap_or_else(|| response.rect.center());
+        Some(Ask::Drag(TabDrag { tab: index, whole_window: false, pos }))
+    } else if response.clicked() {
+        Some(Ask::Pick(index))
+    } else {
+        None
+    };
+    (response, hit)
+}
+
+/// How [`paint_tab`] draws a tab: its width range, whether it has a close cross, and its state.
+pub(crate) struct TabLook {
+    pub min: f32,
+    pub max: f32,
+    pub closable: bool,
+    pub active: bool,
+    /// Being dragged out of the row.
+    pub carried: bool,
+    pub sense: egui::Sense,
+}
+
+/// Paint a tab of a strip: the tab's response and, if closable, its close cross's.
+pub(crate) fn paint_tab(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    name: &str,
+    unsaved: bool,
+    look: TabLook,
+) -> (egui::Response, Option<egui::Response>) {
     const CLOSE: f32 = 16.0;
 
     let font = egui::FontId::proportional(theme::font::VALUE);
     let label = if unsaved { format!("{name} \u{2022}") } else { name.to_string() };
     let text_width = ui.fonts(|fonts| fonts.layout_no_wrap(label.clone(), font.clone(), token::TEXT_HI).size().x);
-    let width = (text_width + CLOSE + 24.0).clamp(MIN, MAX.min(ui.available_width().max(MIN)));
+    let room = if look.closable { CLOSE + 24.0 } else { 20.0 };
+    let width = (text_width + room).clamp(look.min, look.max.min(ui.available_width().max(look.min)));
     let height = ui.available_height();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    // Click to pick, drag to move between windows; egui tells them apart by travel.
-    let response = ui.interact(rect, tab_id(index), egui::Sense::click_and_drag());
+    let response = ui.interact(rect, id, look.sense);
 
-    let fill = if carried {
+    let fill = if look.carried {
         token::SURFACE_3
-    } else if active {
+    } else if look.active {
         token::SURFACE_0B
     } else if response.hovered() {
         token::SURFACE_2
@@ -114,7 +151,7 @@ fn tab(
         token::SURFACE_1
     };
     ui.painter().rect_filled(rect, 0.0, fill);
-    if active {
+    if look.active {
         // Lit top edge and no bottom rule: the active tab is part of the workspace.
         ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
     } else {
@@ -124,33 +161,24 @@ fn tab(
 
     let close_rect =
         egui::Rect::from_center_size(egui::pos2(rect.right() - 13.0, rect.center().y), egui::Vec2::splat(CLOSE));
-    let text_colour = if active { token::TEXT_HI } else { token::TEXT_LO };
+    let text_right = if look.closable { close_rect.left() } else { rect.right() - 4.0 };
+    let text_colour = if look.active { token::TEXT_HI } else { token::TEXT_LO };
     let mut job = egui::text::LayoutJob::simple_singleline(label, font, text_colour);
-    job.wrap.max_width = (close_rect.left() - rect.left() - 16.0).max(8.0);
+    job.wrap.max_width = (text_right - rect.left() - 16.0).max(8.0);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
     let galley = ui.fonts(|fonts| fonts.layout_job(job));
     ui.painter().galley(egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y * 0.5), galley, text_colour);
 
-    let close = ui.interact(close_rect, tab_id(index).with("close"), egui::Sense::click());
+    if !look.closable {
+        return (response, None);
+    }
+    let close = ui.interact(close_rect, id.with("close"), egui::Sense::click());
     if close.hovered() {
         ui.painter().rect_filled(close_rect, 3.0, token::SURFACE_3);
     }
     cross(ui.painter(), close_rect.center(), if close.hovered() { token::TEXT_HI } else { token::TEXT_LO });
-    let response =
-        response.on_hover_text(if unsaved { format!("{name} \u{2022} unsaved changes") } else { name.to_string() });
-
-    let hit = if close.clicked() || response.middle_clicked() {
-        Some(Ask::Close(index))
-    } else if response.drag_started() {
-        let pos = response.interact_pointer_pos().unwrap_or_else(|| rect.center());
-        Some(Ask::Drag(TabDrag { tab: index, whole_window: false, pos }))
-    } else if response.clicked() {
-        Some(Ask::Pick(index))
-    } else {
-        None
-    };
-    (response, hit)
+    (response, Some(close))
 }
 
 /// The tab's menu: sending a document to another window where drags cannot find it
@@ -220,11 +248,15 @@ pub(crate) fn plus(ui: &mut egui::Ui, hover: &str) -> bool {
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, token::SURFACE_2);
     }
-    let centre = rect.center();
-    let stroke = egui::Stroke::new(1.4_f32, colour);
-    ui.painter().hline(centre.x - 5.0..=centre.x + 5.0, centre.y, stroke);
-    ui.painter().vline(centre.x, centre.y - 5.0..=centre.y + 5.0, stroke);
+    plus_glyph(ui.painter(), rect.center(), colour);
     response.on_hover_text(hover).clicked()
+}
+
+/// The plus sign, painted like [`cross`].
+pub(crate) fn plus_glyph(painter: &egui::Painter, centre: egui::Pos2, colour: egui::Color32) {
+    let stroke = egui::Stroke::new(1.4_f32, colour);
+    painter.hline(centre.x - 5.0..=centre.x + 5.0, centre.y, stroke);
+    painter.vline(centre.x, centre.y - 5.0..=centre.y + 5.0, stroke);
 }
 
 /// The close cross, painted so it does not depend on the font and sits centred.

@@ -5,20 +5,6 @@ use simple3d_core::pattern;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 use simple3d_geom::Vec3;
 
-/// An app with the tool open on a pattern of the starting shape, started from a linear run.
-fn with_rule() -> (App, simple3d_core::scene::NodeId) {
-    let mut app = headless_app();
-    app.open_pattern_tool();
-    let pattern = app.pattern_tool.expect("the tool opened on a pattern");
-    app.start_rule_from(pattern, 0);
-    app.reevaluate_for_test();
-    (app, pattern)
-}
-
-fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primitive::Params {
-    app.scene.node(id).params().cloned().expect("a pattern has parameters")
-}
-
 /// A new stage is the next thing the rule lacks (a run along a free axis, clear of the shape),
 /// not its slot's old contents. After a blank rule, "Add a stage" used to look like it did nothing.
 #[test]

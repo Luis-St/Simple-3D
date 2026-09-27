@@ -19,7 +19,7 @@ impl Drag {
     /// The node's extent along an own axis in world millimetres at drag start. Converted back to a
     /// dimension or factor only in `size_axis`.
     pub(super) fn start_extent(&self, axis: usize) -> f64 {
-        let local = get_axis(self.start_local_hi, axis) - get_axis(self.start_local_lo, axis);
+        let local = self.start_local_hi.get(axis) - self.start_local_lo.get(axis);
         local * self.gizmo.axis_scale[axis]
     }
 }
@@ -57,8 +57,8 @@ impl Drag {
             }
             let factor = target_extent / start_extent;
             let mut scale = self.start_scale;
-            let grown = (get_axis(self.start_scale, axis) * factor).max(Node::MIN_SCALE);
-            set_axis(&mut scale, axis, grown);
+            let grown = (self.start_scale.get(axis) * factor).max(Node::MIN_SCALE);
+            scale.set(axis, grown);
             scene.get_mut(self.node)?.scale = scale;
         } else {
             let driver = self.drivable(axis)?;
@@ -75,10 +75,10 @@ impl Drag {
             node.position = self.start_position;
         } else {
             // `position` is in the parent's frame, so divide the world change by the ancestors' scale alone.
-            let ancestor = (self.gizmo.axis_scale[axis] / get_axis(self.start_scale, axis)).max(1e-9);
+            let ancestor = (self.gizmo.axis_scale[axis] / self.start_scale.get(axis)).max(1e-9);
             let change = (target_extent - start_extent) / ancestor;
             let mut local_shift = Vec3::ZERO;
-            set_axis(&mut local_shift, axis, change / 2.0 * if positive { 1.0 } else { -1.0 });
+            local_shift.set(axis, change / 2.0 * if positive { 1.0 } else { -1.0 });
             let parent_shift = Xform::from_pos_rot(Vec3::ZERO, self.start_rotation).vector(local_shift);
             node.position = self.start_position + parent_shift;
         }

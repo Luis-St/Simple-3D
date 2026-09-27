@@ -70,11 +70,7 @@ pub fn apply_grip(params: &mut Params, grip: &Grip, value: f64) {
                 let dir = if length > 1e-9 { step * (1.0 / length) } else { unit(0) };
                 let scaled = dir * v;
                 for (axis, key) in keys.iter().enumerate() {
-                    let component = match axis {
-                        0 => scaled.x,
-                        1 => scaled.y,
-                        _ => scaled.z,
-                    };
+                    let component = scaled.get(axis);
                     params.insert((*key).to_string(), ParamValue::Length(component));
                 }
             } else {

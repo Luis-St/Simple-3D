@@ -1,21 +1,8 @@
 //! Several variations per stage, building up or repeating, and migration of older rules (issue 79).
 
 use super::*;
-use crate::primitive::{ParamValue, Params};
+use crate::primitive::ParamValue;
 use simple3d_geom::Vec3;
-
-fn near(a: Vec3, b: Vec3) -> bool {
-    (a - b).length() < 1e-9
-}
-
-fn rule(stages: &[Stage]) -> Params {
-    let mut params = with(&[("kind", ParamValue::Choice(CUSTOM))]);
-    for (index, stage) in stages.iter().enumerate() {
-        set_stage(&mut params, index, stage);
-    }
-    params.insert("stages".to_string(), ParamValue::Count(stages.len() as u32));
-    params
-}
 
 /// The angle copy `copy` is turned to about Z, in degrees.
 fn turned_to(copy: &Instance) -> f64 {

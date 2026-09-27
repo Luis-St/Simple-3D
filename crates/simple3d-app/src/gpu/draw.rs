@@ -40,24 +40,16 @@ impl Gpu {
         gl.use_program(Some(self.background.program));
         let top = request.palette.background_at(0, height);
         let bottom = request.palette.background_at(height.saturating_sub(1), height);
-        if let Some(at) = self.background.at("u_top") {
-            gl.uniform_4_f32_slice(Some(at), &as_float(top));
-        }
-        if let Some(at) = self.background.at("u_bottom") {
-            gl.uniform_4_f32_slice(Some(at), &as_float(bottom));
-        }
+        set4(&gl, &self.background, "u_top", &as_float(top));
+        set4(&gl, &self.background, "u_bottom", &as_float(bottom));
         gl.bind_vertex_array(Some(self.buffer.array));
         gl.draw_arrays(glow::TRIANGLES, 0, 3);
 
         gl.enable(glow::DEPTH_TEST);
         gl.depth_func(glow::LESS);
         gl.use_program(Some(self.solid.program));
-        if let Some(at) = self.solid.at("u_viewport") {
-            gl.uniform_2_f32(Some(at), width as f32, height as f32);
-        }
-        if let Some(at) = self.solid.at("u_depth") {
-            gl.uniform_2_f32(Some(at), offset, scale);
-        }
+        set2(&gl, &self.solid, "u_viewport", [width as f32, height as f32]);
+        set2(&gl, &self.solid, "u_depth", [offset, scale]);
 
         let (view, section) = (&request.view, &request.section[..]);
         let viewport = [width as f32, height as f32];

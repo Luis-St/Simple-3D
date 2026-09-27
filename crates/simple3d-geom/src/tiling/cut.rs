@@ -36,8 +36,7 @@ pub(crate) fn cut_within(
         .indices
         .iter()
         .map(|t| {
-            let (a, b, c) =
-                (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
+            let [a, b, c] = mesh.corners(*t);
             (a.min(b).min(c), a.max(b).max(c))
         })
         .collect();
@@ -104,26 +103,8 @@ pub(crate) fn inside(mesh: &Mesh, point: Vec3) -> bool {
     let dir = Vec3::new(0.5773502691896258, 0.3313, 0.7443).normalized();
     let mut crossings = 0;
     for tri in &mesh.indices {
-        let (a, b, c) =
-            (mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]);
-        let (e1, e2) = (b - a, c - a);
-        let h = dir.cross(e2);
-        let det = e1.dot(h);
-        if det.abs() < 1e-12 {
-            continue;
-        }
-        let inv = 1.0 / det;
-        let s = point - a;
-        let u = s.dot(h) * inv;
-        if !(0.0..=1.0).contains(&u) {
-            continue;
-        }
-        let q = s.cross(e1);
-        let v = dir.dot(q) * inv;
-        if v < 0.0 || u + v > 1.0 {
-            continue;
-        }
-        if e2.dot(q) * inv > 1e-9 {
+        let [a, b, c] = mesh.corners(*tri);
+        if crate::ray::line_triangle(point, dir, [a, b, c], 0.0).is_some_and(|t| t > 1e-9) {
             crossings += 1;
         }
     }
@@ -132,14 +113,5 @@ pub(crate) fn inside(mesh: &Mesh, point: Vec3) -> bool {
 
 /// The volume a closed mesh encloses, from signed tetrahedra to the origin.
 pub(crate) fn volume(mesh: &Mesh) -> f64 {
-    let sum: f64 = mesh
-        .indices
-        .iter()
-        .map(|t| {
-            let (a, b, c) =
-                (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
-            a.dot(b.cross(c))
-        })
-        .sum();
-    (sum / 6.0).abs()
+    mesh.signed_volume().abs()
 }

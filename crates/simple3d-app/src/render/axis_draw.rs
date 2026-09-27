@@ -10,7 +10,7 @@ use simple3d_geom::Vec3;
 /// passes through the origin, so the plane test reduces to one number; an axis lying in the plane
 /// is kept or removed whole.
 pub(crate) fn trim_span(span: (f64, f64), axis: usize, plane: &Plane) -> Option<(f64, f64)> {
-    let slope = component(plane.normal, axis);
+    let slope = plane.normal.get(axis);
     let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
     let (lo, hi) = if slope > 1e-12 {
         (lo, hi.min(plane.offset / slope))
@@ -35,7 +35,7 @@ pub(crate) fn trim_spans(span: (f64, f64), axis: usize, cuts: &[Plane]) -> Vec<(
     let along = [Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)][axis.min(2)];
     simple3d_geom::section::kept_by_all(cuts, along * lo, along * hi)
         .iter()
-        .map(|&(a, b)| (component(a, axis), component(b, axis)))
+        .map(|&(a, b)| (a.get(axis), b.get(axis)))
         .filter(|(a, b)| b - a > 1e-9)
         .collect()
 }
@@ -60,7 +60,7 @@ pub(crate) fn push_axis_line(
     tags: usize,
 ) {
     // Positive when travelling along +axis moves away from the eye.
-    let away = component(view.forward(), axis);
+    let away = view.forward().get(axis);
     let extents = body_extents(through, tags);
     let mut seen = vec![false; tags + 1];
     for step in 0..FADE_STEPS {
@@ -74,7 +74,7 @@ pub(crate) fn push_axis_line(
             continue;
         }
         let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
-        for (from, to, material) in clip_spans(component(a, axis), component(b, axis), inside) {
+        for (from, to, material) in clip_spans(a.get(axis), b.get(axis), inside) {
             if material {
                 continue;
             }

@@ -64,8 +64,8 @@ pub(crate) fn scrub_transform(
     for target in targets {
         let Some(node) = app.scene.get_mut(*target) else { continue };
         let mut v = if rotation { node.rotation } else { node.position };
-        let next = crate::gizmo::get_axis(v, axis) + delta;
-        set_component(&mut v, axis, if rotation { wrap_degrees(next) } else { next });
+        let next = v.get(axis) + delta;
+        v.set(axis, if rotation { wrap_degrees(next) } else { next });
         if rotation {
             node.rotation = v;
         } else {
@@ -84,8 +84,8 @@ pub(crate) fn scrub_scale(app: &mut App, targets: &[NodeId], axis: usize, delta:
     for target in targets {
         let Some(node) = app.scene.get_mut(*target) else { continue };
         let mut s = Node::sane_scale(node.scale);
-        let next = (crate::gizmo::get_axis(s, axis) + delta).max(Node::MIN_SCALE);
-        set_component(&mut s, axis, next);
+        let next = (s.get(axis) + delta).max(Node::MIN_SCALE);
+        s.set(axis, next);
         node.scale = s;
     }
     app.touch();

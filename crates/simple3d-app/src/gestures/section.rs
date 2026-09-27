@@ -28,7 +28,7 @@ pub(crate) fn every_edge_grip_slides_the_section_plane() {
 
     let axis = harness.state().scene.settings.section.axis();
     let mut along = Vec3::ZERO;
-    crate::panel_properties::set_component(&mut along, axis, 1.0);
+    along.set(axis, 1.0);
 
     for index in 0..4 {
         let at = section_grips(&harness)[index];
@@ -59,7 +59,7 @@ pub(crate) fn the_grip_in_the_middle_slides_the_plane_too() {
     let view = harness.state().current_view();
     let axis = harness.state().scene.settings.section.axis();
     let mut along = Vec3::ZERO;
-    crate::panel_properties::set_component(&mut along, axis, 1.0);
+    along.set(axis, 1.0);
     let travel = crate::panel_viewport::screen_direction(&view, harness.state().scene.camera.target, along);
     let before = harness.state().scene.settings.section.offset;
 

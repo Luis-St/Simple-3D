@@ -109,8 +109,7 @@ pub(super) struct Facing {
 pub(super) fn facings(mesh: &Mesh) -> Vec<Facing> {
     let mut found: Vec<Facing> = Vec::new();
     for tri in &mesh.indices {
-        let (a, b, c) =
-            (mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]);
+        let [a, b, c] = mesh.corners(*tri);
         let cross = (b - a).cross(c - a);
         let area = cross.length() / 2.0;
         if area <= 0.0 {
@@ -208,7 +207,7 @@ fn pole_axis(mesh: &Mesh) -> Option<Vec3> {
     if busiest < 8 {
         return None;
     }
-    let centre = bounds_of(&mesh.positions).map(|(lo, hi)| (lo + hi) * 0.5)?;
+    let centre = crate::aabb::bounds_of(mesh.positions.iter().copied()).map(|(lo, hi)| (lo + hi) * 0.5)?;
     let poles: Vec<Vec3> =
         (0..mesh.positions.len()).filter(|&v| meeting[v] == busiest).map(|v| mesh.positions[v] - centre).collect();
     // Exactly two, opposite: one is a cone's apex (already found), three is irregular.

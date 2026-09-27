@@ -122,15 +122,15 @@ pub(crate) fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
     let step = nudge_step(&gizmo, &f.view, Command::NudgeUp, 2.5, 15.0).expect("a nudge command");
     let Nudge::Rotate { axis, degrees } = step else { panic!("rotate mode gave {step:?}") };
     assert_eq!(degrees.abs(), 15.0, "rotate did not step by the rotation snap");
-    let before = get_axis(f.scene.node(f.node).rotation, axis);
+    let before = f.scene.node(f.node).rotation.get(axis);
     step.apply(&gizmo, &mut f.scene, f.node);
-    assert!((get_axis(f.scene.node(f.node).rotation, axis) - (before + degrees)).abs() < 1e-9);
+    assert!((f.scene.node(f.node).rotation.get(axis) - (before + degrees)).abs() < 1e-9);
 
     // A fresh box, since the rotation above would skew the world bounds.
     let mut f = Fixture::new("box");
     let gizmo = f.gizmo(Mode::Resize);
     let (axis, _) = nudge_axis(&gizmo, &f.view, Command::NudgeRight).unwrap();
-    let extent = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
+    let extent = gizmo.local_hi.get(axis) - gizmo.local_lo.get(axis);
     let step = nudge_step(&gizmo, &f.view, Command::NudgeRight, 2.5, 15.0).expect("a nudge command");
     let Nudge::Resize { extent: target, driver, .. } = step else { panic!("resize mode gave {step:?}") };
     assert!((target - (extent + 2.5)).abs() < 1e-9, "resize did not step by the scene step");
@@ -139,7 +139,7 @@ pub(crate) fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
     f.reevaluate();
     // The box is unrotated, so local axes are world axes.
     let (lo, hi) = f.world_bounds();
-    let measured = get_axis(hi, axis) - get_axis(lo, axis);
+    let measured = hi.get(axis) - lo.get(axis);
     assert!((measured - (extent + 2.5)).abs() < 1e-6, "the measured extent {measured} did not follow the nudge");
     // Criterion 24 holds for keys too: a dimension changed, not a scale.
     assert!((f.param(driver.param) - (before + 2.5 / driver.factor)).abs() < 1e-9, "resizing wrote no dimension");

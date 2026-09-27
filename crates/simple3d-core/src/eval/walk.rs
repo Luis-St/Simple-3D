@@ -81,22 +81,7 @@ impl Evaluator {
                 // The group's result, kept for the selection outline, in the parent's frame (`node_frames`) and
                 // sharing the cache's `Arc`.
                 out.group_meshes.insert(id, subtree.mesh.clone());
-                if let Some((lo, hi)) = subtree.mesh.bounds() {
-                    // The group's mesh is in its parent's frame, so undo the node's transform for its local box.
-                    let inv = Xform::from_pos_rot_scale(
-                        node.position,
-                        node.rotation,
-                        crate::scene::Node::sane_scale(node.scale),
-                    )
-                    .inverse();
-                    let (a, b) = (inv.point(lo), inv.point(hi));
-                    out.local_bounds.insert(id, (a.min(b), a.max(b)));
-                    // World bounds from the transformed points, not a transported box, which would overstate an
-                    // angled group's size.
-                    if let Some(bounds) = bounds_of(subtree.mesh.positions.iter().map(|&p| parent.point(p))) {
-                        out.world_bounds.insert(id, bounds);
-                    }
-                }
+                record_bounds(out, id, node, parent, &subtree.mesh);
                 for &child in &node.children {
                     self.walk(scene, child, shifted, out, cancel);
                 }
@@ -104,19 +89,7 @@ impl Evaluator {
             Body::Pattern { .. } => {
                 // Bounds like a group, over the whole repeated result.
                 let subtree = self.subtree(scene, id, cancel);
-                if let Some((lo, hi)) = subtree.mesh.bounds() {
-                    let inv = Xform::from_pos_rot_scale(
-                        node.position,
-                        node.rotation,
-                        crate::scene::Node::sane_scale(node.scale),
-                    )
-                    .inverse();
-                    let (a, b) = (inv.point(lo), inv.point(hi));
-                    out.local_bounds.insert(id, (a.min(b), a.max(b)));
-                    if let Some(bounds) = bounds_of(subtree.mesh.positions.iter().map(|&p| parent.point(p))) {
-                        out.world_bounds.insert(id, bounds);
-                    }
-                }
+                record_bounds(out, id, node, parent, &subtree.mesh);
                 // The whole repeated mesh is pickable, so clicking any copy selects the pattern.
                 let world = self.world_mesh(id, &subtree.mesh, parent, None);
                 out.meshes.insert(id, world);
@@ -125,5 +98,19 @@ impl Evaluator {
                 }
             }
         }
+    }
+}
+
+/// A group-like node's boxes from its combined `mesh`, which is in its parent's frame: the local box
+/// undoes the node's own transform, and the world box comes from the transformed points, since a
+/// transported box would overstate an angled group's size.
+fn record_bounds(out: &mut Collected, id: NodeId, node: &crate::scene::Node, parent: Xform, mesh: &Mesh) {
+    let Some((lo, hi)) = mesh.bounds() else { return };
+    let inv =
+        Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale)).inverse();
+    let (a, b) = (inv.point(lo), inv.point(hi));
+    out.local_bounds.insert(id, (a.min(b), a.max(b)));
+    if let Some(bounds) = bounds_of(mesh.positions.iter().map(|&p| parent.point(p))) {
+        out.world_bounds.insert(id, bounds);
     }
 }

@@ -117,16 +117,7 @@ pub(crate) struct Collected {
     pub(super) placements: BTreeMap<NodeId, Xform>,
 }
 
-pub(crate) fn bounds_of(points: impl Iterator<Item = Vec3>) -> Option<(Vec3, Vec3)> {
-    let mut bounds: Option<(Vec3, Vec3)> = None;
-    for p in points {
-        bounds = Some(match bounds {
-            Some((lo, hi)) => (lo.min(p), hi.max(p)),
-            None => (p, p),
-        });
-    }
-    bounds
-}
+pub(crate) use simple3d_geom::aabb::bounds_of;
 
 pub(crate) fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
     Mesh {

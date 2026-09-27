@@ -4,20 +4,6 @@ use super::*;
 use crate::primitive::{ParamValue, Params, ParamsExt};
 use simple3d_geom::Vec3;
 
-fn near(a: Vec3, b: Vec3) -> bool {
-    (a - b).length() < 1e-9
-}
-
-/// A rule of the given stages, and nothing else.
-fn rule(stages: &[Stage]) -> Params {
-    let mut params = with(&[("kind", ParamValue::Choice(CUSTOM))]);
-    for (index, stage) in stages.iter().enumerate() {
-        set_stage(&mut params, index, stage);
-    }
-    params.insert("stages".to_string(), ParamValue::Count(stages.len() as u32));
-    params
-}
-
 /// Planks from the issue: rows end to end, every other row offset by half a plank.
 #[test]
 pub(crate) fn a_shift_every_other_copy_staggers_the_rows() {

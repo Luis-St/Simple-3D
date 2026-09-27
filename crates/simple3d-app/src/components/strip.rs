@@ -3,6 +3,7 @@
 use super::*;
 use crate::app::App;
 use crate::icon::{self, Glyph};
+use crate::tabs::strip::{paint_tab, plus, plus_glyph, TabLook};
 use crate::theme::{self, metric, token};
 
 /// Whether the second row is drawn: only once a project in this window has a non-root component.
@@ -79,7 +80,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             for (id, name, unsaved) in &tabs {
                 tab(ui, *id, name, *unsaved, *id == active, &mut asked);
             }
-            if crate::tabs::strip::plus(ui, "New component") {
+            if plus(ui, "New component") {
                 asked = Some(Ask::New);
             }
             list(ui, &listed, &mut asked);
@@ -107,59 +108,10 @@ pub(crate) fn tab_id(id: ComponentId) -> egui::Id {
 
 /// One component's tab: like a document tab but quieter, closable except for the root.
 fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bool, asked: &mut Option<Ask>) {
-    const MIN: f32 = 80.0;
-    const MAX: f32 = 200.0;
-    const CLOSE: f32 = 16.0;
     let closable = id != ROOT_COMPONENT;
-
-    let font = egui::FontId::proportional(theme::font::VALUE);
-    let label = if unsaved { format!("{name} \u{2022}") } else { name.to_string() };
-    let text_width = ui.fonts(|fonts| fonts.layout_no_wrap(label.clone(), font.clone(), token::TEXT_HI).size().x);
-    let room = if closable { CLOSE + 24.0 } else { 20.0 };
-    let width = (text_width + room).clamp(MIN, MAX.min(ui.available_width().max(MIN)));
-    let height = ui.available_height();
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    let response = ui.interact(rect, tab_id(id), egui::Sense::click());
-
-    let fill = if active {
-        token::SURFACE_0B
-    } else if response.hovered() {
-        token::SURFACE_2
-    } else {
-        token::SURFACE_1
-    };
-    ui.painter().rect_filled(rect, 0.0, fill);
-    if active {
-        ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
-    } else {
-        ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, token::SURFACE_3));
-    }
-    ui.painter().vline(rect.right() - 0.5, rect.y_range(), egui::Stroke::new(1.0_f32, token::SURFACE_0));
-
-    let close_rect =
-        egui::Rect::from_center_size(egui::pos2(rect.right() - 13.0, rect.center().y), egui::Vec2::splat(CLOSE));
-    let text_right = if closable { close_rect.left() } else { rect.right() - 4.0 };
-    let text_colour = if active { token::TEXT_HI } else { token::TEXT_LO };
-    let mut job = egui::text::LayoutJob::simple_singleline(label, font, text_colour);
-    job.wrap.max_width = (text_right - rect.left() - 16.0).max(8.0);
-    job.wrap.max_rows = 1;
-    job.wrap.break_anywhere = true;
-    let galley = ui.fonts(|fonts| fonts.layout_job(job));
-    ui.painter().galley(egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y * 0.5), galley, text_colour);
-
-    let mut closed = false;
-    if closable {
-        let close = ui.interact(close_rect, tab_id(id).with("close"), egui::Sense::click());
-        if close.hovered() {
-            ui.painter().rect_filled(close_rect, 3.0, token::SURFACE_3);
-        }
-        crate::tabs::strip::cross(
-            ui.painter(),
-            close_rect.center(),
-            if close.hovered() { token::TEXT_HI } else { token::TEXT_LO },
-        );
-        closed = close.clicked() || response.middle_clicked();
-    }
+    let look = TabLook { min: 80.0, max: 200.0, closable, active, carried: false, sense: egui::Sense::click() };
+    let (response, close) = paint_tab(ui, tab_id(id), name, unsaved, look);
+    let closed = close.is_some_and(|close| close.clicked()) || (closable && response.middle_clicked());
     let hover = match (id == ROOT_COMPONENT, unsaved) {
         (true, _) => format!("{name}: the root component, which is the project itself"),
         (false, true) => format!("{name} \u{2022} unsaved changes"),
@@ -329,10 +281,7 @@ fn new_row(ui: &mut egui::Ui, width: f32) -> bool {
         painter.rect_filled(rect, egui::CornerRadius::same(3), token::SURFACE_3);
     }
     let colour = if response.hovered() { token::TEXT_HI } else { token::TEXT_LO };
-    let centre = egui::pos2(rect.left() + 16.0, rect.center().y);
-    let stroke = egui::Stroke::new(1.4_f32, colour);
-    painter.hline(centre.x - 5.0..=centre.x + 5.0, centre.y, stroke);
-    painter.vline(centre.x, centre.y - 5.0..=centre.y + 5.0, stroke);
+    plus_glyph(painter, egui::pos2(rect.left() + 16.0, rect.center().y), colour);
     painter.text(
         egui::pos2(rect.left() + 30.0, rect.center().y),
         egui::Align2::LEFT_CENTER,

@@ -27,7 +27,7 @@ impl App {
         let count = self.primitive_clip.as_ref().map(|c| c.nodes.len()).unwrap_or(0);
         ui.label(format!(
             "{count} node{} will be kept on the palette, ready to drop into any project.",
-            if count == 1 { "" } else { "s" }
+            crate::ui::plural(count)
         ));
         ui.add_space(6.0);
         ui.horizontal(|ui| {

@@ -30,7 +30,7 @@ pub(crate) fn tally(assembly: &Assembly) -> String {
         1 => ", in one group".to_string(),
         many => format!(", in {many} groups"),
     };
-    format!("{objects} object{}: {}{assemblies}", if objects == 1 { "" } else { "s" }, list(&kinds))
+    format!("{objects} object{}: {}{assemblies}", crate::ui::plural(objects), list(&kinds))
 }
 
 /// "a, b and c", as a sentence reads.

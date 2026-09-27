@@ -11,7 +11,6 @@ pub use body::features_of;
 mod axis;
 pub use axis::{axis_features, axis_lines};
 mod plane;
-pub(crate) use plane::*;
 pub use plane::{plane_crossing, plane_mark_lines, MARK_AXIS};
 mod nearest;
 pub use nearest::{near_on_screen, nearest_on_edge};

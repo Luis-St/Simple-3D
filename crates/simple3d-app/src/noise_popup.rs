@@ -7,7 +7,7 @@
 
 use crate::app::App;
 use crate::panel_properties::PATTERN_ROW;
-use crate::popup::{self, PopupEvent, PopupSpec};
+use crate::popup::{PopupEvent, PopupSpec};
 use crate::ui;
 use simple3d_core::scene::NodeId;
 
@@ -30,17 +30,10 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
         app.noise_popup = None;
     }
     let Some(id) = app.noise_popup else { return };
-    let bounds = app.viewport_rect;
     // Named, since the selection can move on while it is open.
     let title = format!("Noise for {}", app.scene.node(id).name);
-    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
-    let mut placement = app.popups.remove(KEY).unwrap_or_default();
-    let event = popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: &title, width: WIDTH }, |ui| {
-        // Scrolls on short viewports so the buttons stay reachable.
-        popup::scrolling_body(ui, bounds, |ui| builder(app, ui, id, PATTERN_ROW));
-        popup::action_row(ui, |ui| actions(app, ui, id));
-    });
-    app.popups.insert(KEY, placement);
+    let spec = PopupSpec { key: KEY, title: &title, width: WIDTH };
+    let event = app.tool_popup(ctx, spec, |app, ui| builder(app, ui, id, PATTERN_ROW), |app, ui| actions(app, ui, id));
     if event == PopupEvent::Closed {
         app.noise_popup = None;
     }

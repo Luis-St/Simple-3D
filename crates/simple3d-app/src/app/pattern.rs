@@ -25,12 +25,7 @@ impl App {
                 let turn = match grip.drive {
                     simple3d_core::pattern::Drive::Angle { axis, .. } => {
                         let radial = simple3d_core::pattern::radial_axis(axis);
-                        let mut zero = Vec3::ZERO;
-                        match radial {
-                            0 => zero.x = 1.0,
-                            1 => zero.y = 1.0,
-                            _ => zero.z = 1.0,
-                        }
+                        let zero = Vec3::axis(radial);
                         Some((along * (1.0 / scale), own.vector(zero).normalized(), grip.radius))
                     }
                     _ => None,

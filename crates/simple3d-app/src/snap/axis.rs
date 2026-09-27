@@ -14,7 +14,7 @@ pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
         }
         // The axis can only meet the body if it straddles zero on the other two coordinates.
         let others = [(axis + 1) % 3, (axis + 2) % 3];
-        let range = |i: usize| (component(lo, i), component(hi, i));
+        let range = |i: usize| (lo.get(i), hi.get(i));
         if others.iter().any(|&i| {
             let (l, h) = range(i);
             l > 1e-9 || h < -1e-9
@@ -22,14 +22,13 @@ pub fn axis_features(mesh: &Mesh, axes: [bool; 3]) -> Vec<Feature> {
             continue;
         }
         let mut dir = Vec3::ZERO;
-        set_component(&mut dir, axis, 1.0);
+        dir.set(axis, 1.0);
 
         // Every crossing along the line in order, so entry and exit pair up.
         let mut hits: Vec<f64> = Vec::new();
         for tri in &mesh.indices {
-            let (a, b, c) =
-                (mesh.positions[tri[0] as usize], mesh.positions[tri[1] as usize], mesh.positions[tri[2] as usize]);
-            if let Some(t) = line_triangle(Vec3::ZERO, dir, a, b, c) {
+            let [a, b, c] = mesh.corners(*tri);
+            if let Some(t) = simple3d_geom::ray::line_triangle(Vec3::ZERO, dir, [a, b, c], 1e-9) {
                 hits.push(t);
             }
         }
@@ -50,7 +49,7 @@ pub fn axis_lines(axes: [bool; 3], reach: f64) -> Vec<(Vec3, Vec3)> {
             continue;
         }
         let mut dir = Vec3::ZERO;
-        set_component(&mut dir, axis, reach);
+        dir.set(axis, reach);
         out.push((dir * -1.0, dir));
     }
     out

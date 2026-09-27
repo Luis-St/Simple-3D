@@ -4,19 +4,6 @@ use super::*;
 use simple3d_core::keymap::Command;
 use simple3d_core::pattern::{self, StageMode, Vary};
 
-fn with_rule() -> (App, simple3d_core::scene::NodeId) {
-    let mut app = headless_app();
-    app.open_pattern_tool();
-    let pattern = app.pattern_tool.expect("the tool opened on a pattern");
-    app.start_rule_from(pattern, 0);
-    app.reevaluate_for_test();
-    (app, pattern)
-}
-
-fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primitive::Params {
-    app.scene.node(id).params().cloned().expect("a pattern has parameters")
-}
-
 /// A stage takes a list of variations: each added working, removable, and one undo step.
 #[test]
 pub(crate) fn a_stage_takes_several_variations_and_drops_any_of_them() {

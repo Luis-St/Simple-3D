@@ -1,5 +1,6 @@
 //! The framebuffer drawn into, and its depth buffer.
 
+use super::clamp_texture;
 use eframe::glow::{self, HasContext};
 
 pub(crate) struct Target {
@@ -26,14 +27,7 @@ impl Target {
     ) -> Result<Target, String> {
         let plain = |texture: glow::Texture| {
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            for (name, value) in [
-                (glow::TEXTURE_MIN_FILTER, glow::NEAREST),
-                (glow::TEXTURE_MAG_FILTER, glow::LINEAR),
-                (glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE),
-                (glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE),
-            ] {
-                gl.tex_parameter_i32(glow::TEXTURE_2D, name, value as i32);
-            }
+            clamp_texture(gl, glow::NEAREST, glow::LINEAR);
         };
         let (w, h) = (width as i32, height as i32);
 

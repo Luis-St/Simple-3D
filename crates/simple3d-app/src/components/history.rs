@@ -30,14 +30,14 @@ impl App {
     /// components the undo leaves. Integrations among themselves and in the on-screen component (the
     /// step's own) do not count.
     pub(crate) fn components_have_work(&self, made: &[ComponentId]) -> bool {
-        let edited = made.iter().any(|&id| self.project.get(id).is_some_and(|c| c.history.revision() != 0));
+        let edited = made.iter().any(|&id| self.project.get(id).is_some_and(|c| c.model.history.revision() != 0));
         let active = self.project.active;
         let used_elsewhere = self
             .project
             .components
             .iter()
             .filter(|c| c.id != active && !made.contains(&c.id))
-            .any(|c| made.iter().any(|&id| !c.scene.integrations_of(id).is_empty()));
+            .any(|c| made.iter().any(|&id| !c.model.scene.integrations_of(id).is_empty()));
         edited || used_elsewhere
     }
 

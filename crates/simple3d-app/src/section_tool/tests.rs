@@ -1,6 +1,5 @@
 use super::grips::*;
 use super::window::*;
-use crate::panel_properties::component;
 use simple3d_core::scene::SectionView;
 use simple3d_geom::Vec3;
 
@@ -51,10 +50,7 @@ fn the_plane_is_held_at_each_edge_and_in_the_middle() {
         );
 
         // A grip must lie in the plane, or it would slide the wrong coordinate.
-        assert!(
-            held.iter().all(|&at| (component(at, axis) - 5.0).abs() < 1e-9),
-            "a grip left the plane on axis {axis}"
-        );
+        assert!(held.iter().all(|&at| (at.get(axis) - 5.0).abs() < 1e-9), "a grip left the plane on axis {axis}");
     }
 }
 

@@ -41,27 +41,8 @@ impl Scene {
 
     /// Add an integration of `component` under `parent`.
     pub fn add_integration(&mut self, component: ComponentId, name: &str, parent: NodeId, index: usize) -> NodeId {
-        let id = self.fresh_id();
-        let node = Node {
-            id,
-            name: self.unique_name(name),
-            position: simple3d_geom::Vec3::ZERO,
-            rotation: simple3d_geom::Vec3::ZERO,
-            scale: simple3d_geom::Vec3::ONE,
-            anchor: Anchor::Centre,
-            visible: true,
-            ghost: false,
-            colour: None,
-            segments: None,
-            export_body: None,
-            extracted: false,
-            body: Body::Component { component, op: None },
-            children: Vec::new(),
-            parent: Some(parent),
-        };
-        self.nodes.insert(id, node);
-        self.link(id, parent, index);
-        id
+        let name = self.unique_name(name);
+        self.insert_fresh(name, Body::Component { component, op: None }, parent, index)
     }
 
     /// Turn group `id` into an integration of `component`, returning the group's contents (with its

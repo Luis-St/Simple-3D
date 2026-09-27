@@ -59,14 +59,7 @@ impl ReassembleTool {
         self.plan.group_touching.hash(hasher);
         self.plan.max_objects.hash(hasher);
         self.plan.tolerance.to_bits().hash(hasher);
-        for row in self.placement.m {
-            for number in row {
-                number.to_bits().hash(hasher);
-            }
-        }
-        for number in [self.placement.t.x, self.placement.t.y, self.placement.t.z] {
-            number.to_bits().hash(hasher);
-        }
+        self.placement.hash_bits(hasher);
     }
 }
 

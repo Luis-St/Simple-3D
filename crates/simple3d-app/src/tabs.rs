@@ -14,26 +14,16 @@ mod transfer;
 pub use strip::show;
 
 use simple3d_core::eval::Evaluated;
-use simple3d_core::scene::{NodeId, Scene};
-use simple3d_core::undo::History;
-use simple3d_geom::Vec3;
-use std::collections::{BTreeMap, HashSet};
+use simple3d_core::scene::Scene;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 /// One open document: everything about the model in a tab (camera included, in `scene`), but not
 /// the window's tool mode, dock layout or settings.
 pub struct Document {
-    pub scene: Scene,
-    pub history: History,
+    /// The document's on-screen component.
+    pub model: crate::components::ModelState,
     pub path: Option<PathBuf>,
-    pub saved_revision: u64,
-    pub selection: Vec<NodeId>,
-    pub selection_anchor: Option<NodeId>,
-    pub collapsed: HashSet<NodeId>,
-    pub cursor: Option<Vec3>,
-    pub frame_when_evaluated: bool,
-    /// The last evaluation, so returning to a tab shows the model at once.
-    pub evaluated: Evaluated,
     /// The rest of the project: every component but the one that was on screen (issue 113).
     pub project: crate::components::Project,
 }
@@ -42,22 +32,14 @@ impl Document {
     /// An empty, unsaved document: a new tab, or the active tab's stand-in.
     pub fn empty() -> Document {
         Document {
-            scene: Scene::new(),
-            history: History::new(),
+            model: crate::components::ModelState::new(Scene::new()),
             path: None,
-            saved_revision: 0,
-            selection: Vec::new(),
-            selection_anchor: None,
-            collapsed: HashSet::new(),
-            cursor: None,
-            frame_when_evaluated: true,
-            evaluated: empty_evaluation(),
             project: crate::components::Project::new(),
         }
     }
 
     fn unsaved(&self) -> bool {
-        self.history.revision() != self.saved_revision || self.project.unsaved()
+        self.model.history.revision() != self.model.saved_revision || self.project.unsaved()
     }
 
     fn name(&self) -> String {

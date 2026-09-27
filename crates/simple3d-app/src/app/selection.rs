@@ -4,6 +4,21 @@ use super::*;
 use simple3d_core::scene::NodeId;
 
 impl App {
+    /// The one top-level node selected for a single-target action, or nothing with `none` or `many`
+    /// as the warning when the selection is empty or holds several.
+    pub(crate) fn single_target(&mut self, none: &str, many: &str) -> Option<NodeId> {
+        let targets = self.top_level_selection();
+        let Some(&id) = targets.first() else {
+            self.status = Status::Warning(none.into());
+            return None;
+        };
+        if targets.len() > 1 {
+            self.status = Status::Warning(many.into());
+            return None;
+        }
+        Some(id)
+    }
+
     // -- selection ----------------------------------------------------------
 
     pub fn primary(&self) -> Option<NodeId> {

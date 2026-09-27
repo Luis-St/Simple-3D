@@ -92,22 +92,6 @@ pub(crate) fn other_axes(axis: usize) -> (usize, usize) {
     }
 }
 
-pub fn get_axis(v: Vec3, axis: usize) -> f64 {
-    match axis {
-        0 => v.x,
-        1 => v.y,
-        _ => v.z,
-    }
-}
-
-pub fn set_axis(v: &mut Vec3, axis: usize, value: f64) {
-    match axis {
-        0 => v.x = value,
-        1 => v.y = value,
-        _ => v.z = value,
-    }
-}
-
 pub(crate) fn distance_to_segment(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     let ab = b - a;
     let len2 = ab.length_sq();

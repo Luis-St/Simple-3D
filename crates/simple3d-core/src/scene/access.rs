@@ -1,28 +1,11 @@
 //! Reaching nodes: by id, by walk, and by position in the tree.
 
 use super::*;
-use simple3d_geom::Vec3;
 use std::collections::{BTreeMap, HashSet};
 
 impl Scene {
     pub fn new() -> Scene {
-        let root = Node {
-            id: 1,
-            name: "Scene".to_string(),
-            position: Vec3::ZERO,
-            rotation: Vec3::ZERO,
-            scale: Vec3::ONE,
-            anchor: Anchor::Centre,
-            visible: true,
-            ghost: false,
-            colour: None,
-            segments: None,
-            export_body: None,
-            extracted: false,
-            body: Body::Group { op: GroupOp::Union },
-            children: Vec::new(),
-            parent: None,
-        };
+        let root = Node::fresh(1, "Scene".to_string(), Body::Group { op: GroupOp::Union }, None);
         let mut nodes = BTreeMap::new();
         nodes.insert(1, root);
         Scene {

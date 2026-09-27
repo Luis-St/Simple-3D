@@ -102,7 +102,7 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         format!(
             "{copies} cop{} of {children} shape{}.",
             if copies == 1 { "y" } else { "ies" },
-            if children == 1 { "" } else { "s" }
+            crate::ui::plural(children)
         )
     };
     ui.add(egui::Label::new(theme::hint(note)).selectable(false));
@@ -112,7 +112,7 @@ pub(crate) fn pattern(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
         ui.add(
             egui::Label::new(theme::hint(format!(
                 "{grips} handle{} in the viewport lay{} this out by eye.",
-                if grips == 1 { "" } else { "s" },
+                crate::ui::plural(grips),
                 if grips == 1 { "s" } else { "" }
             )))
             .selectable(false),

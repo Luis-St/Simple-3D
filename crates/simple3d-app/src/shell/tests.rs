@@ -4,19 +4,9 @@
 //! carries it out; only where documents end up and which windows remain is checked.
 
 use super::*;
+use crate::app::tests::temp_config_dir;
 use crate::tabs::Document;
 use std::path::{Path, PathBuf};
-
-fn config_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "simple3d-shell-test-{name}-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
 
 impl Shell {
     /// A shell using `dir` for settings, like `App::with_config_dir`.
@@ -29,7 +19,7 @@ impl Shell {
 
 /// A shell with one window holding two saved documents.
 fn shell_with_two_documents(name: &str) -> (Shell, PathBuf, egui::Context) {
-    let dir = config_dir(name);
+    let dir = temp_config_dir(name);
     let ctx = egui::Context::default();
     let mut shell = Shell::in_config_dir(&ctx, dir.clone());
     shell.windows[0].save_to(&dir.join("first.simple3d"));
@@ -61,7 +51,7 @@ fn a_tab_taken_out_of_a_window_opens_in_one_of_its_own() {
 /// Pulling out a window's only tab does nothing rather than opening an empty window.
 #[test]
 fn the_only_tab_of_a_window_cannot_be_pulled_out_of_it() {
-    let dir = config_dir("detach-only");
+    let dir = temp_config_dir("detach-only");
     let ctx = egui::Context::default();
     let mut shell = Shell::in_config_dir(&ctx, dir);
     shell.windows[0].window_request = Some(WindowRequest::Detach(0));

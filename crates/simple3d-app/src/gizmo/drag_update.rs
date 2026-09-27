@@ -58,7 +58,7 @@ impl Drag {
                 let delta = mods.snap(self.turns, rotate_snap);
                 let mut rotation = self.start_rotation;
                 // The resulting direction lives in one turn (issue 84), as the rotation field reads it.
-                set_axis(&mut rotation, axis, wrap_degrees(get_axis(self.start_rotation, axis) + delta));
+                rotation.set(axis, wrap_degrees(self.start_rotation.get(axis) + delta));
                 if let Some(node) = scene.get_mut(self.node) {
                     node.position = gizmo.position_keeping_pivot(rotation, self.start_scale);
                     node.rotation = rotation;

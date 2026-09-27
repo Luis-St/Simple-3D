@@ -6,8 +6,8 @@
 //! unrelated to the selection and is meant to stay readable while orbiting.
 
 use crate::app::{App, Status};
-use crate::panel_properties::{component, field_row, named, point_fields, scalar_field, set_component, Scalar, POINT};
-use crate::popup::{self, PopupEvent, PopupSpec};
+use crate::panel_properties::{field_row, named, point_fields, scalar_field, Scalar, POINT};
+use crate::popup::{PopupEvent, PopupSpec};
 use crate::theme;
 use crate::ui;
 use simple3d_core::unit::{format_angle, format_length};
@@ -24,16 +24,8 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     if !app.measure.active {
         return;
     }
-    let bounds = app.viewport_rect;
-    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
-    let mut placement = app.popups.remove(KEY).unwrap_or_default();
-    let event =
-        popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: "Measure", width: WIDTH }, |ui| {
-            // Scrolls on short viewports so the buttons stay reachable.
-            popup::scrolling_body(ui, bounds, |ui| body(app, ui));
-            popup::action_row(ui, |ui| actions(app, ui));
-        });
-    app.popups.insert(KEY, placement);
+    let spec = PopupSpec { key: KEY, title: "Measure", width: WIDTH };
+    let event = app.tool_popup(ctx, spec, body, actions);
     // The cross puts the tool and its span away, like the row's button.
     if event == PopupEvent::Closed && app.measure.active {
         app.toggle_measure();
@@ -63,11 +55,11 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
                 if !enabled {
                     ui.disable();
                 }
-                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
+                let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: at.get(axis), step };
                 // No undo step: the span belongs to the tool, not the scene.
                 scalar_field(app, ui, field, |app, mm, _| {
                     let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
-                    set_component(&mut p, axis, mm);
+                    p.set(axis, mm);
                     app.measure.set_point(index, p);
                 });
             });
