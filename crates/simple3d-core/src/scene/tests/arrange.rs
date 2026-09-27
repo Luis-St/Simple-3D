@@ -24,15 +24,14 @@ pub(crate) fn reparent_within_one_parent_lands_where_the_indicator_showed() {
     let a = box_at(&mut scene, root, 0.0);
     let b = box_at(&mut scene, root, 1.0);
     let c = box_at(&mut scene, root, 2.0);
-    // Drop `a` between `b` and `c`: index 2 in the pre-move list.
+    // Between `b` and `c`: index 2 in the pre-move list.
     scene.reparent(a, root, 2).unwrap();
     assert_eq!(scene.node(root).children, vec![b, a, c]);
 }
 
 #[test]
 pub(crate) fn reparenting_several_nodes_keeps_their_order_and_lands_where_one_would() {
-    // Issue 43: a multi-node drag is one move, not a loop of single moves --
-    // each of those would shift the index the next was measured against.
+    // Issue 43: a multi-node drag is one move; single moves would shift each other's index.
     let mut scene = Scene::new();
     let root = scene.root();
     let a = box_at(&mut scene, root, 0.0);
@@ -45,13 +44,11 @@ pub(crate) fn reparenting_several_nodes_keeps_their_order_and_lands_where_one_wo
     assert_eq!(scene.node(group).children, vec![a, c], "the two lost their order on the way in");
     assert_eq!(scene.node(root).children, vec![b, d, group]);
 
-    // Back out, between `b` and `d`: the index is read against the list as
-    // it stands before the move, exactly as for a single node.
+    // The index is read against the pre-move list, as for a single node.
     scene.reparent_many(&[a, c], root, 1).unwrap();
     assert_eq!(scene.node(root).children, vec![b, a, c, d, group]);
 
-    // A run that moves within one parent counts what leaves from in front
-    // of the target, so it lands where the indicator was drawn.
+    // Within one parent, nodes leaving from before the target are counted, so it lands at the indicator.
     scene.reparent_many(&[b, a], root, 3).unwrap();
     assert_eq!(scene.node(root).children, vec![c, b, a, d, group]);
 }
@@ -65,13 +62,12 @@ pub(crate) fn a_multi_node_reparent_is_refused_whole_and_never_moves_a_carried_c
     let leaf = box_at(&mut scene, inner, 0.0);
     let other = box_at(&mut scene, root, 1.0);
 
-    // One illegal member fails the whole drag, and nothing has moved.
+    // One illegal member fails the whole drag with nothing moved.
     assert!(scene.reparent_many(&[other, outer], inner, 0).is_err());
     assert_eq!(scene.node(root).children, vec![outer, other]);
     assert_eq!(scene.node(outer).children, vec![inner]);
 
-    // A node inside another node being moved travels inside it; moving it
-    // as well would tear it out of the group that carries it.
+    // A node inside another moved node travels with it rather than being torn out.
     scene.reparent_many(&[outer, leaf], root, 0).unwrap();
     assert_eq!(scene.node(inner).children, vec![leaf]);
     assert_eq!(scene.node(root).children, vec![outer, other]);

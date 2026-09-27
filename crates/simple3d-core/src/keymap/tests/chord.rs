@@ -40,8 +40,7 @@ pub(crate) fn shortcut_text_is_what_the_menus_show() {
 
 #[test]
 pub(crate) fn a_modifier_on_its_own_is_a_chord() {
-    // Issue 77: Ctrl, Shift and Alt used to be unbindable because a chord
-    // was required to carry a key as well.
+    // Issue 77: modifiers alone used to be unbindable.
     let ctrl = Chord::modifiers(true, false, false);
     assert!(ctrl.is_modifier_only());
     assert_eq!(ctrl.to_string(), "Ctrl");
@@ -51,8 +50,7 @@ pub(crate) fn a_modifier_on_its_own_is_a_chord() {
     assert_eq!(all.to_string(), "Ctrl+Alt+Shift");
     assert_eq!(Chord::from_str(&all.to_string()).unwrap(), all);
 
-    // A key chord is still not modifier-only, and nothing at all is still an
-    // error.
+    // A key chord is not modifier-only, and an empty one is an error.
     assert!(!Chord::ctrl("S").is_modifier_only());
     assert!(Chord::from_str("").is_err());
     assert!(Chord::from_str("Ctrl+").is_err());
@@ -60,8 +58,7 @@ pub(crate) fn a_modifier_on_its_own_is_a_chord() {
 
 #[test]
 pub(crate) fn a_modifier_only_chord_is_a_binding_of_its_own_not_a_prefix() {
-    // Ctrl and Ctrl+S are different bindings: holding Ctrl to snap must not
-    // collide with Save, in either direction.
+    // Ctrl and Ctrl+S are different bindings, colliding in neither direction.
     let map = Keymap::default();
     assert_eq!(map.binding(Command::SnapToGeometry), Some(&Chord::modifiers(true, false, false)));
     assert_eq!(map.command_for(&Chord::ctrl("S")), Some(Command::Save));
@@ -82,8 +79,7 @@ pub(crate) fn a_keymap_holding_a_modifier_only_binding_round_trips() {
 
 #[test]
 pub(crate) fn a_combination_of_ordinary_keys_is_a_chord_too() {
-    // Any key can be the base of a combination, not only Ctrl, Shift and
-    // Alt: Q+W+E is a binding.
+    // Any key can base a combination: Q+W+E is a binding.
     let mut map = Keymap::default();
     let combo = Chord::combo(["Q", "W", "E"]);
     assert_eq!(combo.to_string(), "E+Q+W", "the keys are a set, written in one settled order");
@@ -92,24 +88,17 @@ pub(crate) fn a_combination_of_ordinary_keys_is_a_chord_too() {
 
     let down = |name: &str| ["Q", "W", "E"].contains(&name);
     assert_eq!(map.command_for_press("E", down, false, false, false), Some(Command::FrameAll));
-    // The press that completes it is the one that fires. Q and W are in the
-    // chord too, but pressing them again with everything already down is not
-    // a second completion of a different binding.
+    // Only the completing press fires; pressing Q again with all down does not re-fire it.
     assert_eq!(map.command_for_press("Q", down, false, false, false), Some(Command::FrameAll));
-    // A key of the combination pressed on its own does not fire it -- it
-    // fires whatever that key is bound to by itself, which here is the
-    // preset's own rotate.
+    // E alone fires E's own binding, the preset's rotate.
     assert_eq!(map.command_for_press("E", |name| name == "E", false, false, false), Some(Command::ModeRotate));
-    // Nor does the combination fire with a modifier held that it does not
-    // carry: Ctrl+E is Export, and stays Export with Q and W down.
+    // With an extra modifier held, Ctrl+E is still Export.
     assert_eq!(map.command_for_press("E", down, true, false, false), Some(Command::Export));
 }
 
 #[test]
 pub(crate) fn the_longest_binding_the_held_keys_satisfy_is_the_one_that_fires() {
-    // With Q and W down, pressing E fires Q+W+E rather than whatever E alone
-    // is bound to -- otherwise a combination could never be built out of
-    // keys that are already in use.
+    // With Q and W down, E fires Q+W+E, so combinations can use keys already bound.
     let mut map = Keymap::default();
     map.set(Command::FrameSelection, Chord::key("E"), true).unwrap();
     map.set(Command::FrameAll, Chord::combo(["Q", "W", "E"]), true).unwrap();

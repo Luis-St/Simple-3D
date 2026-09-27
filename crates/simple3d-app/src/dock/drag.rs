@@ -5,9 +5,7 @@ use crate::app::App;
 use crate::theme::{metric, token};
 use simple3d_core::config::{Layout, Side};
 
-/// Work out where a drag would drop, draw the line that says so, and apply it on
-/// release. Called once a frame, after both docks have drawn themselves, since
-/// it needs both their rectangles.
+/// Resolve a drag's drop, draw its indicator and apply it on release. Runs after both docks have drawn.
 pub fn resolve_drag(app: &mut App, ctx: &egui::Context) {
     app.dock_drag.target = None;
     let Some(panel) = app.dock_drag.panel else {
@@ -17,9 +15,7 @@ pub fn resolve_drag(app: &mut App, ctx: &egui::Context) {
     };
     let pointer = ctx.input(|i| i.pointer.interact_pos());
     if let Some(pointer) = pointer {
-        // The nearer dock wins when the pointer is over neither: a drag that
-        // ends in the viewport has to land somewhere, and the side it is on is
-        // the least surprising answer.
+        // Over neither dock, the nearer one wins, so a drop in the viewport still lands.
         let side = app
             .dock_rects
             .iter()
@@ -46,7 +42,7 @@ pub fn resolve_drag(app: &mut App, ctx: &egui::Context) {
     app.dock_rects.clear();
 }
 
-/// The whole layout, back to how it ships.
+/// Reset the layout to how it ships.
 pub fn reset(app: &mut App) {
     app.settings.layout = Layout::default();
     app.settings.outliner_width = 260.0;

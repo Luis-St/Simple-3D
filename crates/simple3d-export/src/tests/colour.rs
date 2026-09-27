@@ -6,8 +6,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn an_unpainted_model_is_written_without_the_colour_extension() {
-    // Nothing that reads plain 3MF should have to cope with a namespace a
-    // model does not use.
+    // Plain 3MF readers should not see a namespace the model does not use.
     let bytes = three_mf(&[Part::whole(&plate())], &Options::default(), &mut no_progress()).unwrap();
     let text = model_document(&bytes);
     assert!(!text.contains("colorgroup"));
@@ -18,8 +17,7 @@ pub(crate) fn an_unpainted_model_is_written_without_the_colour_extension() {
 pub(crate) fn a_painted_model_carries_one_colour_group_and_a_colour_per_face() {
     let mut mesh = plate();
     mesh.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
-    // Two bodies, two colours, in one mesh -- what a boolean between two
-    // painted shapes produces.
+    // Two colours in one mesh, as a boolean of two painted shapes produces.
     let mut other = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(60.0, 0.0, 0.0));
     other.set_tag(simple3d_geom::colour_tag([0xFF, 0x00, 0x00]));
     mesh.append(&other);
@@ -30,8 +28,7 @@ pub(crate) fn a_painted_model_carries_one_colour_group_and_a_colour_per_face() {
     assert!(text.contains("<m:color color=\"#204080\"/>"));
     assert!(text.contains("<m:color color=\"#FF0000\"/>"));
     assert!(text.contains("pid=\"2\" pindex=\"0\""));
-    // Index 0 is the unpainted default, so these two are 1 and 2 and every
-    // triangle names one of them.
+    // Index 0 is the unpainted default, so these are 1 and 2 and every triangle names one.
     assert_eq!(text.matches(" p1=\"1\"").count(), plate().indices.len());
     assert_eq!(text.matches(" p1=\"2\"").count(), other.indices.len());
     assert_eq!(text.matches(" p1=\"0\"").count(), 0);
@@ -39,8 +36,7 @@ pub(crate) fn a_painted_model_carries_one_colour_group_and_a_colour_per_face() {
 
 #[test]
 pub(crate) fn separated_objects_share_one_colour_group() {
-    // Two objects painted the same colour name the same entry, and the
-    // group's id sits clear of the objects' own ids.
+    // Same colour, same entry; the group id sits clear of the object ids.
     let mut left = plate();
     left.set_tag(simple3d_geom::colour_tag([0x20, 0x40, 0x80]));
     let mut right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));

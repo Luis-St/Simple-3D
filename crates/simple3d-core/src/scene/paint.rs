@@ -2,6 +2,8 @@
 
 use super::*;
 impl Scene {
+    /// A node's paint: its own, else its nearest painted ancestor's, else none. Painting a group
+    /// paints everything in it that has no colour of its own.
     pub fn effective_colour(&self, id: NodeId) -> Option<Colour> {
         let mut at = Some(id);
         while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {

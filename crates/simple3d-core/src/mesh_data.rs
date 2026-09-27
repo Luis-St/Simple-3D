@@ -1,25 +1,9 @@
 //! Geometry a node owns outright, and how it is written to the project file.
 //!
-//! Everything else in the tree is a *recipe*: a box is three numbers, a
-//! boolean is its operands, and the triangles are made again on every load. A
-//! mesh body is the exception -- it is what a shape becomes when it is converted
-//! (issue 80), and after that there is no recipe left to keep, only the surface.
-//!
-//! ## Why it is not written as arrays of numbers
-//!
-//! The project file is pretty-printed JSON, one value per line, so that a
-//! changed dimension is a one-line diff. `serde_json` puts every element of an
-//! array on its own line, and a converted assembly is easily a hundred thousand
-//! triangles: written as numbers that is over a million lines, and a file no
-//! editor will open. So the arrays go in as base64 of their little-endian bytes
-//! -- one line each -- beside a plainly readable triangle count for a human
-//! reading the file.
-//!
-//! Positions are stored as `f32`. A mesh body is always the *result* of a
-//! tessellation rather than a dimension anybody typed, and 24 bits of mantissa
-//! resolves a hundredth of a millimetre out to a metre, which is finer than
-//! anything downstream of it. Doubles would halve the tolerance and double the
-//! file for geometry that is already an approximation of a surface.
+//! Unlike recipes, a converted mesh (issue 80) keeps only its surface. Arrays are written as
+//! base64 of little-endian bytes, one line each, since pretty-printed JSON would put every number
+//! on its own line. Positions are `f32`: enough for 0.01 mm at a metre, for geometry that is
+//! already a tessellation.
 
 mod blob;
 pub use blob::MeshBlob;
@@ -31,19 +15,14 @@ mod tests;
 
 use simple3d_geom::{Mesh, Vec3};
 
-/// A mesh a node owns. Immutable: a boolean builds a new one, so a
-/// stored mesh can be shared behind an `Arc` and a scene snapshot for undo costs
-/// a pointer rather than a copy of every triangle.
+/// A mesh a node owns. Immutable, so it can be shared behind an `Arc` and undo snapshots stay cheap.
 #[derive(Clone, Debug)]
 pub struct MeshData {
     pub mesh: Mesh,
 }
 
-/// Two stored meshes are the same when they describe the same surface. Written
-/// out rather than derived because `Mesh` has no equality of its own -- meshes
-/// are compared by what they *are* nowhere else in the application, and giving
-/// the geometry crate a blanket `PartialEq` would invite exactly the
-/// vertex-by-vertex comparison this one exists to keep rare.
+/// Equal when describing the same surface. Written by hand since `Mesh` deliberately has no
+/// `PartialEq`, keeping vertex-by-vertex comparison rare.
 impl PartialEq for MeshData {
     fn eq(&self, other: &Self) -> bool {
         self.mesh.indices == other.mesh.indices
@@ -54,8 +33,7 @@ impl PartialEq for MeshData {
 
 impl MeshData {
     pub fn new(mesh: Mesh) -> MeshData {
-        // Welded on the way in: a converted mesh is stored once and read many
-        // times, so the compact form is the one worth keeping.
+        // Welded on the way in: stored once, read many times.
         MeshData { mesh: mesh.weld() }
     }
 
@@ -85,9 +63,7 @@ impl MeshData {
         }
     }
 
-    /// Read a blob back. `None` when it does not describe a mesh -- a truncated
-    /// array, an index past the end of the vertices -- so a damaged file is
-    /// refused with a message rather than loaded as a half-mesh.
+    /// Read a blob back; `None` if it is not a valid mesh, so a damaged file is refused.
     pub fn from_blob(blob: &MeshBlob) -> Option<MeshData> {
         let position_bytes = decode(&blob.positions)?;
         if position_bytes.len() % 12 != 0 {

@@ -5,11 +5,9 @@ pub enum Mode {
     #[default]
     Move,
     Rotate,
-    /// Rewrite the dimension the shape is defined by. Exact, and only offered on
-    /// an axis some parameter actually governs.
+    /// Rewrite the defining dimension; exact, and only on axes a parameter governs.
     Resize,
-    /// Multiply what is there by a factor. Works on a group, and on an axis no
-    /// parameter governs, because it does not have to know what anything means.
+    /// Multiply by a factor; works on groups and ungoverned axes.
     Scale,
 }
 
@@ -28,20 +26,18 @@ impl Mode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Handle {
-    /// Drag along one axis.
     MoveAxis(usize),
-    /// Drag in the plane whose normal is this axis, for two-axis movement.
+    /// Drag in the plane normal to this axis.
     MovePlane(usize),
-    /// Rotate about one axis.
     RotateRing(usize),
-    /// A face of the selection's bounding box: which axis, and which side.
+    /// A bounding-box face: axis and side.
     ResizeFace(usize, bool),
-    /// A corner: which side on each axis.
+    /// A corner: side on each axis.
     ResizeCorner([bool; 3]),
 }
 
 impl Handle {
-    /// The axes this handle affects, for colouring and for the readout.
+    /// Axes this handle affects, for colouring and the readout.
     pub fn axes(self) -> Vec<usize> {
         match self {
             Handle::MoveAxis(a) | Handle::RotateRing(a) | Handle::ResizeFace(a, _) => vec![a],

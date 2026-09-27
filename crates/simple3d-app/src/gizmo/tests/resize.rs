@@ -5,7 +5,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn dragging_the_right_face_changes_the_width_and_leaves_the_left_face() {
-    // Spec acceptance criterion 24, the central one for this module.
+    // Spec acceptance criterion 24.
     let mut f = Fixture::new("box");
     let (lo_before, hi_before) = f.world_bounds();
     assert!((hi_before.x - lo_before.x - 20.0).abs() < 1e-9);
@@ -19,7 +19,6 @@ pub(crate) fn dragging_the_right_face_changes_the_width_and_leaves_the_left_face
     let (lo_after, hi_after) = f.world_bounds();
     assert!((lo_after.x - lo_before.x).abs() < 1e-9, "the left face moved: {} -> {}", lo_before.x, lo_after.x);
     assert!((hi_after.x - hi_before.x - 10.0).abs() < 1e-9, "the right face did not follow");
-    // Nothing else changed.
     assert!((hi_after.y - lo_after.y - 20.0).abs() < 1e-9);
     assert!((hi_after.z - lo_after.z - 20.0).abs() < 1e-9);
 }
@@ -69,7 +68,7 @@ pub(crate) fn a_corner_drag_with_the_proportions_modifier_keeps_the_ratio() {
     let ratio_after = f.param("width") / f.param("depth");
     assert!((ratio_after - ratio_before).abs() < 1e-6, "{ratio_before} -> {ratio_after}");
     assert!(f.param("width") > 40.0, "the corner drag did nothing: {}", f.param("width"));
-    // The third dimension scaled by the same ratio too.
+    // The third dimension scaled by the same ratio.
     let scale = f.param("width") / 40.0;
     assert!((f.param("thickness") - 4.0 * scale).abs() < 1e-6);
 }

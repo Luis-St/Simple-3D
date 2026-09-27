@@ -5,9 +5,7 @@ use simple3d_core::keymap::Command;
 use simple3d_core::project;
 use simple3d_core::scene::{GroupOp, Scene};
 
-/// Several documents open at once, each with its own model, selection,
-/// history and camera (issue 61). What tabs are for: switching has to be a
-/// change of document, not a change of what one document is showing.
+/// Each tab has its own model, selection, history and camera (issue 61).
 #[test]
 pub(crate) fn each_tab_keeps_its_own_document() {
     let mut app = app_in(temp_config_dir("tabs-own-document"));
@@ -38,9 +36,8 @@ pub(crate) fn each_tab_keeps_its_own_document() {
     assert_eq!(app.active, 0, "walking off the end of the row did not wrap");
 }
 
-/// Opening a file uses an untouched document rather than leaving an empty
-/// tab behind, and a file that is already open is shown rather than opened
-/// a second time (issue 61).
+/// Opening a file reuses an untouched document, and an open file is shown rather than reopened
+/// (issue 61).
 #[test]
 pub(crate) fn opening_a_project_reuses_a_scratch_tab_and_never_opens_one_file_twice() {
     let dir = temp_config_dir("tabs-open");
@@ -53,13 +50,12 @@ pub(crate) fn opening_a_project_reuses_a_scratch_tab_and_never_opens_one_file_tw
     let second = dir.join("second.simple3d");
     std::fs::write(&second, project::to_string(&Scene::new())).unwrap();
 
-    // The document on screen has been saved, so it is not scratch space: the
-    // second file gets a tab of its own.
+    // The saved document is not scratch, so the second file gets its own tab.
     app.open_path(&second);
     assert_eq!(app.tab_count(), 2);
     assert_eq!(app.path.as_deref(), Some(second.as_path()));
 
-    // Both files are open now, so neither opens again.
+    // Both are open, so neither opens again.
     app.open_path(&first);
     assert_eq!(app.tab_count(), 2, "a file that was already open opened a second time");
     assert_eq!(app.active, 0);
@@ -67,8 +63,7 @@ pub(crate) fn opening_a_project_reuses_a_scratch_tab_and_never_opens_one_file_tw
     assert_eq!(app.tab_count(), 2);
     assert_eq!(app.active, 1);
 
-    // A new, untouched document is scratch space: a file opened from it
-    // lands in that tab rather than in one more.
+    // A new untouched document is scratch, so a file opens into it.
     app.run(Command::New);
     assert_eq!(app.tab_count(), 3);
     let third = dir.join("third.simple3d");
@@ -78,8 +73,7 @@ pub(crate) fn opening_a_project_reuses_a_scratch_tab_and_never_opens_one_file_tw
     assert_eq!(app.path.as_deref(), Some(third.as_path()));
 }
 
-/// Closing asks before it throws work away, and the last document does not
-/// close: it empties, so there is always somewhere to work (issue 61).
+/// Closing asks before discarding work, and the last document empties rather than closes (issue 61).
 #[test]
 pub(crate) fn closing_a_tab_asks_about_changes_and_the_last_one_empties_instead_of_vanishing() {
     let mut app = app_in(temp_config_dir("tabs-close"));
@@ -100,7 +94,7 @@ pub(crate) fn closing_a_tab_asks_about_changes_and_the_last_one_empties_instead_
     assert_eq!(app.active, 0);
     assert_eq!(app.modal, Modal::None);
 
-    // The one remaining document: closing it leaves an empty one open.
+    // Closing the only document leaves an empty one.
     app.add_node(Some("plate"), GroupOp::Union);
     app.close_tab_now(0);
     assert_eq!(app.tab_count(), 1, "the last document closed and left no document at all");
@@ -108,9 +102,7 @@ pub(crate) fn closing_a_tab_asks_about_changes_and_the_last_one_empties_instead_
     assert!(!app.unsaved(), "the emptied document counts as modified");
 }
 
-/// Quitting asks about every open document, not only the one on screen
-/// (issue 61) -- the changes in a tab that is not showing are exactly the
-/// ones that would be lost without anybody noticing.
+/// Quitting asks about every open document, including hidden tabs (issue 61).
 #[test]
 pub(crate) fn quitting_asks_about_a_document_that_is_not_on_screen() {
     let mut app = app_in(temp_config_dir("tabs-quit"));
@@ -125,7 +117,7 @@ pub(crate) fn quitting_asks_about_a_document_that_is_not_on_screen() {
     assert!(!app.quit_now, "quitting went ahead with unsaved changes in another tab");
 }
 
-/// The row of tabs, and the question closing one asks, both draw.
+/// The tab row and the close question both draw.
 #[test]
 pub(crate) fn a_row_of_tabs_draws_and_so_does_the_question_a_close_asks() {
     let mut app = headless_app();

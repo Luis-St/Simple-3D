@@ -1,15 +1,8 @@
-//! Saved pattern kinds (issue 67): a custom rule, named and kept for reuse in
-//! any project.
+//! Saved pattern kinds (issue 67): named custom rules reusable in any project.
 //!
-//! An entry is one file in `pattern-kinds/` under the config directory, holding
-//! the parameters a custom rule is made of and nothing else -- so a saved kind
-//! is readable, diffable, and can be handed to someone else by sending them the
-//! file, exactly as a saved primitive can (see [`crate::library`]).
-//!
-//! The library is *per user*, not per project. That is deliberate and it is why
-//! a pattern node stores the numbers themselves rather than the name of a kind:
-//! a project opened on a machine that has never seen the kind still lays its
-//! copies out correctly, because everything the rule needs travels with it.
+//! Each is one file in `pattern-kinds/` under the config directory, like saved primitives
+//! ([`crate::library`]). The library is per user, so pattern nodes store the numbers themselves
+//! and a project still lays out correctly on a machine without the kind.
 
 use crate::pattern;
 use crate::primitive::Params;
@@ -19,7 +12,7 @@ use std::path::{Path, PathBuf};
 const DIRECTORY: &str = "pattern-kinds";
 const EXTENSION: &str = "json";
 
-/// One saved kind: what to call it, and where it lives.
+/// One saved kind: its name and file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
@@ -30,8 +23,7 @@ pub fn dir(config_dir: &Path) -> PathBuf {
     config_dir.join(DIRECTORY)
 }
 
-/// Every saved kind, by name. Anything unreadable is skipped rather than
-/// reported: a stray file in the directory must not stop the picker drawing.
+/// Every saved kind by name; unreadable files are skipped so the picker still draws.
 pub fn list(config_dir: &Path) -> Vec<Entry> {
     let Ok(entries) = std::fs::read_dir(dir(config_dir)) else { return Vec::new() };
     let mut out: Vec<Entry> = entries
@@ -51,18 +43,10 @@ pub fn exists(config_dir: &Path, name: &str) -> bool {
     path_for(config_dir, name).exists()
 }
 
-/// Write the custom part of `params` to the library under `name`, replacing any
-/// entry of that name.
+/// Save the custom part of `params` as `name`, replacing any same-named entry.
 ///
-/// Only the custom keys are kept. A saved kind is a rule, not a pattern: the
-/// linear step and the helix radius that happen to be sitting in the same map
-/// are the node's business, and writing them here would mean applying a kind
-/// silently changed the numbers of every *other* kind the node could be set to.
-///
-/// The scatter is kept too when `with_noise` says so (issue 79). A rule for
-/// laying planks is a rule *and* the bit of randomness that stops the deck
-/// reading as wallpaper, and a kind that came back off the shelf without the
-/// second half was only half of what was saved.
+/// Only custom keys are kept, so applying a kind never changes other kinds' numbers on the node.
+/// The scatter is kept when `with_noise` says so (issue 79).
 pub fn save(config_dir: &Path, name: &str, params: &Params, with_noise: bool) -> io::Result<PathBuf> {
     let name = crate::library::sanitise(name);
     if name.is_empty() {
@@ -76,8 +60,7 @@ pub fn save(config_dir: &Path, name: &str, params: &Params, with_noise: bool) ->
     Ok(path)
 }
 
-/// The custom rule a file holds, with anything it is missing filled in from the
-/// defaults -- so a kind saved by an older build still applies cleanly.
+/// The custom rule a file holds, with missing keys defaulted, so older saves still apply.
 pub fn load(path: &Path) -> Option<Params> {
     let text = std::fs::read_to_string(path).ok()?;
     let stored: Params = serde_json::from_str(&text).ok()?;
@@ -91,14 +74,10 @@ pub fn load(path: &Path) -> Option<Params> {
             .or_else(|| defaults.get(key).copied())?;
         out.insert(key.to_string(), value);
     }
-    // A rule kept before a stage said what it *does*, or before it could vary
-    // its copies more than one way, has to go on laying its copies down where
-    // it always did, which is what the old numbers are read for (issue 79).
+    // Older rules must keep laying out copies where they did (issue 79).
     pattern::migrate_stages(&stored, &mut out);
     pattern::migrate_noise(&stored, &mut out);
-    // The scatter only where the file has one. A kind saved without it leaves
-    // whatever scatter the pattern it is applied to already has, rather than
-    // taking it off: "no noise was kept" is not "keep no noise".
+    // Scatter only if the file has one; a kind without it leaves the target's scatter alone.
     for key in pattern::noise_keys() {
         let kept = stored
             .get(*key)
@@ -115,7 +94,7 @@ pub fn remove(path: &Path) -> io::Result<()> {
     std::fs::remove_file(path)
 }
 
-/// Just the parameters that make up a custom rule, and its scatter when asked.
+/// Only a custom rule's parameters, plus its scatter when asked.
 pub fn extract(params: &Params, with_noise: bool) -> Params {
     let noise: &[&str] = if with_noise { pattern::noise_keys() } else { &[] };
     pattern::rule_keys(params)
@@ -125,13 +104,12 @@ pub fn extract(params: &Params, with_noise: bool) -> Params {
         .collect()
 }
 
-/// Whether a saved kind carries a scatter of its own.
+/// Whether a saved kind carries its own scatter.
 pub fn has_noise(kind: &Params) -> bool {
     pattern::noise_keys().iter().any(|key| kind.contains_key(*key))
 }
 
-/// Apply a saved rule to a node's parameters: its stages, and the kind choice
-/// that makes them the ones in use.
+/// Apply a saved rule to a node: its stages, and the kind choice that uses them.
 pub fn apply(params: &mut Params, kind: &Params) {
     for (key, value) in kind {
         params.insert(key.clone(), *value);
@@ -160,7 +138,7 @@ mod tests {
         let mut params = pattern::default_params();
         params.insert("stages".to_string(), ParamValue::Count(2));
         params.insert("stage2_turn".to_string(), ParamValue::Angle(45.0));
-        // A number belonging to another kind entirely, which must not travel.
+        // Another kind's number, which must not travel.
         params.insert("helix_radius".to_string(), ParamValue::Length(123.0));
 
         let path = save(&config, "Bolt ring", &params, false).expect("the kind should save");
@@ -172,8 +150,7 @@ mod tests {
         assert_eq!(back.num("stage2_turn"), 45.0);
         assert!(!back.contains_key("helix_radius"), "a saved kind carried a number that is not its own");
 
-        // Applying it writes the stages and switches the node to them, without
-        // touching what the other kinds hold.
+        // Applying writes the stages and switches kind without touching other kinds' numbers.
         let mut fresh = pattern::default_params();
         fresh.insert("helix_radius".to_string(), ParamValue::Length(7.0));
         apply(&mut fresh, &back);
@@ -186,9 +163,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
-    /// A kind saved with its scatter brings the scatter back and puts it on the
-    /// pattern it is applied to; one saved without leaves the pattern's own
-    /// alone (issue 79).
+    /// A kind saved with scatter brings it back; one saved without leaves the target's (issue 79).
     #[test]
     fn a_kind_carries_its_noise_only_when_it_was_saved_with_it() {
         let config = temp_dir("noise");
@@ -213,9 +188,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&config);
     }
 
-    /// A kind kept while a stage carried one of each variation comes off the
-    /// shelf with that one as a variation of its own, staggering its rows the
-    /// way it did when it was saved (issue 79).
+    /// An old-format kind comes back with its variation, staggering rows as saved (issue 79).
     #[test]
     fn a_kind_saved_before_a_stage_held_a_list_keeps_its_stagger() {
         let config = temp_dir("legacy-vary");

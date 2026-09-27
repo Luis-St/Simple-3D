@@ -47,7 +47,6 @@ fn a_pasted_copy_lands_exactly_on_the_original() {
     // Directly after the original, as a sibling.
     assert_eq!(scene.node(root).children, vec![original, copy_id]);
 
-    // Editing the copy leaves the original untouched.
     scene.get_mut(copy_id).unwrap().position = Vec3::new(99.0, 0.0, 0.0);
     assert_eq!(scene.node(original).position, Vec3::new(12.0, 0.0, 0.0));
 }
@@ -72,9 +71,7 @@ fn a_nested_subtree_arrives_with_order_and_relative_positions_intact() {
         assert_eq!(scene.node(*new).position, scene.node(*old).position);
         assert_ne!(new, old);
     }
-    // The arriving children are renamed rather than kept, because names are
-    // unique across the whole document and the outliner shows every depth
-    // at once.
+    // Arriving children are renamed, since names are unique document-wide.
     let names: Vec<&str> = scene.ids().map(|id| scene.node(id).name.as_str()).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
@@ -119,7 +116,7 @@ fn the_root_cannot_be_copied() {
 
 #[test]
 fn the_payload_is_text_in_the_project_schema() {
-    // Spec section 8.1: paste into a text editor and back again.
+    // Spec section 8.1: paste into a text editor and back.
     let mut scene = Scene::new();
     let root = scene.root();
     let id = boxed(&mut scene, root, 3.0);

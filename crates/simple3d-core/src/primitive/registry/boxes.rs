@@ -68,9 +68,7 @@ pub(super) const CHAMFERED_BOX: PrimitiveSpec = PrimitiveSpec {
             gen::ChamferEdges::from_index(p.int("edges")),
         )
     },
-    // A chamfer cuts corners off the box, never past a face: the widest
-    // point of every axis is still the box's own dimension, whatever the
-    // chamfer is clamped to.
+    // A chamfer never cuts past a face, so every axis keeps the box's dimension.
     axes: |_p| {
         [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("height"))]
     },
@@ -108,9 +106,7 @@ pub(super) const PRISM: PrimitiveSpec = PrimitiveSpec {
     axes: |p| {
         [
             Some(AxisDriver { param: "diameter", factor: polygon_x_factor(p) }),
-            // The Y extent of an n-gon with a vertex at angle 0 is neither
-            // the across-corners nor the across-flats diameter for general
-            // n, so no handle rather than a misleading one.
+            // An n-gon's Y extent is neither diameter for general n, so no handle rather than a misleading one.
             None,
             Some(AxisDriver::direct("height")),
         ]

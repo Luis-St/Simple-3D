@@ -10,9 +10,7 @@ impl Keymap {
         text
     }
 
-    /// Import a keymap file. Anything missing falls back to the recorded
-    /// preset's default, so a file from an older build that did not know a
-    /// command still yields a fully usable map.
+    /// Import a keymap file; anything missing falls back to the preset, so older files stay usable.
     pub fn from_text(text: &str) -> Result<Keymap, String> {
         let mut map: Keymap = serde_json::from_str(text).map_err(|e| e.to_string())?;
         let preset = Keymap::from_preset(map.preset);
@@ -23,9 +21,7 @@ impl Keymap {
             }
         }
         if let Some((was, now)) = moved_nav_pan(map.preset) {
-            // Never onto the button the user's own orbit already uses: the two
-            // would then be the same gesture, and a keymap this build wrote for
-            // them is not the place to introduce a conflict.
+            // Never onto the button the user's orbit uses, which would create a conflict.
             if map.nav.pan == was && !map.nav.orbit.matches(now.button, now.ctrl, now.shift, now.alt) {
                 map.nav.pan = now;
             }
@@ -39,7 +35,6 @@ impl Keymap {
                 }
             }
         }
-        // Drop commands this build no longer has.
         map.bindings.retain(|k, _| Command::ALL.contains(k));
         Ok(map)
     }

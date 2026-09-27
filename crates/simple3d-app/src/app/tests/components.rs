@@ -1,5 +1,4 @@
-//! Components: a project of several node trees, each in a tab of its own
-//! (issue 113).
+//! Components: several node trees in one project, each in its own tab (issue 113).
 
 use super::*;
 use simple3d_core::keymap::Command;
@@ -7,7 +6,7 @@ use simple3d_core::project;
 use simple3d_core::scene::{GroupOp, NodeId, ROOT_COMPONENT};
 use simple3d_geom::Vec3;
 
-/// A root component holding one union group of two boxes, the group selected.
+/// A root component with one selected union group of two boxes.
 fn app_with_group(name: &str) -> (App, NodeId) {
     let mut app = app_in(temp_config_dir(name));
     let root = app.scene.root();
@@ -32,8 +31,7 @@ fn close(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
     (a.0 - b.0).length() < 1e-6 && (a.1 - b.1).length() < 1e-6
 }
 
-/// Making a component of a group leaves one node where the group was -- no
-/// children in the tree -- and a model that looks exactly as it did.
+/// Making a component of a group leaves one childless node and an unchanged model.
 #[test]
 pub(crate) fn making_a_component_leaves_one_node_and_the_same_model() {
     let (mut app, group) = app_with_group("components-make");
@@ -54,8 +52,7 @@ pub(crate) fn making_a_component_leaves_one_node_and_the_same_model() {
     assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
 }
 
-/// An edit made in a component's own tab shows up in every integration of it,
-/// and the tab shows the component on its own.
+/// An edit in a component's tab shows in every integration, and the tab shows the component alone.
 #[test]
 pub(crate) fn an_edit_in_the_component_shows_up_everywhere_it_is_placed() {
     let (mut app, group) = app_with_group("components-edit");
@@ -72,7 +69,6 @@ pub(crate) fn an_edit_in_the_component_shows_up_everywhere_it_is_placed() {
     app.activate_component(component);
     assert_eq!(app.project.active, component);
     assert_eq!(app.project.open, vec![ROOT_COMPONENT, component], "the component did not get a tab");
-    // On its own: the two boxes, not the root's two placements of them.
     app.reevaluate_for_test();
     assert_eq!(app.evaluated.mesh.triangle_count() * 2, triangles, "the tab does not show the component alone");
     let root = app.scene.root();
@@ -87,8 +83,7 @@ pub(crate) fn an_edit_in_the_component_shows_up_everywhere_it_is_placed() {
         "the sphere added to the component is not in either placement of it"
     );
     assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-    // Each tab has a history of its own: the root's last step is still the
-    // duplicate, not the sphere.
+    // Each tab has its own history.
     assert_eq!(app.history.undo_label(), Some("Duplicate"));
 }
 
@@ -102,7 +97,6 @@ pub(crate) fn a_component_cannot_be_placed_inside_itself() {
     assert!(app.can_integrate(wheel).is_err(), "a component was offered to itself");
     assert!(app.can_integrate(ROOT_COMPONENT).is_err(), "the root was offered as a component");
 
-    // A second component holding the wheel cannot then go into the wheel.
     app.new_component();
     let axle = app.project.active;
     {
@@ -120,8 +114,7 @@ pub(crate) fn a_component_cannot_be_placed_inside_itself() {
     assert_eq!(app.scene.len(), before, "the refused placement was made anyway");
 }
 
-/// Undoing the making of a component takes the component away; redoing it
-/// brings it back. Nothing is asked while there is nothing to lose.
+/// Undo removes a new component and redo restores it, without asking while nothing is lost.
 #[test]
 pub(crate) fn undoing_the_making_takes_the_component_away_and_redo_brings_it_back() {
     let (mut app, group) = app_with_group("components-undo");
@@ -142,8 +135,7 @@ pub(crate) fn undoing_the_making_takes_the_component_away_and_redo_brings_it_bac
     assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
 }
 
-/// Undoing the making of a component that has been worked on asks first, and
-/// throws the work away only when told to.
+/// Undoing a component that has been worked on asks first.
 #[test]
 pub(crate) fn undoing_the_making_of_an_edited_component_asks_first() {
     let (mut app, group) = app_with_group("components-undo-edited");
@@ -168,8 +160,7 @@ pub(crate) fn undoing_the_making_of_an_edited_component_asks_first() {
     assert!(app.project.get(component).is_none());
 }
 
-/// Deleting a component takes every integration of it with it, in every
-/// component, after asking.
+/// Deleting a component removes all its integrations everywhere, after asking.
 #[test]
 pub(crate) fn deleting_a_component_removes_every_integration_of_it() {
     let (mut app, group) = app_with_group("components-delete");
@@ -193,8 +184,7 @@ pub(crate) fn deleting_a_component_removes_every_integration_of_it() {
     assert!(app.scene.integrations_of(wheel).is_empty(), "the integration in another component outlived it");
 }
 
-/// A project with components is written whole and read back whole; one
-/// without is still the file it always was.
+/// A project with components round-trips whole; one without keeps the old file format.
 #[test]
 pub(crate) fn a_project_with_components_saves_and_opens_whole() {
     let dir = temp_config_dir("components-file");
@@ -205,7 +195,7 @@ pub(crate) fn a_project_with_components_saves_and_opens_whole() {
 
     app.run(Command::MakeComponent);
     let component = app.scene.component_of(group).unwrap();
-    // Saved from the component's own tab, which must not matter.
+    // Saving from the component's own tab must not matter.
     app.activate_component(component);
     assert!(app.unsaved());
     let path = dir.join("parts.simple3d");
@@ -225,8 +215,7 @@ pub(crate) fn a_project_with_components_saves_and_opens_whole() {
     assert!(fresh.evaluated.errors.is_empty(), "{:?}", fresh.evaluated.errors);
 }
 
-/// A saved primitive placed twice is two components: taking something off the
-/// shelf twice does not link the two (issue 113).
+/// A saved primitive placed twice gives two unlinked components (issue 113).
 #[test]
 pub(crate) fn every_placed_primitive_is_a_component_of_its_own() {
     let (mut app, group) = app_with_group("components-primitive");
@@ -243,13 +232,11 @@ pub(crate) fn every_placed_primitive_is_a_component_of_its_own() {
     app.reevaluate_for_test();
     assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
 
-    // And undoing a placement takes its component with it.
     app.run(Command::Undo);
     assert!(app.project.get(second).is_none());
 }
 
-/// Copy and paste inside a project places the same component again; into
-/// another project it brings a copy of it along.
+/// Pasting within a project reuses the component; into another project it brings a copy.
 #[test]
 pub(crate) fn a_pasted_integration_links_here_and_copies_elsewhere() {
     let (mut app, group) = app_with_group("components-paste");
@@ -271,8 +258,7 @@ pub(crate) fn a_pasted_integration_links_here_and_copies_elsewhere() {
     assert!(app.evaluated.bounds.is_some(), "the pasted component evaluated to nothing");
 }
 
-/// The window draws with the second row of tabs up, with an integration
-/// selected, and on a component's own tab.
+/// The window draws with the component tab row, an integration selected, and on a component tab.
 #[test]
 pub(crate) fn the_window_draws_with_components() {
     let (mut app, group) = app_with_group("components-draw");
@@ -289,9 +275,7 @@ pub(crate) fn the_window_draws_with_components() {
     assert!(app.project.get(component).is_some(), "closing the tab deleted the component");
 }
 
-/// An undo in the root puts its own tree back and nothing else: the
-/// components it places stay as they are now, however they were when the step
-/// was taken.
+/// An undo in the root restores only its own tree, not the components it places.
 #[test]
 pub(crate) fn an_undo_keeps_the_components_as_they_are_now() {
     let (mut app, group) = app_with_group("components-undo-current");
@@ -313,8 +297,7 @@ pub(crate) fn an_undo_keeps_the_components_as_they_are_now() {
     app.reevaluate_for_test();
     assert!(bounds(&app).1.z > 150.0, "the redo brought back the component as it was before the sphere");
 
-    // And an undo that puts back an integration of a deleted component shows
-    // it as gone, not as it last looked.
+    // An integration of a deleted component comes back as gone.
     app.ask_delete_component(component);
     app.confirm_component_ask();
     app.run(Command::Undo);
@@ -322,8 +305,8 @@ pub(crate) fn an_undo_keeps_the_components_as_they_are_now() {
     assert!(!app.evaluated.errors.is_empty(), "the integration of a deleted component still evaluated");
 }
 
-/// Undoing the placement of a saved primitive that carried a component inside
-/// it takes both away, without asking; redo brings both back whole.
+/// Undoing a saved primitive placement with a nested component removes both without asking;
+/// redo restores both.
 #[test]
 pub(crate) fn undoing_a_placed_primitive_takes_the_components_inside_it_too() {
     let (mut app, group) = app_with_group("components-primitive-nested");
@@ -349,8 +332,7 @@ pub(crate) fn undoing_a_placed_primitive_takes_the_components_inside_it_too() {
     assert!(close(placed, bounds(&app)), "the redo did not bring the primitive back whole");
 }
 
-/// A paste into another project brings the components in, and undoing it
-/// takes them out again.
+/// Pasting into another project brings the components in, and undo removes them.
 #[test]
 pub(crate) fn undoing_a_paste_from_another_project_takes_its_components_away() {
     let (mut app, group) = app_with_group("components-paste-undo");
@@ -364,9 +346,8 @@ pub(crate) fn undoing_a_paste_from_another_project_takes_its_components_away() {
     assert!(!app.project.uses_components(), "the undone paste left its component in the project");
 }
 
-/// A new component made with a group selected is made of that group: the group
-/// goes into it, an integration is left where it stood, and the component's
-/// tab opens beside the root while the view stays on the integration.
+/// A new component with a group selected takes that group, leaves an integration in its place,
+/// and opens its tab while the view stays on the integration.
 #[test]
 pub(crate) fn a_new_component_with_a_group_selected_takes_the_group() {
     let (mut app, group) = app_with_group("components-new-from-group");
@@ -396,8 +377,8 @@ pub(crate) fn a_component_placed_on_a_group_row_goes_inside_it() {
     assert_eq!(app.scene.node(placed).parent, Some(holder), "the component was not placed inside the row's group");
 }
 
-/// A group still called what it was given becomes a numbered component, the
-/// node left where it stood renamed with it; a name somebody typed is kept.
+/// A group with its default name becomes a numbered component, renaming the integration too;
+/// a typed name is kept.
 #[test]
 pub(crate) fn a_group_with_its_given_name_becomes_a_numbered_component() {
     // An empty component first, so the numbering has one to count past.
@@ -422,7 +403,6 @@ pub(crate) fn a_group_with_its_given_name_becomes_a_numbered_component() {
         let component = app.scene.component_of(node).unwrap();
         assert_eq!(app.component_label(component), Some(app.scene.node(node).name.clone()));
     }
-    // The group the root started with was never touched.
     assert_eq!(app.scene.node(group).name, "Wheel");
     assert!(!app.scene.node(group).is_component());
 }

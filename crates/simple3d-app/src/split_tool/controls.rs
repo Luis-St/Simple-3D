@@ -6,7 +6,7 @@ use crate::theme;
 use simple3d_core::primitive::ParamKind;
 use simple3d_geom::tiling::{CellKind, Tiling};
 
-/// Every cut in the plan, and the way to add or drop one.
+/// Every cut in the plan, and adding or dropping one.
 pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
     let cuts = tool.plan.passes.len();
     let mut drop = None;
@@ -17,9 +17,7 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
             ui.separator();
             ui.add_space(2.0);
         }
-        // The header names the cut only when there is more than one: a window
-        // that says "Cut 1" over a single cut is answering a question nobody
-        // had. The buttons on the right of it are there either way.
+        // The header names the cut only when there are several; the buttons show either way.
         ui.horizontal(|ui| {
             if cuts > 1 {
                 ui.label(
@@ -32,13 +30,8 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
                 if cuts > 1 && drop_button(ui, index) {
                     drop = Some(index);
                 }
-                // Back to the numbers a cut starts with: no turn, no offset, no
-                // layers, and the stock cell size. Not literally every number
-                // to zero -- a cell of no size is a split that is refused, so
-                // the size goes back to the one a new cut opens on -- and not
-                // the cell shape or the axis, which are choices rather than
-                // numbers and are the two things worth keeping while the
-                // numbers are thrown away.
+                // Reset the numbers a new cut starts with (stock size, no turn, offset or layers), keeping the
+                // cell shape and axis, which are choices rather than numbers.
                 if ui
                     .button("Reset")
                     .on_hover_text(
@@ -54,8 +47,7 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
         });
         pass(app, ui, index, tiling);
     }
-    // A field being typed into holds its own text until it is left, and that
-    // text is what would be read back over the numbers this just put right.
+    // A field being typed into holds its own text, which would overwrite the reset numbers.
     if let Some(index) = reset {
         for part in ["size", "depth", "angle", "layer", "offset-0", "offset-1"] {
             app.fields.forget(egui::Id::new(("split-field", field_name(index, part))));
@@ -66,9 +58,7 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
     }
     if tool.plan.passes.len() < simple3d_geom::tiling::MAX_PASSES {
         ui.add_space(6.0);
-        // The new cut starts on the next axis round rather than on the one
-        // already being cut: two identical tilings on the same axis are one
-        // tiling, so the useful second cut is the one across the first.
+        // A new cut starts on the next axis, since a second tiling on the same axis would be redundant.
         let next =
             tool.plan.passes.last().map_or_else(Tiling::default, |last| Tiling { axis: (last.axis + 1) % 3, ..*last });
         if ui
@@ -84,11 +74,7 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
     }
 }
 
-/// The cross that drops one cut, drawn rather than written.
-///
-/// The same two strokes the popup's own close cross is, for the same reason: a
-/// cross typed as a character is a character the interface font may not have,
-/// and the one it puts in its place is an empty box.
+/// The painted cross that drops one cut, as the UI font may lack the glyph.
 pub(crate) fn drop_button(ui: &mut egui::Ui, index: usize) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
     let colour = if response.hovered() { theme::token::DANGER } else { theme::token::TEXT_LO };
@@ -96,24 +82,19 @@ pub(crate) fn drop_button(ui: &mut egui::Ui, index: usize) -> bool {
     let stroke = egui::Stroke::new(1.4_f32, colour);
     ui.painter().line_segment([arm.left_top(), arm.right_bottom()], stroke);
     ui.painter().line_segment([arm.right_top(), arm.left_bottom()], stroke);
-    // Painted, so nothing would otherwise say what it is: to anything reading
-    // the interface it was an unnamed rectangle.
+    // Painted, so it needs an accessible name.
     let label = format!("Drop cut {}", index + 1);
     let name = label.clone();
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     response.on_hover_text(&label).clicked()
 }
 
-/// One cut of the plan: what shape its cells are, how big, and where they run.
+/// One cut: its cell shape, size and direction.
 pub(crate) fn pass(app: &mut App, ui: &mut egui::Ui, index: usize, tiling: &mut Tiling) {
-    // Every field says what it is measured in, the way the properties panel's
-    // rows do: a number in a box is a number in some unit, and which one is not
-    // something to work out from the document setting three panels away.
+    // Every field names its unit, like the properties panel.
     let length = format!("({})", app.unit().suffix());
-    // The cell shapes are a row of their own above the grid rather than a cell
-    // in it. Four chips do not fit across the width of a popup, and an
-    // `egui::Grid` does not grow its row for a wrapped one: the fourth landed
-    // on top of the row below, which is the Size field.
+    // Cell shapes in their own row above the grid, since four chips wrapping inside an `egui::Grid`
+    // overlapped the next row.
     ui.label(egui::RichText::new("Cells").size(theme::font::LABEL).color(theme::token::TEXT_LO));
     ui.horizontal_wrapped(|ui| {
         for kind in CellKind::ALL {
@@ -134,9 +115,7 @@ pub(crate) fn pass(app: &mut App, ui: &mut egui::Ui, index: usize, tiling: &mut 
             ui.end_row();
         }
 
-        // The axis is the direction the cells *run in*, not the plane they lie
-        // in, which is the way round a cut is thought about: a plate lying flat
-        // is cut into columns standing up it, which is Z.
+        // The axis the cells run along: a flat plate is cut into columns standing up it, which is Z.
         ui.label("Through");
         ui.horizontal(|ui| {
             for (axis, name) in [(0u8, "X"), (1, "Y"), (2, "Z")] {
@@ -172,8 +151,7 @@ pub(crate) fn pass(app: &mut App, ui: &mut egui::Ui, index: usize, tiling: &mut 
         });
         ui.end_row();
 
-        // "Layer height" rather than "Layers": the number is how tall one layer
-        // is, and a row called Layers holding a 4 reads as four of them.
+        // "Layer height", since "Layers" with a 4 reads as four layers.
         label(
             ui,
             &format!("Layer height {length}"),

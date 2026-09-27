@@ -8,10 +8,7 @@ use simple3d_export::{BodyMode, Format};
 
 impl App {
     pub(super) fn export_window(&mut self, ctx: &egui::Context) {
-        // Tall enough for the body picker, which is the one part of this
-        // window that is a list rather than a row. Without it the window is as
-        // tall as its rows: a fixed 320 px was shorter than they had grown to,
-        // and the compression note was drawn over the summary line under it.
+        // Taller for the body picker, the one list here; a fixed short height drew the note over the summary.
         let picking = self.export_body_mode() == BodyMode::Selected;
         let size = if picking { egui::vec2(600.0, 560.0) } else { egui::vec2(560.0, 320.0) };
         self.dialog(
@@ -20,9 +17,8 @@ impl App {
                 key: "dialog-export",
                 title: "Export",
                 size,
-                // Resizable either way: a window whose resizability changes is
-                // made again by the window system, and egui panics when the
-                // immediate viewport it was building goes away under it.
+                // Always resizable: changing it recreates the window, and egui panics when the immediate viewport
+                // vanishes mid-build.
                 resizable: true,
                 fit_height: !picking,
                 min_size: None,
@@ -33,19 +29,14 @@ impl App {
     }
 
     pub(super) fn export_body(&mut self, ui: &mut egui::Ui) {
-        // A window as tall as its contents has no room below them to fill:
-        // the summary simply follows the rows.
+        // A content-height window has no room to fill: the summary just follows the rows.
         if self.export_body_mode() != BodyMode::Selected {
             self.export_controls(ui);
             ui.separator();
             self.export_summary_line(ui);
             return;
         }
-        // Bottom-up: the count of what is about to be written is laid out first
-        // and ends up at the foot of the contents, just over the buttons, and
-        // everything else takes the room left above it. In a `bottom_up` layout
-        // the items are added in the order they stack upwards, which is why the
-        // summary comes first here.
+        // Bottom-up, so the summary is laid out first and sits just above the buttons.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             self.export_summary_line(ui);
             ui.separator();
@@ -76,8 +67,7 @@ impl App {
             if self.export_format.carries_units() {
                 ui.label("Millimetres, recorded in the file");
             } else {
-                // For formats that do not carry units, state the
-                // assumption (spec section 9).
+                // For formats without units, state the assumption (spec section 9).
                 ui.label(
                     egui::RichText::new("This format does not record units. Numbers are written in millimetres.")
                         .weak(),
@@ -104,8 +94,7 @@ impl App {
             });
             ui.end_row();
 
-            // Only where the format has objects to keep apart; for the rest the
-            // question has no answer, so it is disabled rather than ignored.
+            // Only where the format keeps objects apart; otherwise disabled rather than ignored.
             ui.label("Bodies");
             ui.vertical(|ui| {
                 let separates = self.export_format.keeps_objects_separate();
@@ -137,9 +126,7 @@ impl App {
             });
             ui.end_row();
 
-            // Only 3MF is a package with parts to compress; the single-file
-            // formats have nothing to apply it to, so the row says so rather
-            // than offering a switch that would do nothing.
+            // Only 3MF is a package with parts to compress; the row says so for other formats.
             ui.label("Compression");
             ui.vertical(|ui| {
                 let packaged = self.export_format == Format::ThreeMf;

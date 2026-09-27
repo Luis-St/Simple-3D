@@ -6,13 +6,9 @@ use crate::view::View;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
-/// What is left of a stretch of material along `axis` once the section has had
-/// it, as the coordinate along that axis.
-///
-/// The axis runs through the origin, so a point on it is `t` along the axis and
-/// zero elsewhere and the plane's own test comes down to one number: the axis
-/// crosses it where the normal's component along the axis carries it there, and
-/// an axis lying *in* the plane is either wholly kept or wholly gone.
+/// What is left of a material span along `axis` after the section, as axis coordinates. The axis
+/// passes through the origin, so the plane test reduces to one number; an axis lying in the plane
+/// is kept or removed whole.
 pub(crate) fn trim_span(span: (f64, f64), axis: usize, plane: &Plane) -> Option<(f64, f64)> {
     let slope = component(plane.normal, axis);
     let (lo, hi) = (span.0.min(span.1), span.0.max(span.1));
@@ -28,8 +24,7 @@ pub(crate) fn trim_span(span: (f64, f64), axis: usize, plane: &Plane) -> Option<
     (hi - lo > 1e-9).then_some((lo, hi))
 }
 
-/// [`trim_span`] for any number of cuts: a plane cut down to a rectangle can
-/// take a stretch out of the middle of a span and leave both of its ends.
+/// [`trim_span`] for several cuts: a windowed cut can remove a span's middle and keep both ends.
 pub(crate) fn trim_spans(span: (f64, f64), axis: usize, cuts: &[Plane]) -> Vec<(f64, f64)> {
     if let [plane] = cuts {
         if plane.window.is_none() {
@@ -45,28 +40,12 @@ pub(crate) fn trim_spans(span: (f64, f64), axis: usize, cuts: &[Plane]) -> Vec<(
         .collect()
 }
 
-/// One arm of an axis: faded along its length like the grid, and drawn over the
-/// frame rather than tested against it -- except where it runs inside material,
-/// which is not drawn at all.
+/// One axis arm: faded along its length and drawn over the frame, except inside material.
 ///
-/// The depth test is the wrong question for an axis. Asked of the depth buffer,
-/// an axis disappears wherever the shape merely *stands in front of it*, which
-/// is most of the screen once the camera is close: the arm leaving a box at the
-/// origin is outside the box from the surface onwards, but its projection stays
-/// over the box for a long way, so the line arriving at the shape was missing
-/// and only a mark on the face was left (issue 47). Asked of the model instead
-/// -- is this stretch of the line inside anything? -- the answer is the one the
-/// picture wants: the line runs unbroken up to the surface it goes into, stops
-/// there, and picks up again where it comes out (issues 20, 36, 47).
-///
-/// That exception is the *approach*, and nothing else. It is granted to the
-/// stretch of the line on the eye's side of the material, because the stretch
-/// beyond the far surface really is behind the shape: drawing it over the solid
-/// as well put the line on the face of a box it had already left, which reads
-/// as an axis running inside the object instead of out the back of it. So every
-/// piece asks the question for itself, and the arm going away is
-/// depth-tested like anything else -- hidden by the box, and picked up again
-/// where it comes out past the silhouette.
+/// A plain depth test hides the arm wherever a shape stands in front of it, losing the approach to
+/// the surface it enters (issue 47); testing against material instead draws it up to the surface
+/// and from where it exits (issues 20, 36, 47). The exception is only for the approach: the stretch
+/// beyond the far surface is behind the shape and is depth-tested like anything else.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn push_axis_line(
     out: &mut Vec<AxisStep>,
@@ -80,8 +59,7 @@ pub(crate) fn push_axis_line(
     through: &[(f64, f64, u16)],
     tags: usize,
 ) {
-    // Which way depth runs along this axis: positive when travelling along
-    // +axis moves away from the eye.
+    // Positive when travelling along +axis moves away from the eye.
     let away = component(view.forward(), axis);
     let extents = body_extents(through, tags);
     let mut seen = vec![false; tags + 1];
@@ -108,15 +86,9 @@ pub(crate) fn push_axis_line(
     }
 }
 
-/// How far along the axis each body reaches, indexed by tag: from the first
-/// surface the axis meets in it to the last.
-///
-/// One body can hold several stretches of the axis -- a block with a hole
-/// drilled across the line is material, then the hole, then material again --
-/// and the approach is the side of the *whole* body. Asked of each stretch on
-/// its own, the piece of the line in the hole was on the eye's side of the far
-/// wall and so counted as arriving, and was drawn over the solid wall in front
-/// of it.
+/// Each body's reach along the axis, by tag: from the first surface met to the last. The approach
+/// is judged against the whole body, or a stretch in a drilled hole counts as arriving and is drawn
+/// over the near wall.
 pub(crate) fn body_extents(through: &[(f64, f64, u16)], tags: usize) -> Vec<Option<(f64, f64)>> {
     let mut extents: Vec<Option<(f64, f64)>> = vec![None; tags + 1];
     for &(lo, hi, tag) in through {
@@ -126,16 +98,9 @@ pub(crate) fn body_extents(through: &[(f64, f64, u16)], tags: usize) -> Vec<Opti
     extents
 }
 
-/// Fill `seen`, indexed by body tag, with the bodies that may not hide the piece
-/// of an axis at `at` along it.
-///
-/// A body qualifies only when that piece is on the eye's side of all of it (see
-/// [`body_extents`]): the line is being drawn over the shape so that it can be
-/// seen *arriving* at the surface it enters, and past the near surface -- in a
-/// hole inside the body, or out beyond its far side -- there is no arrival left
-/// to show, only a solid the line is genuinely behind. `away` is how depth runs
-/// along the axis; when it is about zero the axis lies in the screen plane, the
-/// two ends are the same distance off, and either may be the approach.
+/// Mark in `seen`, by tag, the bodies that may not hide the axis piece at `at`: those the piece is
+/// entirely on the eye's side of ([`body_extents`]). `away` is the depth direction along the axis;
+/// near zero, either end may be the approach.
 pub(crate) fn seen_through(seen: &mut [bool], extents: &[Option<(f64, f64)>], at: f64, away: f64) {
     for (slot, extent) in seen.iter_mut().zip(extents) {
         *slot = extent.is_some_and(|(lo, hi)| {

@@ -5,8 +5,7 @@ use crate::app::App;
 use crate::{theme, ui};
 use simple3d_geom::Vec3;
 
-/// What the plan comes to: how many cells it lays over the shape, or why it
-/// cannot be cut at all.
+/// What the plan comes to: how many cells, or why it cannot be cut.
 pub(crate) fn summary(app: &mut App, ui: &mut egui::Ui, tool: &SplitTool) {
     match tool.plan.refusal(tool.bounds) {
         Some(why) => {
@@ -27,21 +26,8 @@ pub(crate) fn summary(app: &mut App, ui: &mut egui::Ui, tool: &SplitTool) {
     }
 }
 
-/// Where the cuts will fall, in world space, for the renderer to draw over the
-/// model (issue 82).
-///
-/// This is the tool's preview, and it is in the viewport rather than in the
-/// window on purpose. A plan drawn inside the window can only ever show the
-/// tiling seen straight down its own axis; the question that actually stops
-/// people -- will this cut fall through the middle of that boss, is the grid
-/// turned the way I think it is -- is a question about the *shape*, and it is
-/// answered by drawing the cells on the shape and turning the model.
-///
-/// The loops go to the renderer rather than to the 2D painter so that the depth
-/// buffer can have them: a cell on the far side of the solid is behind it, and
-/// a grid drawn through the shape reads as floating in front of it. The cells
-/// live in the shape's own frame, so every loop goes out through the tool's
-/// `placement` on the way.
+/// Where the cuts fall, in world space, drawn over the model by the renderer (issue 82) so the cells
+/// are judged on the shape and depth-tested. Loops go out through the tool's `placement`.
 pub(crate) fn preview_loops(app: &App) -> Vec<Vec<Vec3>> {
     let Some(tool) = app.split_tool.as_ref() else { return Vec::new() };
     if tool.plan.refusal(tool.bounds).is_some() {

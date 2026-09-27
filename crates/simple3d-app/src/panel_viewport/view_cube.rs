@@ -7,21 +7,14 @@ use crate::app::{App, Status};
 use crate::theme::{self, token};
 use simple3d_geom::Vec3;
 
-/// The orientation cube's id. Fixed rather than derived from the viewport's Ui,
-/// so it is the same cube whatever else the panel contains -- and so a test can
-/// click a face of it.
+/// The orientation cube's id, fixed so it is stable and tests can click it.
 pub fn cube_id() -> egui::Id {
     egui::Id::new("view-cube")
 }
 
-/// What one frame's pointer left the cube knowing: where it is drawn, which of
-/// its zones the pointer is over, and whether it took the pointer.
-///
-/// The cube is answered in two halves because the viewport is: it has to claim
-/// the pointer *before* the orbit gesture reads it, and it has to be drawn
-/// *after* the picture the orbit has just moved (issue 102). Nothing here
-/// carries an angle -- the paint half reads the camera itself, so it draws the
-/// cube from the same one the frame behind it was rasterized from.
+/// What the frame's pointer told the cube: where it is, which zone is hovered, whether it took the
+/// pointer. Split because it must claim the pointer before orbiting and draw after the picture
+/// (issue 102); the paint half reads the camera itself.
 pub(crate) struct CubeHit {
     box_rect: egui::Rect,
     over_centre: bool,
@@ -30,25 +23,18 @@ pub(crate) struct CubeHit {
     pub taken: bool,
 }
 
-/// The orientation cube's half of the pointer.
-///
-/// It answers which way the model faces, and it is also the fastest way to
-/// change that: a face turns the camera to look at it straight on, and the dot
-/// at its centre returns to the isometric view the cube is drawn from.
+/// The cube's pointer half: a face turns the camera to face it, the centre dot returns to
+/// isometric.
 pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect) -> CubeHit {
     let side = theme::metric::VIEW_CUBE;
     let box_rect =
         egui::Rect::from_min_size(rect.right_bottom() - egui::vec2(side + 12.0, side + 12.0), egui::Vec2::splat(side));
-    // Click *and drag*: the drag turns the cube alone, which is the only way to
-    // reach the three sides the camera cannot currently see (issue 34).
+    // Dragging spins the cube alone, to reach the sides the camera cannot see (issue 34).
     let response = ui.interact(box_rect, cube_id(), egui::Sense::click_and_drag());
     let centre = box_rect.center();
     let reach = side * 0.30;
 
-    // The cube follows the camera unless it has been turned by hand, and a
-    // camera that moves takes the cube back with it: a spin is remembered
-    // along with the camera it was started from, and is dropped the moment the
-    // scene turns underneath it.
+    // A hand spin is remembered with the camera it started from and dropped once the camera moves.
     let camera = (app.scene.camera.yaw, app.scene.camera.pitch);
     if app.cube_spin.is_some_and(|spin| spin.camera != camera) {
         app.cube_spin = None;
@@ -66,10 +52,7 @@ pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::R
 
     let hover = response.hover_pos();
     let over_centre = hover.is_some_and(|p| (p - centre).length() < side * 0.11);
-    // Which part of the cube the pointer is over -- a face, an edge or a corner
-    // -- among the ones turned towards the eye, so a click never asks for the
-    // side of the cube that cannot be seen. A drag in progress is turning the
-    // cube, not choosing a view, so nothing is highlighted during one.
+    // The hovered face, edge or corner among those facing the eye; nothing during a spin drag.
     let hovered_zone = match (over_centre, response.dragged(), hover) {
         (false, false, Some(p)) => crate::view::cube_zone_at(yaw, pitch, p - centre, reach),
         _ => None,
@@ -91,8 +74,7 @@ pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::R
         response.clone().on_hover_text(format!("{hint}\nDrag the cube to turn it without moving the model"));
     }
     if response.clicked() {
-        // Whatever was chosen, the cube goes back to matching the camera: the
-        // spin is a way of *reaching* a view, not a second orientation to keep.
+        // After a click the cube follows the camera again: a spin only reaches a view.
         app.cube_spin = None;
         if over_centre {
             app.set_view(crate::view::ViewPreset::Isometric);
@@ -110,21 +92,19 @@ pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::R
     }
 }
 
-/// Which way the cube itself is turned: the camera's own angles, unless it has
-/// been spun by hand.
+/// The cube's angles: the camera's, unless spun by hand.
 fn cube_angles(app: &App) -> (f64, f64) {
     let camera = (app.scene.camera.yaw, app.scene.camera.pitch);
     app.cube_spin.map_or(camera, |spin| (spin.yaw, spin.pitch))
 }
 
-/// How nearly edge-on a face may be and still be drawn, as the depth of its
-/// normal: about a degree.
+/// How nearly edge-on a face may be and still be drawn: about a degree.
 const EDGE_ON: f64 = 0.02;
 
-/// How far a face has to be turned towards the eye for its label to fit on it.
+/// How far a face must face the eye for its label to fit.
 const LABELLED: f64 = 0.2;
 
-/// Draw the cube, from the camera as it stands at the end of the frame.
+/// Draw the cube from the camera as it stands at the end of the frame.
 pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
     let box_rect = hit.box_rect;
     let side = box_rect.width();
@@ -160,19 +140,17 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
         })
         .collect();
 
-    // Far faces first, so a near one draws over them.
+    // Far faces first, so near ones draw over them.
     let mut order: Vec<usize> = (0..crate::view::CUBE_FACES.len()).collect();
     order.sort_by(|a, b| faces[*b].2.partial_cmp(&faces[*a].2).unwrap_or(std::cmp::Ordering::Equal));
     for index in order {
         let (normal, _, label) = crate::view::CUBE_FACES[index];
         let (_, at, depth) = faces[index];
-        // A face seen edge-on, as the four sides are from straight above, is a
-        // line with nothing to show: drawn, its label hung outside the cube
-        // and was cut off by the frame ("GT" for RGT).
+        // Edge-on faces are skipped; their labels hung outside and were clipped ("GT" for RGT).
         if depth >= -EDGE_ON {
             continue;
         }
-        // The face as a quad: the four cube corners that share this normal.
+        // The face as a quad: the four cube corners sharing this normal.
         let axis = normal.iter().position(|c| *c != 0).unwrap_or(0);
         let sign = normal[axis] as f64;
         let quad: Vec<egui::Pos2> = (0..8)
@@ -192,27 +170,21 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
             egui::Stroke::new(1.0_f32, token::SURFACE_3.gamma_multiply(0.9)),
         ));
         let text_colour = if hovered_face == Some(index) { token::SURFACE_0 } else { token::TEXT_LO };
-        // Pushed a little away from the cube's centre: in an isometric view the
-        // three visible face centres meet at the near corner, and that is where
-        // the projection dot lives.
+        // Pushed out from the centre, where the three visible face centres meet the projection dot.
         let mut text_at = centre + (at - centre) * 1.2;
-        // A face turned so far away that its label would not fit on it is
-        // named by the faces beside it instead.
+        // A face turned too far away for its label is named by its neighbours instead.
         if depth > -LABELLED {
             continue;
         }
-        // Looked at square on, the face's centre is the cube's, and the label
-        // sat under the centre dot ("B.M" for BTM). It goes above it.
+        // Seen square on, the label goes above the centre dot rather than under it ("B.M" for BTM).
         if (text_at - centre).length() < 9.0 {
             text_at = centre - egui::vec2(0.0, 9.0);
         }
         painter.text(text_at, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(9.0), text_colour);
     }
 
-    // An edge or a corner has no quad of its own, so the highlight is drawn
-    // over the faces: the edge as a bar along itself, the corner as a dot on
-    // it. Both in the selection colour, which is what "this is what a click
-    // would take" means everywhere else in the application.
+    // Edges and corners have no quad, so their highlight (a bar or a dot) is drawn over the faces in
+    // the selection colour.
     if let Some(zone) = hit.hovered_zone {
         match crate::view::zone_order(zone) {
             2 => {
@@ -230,9 +202,7 @@ pub(crate) fn view_cube_paint(app: &App, ui: &egui::Ui, hit: &CubeHit) {
         }
     }
 
-    // The centre dot: an isometric view, back to where the cube itself is
-    // drawn from. It sits where no face label does -- a label that would be
-    // under it is moved above it -- so it never covers one.
+    // The centre dot returns to isometric; labels are moved so it never covers one.
     let dot = if hit.over_centre { token::ACCENT } else { token::TEXT_LO };
     painter.circle_filled(centre, side * 0.11 * 0.45, dot);
 }

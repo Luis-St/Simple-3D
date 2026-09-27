@@ -7,16 +7,13 @@ use std::time::Duration;
 
 #[test]
 pub(crate) fn a_new_document_is_empty_and_unmodified() {
-    // A shape nobody asked for is a shape they have to notice and delete,
-    // and the palette is one click away. What matters as much: an untouched
-    // new document has nothing to save, so quitting it asks no question.
+    // A new document is empty, so there is nothing to delete and quitting asks nothing.
     let mut app = app_in(temp_config_dir("empty-start"));
     assert_eq!(app.scene.depth_first(), vec![app.scene.root()], "something was added to the new document");
     assert!(app.primary().is_none());
     assert!(!app.unsaved(), "an untouched new document already counts as modified");
 
-    // And File > New, from a document that does have something in it, gets
-    // back to exactly that.
+    // File > New from a non-empty document gets back to exactly that.
     let root = app.scene.root();
     app.scene.add_primitive("box", root, 0).unwrap();
     app.run(Command::New);
@@ -31,15 +28,12 @@ pub(crate) fn a_message_fades_once_it_has_been_read_and_ready_never_does() {
     assert_eq!(status_opacity(&message, STATUS_LIFETIME), 1.0);
     assert!(status_opacity(&message, STATUS_LIFETIME + Duration::from_millis(500)) < 1.0);
     assert_eq!(status_opacity(&message, STATUS_LIFETIME + Duration::from_secs(2)), 0.0);
-    // "Ready" is the state of the application, not news about it.
+    // "Ready" is the application's state, not news.
     assert_eq!(status_opacity(&Status::Idle, Duration::from_secs(600)), 1.0);
 }
 
-/// A project handed to the binary on the command line -- which is what a
-/// file association and a double-click do -- keeps the camera it was saved
-/// with. The starter scene has no camera worth keeping and is framed once
-/// it has bounds; the flag is what tells the two apart, and it used to be
-/// "this is the first evaluation of the session", which both are.
+/// A project opened from the command line keeps its saved camera; only the starter scene is framed.
+/// The flag once meant "first evaluation", true for both.
 #[test]
 pub(crate) fn a_project_opened_from_the_command_line_keeps_its_saved_camera() {
     let dir = temp_config_dir("cli-camera");
@@ -59,13 +53,11 @@ pub(crate) fn a_project_opened_from_the_command_line_keeps_its_saved_camera() {
     let mut opened = App::with_config_dir(&ctx, Some(path.clone()), dir.clone());
     opened.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
     assert!(!opened.frame_when_evaluated, "opening a file from the command line asked for a reframe");
-    // The reframe used to happen when the first evaluation landed, so the
-    // camera has to still be the saved one *after* that.
+    // The reframe happened when the first evaluation landed, so check after it.
     opened.reevaluate_for_test();
     assert_eq!(opened.scene.camera, saved, "the saved camera did not survive being opened from the command line");
 
-    // And the empty starter document still frames itself, which is what the
-    // flag exists for.
+    // The empty starter still frames itself.
     let fresh = app_in(temp_config_dir("cli-camera-fresh"));
     assert!(fresh.frame_when_evaluated, "the starter scene will never be framed");
 }

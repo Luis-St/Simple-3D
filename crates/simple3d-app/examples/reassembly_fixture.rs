@@ -1,34 +1,15 @@
-//! Writes the 3MF used to try the reassembly out (issue 108): one object whose
-//! mesh holds eighty-odd separate bodies, laid out so that every branch of the
-//! recognition has something to be tried on.
+//! Writes the 3MF used to try the reassembly (issue 108): one object of eighty-odd separate
+//! bodies covering every branch of the recognition.
 //!
-//! The bodies are *appended*, never unioned, which is the whole point. A
-//! printer file is a bag of surfaces and says nothing about which of them are
-//! one solid -- a pin standing in a plate is two closed shells whose triangles
-//! happen to touch -- and putting them through the boolean kernel first would
-//! weld them into one surface, which is a different model and one the
-//! recognition would be right to refuse. Bodies that are *meant* to be one
-//! shell (the drilled plate, the L-bracket) go through the kernel on purpose,
-//! and come out as the single unrecognisable body they are.
+//! Bodies are appended, never unioned, as in a printer file; a union would weld touching bodies
+//! into one. Shapes meant to be one shell (drilled plate, L-bracket) go through the kernel.
 //!
-//! What is in it, and what each thing is there to test:
-//!
-//! * **Two assemblies of parts standing on a plate** -- boxes, cylinders at
-//!   several tessellations, a hexagonal prism, a cone, a frustum, a sphere.
-//!   Each part touches its plate, so they should come back as one group apiece
-//!   with every part named; the two assemblies stand well apart, so they should
-//!   *not* be gathered into one.
-//! * **A row of shapes standing on their own, turned every which way** -- the
-//!   fits have to find an axis rather than assume one, and a body that is not
-//!   near a world axis is where that shows.
-//! * **A row of shapes nothing here can rebuild** -- a torus, a drilled plate,
-//!   an L-bracket, a tube, a capsule, a rounded box. These have to come back as
-//!   meshes, unchanged, rather than as the box or cylinder each of them nearly
-//!   is. Getting one of these *recognised* is a worse failure than missing a
-//!   cylinder.
-//! * **Sixty small cubes in a field** -- for the cap. They are the smallest
-//!   bodies in the file, so lowering "At most" leaves the big parts as objects
-//!   and sweeps the cubes into the one leftover mesh.
+//! * **Two assemblies on plates**: each should become one group with every part named, and the
+//!   two should stay apart.
+//! * **Shapes turned every which way**: the fits must find the axis.
+//! * **Unrebuildable shapes** (torus, drilled plate, L-bracket, tube, capsule, rounded box): must
+//!   stay meshes; recognising one is worse than missing a cylinder.
+//! * **Sixty small cubes**, for the cap: lowering it sweeps them into the leftover mesh.
 //!
 //! usage: reassembly_fixture [out.3mf]
 
@@ -49,8 +30,7 @@ fn main() {
     let plate = Vec3::new(-260.0, 0.0, 0.0);
     put(gen::box_mesh(150.0, 110.0, 8.0), plate + Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
     for (x, y) in [(-57.0, -37.0), (57.0, -37.0), (57.0, 37.0), (-57.0, 37.0)] {
-        // Sunk two millimetres into the plate, the way a part that is meant to
-        // be in contact is modelled.
+        // Sunk 2 mm into the plate, as parts meant to be in contact are modelled.
         put(gen::cylinder_mesh(14.0, 14.0, 40.0, 32), plate + Vec3::new(x, y, 26.0), Vec3::ZERO);
     }
     put(gen::regular_prism_mesh(6, 44.0, 22.0, false), plate + Vec3::new(0.0, 0.0, 17.0), Vec3::ZERO);
@@ -59,18 +39,14 @@ fn main() {
     let stack = Vec3::new(-40.0, 0.0, 0.0);
     put(gen::cylinder_mesh(90.0, 90.0, 12.0, 64), stack + Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO);
     put(gen::cone_mesh(78.0, 30.0, 34.0, 64), stack + Vec3::new(0.0, 0.0, 27.0), Vec3::ZERO);
-    // Wider than the frustum it stands on, and sunk into it. Matching its rim
-    // exactly would put a vertex of each in the same place, and a shared vertex
-    // is what "one body" means here: the two would weld into a single
-    // unrecognisable solid on the way through the file.
+    // Wider than the frustum and sunk into it: matching its rim would share vertices and weld them.
     put(gen::cone_mesh(34.0, 0.0, 28.0, 48), stack + Vec3::new(0.0, 0.0, 56.0), Vec3::ZERO);
     put(gen::ellipsoid_mesh(24.0, 24.0, 24.0, 32), stack + Vec3::new(0.0, 0.0, 78.0), Vec3::ZERO);
 
     // -- assembly three: the coarse tessellations --------------------------
     let coarse = Vec3::new(160.0, 0.0, 0.0);
     put(gen::box_mesh(120.0, 90.0, 8.0), coarse + Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
-    // Eight segments: the same triangles a cylinder has, and few enough of them
-    // that the shape somebody meant is a prism.
+    // Eight segments: few enough that a prism is what was meant.
     put(gen::cylinder_mesh(34.0, 34.0, 30.0, 8), coarse + Vec3::new(-36.0, 0.0, 21.0), Vec3::ZERO);
     put(gen::regular_prism_mesh(3, 44.0, 26.0, false), coarse + Vec3::new(30.0, -24.0, 19.0), Vec3::ZERO);
     put(gen::cylinder_mesh(9.0, 9.0, 46.0, 12), coarse + Vec3::new(34.0, 26.0, 29.0), Vec3::ZERO);
@@ -112,9 +88,7 @@ fn main() {
         scale: 1.0,
         unit: simple3d_export::Unit3mf::Millimeter,
         allow_invalid: false,
-        // One object, so the import lands as one mesh node -- which is what
-        // there is to reassemble. Written as separate bodies the importer would
-        // hand back a group of meshes and the feature would have nothing to do.
+        // One object, so the import is one mesh node to reassemble.
         bodies: simple3d_export::BodyMode::One,
         compress: true,
     };
@@ -127,14 +101,7 @@ fn main() {
     report(&path, bodies);
 }
 
-/// Read the file back the way the application reads it, take it apart, and say
-/// what came out.
-///
-/// The harness checks itself, because the thing that makes this file worth
-/// having is not that it is complicated but that it is complicated in the ways
-/// the recognition has to answer for -- and a body that quietly stopped being
-/// recognised would otherwise only turn up as a disappointing afternoon with
-/// the tool open.
+/// Read the file back as the application does, reassemble it, and report what came out.
 fn report(path: &std::path::Path, bodies: usize) {
     let mut progress = |_: f32| true;
     let model = simple3d_import::read(path, &mut progress).expect("the file reads back");
@@ -162,18 +129,15 @@ fn report(path: &std::path::Path, bodies: usize) {
     }
 }
 
-/// A plate with a hole bored through it: one closed body, and the case the
-/// whole measurement is shaped around -- every corner of it sits on the surface
-/// of its own bounding box, so anything that looked only at corners would call
-/// it a solid box and lose the hole.
+/// A plate with a hole: every corner lies on its bounding box, so a corners-only measure would
+/// call it a solid box.
 fn drilled() -> Mesh {
     let plate = gen::box_mesh(76.0, 76.0, 14.0);
     let drill = gen::cylinder_mesh(34.0, 34.0, 40.0, 48);
     simple3d_geom::evaluate_boolean(BooleanOp::Difference, &[plate, drill])
 }
 
-/// Two boxes welded into an L: one body whose surface turns a corner inwards,
-/// which no single primitive describes.
+/// Two boxes welded into an L, which no single primitive describes.
 fn bracket() -> Mesh {
     let upright = gen::box_mesh(22.0, 60.0, 70.0).translated(Vec3::new(-25.0, 0.0, 0.0));
     let foot = gen::box_mesh(72.0, 60.0, 20.0).translated(Vec3::new(0.0, 0.0, -25.0));

@@ -3,35 +3,23 @@
 use super::*;
 use crate::mesh::Mesh;
 
-/// Break a welded mesh into the connected pieces it is in, each with its own
-/// vertices and its tags carried across.
-///
-/// Connected through *shared vertices*, which is what a weld leaves and what
-/// separateness means here: two solids modelled side by side and flattened into
-/// one mesh have no vertex in common however close they stand, and two halves
-/// of one surface share every vertex along the seam between them. Touching is
-/// therefore not connection -- a pin resting in a hole is two bodies -- which is
-/// the right answer, and is why bodies that touch are offered a group rather
-/// than merged (see [`super::group`]).
-///
-/// The caller welds first; a mesh whose triangles each carry their own copies
-/// of their corners is one body per triangle.
+/// Break a welded mesh into its vertex-connected pieces, with their tags. Touching is not
+/// connection (a pin resting in a hole is two bodies); touching bodies are grouped instead
+/// ([`super::group`]). Unwelded input gives one body per triangle.
 pub(super) fn shells(mesh: &Mesh, give_up: Abandon<'_>) -> Option<Vec<Mesh>> {
     if mesh.indices.is_empty() {
         return Some(Vec::new());
     }
     let mut owner = Owner::of(mesh.positions.len());
     for (i, tri) in mesh.indices.iter().enumerate() {
-        // Often enough that a mesh of a hundred thousand triangles can be
-        // abandoned promptly, and rarely enough that the check is not the work.
+        // Checked often enough to abandon large meshes promptly, rarely enough not to dominate.
         if i % 4096 == 0 && give_up() {
             return None;
         }
         owner.join(tri[0] as usize, tri[1] as usize);
         owner.join(tri[1] as usize, tri[2] as usize);
     }
-    // One pass to number the bodies in the order their first triangle appears,
-    // so a mesh taken apart twice comes apart the same way.
+    // Bodies numbered by first triangle, so repeated runs split the same way.
     let mut number: Vec<Option<usize>> = vec![None; mesh.positions.len()];
     let mut bodies: Vec<Mesh> = Vec::new();
     let mut moved: Vec<u32> = vec![u32::MAX; mesh.positions.len()];
@@ -49,9 +37,7 @@ pub(super) fn shells(mesh: &Mesh, give_up: Abandon<'_>) -> Option<Vec<Mesh>> {
         let mut carried = [0u32; 3];
         for (slot, &v) in carried.iter_mut().zip(tri.iter()) {
             let v = v as usize;
-            // A vertex is copied into a body the first time that body reaches
-            // it, and the two side tables say where it went -- so the copy is
-            // one pass over the triangles rather than a map per body.
+            // Vertices are copied into a body on first reach, tracked by side tables, in one pass.
             if mine[v] != body {
                 mine[v] = body;
                 moved[v] = out.positions.len() as u32;
@@ -78,8 +64,7 @@ impl Owner {
 
     fn find(&mut self, mut v: usize) -> usize {
         while self.parent[v] as usize != v {
-            // Halving: the next look-up of anything on this path is one step
-            // shorter, without the second pass a full compression costs.
+            // Path halving: shorter lookups next time without a full compression pass.
             let grandparent = self.parent[self.parent[v] as usize];
             self.parent[v] = grandparent;
             v = grandparent as usize;

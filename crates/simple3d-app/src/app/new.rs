@@ -19,10 +19,7 @@ impl App {
         app
     }
 
-    /// `new`, but reading and writing settings and the keymap in `config_dir`
-    /// rather than the user's own. Tests use this so their result cannot depend
-    /// on what happens to be in the developer's config directory, and so they
-    /// cannot write to it.
+    /// `new` with settings and keymap in `config_dir`, so tests neither depend on nor write the real config.
     pub fn with_config_dir(ctx: &egui::Context, open: Option<PathBuf>, config_dir: PathBuf) -> App {
         crate::theme::apply(ctx);
         let settings = config::load_settings_from(&config_dir);
@@ -156,22 +153,17 @@ impl App {
         app.export_bodies = simple3d_export::BodyMode::from_id(&app.settings.last_export_bodies).unwrap_or_default();
         app.export_compress = app.settings.last_export_compress;
         app.refresh_library();
-        // And the saved pattern kinds, for the same reason: the property panel
-        // offers them on any custom pattern, which is a place the user reaches
-        // without ever opening the tool that keeps the shelf up to date.
+        // The property panel offers saved kinds on any custom pattern, without opening the pattern tool.
         app.refresh_pattern_kinds();
         match open {
-            // Opening a project by passing its path on the command line, so file
-            // associations work on both platforms (spec section 10).
+            // A path on the command line, for file associations (spec section 10).
             Some(path) => app.open_path(&path),
             None => app.starter_scene(),
         }
         app
     }
 
-    /// An empty document. Nothing is added for the user: a shape they did not
-    /// ask for is a shape they have to notice and delete, and the palette is
-    /// one click away.
+    /// An empty document; an unrequested shape would only need deleting.
     pub(crate) fn starter_scene(&mut self) {
         self.history.clear();
         self.saved_revision = self.history.revision();

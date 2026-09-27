@@ -32,7 +32,7 @@ pub(crate) fn a_pattern_holds_children_and_round_trips_through_the_portable_form
     let pat = scene.add_pattern(root, 0);
     assert!(scene.node(pat).is_pattern());
     assert!(scene.node(pat).can_hold_children(), "a pattern must be able to hold children");
-    // A child can be reparented into it, the way a group takes one.
+    // A child can be reparented into it, like a group.
     let child = box_at(&mut scene, root, 3.0);
     scene.reparent(child, pat, 0).unwrap();
     assert_eq!(scene.node(pat).children, vec![child]);
@@ -101,10 +101,8 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
 
 #[test]
 pub(crate) fn a_node_has_three_visibility_states_and_they_survive_the_file() {
-    // Issue 21: hidden used to mean "invisible, unless the document-wide
-    // ghost switch is on, in which case it means translucent" -- so the only
-    // states the interface could reach were visible and ghost, and there was
-    // no way to say "this one is gone" while another was being positioned.
+    // Issue 21: hidden used to mean translucent with the ghost switch on, so "gone" was unreachable while
+    // positioning another node.
     let mut scene = Scene::new();
     let root = scene.root();
     let a = scene.add_primitive("plate", root, 0).unwrap();
@@ -113,8 +111,7 @@ pub(crate) fn a_node_has_three_visibility_states_and_they_survive_the_file() {
     for state in Visibility::ALL {
         scene.get_mut(a).unwrap().set_visibility(state);
         assert_eq!(scene.node(a).visibility(), state);
-        // Anything but visible is out of the model, ghost included: a ghost
-        // is drawn, never built.
+        // Anything but visible is out of the model: a ghost is drawn, never built.
         assert_eq!(scene.node(a).visible, state == Visibility::Visible);
 
         let data = scene.export_subtree(a).unwrap();

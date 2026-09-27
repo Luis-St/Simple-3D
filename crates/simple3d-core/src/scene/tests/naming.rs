@@ -4,9 +4,7 @@ use super::*;
 
 #[test]
 pub(crate) fn a_duplicate_is_named_as_a_copy() {
-    // A duplicate is the same thing the clipboard makes, so it reads the
-    // same way; two siblings both called "Box" say nothing about which is
-    // which.
+    // A duplicate reads like a paste; two siblings both called "Box" say nothing.
     let mut scene = Scene::new();
     let root = scene.root();
     let a = box_at(&mut scene, root, 0.0);
@@ -16,9 +14,7 @@ pub(crate) fn a_duplicate_is_named_as_a_copy() {
     let again = scene.duplicate(a).unwrap();
     assert_eq!(scene.node(again).name, "Box copy 2");
 
-    // Duplicating a duplicate is how a row of something actually gets laid
-    // out, and each one is of the one just made. Without trimming the
-    // suffix the fourth press of Ctrl+D reads "Box copy copy copy copy".
+    // Chained duplicates trim the suffix, or the fourth Ctrl+D reads "Box copy copy copy copy".
     let mut chained = copy;
     for expected in ["Box copy 3", "Box copy 4", "Box copy 5"] {
         chained = scene.duplicate(chained).unwrap();
@@ -40,8 +36,7 @@ pub(crate) fn a_duplicated_group_renames_what_travels_inside_it() {
 
 #[test]
 pub(crate) fn a_name_is_free_across_the_tree_not_only_among_siblings() {
-    // The outliner shows every depth at once, so a "Box 2" nested in a
-    // pattern is a row the user has to tell apart from a "Box 2" beside it.
+    // The outliner shows every depth, so names must be unique across the tree.
     let mut scene = Scene::new();
     let root = scene.root();
     let pattern = scene.add_pattern(root, 0);

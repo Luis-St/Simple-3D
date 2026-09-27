@@ -5,7 +5,7 @@ use crate::view::View;
 use simple3d_geom::Vec3;
 
 impl Gizmo {
-    /// Points along a rotate ring, for drawing it and for hit-testing it.
+    /// Points along a rotate ring, for drawing and hit-testing.
     pub fn ring_points(&self, axis: usize, view: &View, count: usize) -> Vec<Vec3> {
         let radius = self.arm(view) * 0.86;
         let (u, v) = other_axes(axis);
@@ -17,16 +17,8 @@ impl Gizmo {
             .collect()
     }
 
-    /// A plane handle's four corners on screen -- the origin, the end of its
-    /// first axis, the far corner and the end of its second -- or `None` while
-    /// the plane is seen too nearly edge-on to be a handle at all.
-    ///
-    /// Edge-on, the square collapses onto a line, and an outlined polygon of no
-    /// area is one egui draws with mitre spikes thousands of pixels long: a
-    /// line straight through the handle and off across the viewport, there at
-    /// exactly one camera angle and gone the moment the camera turns. Grabbing
-    /// such a handle would be no better, since the drag moves in a plane the
-    /// eye cannot see into.
+    /// A plane handle's screen corners, or `None` when seen nearly edge-on: egui draws a zero-area
+    /// outline with huge mitre spikes, and a drag there moves in a plane the eye cannot see.
     pub fn plane_quad(&self, axis: usize, view: &View) -> Option<[egui::Pos2; 4]> {
         let (u, v) = other_axes(axis);
         let side = self.arm(view) * PLANE_FRACTION;
@@ -50,7 +42,6 @@ impl Gizmo {
         (twice_area.abs() * 0.5 >= facing * PLANE_MIN_FACING).then_some(quad)
     }
 
-    /// The handle under the cursor, if any.
     pub fn hit_test(&self, view: &View, cursor: egui::Pos2, is_group: bool) -> Option<Handle> {
         let mut best: Option<(f32, Handle)> = None;
         for handle in self.handles(is_group) {

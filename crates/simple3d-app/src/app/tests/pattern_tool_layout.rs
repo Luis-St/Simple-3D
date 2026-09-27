@@ -2,25 +2,15 @@
 
 use super::*;
 
-/// The cross that drops a stage ends where the stage's own fields end, and
-/// is big enough to aim at.
-///
-/// Asked for after it sat eight pixels right of every field under it -- a
-/// stage's name line ran to the edge of the column while a property row is
-/// pinned `EDGE_PAD` inside it -- and at egui's small-button size, 18.5 by
-/// 14, which is a small target for the one control in the tool that throws
-/// work away.
-///
-/// Both edges are read back from the frame rather than worked out here:
-/// what is being held is that they go on coming from the same place.
+/// The stage-drop cross ends where the stage's fields do and is big enough to aim at. Regression: it
+/// sat eight pixels right of the fields at egui's small-button size. Both edges are read from the frame.
 #[test]
 pub(crate) fn the_cross_that_drops_a_stage_lines_up_with_the_fields_under_it() {
     let mut app = headless_app();
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool opened on a pattern");
     app.start_rule_from(pattern, 0);
-    // Every stage has one once there is more than one to choose between; the
-    // second stage's is measured against the second stage's own field.
+    // With several stages each has a cross; the second is measured against its own field.
     if let Some(params) = app.scene.get_mut(pattern).and_then(|n| n.params_mut()) {
         params.insert("stages".to_string(), simple3d_core::primitive::ParamValue::Count(2));
     }
@@ -47,8 +37,7 @@ pub(crate) fn the_cross_that_drops_a_stage_lines_up_with_the_fields_under_it() {
         cross.right(),
         field.right()
     );
-    // Twice the fourteen pixels egui's small button comes out at, and
-    // square: it is a mark rather than a word.
+    // Twice egui's small button height, and square.
     assert!(
         cross.width() >= 28.0 && cross.height() >= 28.0,
         "the cross is {:?}, which is not twice the small button it was",

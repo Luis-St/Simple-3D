@@ -6,30 +6,24 @@ use simple3d_core::scene::{Colour, ComponentId, GroupOp, NodeId, ROOT_COMPONENT}
 
 /// The right-click menu on an outliner row.
 ///
-/// Everything here is also a command with a keyboard binding and a place in the
-/// menu bar -- that is deliberate. The menu is not a second way of doing things,
-/// it is the same commands where the tree is, so the shortcut is learned by
-/// reading the row you are already looking at.
+/// Deliberately the same commands as the menu bar, with their shortcuts, so they can be learned here.
 pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId, is_root: bool) {
     let is_group = app.scene.node(id).is_group();
     use simple3d_core::keymap::Command;
 
-    /// The dividers between the menu's blocks. Only what the row can do is
-    /// shown, so a block can come out empty, and a rule is drawn only once
-    /// something follows it -- never two rules across a gap, and never one at
-    /// the bottom of the menu.
+    /// Dividers between the menu's blocks, drawn only once something follows, so there are never
+    /// two in a row or one at the bottom.
     struct Blocks {
         started: bool,
         ruled: bool,
     }
 
     impl Blocks {
-        /// A block ends here, and the next entry drawn starts a new one.
+        /// A block ends here; the next entry starts a new one.
         fn rule(&mut self) {
             self.ruled = true;
         }
 
-        /// An entry is about to be drawn.
         fn entry(&mut self, ui: &mut egui::Ui) {
             if self.ruled && self.started {
                 ui.separator();
@@ -39,9 +33,8 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         }
     }
 
-    /// One command in the menu, left out where it would not do anything. What
-    /// was picked is collected rather than run on the spot: labelling a button
-    /// borrows the keymap, and running a command wants the whole application.
+    /// One command in the menu, omitted where it would do nothing. The choice is collected rather
+    /// than run: labelling borrows the keymap, running needs the whole application.
     fn item(
         ui: &mut egui::Ui,
         blocks: &mut Blocks,
@@ -61,9 +54,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
     }
 
     response.context_menu(|ui| {
-        // Right-clicking a row that is not in the selection acts on that row,
-        // not on whatever happened to be selected before -- guessing the other
-        // way round is how a delete takes the wrong node.
+        // Right-clicking an unselected row acts on that row, so a delete never hits the wrong node.
         if !app.is_selected(id) {
             app.select_only(id);
         }
@@ -71,8 +62,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let multiple = app.selection.len() > 1;
         let have_clipboard = app.clipboard.is_some();
 
-        // Named for what it does rather than for the flag it flips, because
-        // which of the two "Toggle visibility" means depends on the row.
+        // Named by effect, since "Toggle visibility" would be ambiguous.
         let show_hide = format!(
             "{}\t{}",
             if hidden { "Show" } else { "Hide" },
@@ -87,8 +77,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let mut save_as_primitive = false;
         let mut open_component = false;
         let mut place_component: Option<ComponentId> = None;
-        // Every component that could be placed here, and why not where one
-        // cannot -- none at all until the project has one beyond its root.
+        // Every component placeable here, with the reason where one cannot be.
         let placeable: Vec<(ComponentId, String, Option<String>)> = app
             .project
             .components
@@ -102,11 +91,8 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         let keymap = &app.keymap;
         let mut blocks = Blocks { started: false, ruled: false };
 
-        // First, because adding is what the tree is most often opened to do,
-        // and because a shape added from a row belongs on that row: inside the
-        // group that was clicked, or beside anything else (issue 44). The Add
-        // menu in the menu bar has the same contents and puts them at the
-        // document's insertion point instead.
+        // First, as adding is the most common use; a shape goes inside the clicked group or beside
+        // anything else (issue 44).
         blocks.entry(ui);
         ui.menu_button("Add", |ui| {
             for op in GroupOp::ALL {
@@ -115,15 +101,9 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                     ui.close();
                 }
             }
-            // Ruled off from the group operators above: both halves add a
-            // container, but a group is one that combines what is in it and a
-            // pattern is one that repeats it, and six buttons in an unbroken
-            // column read as six of the same thing.
+            // Separates combining containers (groups) from repeating ones (patterns).
             ui.separator();
-            // The other container a node can be (issue 67). Empty, for shapes
-            // to be put into afterwards -- "Make a pattern of the selection",
-            // further down this same menu, is the one that wraps what is
-            // already there.
+            // An empty pattern (issue 67); wrapping the selection is further down.
             if ui
                 .button("Pattern")
                 .on_hover_text("An empty pattern, for shapes to be put into it and repeated")
@@ -132,10 +112,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                 add_pattern = true;
                 ui.close();
             }
-            // The tool that builds a repetition rule out of stages (issue 67).
-            // Beside "Pattern" here as well as in the menu bar: the tree's own
-            // Add menu is where a container gets added from, and a rule nobody
-            // can find is a rule nobody has.
+            // The custom-pattern tool (issue 67), next to "Pattern" so it can be found.
             if ui
                 .button("Custom pattern")
                 .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
@@ -145,8 +122,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                 ui.close();
             }
             ui.separator();
-            // The project's components, as a category of their own beside the
-            // shapes' (issue 113), and only once there is one to place.
+            // The project's components as their own category (issue 113), once there is one to place.
             if !placeable.is_empty() {
                 ui.menu_button("Components", |ui| {
                     for (component, name, refusal) in &placeable {
@@ -188,16 +164,12 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         item(ui, &mut blocks, keymap, &mut chosen, Command::Cut, !is_root);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Paste, have_clipboard);
         blocks.rule();
-        // What a node can be put into: the two containers, and nothing else
-        // (issue 94 -- each block of this menu is one kind of action).
+        // What a node can be put into (issue 94: each block is one kind of action).
         item(ui, &mut blocks, keymap, &mut chosen, Command::Group, !is_root);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Pattern, !is_root);
-        // A group taken out into a component of its own (issue 113), and the
-        // way into one that already is.
+        // Make a group into a component, or open an existing one (issue 113).
         item(ui, &mut blocks, keymap, &mut chosen, Command::MakeComponent, is_group && !is_root && !multiple);
-        // A new one on every group, the root among them: on the root an empty
-        // one, so a project that has none yet has a way in from the tree, and
-        // on any other group one made of it.
+        // On the root an empty component, on other groups one made from the group.
         item(ui, &mut blocks, keymap, &mut chosen, Command::NewComponent, is_group && !multiple);
         if is_component && !multiple {
             blocks.entry(ui);
@@ -207,33 +179,18 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             }
         }
         blocks.rule();
-        // What a node can be turned into. Baking a shape into its triangles
-        // (issue 80); dropping detail from one already baked, which is the same
-        // row the other way round and so sits next to it (issue 106); cutting
-        // one into a pattern of pieces, which on a split re-cuts rather than
-        // splits a split, and is why it is offered there too (issue 82); and
-        // the way back, on the split itself, which is the only row it can act
-        // on. All of them act on the selection, which the click above has
-        // already made this row.
+        // What a node can be turned into: mesh (issue 80), simplify (issue 106), split, also re-cutting
+        // a split (issue 82), and unsplit.
         item(ui, &mut blocks, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::SimplifyMesh, !multiple && app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::Reassemble, !multiple && app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::SplitIntoPieces, !is_root && !multiple);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Rejoin, !multiple && app.scene.node(id).is_split());
         blocks.rule();
-        // Where a node stands among its siblings. Left out where the move has
-        // nowhere to go, rather than offered and silent: a node that is already
-        // first among its siblings used to answer a click with a status line
-        // that had faded by the time anyone looked for it (issue 41).
+        // Omitted rather than silent where the move has nowhere to go (issue 41).
         item(ui, &mut blocks, keymap, &mut chosen, Command::MoveUp, app.can_reorder(-1));
         item(ui, &mut blocks, keymap, &mut chosen, Command::MoveDown, app.can_reorder(1));
-        // A group's operator, where the group is: the property editor has the
-        // same four, but pointing at the group in the tree and saying what it
-        // does is one gesture rather than three (issue 37).
-        //
-        // Like everything else here, it is left out rather than greyed out
-        // where it does not apply: an operator on something that is not a group
-        // is not a choice, it is not a question.
+        // A group's operator (issue 37), omitted rather than greyed out for non-groups.
         blocks.rule();
         if is_group {
             blocks.entry(ui);
@@ -256,14 +213,8 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             }
         }
         blocks.rule();
-        // Painting is here as well as in the property editor, because the
-        // outliner is where a group is easiest to point at and painting a group
-        // is the reason most people open this menu.
-        //
-        // A short palette of plain buttons, not a colour picker: the picker is
-        // a popup, and opening one from inside a menu closes the menu under it
-        // before a colour can be chosen. Anything not on the palette is a
-        // click away in the property editor, which the hint says.
+        // Painting here too, since groups are easiest to point at in the outliner. Plain buttons, not
+        // a picker: a picker popup would close the menu before a colour is chosen.
         blocks.entry(ui);
         ui.label(crate::theme::hint("Colour"));
         ui.horizontal(|ui| {
@@ -278,9 +229,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
                 }
             }
         });
-        // The colours the user has mixed for themselves, offered where the
-        // fixed palette is: the property editor keeps the same two rows. A
-        // preset never appears here -- it is already one row up.
+        // The user's custom recent colours; presets are already in the row above.
         let recent: Vec<[u8; 3]> = app.custom_recent_colours();
         if !recent.is_empty() {
             ui.horizontal(|ui| {
@@ -331,10 +280,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         if let Some(component) = place_component {
             app.integrate_component_at(id, component);
         }
-        // An empty pattern on this row, and the tool opened on it: adding leaves
-        // the new pattern selected, which is what the tool works on -- and which
-        // one it just made, so the tool knows it is a custom kind from the start
-        // rather than a linear one waiting to be told otherwise.
+        // Add an empty pattern and open the tool on it, so it is custom from the start.
         if add_custom_pattern {
             app.add_pattern_at(id);
             if let Some(made) = app.primary() {

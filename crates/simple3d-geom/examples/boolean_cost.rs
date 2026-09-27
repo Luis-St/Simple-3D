@@ -2,15 +2,9 @@
 //!
 //! `cargo run --release -p simple3d-geom --example boolean_cost`
 //!
-//! The fixture is one of the fifty assemblies in the spec's 200-primitive scene
-//! (`simple3d-core/tests/performance.rs`): a plate with a hole and a slot cut
-//! from it, and a boss unioned on. Both numbers matter and they pull against
-//! each other -- the triangle count of each step is the input size of the next,
-//! so a boolean that leaves the result denser than it needs to be makes every
-//! later boolean in the chain slower.
-//!
-//! Reference figures on the machine this was written on, for spotting a
-//! regression: ~4 ms and 228 triangles for the whole assembly.
+//! The fixture is one assembly from the 200-primitive scene (`simple3d-core/tests/performance.rs`).
+//! Each step's triangle count is the next step's input, so a denser result slows later booleans.
+//! Reference: ~4 ms and 228 triangles for the whole assembly.
 
 use simple3d_geom::{csg_bsp, primitives, Mesh, Vec3};
 use std::time::Instant;

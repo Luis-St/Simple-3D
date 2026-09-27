@@ -2,15 +2,12 @@
 
 use crate::raster::{Frame, Rgba};
 
-/// Colours, resolved from the host theme so the viewport is usable under both
-/// light and dark system themes (spec section 7.4).
+/// Colours resolved from the host theme, usable in light and dark system themes (spec section 7.4).
 #[derive(Clone, Copy, Debug)]
 pub struct Palette {
     /// The top of the viewport's vertical gradient.
     pub background: Rgba,
-    /// The bottom of it. A flat field of one colour reads as a blank canvas;
-    /// a gradient this shallow is barely nameable but gives the ground plane
-    /// somewhere to sit.
+    /// The bottom of it: a barely visible gradient gives the ground plane somewhere to sit.
     pub background_low: Rgba,
     pub solid: Rgba,
     pub selected: Rgba,
@@ -22,20 +19,14 @@ pub struct Palette {
     pub axis_z: Rgba,
     pub wire: Rgba,
     pub edge: Rgba,
-    /// The fill a body glowing through another one is drawn in: the selection
-    /// colour, translucent enough that the shape in front of it still reads.
+    /// The fill for a body glowing through another: the selection colour, translucent.
     pub glow: Rgba,
-    /// The face a section leaves behind (issue 71): the inside of the material,
-    /// which is the one surface in the frame that is not a surface of the
-    /// model. Darker than a solid on purpose -- a cut that reads in the same
-    /// colour as the outside says nothing about where the wall ends.
+    /// A section's cut face (issue 71), darker than a solid so the wall's end reads.
     pub cut: Rgba,
 }
 
 impl Palette {
-    /// The viewport's own reading of the interface palette. The names on the
-    /// left are `crate::theme::token`'s: surface-0 for the ground, the amber
-    /// accent for selection, the danger red for a body that is being subtracted.
+    /// The viewport's reading of the interface palette (`crate::theme::token`).
     pub fn dark() -> Palette {
         use crate::theme::token;
         Palette {
@@ -43,8 +34,7 @@ impl Palette {
             background_low: rgba(token::SURFACE_0B),
             solid: [0x9A, 0xA4, 0xB2, 255],
             selected: rgba(token::ACCENT),
-            // A subtrahend is drawn as a translucent red ghost, so a cut can be
-            // seen before it is resolved.
+            // A subtrahend is a translucent red ghost, so a cut can be seen before it is resolved.
             ghost: fade(token::DANGER, 80),
             grid: [0x28, 0x2D, 0x35, 255],
             grid_major: rgba(token::SURFACE_3),
@@ -86,7 +76,7 @@ impl Palette {
     }
 }
 
-/// A palette token as the rasterizer's own pixel format.
+/// A palette token in the rasterizer's pixel format.
 pub(crate) fn rgba(colour: egui::Color32) -> Rgba {
     [colour.r(), colour.g(), colour.b(), 255]
 }
@@ -97,9 +87,8 @@ pub(crate) fn fade(colour: egui::Color32, alpha: u8) -> Rgba {
 }
 
 impl Palette {
-    /// The background colour at `row` of a frame `height` rows tall. One
-    /// definition, used by the renderer and by anything that needs to ask
-    /// "was this pixel painted, or is it just the sky".
+    /// The background at `row` of a frame `height` rows tall; one definition for drawing and for
+    /// asking whether a pixel is sky.
     pub fn background_at(&self, row: usize, height: usize) -> Rgba {
         if height <= 1 {
             return self.background;
@@ -115,10 +104,9 @@ impl Palette {
     }
 }
 
-/// Lay the gradient down one row at a time, before anything else is drawn.
+/// Lay the gradient down row by row, before anything else.
 pub(crate) fn fill_background(frame: &mut Frame, palette: &Palette) {
-    // The gradient is a property of the whole frame, so the colour is asked for
-    // by the row's place in it -- while the pixels written are this band's own.
+    // The colour depends on the row's place in the whole frame; only this band's pixels are written.
     let height = frame.height;
     let width = frame.width;
     let rows = frame.rows();

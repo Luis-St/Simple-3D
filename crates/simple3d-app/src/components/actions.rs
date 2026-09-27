@@ -4,19 +4,17 @@ use super::*;
 use crate::app::{App, Modal, Status};
 use simple3d_core::scene::{free_name, is_default_name, reaches, SceneSettings};
 
-/// A question about a component that waits on a dialog.
+/// A component question waiting on a dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ComponentAsk {
-    /// Undoing the step that made the component, which takes it away again
-    /// together with everything done to it since.
+    /// Undoing the step that made the component, removing it and everything done to it since.
     Undo(ComponentId),
-    /// Deleting the component, and every integration of it with it.
+    /// Deleting the component and every integration of it.
     Delete(ComponentId),
 }
 
 impl App {
-    /// Whether component `from` may be placed in the component on screen, and
-    /// why not when it may not.
+    /// Whether component `from` may be placed in the on-screen component, and why not if not.
     pub(crate) fn can_integrate(&self, from: ComponentId) -> Result<(), String> {
         let target = self.project.active;
         if from == ROOT_COMPONENT {
@@ -36,20 +34,15 @@ impl App {
         Ok(())
     }
 
-    /// Whether the one node selected is a group that can be made a component.
+    /// Whether the one selected node is a group that can become a component.
     pub(crate) fn primary_is_group(&self) -> bool {
         self.selection.len() == 1
             && self.primary().is_some_and(|id| id != self.scene.root() && self.scene.node(id).is_group())
     }
 
-    /// Turn the selected group into a component, and leave an integration of
-    /// it where it was (`Command::MakeComponent`).
-    ///
-    /// The model looks exactly as it did: the group's contents go into the
-    /// component as they are, and the node that stood for the group stands for
-    /// the component, where the group stood. What changes is that the inside is
-    /// no longer edited here but in the component's own tab, which is opened
-    /// beside this one -- the view stays here, on the integration.
+    /// Turn the selected group into a component with an integration in its place
+    /// (`Command::MakeComponent`). The model looks the same; the contents are now edited in the
+    /// component's tab, opened beside this one while the view stays here.
     pub fn make_component(&mut self) {
         let Some(id) = self.primary().filter(|&id| id != self.scene.root() && self.scene.node(id).is_group()) else {
             self.status = Status::Warning("Select a group to make a component of it".into());
@@ -62,8 +55,7 @@ impl App {
             self.status = Status::Warning("That group cannot be made a component".into());
             return;
         };
-        // A group still called what it was given is named like any other new
-        // component; a name somebody typed is what the component is called.
+        // A group with its default name gets a component name; a typed name is kept.
         let mut data = data;
         if is_default_name(&data.name, "Group") {
             data.name = self.free_component_name();
@@ -72,9 +64,7 @@ impl App {
             }
         }
         let Some(scene) = Scene::from_root(&data, self.component_settings()) else {
-            // The subtree came out of this very scene, so this cannot happen --
-            // but if it did, the group is already gone, and the step back is
-            // the only honest place to leave it.
+            // Cannot happen, since the subtree came from this scene; if it does, undo is the honest fallback.
             self.history.undo(&mut self.scene);
             self.status = Status::Warning("That group cannot be made a component".into());
             return;
@@ -90,9 +80,7 @@ impl App {
         self.status = Status::Info(format!("Made {name} a component; open it to edit what is inside"));
     }
 
-    /// The settings a component made from this one starts with: the same units
-    /// and detail, and none of the ways of looking at it -- a section plane
-    /// placed for this model means nothing to the part taken out of it.
+    /// A new component's settings: the same units and detail, but no view state such as sections.
     fn component_settings(&self) -> SceneSettings {
         let mut settings = self.scene.settings.clone();
         settings.section = Default::default();
@@ -100,8 +88,7 @@ impl App {
         settings
     }
 
-    /// `Component`, or `Component 2`, `Component 3`... -- the first no
-    /// component of the project is called.
+    /// `Component`, `Component 2`, ...: the first name no component uses.
     fn free_component_name(&self) -> String {
         let taken: std::collections::HashSet<String> = self
             .project
@@ -112,10 +99,8 @@ impl App {
         free_name(&taken, "Component")
     }
 
-    /// A new component (`Command::NewComponent`): made of the selected group
-    /// when one is selected, since that is what a component made with a group
-    /// in hand is expected to hold, and otherwise empty and opened in its own
-    /// tab.
+    /// A new component (`Command::NewComponent`): from the selected group if any, else empty and
+    /// opened in its own tab.
     pub fn new_component(&mut self) {
         if self.primary_is_group() {
             self.make_component();
@@ -135,8 +120,7 @@ impl App {
         self.status = Status::Info(format!("Made {name}"));
     }
 
-    /// Place component `from` on outliner row `at`: inside it when it is a
-    /// group, beside it otherwise, the way the row's Add menu adds a shape.
+    /// Place component `from` on outliner row `at`: inside a group, beside anything else.
     pub fn integrate_component_at(&mut self, at: NodeId, from: ComponentId) {
         let (parent, index) = self.insertion_from_row(at);
         self.place_component(from, parent, index);
@@ -166,8 +150,7 @@ impl App {
         self.activate_component(component);
     }
 
-    /// Ask before deleting component `id`: it takes every integration of it
-    /// with it, and nothing brings it back.
+    /// Ask before deleting component `id`, which removes all its integrations irreversibly.
     pub fn ask_delete_component(&mut self, id: ComponentId) {
         if id == ROOT_COMPONENT || self.project.get(id).is_none() {
             return;
@@ -176,7 +159,7 @@ impl App {
         self.modal = Modal::ConfirmComponent;
     }
 
-    /// How many integrations of `id` there are, across the whole project.
+    /// How many integrations of `id` exist across the project.
     pub(crate) fn integration_count(&self, id: ComponentId) -> usize {
         self.project
             .components
@@ -186,7 +169,7 @@ impl App {
             .sum()
     }
 
-    /// Delete component `id` and every integration of it, wherever it is.
+    /// Delete component `id` and every integration of it.
     pub fn delete_component(&mut self, id: ComponentId) {
         if id == ROOT_COMPONENT {
             return;
@@ -207,13 +190,8 @@ impl App {
         });
     }
 
-    /// Take every integration of `id` out of every component, each as an undo
-    /// step of that component's own, and say how many there were.
-    ///
-    /// A step rather than a silent edit, so each component's history still
-    /// reads as what happened to it -- but a step back there puts back a node
-    /// standing for a component that is gone, which evaluates as nothing and
-    /// says why.
+    /// Remove every integration of `id` from every component, as an undo step in each, and return the
+    /// count. Undoing one restores a node for a missing component, which evaluates as nothing and says why.
     pub(super) fn strip_integrations(&mut self, id: ComponentId, label: &str) -> usize {
         let mut removed = 0;
         let here = self.scene.integrations_of(id);

@@ -1,6 +1,6 @@
 //! Where a pointer gesture has got to.
 
-/// The pointer facts the viewport panel reads off an `egui::Response` each frame.
+/// The pointer facts the viewport reads off an `egui::Response` each frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PointerState {
     /// Escape was pressed this frame.
@@ -11,20 +11,15 @@ pub struct PointerState {
     pub started: bool,
     /// The cursor is over a manipulator handle.
     pub on_handle: bool,
-    /// There is a cursor position at all -- the pointer may be off the window.
+    /// There is a cursor position at all; the pointer may be off the window.
     pub have_cursor: bool,
 }
 
-/// What the pointer is asking the manipulator to do this frame.
-///
-/// Split out of `panel_viewport::manipulate` so the begin/continue/finish
-/// bookkeeping can be asserted. An `egui::Response` cannot be built outside a
-/// running frame, and that is what kept acceptance criterion 23's last clause --
-/// "a completed drag undoes in one step" -- untested: the single undo record
-/// happens on `Begin` and on no other phase, which is the whole mechanism.
+/// What the pointer asks of the manipulator this frame. Separate from `panel_viewport::manipulate`
+/// so the one-undo-per-drag rule (recorded only on `Begin`, acceptance criterion 23) is testable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DragPhase {
-    /// Escape during a drag: put the pre-drag values back exactly.
+    /// Escape during a drag: restore the pre-drag values exactly.
     Cancel,
     /// The button came up: the drag is over.
     Finish,
@@ -36,11 +31,8 @@ pub enum DragPhase {
     Idle,
 }
 
-/// Which phase a frame is in, given whether a drag is already running.
-///
-/// The ordering is the part that matters. Escape beats release, so a cancel is
-/// never mistaken for a completed drag; and `Begin` requires that no drag is
-/// running, which is what stops a second undo step opening mid-gesture.
+/// The frame's phase given whether a drag is running. Escape beats release, and `Begin` requires no
+/// running drag, so no second undo step opens mid-gesture.
 pub fn drag_phase(dragging: bool, pointer: PointerState) -> DragPhase {
     if dragging {
         if pointer.escape {

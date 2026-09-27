@@ -6,9 +6,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_scale_multiplies_a_whole_subtree_and_a_base_anchor_still_stands_on_the_ground() {
-    // A scale is the one thing that makes a group a proportion of what it
-    // was without touching every dimension underneath it, so it has to reach
-    // the children.
+    // A group's scale must reach its children.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
@@ -24,7 +22,7 @@ pub(crate) fn a_scale_multiplies_a_whole_subtree_and_a_base_anchor_still_stands_
     assert!((slo - lo * 2.0).length() < 1e-9, "{slo:?} is not twice {lo:?}");
     assert!((shi - hi * 2.0).length() < 1e-9, "{shi:?} is not twice {hi:?}");
 
-    // Non-uniformly, on one axis only.
+    // Non-uniform, one axis only.
     scene.get_mut(group).unwrap().scale = Vec3::new(1.0, 3.0, 1.0);
     let stretched = Evaluator::new().evaluate(&scene, &Cancel::new());
     let (tlo, thi) = stretched.mesh.bounds().unwrap();
@@ -32,8 +30,7 @@ pub(crate) fn a_scale_multiplies_a_whole_subtree_and_a_base_anchor_still_stands_
     assert!((thi.x - hi.x).abs() < 1e-9, "the X axis stretched too: {thi:?}");
     assert!((tlo.z - lo.z).abs() < 1e-9);
 
-    // The anchor is applied before the scale, so a base-anchored shape is
-    // still standing on z = 0 after being scaled.
+    // The anchor applies before the scale, so a base-anchored shape still stands on z = 0.
     scene.get_mut(group).unwrap().scale = Vec3::ONE;
     scene.get_mut(a).unwrap().anchor = Anchor::Base;
     scene.get_mut(a).unwrap().scale = Vec3::new(1.0, 1.0, 4.0);
@@ -58,7 +55,7 @@ pub(crate) fn a_scale_is_part_of_the_cache_key_and_of_the_world_frames() {
     };
     assert!((child_centre(&before) - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-9);
 
-    // The same evaluator, so a stale cache entry would show up here.
+    // The same evaluator, so a stale cache entry would show here.
     scene.get_mut(group).unwrap().scale = Vec3::new(2.0, 2.0, 2.0);
     let after = evaluator.evaluate(&scene, &Cancel::new());
     assert!(

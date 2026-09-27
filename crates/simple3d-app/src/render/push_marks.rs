@@ -6,11 +6,8 @@ use crate::view::View;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
-/// A tool's preview loops, over the model and depth-tested against it.
-///
-/// Drawn as [`Step::Overlay`]: after the model, tested against it, and claiming
-/// nothing of its own -- so a loop is hidden by the solid it is behind and does
-/// not hide the next loop where two of them cross.
+/// A tool's preview loops as [`Step::Overlay`]: after the model, depth-tested, writing nothing, so
+/// loops hide behind solids but not behind each other.
 pub(crate) fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3>], colour: Rgba, section: &[Plane]) {
     for loop_ in loops {
         for (index, &from) in loop_.iter().enumerate() {
@@ -25,13 +22,8 @@ pub(crate) fn push_preview(steps: &mut Vec<Step>, view: &View, loops: &[Vec<Vec3
     }
 }
 
-/// A body's faces, blended over the finished picture whatever is in front of
-/// them (issue 82).
-///
-/// Every triangle, not only the ones facing the eye: a solid seen through
-/// another solid reads as a shape, and half a shell reads as a hole in one.
-/// The colour is translucent, so what it is inside is still visible through the
-/// glow -- which is how the glow says *where* rather than merely *that*.
+/// A body's faces blended over the finished picture regardless of what is in front (issue 82).
+/// Every triangle, since half a shell reads as a hole; translucent, so the surroundings show.
 pub(crate) fn push_glow(
     steps: &mut Vec<Step>,
     view: &View,
@@ -60,9 +52,7 @@ pub(crate) fn push_edges(
 ) {
     extend_in_order(steps, item.edges.len(), |range, out| {
         for edge in &item.edges[range] {
-            // Tagged like the faces it creases, so an edge of the solid an axis
-            // goes into does not hide that axis where the faces either side of
-            // it do not.
+            // Tagged like its faces, so an edge of the solid an axis enters does not hide that axis.
             let tag = item.body_tag(edge[0] as usize, tag_base);
             push_edge(out, view, item, screen, *edge, section, |a, b| {
                 projected_line_step(a, b, colour, EDGE_BIAS, tag, true)
@@ -71,8 +61,7 @@ pub(crate) fn push_edges(
     });
 }
 
-/// One edge of a mesh as a step: straight from the projected vertices while
-/// there is no section, and cut by the plane when there is.
+/// One mesh edge as a step: from projected vertices, or cut by the section when there is one.
 pub(crate) fn push_edge(
     out: &mut Vec<Step>,
     view: &View,
@@ -92,32 +81,10 @@ pub(crate) fn push_edge(
     }
 }
 
-/// The selected shape's *outline*: the edges its surface turns away from the
-/// camera across, plus any edge with no far side at all.
-///
-/// It used to draw the feature edges instead, and that swung between the two
-/// opposite failures. A sphere at the stock 32 segments creases at 11.25
-/// degrees, under the 20-degree threshold, so it has no feature edges and
-/// selecting one drew *nothing* -- with only the manipulator in the frame,
-/// nothing said what was selected. A torus at the same segment count creases
-/// past the threshold around its tube, so selecting one scribbled concentric
-/// rings over the whole surface. A silhouette is the same picture for both, and
-/// it is what the word outline means.
-/// How far a face has to be turned towards the eye before the outline counts it
-/// as facing it. Anything flatter than this is edge-on, where the sign of the
-/// dot product is arithmetic noise rather than an answer.
+/// How far a face must turn towards the eye to count as facing it; flatter is edge-on noise.
 pub(crate) const EDGE_ON: f64 = 1e-6;
 
-/// How sharp a crease has to be before the highlight reads it as a corner of
-/// the shape rather than as a step in how the shape happens to be tessellated.
-///
-/// Higher than the twenty degrees the edge pass draws at, and deliberately so.
-/// A torus at the stock 32 segments has a sixteen-sided tube, so its rings meet
-/// at 22.5 degrees and are feature edges by that measure: highlighted, they
-/// scribbled concentric rings across the whole visible surface of a selected
-/// torus -- the very picture an earlier pass at the outline was rejected for.
-/// Thirty-five degrees clears that by a wide margin and still keeps every real
-/// corner: ninety for a box or a cylinder's rim, sixty for a hexagonal prism,
-/// forty-five for an octagonal one. A shape faceted coarser than that has
-/// corners worth pointing at.
+/// How sharp a crease must be for the highlight to treat it as a corner. Above the edge pass's 20
+/// degrees so a 32-segment torus's 22.5-degree rings are not scribbled over; 35 keeps every real
+/// corner.
 pub(crate) const SELECTION_CREASE: f64 = 35.0;

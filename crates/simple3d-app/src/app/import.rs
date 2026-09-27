@@ -1,15 +1,7 @@
 //! Bringing a model file into the document on screen (issue 105).
 //!
-//! The other half of the export: every format an export writes can be read
-//! back, and what arrives is a stored mesh -- a file from another program has
-//! no parameters to recover, only a surface. So an import stands where a
-//! conversion to a mesh does (issue 80): a node the user can move, rotate,
-//! paint, group, cut into pieces and export again, with no recipe behind it.
-//!
-//! What the file was structured as is kept. One object comes in as one node;
-//! several -- a 3MF's objects, an OBJ's groups, an STL's several solids -- come
-//! in as a group of nodes named after the file, so the rows that were exported
-//! are the rows that come back rather than one bag of triangles.
+//! Imports become stored meshes (like conversions, issue 80). One object becomes one node;
+//! several come in as a group named after the file, preserving the file's structure.
 
 use super::*;
 use crate::worker::ImportJob;
@@ -19,9 +11,7 @@ impl App {
     /// Ask for a file, and start reading it once the dialog answers.
     pub fn start_import(&mut self) {
         let mut dialog = rfd::FileDialog::new();
-        // Every format under one filter first, because a user importing a model
-        // knows what they have and not which of four filters it is under; the
-        // individual ones follow for narrowing a crowded folder.
+        // A combined filter first, then one per format.
         let every: Vec<&str> = simple3d_import::Format::ALL.iter().flat_map(|f| f.extensions()).copied().collect();
         dialog = dialog.add_filter("Model files", &every);
         for format in simple3d_import::Format::ALL {
@@ -35,9 +25,7 @@ impl App {
         {
             dialog = dialog.set_directory(dir);
         }
-        // The tab is settled here, before the dialog goes up: the answer arrives
-        // on a later frame, and the file belongs to the document that asked for
-        // it rather than to whichever one is on screen by then.
+        // The tab is fixed now, since the answer arrives later and belongs to the asking document.
         let tab = self.active;
         self.ask_for_file("Import", dialog, false, move |app, path| {
             app.settings.last_import_dir = path.parent().map(|p| p.to_path_buf());
@@ -46,7 +34,7 @@ impl App {
         });
     }
 
-    /// Take the model once it has been read, and stand it in the document.
+    /// Take the read model and place it in the document.
     pub(crate) fn poll_import(&mut self) {
         let Some(job) = &self.import_job else { return };
         let Some(outcome) = job.poll() else { return };
@@ -70,19 +58,14 @@ impl App {
         self.place_import(&job.stem(), model);
     }
 
-    /// Put a read model into the scene, select what it became, and say what
-    /// arrived. Separate from the polling so a test can hand it a model without
-    /// a thread and a file in between.
+    /// Put a read model into the scene, select it, and report it. Separate so tests can call it
+    /// without a thread or file.
     pub(crate) fn place_import(&mut self, stem: &str, model: simple3d_import::Model) {
         let root = self.scene.root();
         let index = self.scene.node(root).children.len();
         let triangles = model.triangle_count();
-        // A file of one body is named after the file, whatever the body inside
-        // it is called: the name in a single-object file is nearly always the
-        // writing program's own banner -- this application's STL says `solid
-        // simple3d` -- and the file name is the one the user chose and will
-        // recognise in the outliner. A file of several keeps each body's own
-        // name, because there those names are what tells them apart.
+        // A single body is named after the file, since its internal name is usually the writer's banner;
+        // several keep their own names to tell them apart.
         let named = |part: &simple3d_import::Part| -> String {
             match part.name.trim() {
                 "" => format!("{stem} part"),
@@ -95,12 +78,8 @@ impl App {
             let mesh = simple3d_core::mesh_data::MeshData::new(part.mesh.clone());
             self.scene.add_mesh(stem, mesh, root, index)
         } else {
-            // An assembly, not a union: the file says these are separate
-            // bodies, and separate bodies is what they stay. A union only left
-            // parts alone that stood clear of each other, and a model whose
-            // colours are separate objects has them meeting along whole faces
-            // -- the kernel's worst case, minutes of it, for a result it could
-            // not close either (see `GroupOp::Assembly`).
+            // An assembly, not a union: the bodies stay separate, and unioning face-sharing parts is the
+            // kernel's slowest case (see `GroupOp::Assembly`).
             let group = self.scene.add_group(GroupOp::Assembly, root, index);
             if let Some(node) = self.scene.get_mut(group) {
                 node.name = stem.to_string();
@@ -112,24 +91,14 @@ impl App {
             group
         };
         self.select_only(landed);
-        // The model arrives wherever the file says it stands, which for a file
-        // from another program is often nowhere near the origin -- so the view
-        // is taken to it rather than leaving the user to hunt for what they
-        // just imported.
+        // Frame the view on it, since imported models are often far from the origin.
         self.frame_when_evaluated = true;
         self.status = Status::Info(import_summary(&model, triangles));
     }
 }
 
-/// What the footer says about an import that has just landed: how much geometry
-/// arrived, as what, from which unit, and whether it is a closed solid.
-///
-/// The last of those is said rather than refused. An export verifies before it
-/// writes, because a file that fails in a slicer is the export's fault; an
-/// import has no such choice -- the mesh is what somebody else wrote, and a
-/// model with a hole in it is still the model the user asked for. What it does
-/// mean is that exporting it again will be refused until it is repaired, which
-/// is worth knowing now rather than then.
+/// The footer's import report: geometry, format, unit, and whether it is closed. An open mesh is
+/// reported rather than refused, since export will refuse it until repaired.
 pub(crate) fn import_summary(model: &simple3d_import::Model, triangles: usize) -> String {
     let mut message = format!("Imported {triangles} triangle{}", plural(triangles));
     if model.parts.len() > 1 {

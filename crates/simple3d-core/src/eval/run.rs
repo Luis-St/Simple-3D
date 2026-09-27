@@ -27,8 +27,7 @@ impl Evaluator {
         self.worlds.clear();
     }
 
-    /// `source` placed with `frame`, and painted with `tag` when there is one:
-    /// the mesh from the last run if all three are what it was made from.
+    /// `source` placed with `frame` and painted with `tag`; the last run's mesh if all three match.
     pub(super) fn world_mesh(&mut self, id: NodeId, source: &Arc<Mesh>, frame: Xform, tag: Option<u32>) -> Arc<Mesh> {
         if let Some(last) = self.worlds.get(&id) {
             if Arc::ptr_eq(&last.source, source) && last.frame == frame && last.tag == tag {
@@ -45,9 +44,7 @@ impl Evaluator {
     }
 
     pub(super) fn trim(&mut self) {
-        // Nothing here tracks recency: the caches exist to make an edit-to-
-        // preview cycle fast, and after a wholesale clear the next run repopulates
-        // exactly what the current tree needs.
+        // No recency tracking: after a wholesale clear the next run repopulates just what the tree needs.
         if self.subtrees.len() > self.cache_limit {
             self.subtrees.clear();
         }
@@ -65,7 +62,7 @@ impl Evaluator {
         self.walk(scene, scene.root(), Xform::IDENTITY, &mut collected, cancel);
         let mut ranges = BTreeMap::new();
         self.ranges(scene, scene.root(), 0, cancel, &mut ranges);
-        // A node no longer in the tree has nothing to be reused for.
+        // Nodes no longer in the tree have nothing to reuse.
         self.worlds.retain(|id, _| collected.meshes.contains_key(id));
         self.trim();
         Evaluated {

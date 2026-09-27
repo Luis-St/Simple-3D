@@ -7,8 +7,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_group_saved_as_a_primitive_comes_back_into_a_fresh_document() {
-    // The library is per user, not per project: what is saved out of one
-    // document is on the palette of the next one.
+    // The library is per user, so what one document saves is on the next one's palette.
     let dir = temp_config_dir("library");
     let mut app = app_in(dir.clone());
     let root = app.scene.root();
@@ -27,8 +26,7 @@ pub(crate) fn a_group_saved_as_a_primitive_comes_back_into_a_fresh_document() {
     assert_eq!(app.modal, Modal::None);
     assert_eq!(app.library.len(), 1, "the palette did not pick the new entry up");
 
-    // A second application on the same config directory -- which is what
-    // opening the program again is -- has it on the palette.
+    // A second app on the same config directory, like reopening the program.
     let mut fresh = app_in(dir);
     assert_eq!(fresh.library.len(), 1);
     let entry = fresh.library[0].clone();
@@ -38,15 +36,14 @@ pub(crate) fn a_group_saved_as_a_primitive_comes_back_into_a_fresh_document() {
     fresh.add_library_entry(&entry);
     let added = fresh.primary().expect("nothing was added");
     assert_eq!(fresh.scene.node(added).name, "Bracket", "it arrived under some other name");
-    // A saved primitive is placed as a component of its own (issue 113): one
-    // node here, and the group it was saved from inside the component.
+    // Placed as a component (issue 113): one node here, the saved group inside.
     assert!(fresh.scene.node(added).is_component(), "it did not arrive as a component");
     let component = fresh.scene.component_of(added).unwrap();
     let inside = fresh.component_scene(component).expect("the component is not in the project");
     assert_eq!(inside.node(inside.root()).children.len(), 1, "the group arrived without its child");
     assert_eq!(fresh.scene.node(added).position, Vec3::ZERO);
 
-    // And it can be taken off the palette again.
+    // And it can be removed from the palette.
     fresh.delete_library_entry(&entry);
     assert!(fresh.library.is_empty());
 }

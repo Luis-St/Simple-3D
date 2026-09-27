@@ -1,34 +1,19 @@
-//! Mesh import (issue 105): every format [`simple3d_export`] writes can be read
-//! back in -- 3MF, STL, OBJ and PLY, binary or text.
+//! Mesh import (issue 105): 3MF, STL, OBJ and PLY, binary or text.
 //!
-//! What this crate hands back is triangles and the names they were written
-//! under, and nothing else. A file from another program has no parameters to
-//! recover -- there is no box of 40 by 20 in an STL, only its surface -- so an
-//! import becomes a *stored mesh* body in the scene, the same kind of node a
-//! shape becomes when it is converted (issue 80). What it does keep is the
-//! structure the file holds: a 3MF's objects, an OBJ's groups and an STL's
-//! several solids come back as separate parts rather than as one bag of
-//! triangles, which is the other half of the export that can keep its parts.
+//! Returns triangles and their names only; imports become stored mesh bodies (issue 80). File
+//! structure (3MF objects, OBJ groups, STL solids) is kept as separate parts.
 //!
-//! Three things it insists on, mirroring the exporter:
-//!
-//! * **Say what is wrong.** A file that is not readable is refused with the
-//!   reason -- where the parse stopped, which part of a 3MF was missing -- and
-//!   never with a generic failure.
-//! * **Nothing half-read.** A parse either produces the whole model or an
-//!   error; a file that runs out part-way through is not brought in as the half
-//!   that happened to be understood.
-//! * **Cancellable with progress.** The caller passes the same callback shape
-//!   the exporter takes: it reports progress and returns `false` to cancel.
+//! * **Say what is wrong**: refusals name the reason and position.
+//! * **Nothing half-read**: a parse yields the whole model or an error.
+//! * **Cancellable with progress**, with the exporter's callback shape.
 
 mod error;
 pub(crate) use error::malformed;
 pub use error::ImportError;
 mod format;
 pub use format::{Format, Unit};
-/// The DEFLATE decoder. Public because the export crate's encoder is tested
-/// against it: an encoder that is only checked by its own decoder proves
-/// nothing, and these two were written to the same RFC from opposite ends.
+/// The DEFLATE decoder, public so the export crate's encoder is tested against an independent
+/// decoder.
 pub mod inflate;
 mod obj;
 mod ply;
@@ -36,24 +21,17 @@ mod stl;
 #[cfg(test)]
 mod tests;
 mod three_mf;
-/// The package reader. Public alongside [`inflate`] and for the same reason:
-/// the export crate writes 3MF packages and its tests have to read them back
-/// the way a slicer would, rather than by looking for XML in the raw bytes --
-/// which stopped saying anything the moment those bytes were compressed.
+/// The package reader, public so the export crate's tests read packages back as a slicer would.
 pub mod unzip;
 mod xml;
 
 use simple3d_geom::Mesh;
 
-/// Progress reporting and cancellation, the same contract the exporter's is:
-/// return `false` to cancel.
+/// Progress reporting and cancellation, as for the exporter: return `false` to cancel.
 pub type Progress<'a> = &'a mut dyn FnMut(f32) -> bool;
 
-/// One object of a file: its triangles, and the name it was written under.
-///
-/// The name is empty where the format has nowhere to put one -- an STL is a
-/// bag of triangles and says nothing about what they are -- and the caller
-/// names the node after the file in that case.
+/// One object of a file: its triangles and name. The name is empty where the format has none
+/// (STL), and the caller names the node after the file.
 #[derive(Clone, Debug)]
 pub struct Part {
     pub name: String,
@@ -64,9 +42,7 @@ pub struct Part {
 #[derive(Clone, Debug)]
 pub struct Model {
     pub format: Format,
-    /// The unit the file stated, for a format that records one. The positions
-    /// in `parts` are already millimetres -- this is what they were converted
-    /// *from*, so an import can say so.
+    /// The unit the file stated, if any; `parts` are already converted to millimetres.
     pub unit: Option<Unit>,
     pub parts: Vec<Part>,
 }
@@ -76,7 +52,7 @@ impl Model {
         self.parts.iter().map(|part| part.mesh.triangle_count()).sum()
     }
 
-    /// Everything in one mesh, for a caller that wants a single body.
+    /// Everything in one mesh, for a caller wanting a single body.
     pub fn merged(&self) -> Mesh {
         let mut merged = Mesh::new();
         for part in &self.parts {
@@ -86,16 +62,14 @@ impl Model {
     }
 }
 
-/// Read `path`. The format is decided by looking at the bytes first and at the
-/// extension second, so a renamed file still reads as what it is.
+/// Read `path`, detecting the format by content first and extension second.
 pub fn read(path: &std::path::Path, progress: Progress<'_>) -> Result<Model, ImportError> {
     let bytes = std::fs::read(path).map_err(|e| ImportError::Io(format!("{e} ({})", path.display())))?;
     read_bytes(&bytes, Format::from_path(path), progress)
 }
 
-/// Read a file already in memory. `named` is the format its name claimed, if
-/// any: it decides an OBJ, which has no header to recognise it by, and is
-/// otherwise only consulted when the content says nothing.
+/// Read a file already in memory. `named` is the format its name claimed: it decides OBJ, which has
+/// no header, and is otherwise used only when the content says nothing.
 pub fn read_bytes(bytes: &[u8], named: Option<Format>, progress: Progress<'_>) -> Result<Model, ImportError> {
     if !progress(0.0) {
         return Err(ImportError::Cancelled);
@@ -115,9 +89,7 @@ pub fn read_bytes(bytes: &[u8], named: Option<Format>, progress: Progress<'_>) -
         Format::Obj => obj::read(bytes, progress)?,
         Format::Ply => ply::read(bytes, progress)?,
     };
-    // A file with no triangles in it is refused here rather than by every
-    // reader: an empty object list, an OBJ of vertices with no faces and an STL
-    // whose triangle count is zero are all the same answer to the user.
+    // Files without triangles are refused here, once for every format.
     if model.triangle_count() == 0 {
         return Err(ImportError::Empty);
     }
@@ -125,16 +97,13 @@ pub fn read_bytes(bytes: &[u8], named: Option<Format>, progress: Progress<'_>) -
     Ok(model)
 }
 
-/// Text out of bytes that are supposed to be text. Not `String::from_utf8`:
-/// an OBJ or an STL written on a machine with a different code page is a file
-/// whose *numbers* are still plain ASCII, and refusing the whole model over a
-/// stray byte in a comment would be refusing geometry that reads perfectly.
+/// Text from bytes that should be text, lossily, so a stray byte in a comment does not reject
+/// otherwise readable geometry.
 pub(crate) fn text(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
     String::from_utf8_lossy(bytes)
 }
 
-/// Report progress, and turn a cancellation into the error every reader
-/// returns for one.
+/// Report progress, turning a cancellation into the readers' common error.
 pub(crate) fn step(progress: &mut Progress<'_>, fraction: f32) -> Result<(), ImportError> {
     if progress(fraction.clamp(0.0, 1.0)) {
         Ok(())

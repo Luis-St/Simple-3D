@@ -9,8 +9,7 @@ use simple3d_core::keymap::Command;
 impl App {
     pub(super) fn manipulate_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Manipulate", |ui| {
-            // Driven from `Mode::ALL`, so a tool the manipulator gains cannot
-            // be missing from the menu.
+            // Driven from `Mode::ALL`, so no mode is missing.
             for mode in Mode::ALL {
                 let command = crate::panel_toolrail::tool(mode).1;
                 let text = format!(
@@ -25,13 +24,8 @@ impl App {
                 }
             }
             ui.separator();
-            // Geometry snapping's mode (issue 68). It lived only in the document
-            // settings, which the property panel shows *with nothing selected* --
-            // and snapping needs something selected to have a manipulator at all,
-            // so the one control and the one state were mutually exclusive and
-            // the setting could not be found while doing the thing it governs.
-            // It belongs here rather than there: it is how the manipulator
-            // behaves, not what the document holds.
+            // Geometry snapping's mode (issue 68), here because the document settings only show with nothing
+            // selected, while snapping needs a selection; it is manipulator behaviour, not document state.
             let snap_key = self.keymap.shortcut_text(Command::SnapToGeometry);
             ui.menu_button("Snap to geometry", |ui| {
                 for mode in SnapMode::ALL {

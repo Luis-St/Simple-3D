@@ -1,7 +1,6 @@
 //! Which icon is which.
 
-/// Every glyph the interface draws. Ordered by where it is used: tools first,
-/// then outliner marks, then the primitive silhouettes.
+/// Every glyph the interface draws: tools, then outliner marks, then primitive silhouettes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Glyph {
     // Tools.
@@ -30,8 +29,7 @@ pub enum Glyph {
     EyeOff,
     Bracket,
     Warning,
-    /// The body that is not a primitive: geometry a node owns outright
-    /// (issue 80).
+    /// Geometry a node owns outright, not a primitive (issue 80).
     Mesh,
     /// A shape cut into smaller pieces (issue 82).
     Split,
@@ -59,9 +57,7 @@ pub enum Glyph {
 }
 
 impl Glyph {
-    /// The silhouette for a primitive type, by its registry id. An unknown id
-    /// falls back to the box rather than drawing nothing, so a primitive added
-    /// to the registry without a glyph still has a tile that can be clicked.
+    /// A primitive's silhouette by registry id; unknown ids fall back to the box so the tile is clickable.
     pub fn for_primitive(type_id: &str) -> Glyph {
         match type_id {
             "box" => Glyph::Box,

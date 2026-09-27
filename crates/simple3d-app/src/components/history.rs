@@ -1,18 +1,14 @@
-//! Undo and redo, which know that some steps made a component.
+//! Undo and redo, aware that some steps made a component.
 //!
-//! Every component has a history of its own, and a component is not part of
-//! any one of them: making one is a step in the history of the component the
-//! group was in, and the component it made lives beside it. So taking that
-//! step back takes the component away as well, and putting it back brings the
-//! component back -- as it was when the undo took it, which is kept for exactly
-//! that.
+//! Making a component is a step in the history of the component the group was in, while the new
+//! component lives beside it. Undoing the step removes the component, and redo restores it as the
+//! undo left it.
 
 use super::*;
 use crate::app::{App, Modal, Status};
 
 impl App {
-    /// Take the last step back (`Command::Undo`), asking first when that would
-    /// throw away a component that has been worked on since it was made.
+    /// Undo the last step (`Command::Undo`), asking first if it would discard a worked-on component.
     pub fn undo(&mut self) {
         let made = self.undo_would_remove();
         if let Some(&first) = made.first() {
@@ -25,21 +21,14 @@ impl App {
         self.undo_now();
     }
 
-    /// The components the next undo would take away with it: the one the step
-    /// placed first, and any it brought along inside it after that.
+    /// The components the next undo would remove: the placed one first, then any inside it.
     pub(crate) fn undo_would_remove(&self) -> Vec<ComponentId> {
         self.history.undo_creates().iter().copied().filter(|&id| self.project.get(id).is_some()).collect()
     }
 
-    /// Whether the components `made` hold anything an undo of their making
-    /// would lose: an edit made in one of their own tabs, or an integration of
-    /// one of them in a component the undo leaves behind.
-    ///
-    /// The ones they hold one another in do not count: those go with the undo,
-    /// and a saved primitive that carried a component inside it is still
-    /// untouched when it has just been placed. Nor do the integrations in the
-    /// component on screen: the step that made them is its last one -- making a
-    /// component closes the step -- so every one of them is that step's own.
+    /// Whether components `made` hold work an undo would lose: edits in their tabs, or integrations in
+    /// components the undo leaves. Integrations among themselves and in the on-screen component (the
+    /// step's own) do not count.
     pub(crate) fn components_have_work(&self, made: &[ComponentId]) -> bool {
         let edited = made.iter().any(|&id| self.project.get(id).is_some_and(|c| c.history.revision() != 0));
         let active = self.project.active;
@@ -52,7 +41,7 @@ impl App {
         edited || used_elsewhere
     }
 
-    /// Take the last step back, whatever it throws away.
+    /// Undo the last step, whatever it discards.
     pub fn undo_now(&mut self) {
         let made = self.undo_would_remove();
         match self.history.undo(&mut self.scene) {
@@ -64,8 +53,7 @@ impl App {
         }
     }
 
-    /// Put the last step taken back back (`Command::Redo`), with the
-    /// components it made if it made any.
+    /// Redo the last undone step (`Command::Redo`), with any components it made.
     pub fn redo(&mut self) {
         let made = self.history.redo_creates().to_vec();
         match self.history.redo(&mut self.scene) {
@@ -79,12 +67,8 @@ impl App {
         }
     }
 
-    /// Take the components `ids` out of the project for an undo, keeping them
-    /// for a redo to bring back.
-    ///
-    /// All of them leave the project before any integration is stripped: one
-    /// of them may hold another, and stripping it there would empty it of what
-    /// a redo has to bring back.
+    /// Remove components `ids` for an undo, keeping them for redo. All leave before any integration is
+    /// stripped, since one may hold another.
     fn retire_components(&mut self, ids: &[ComponentId]) {
         let mut retired = Vec::new();
         for &id in ids {
@@ -103,7 +87,7 @@ impl App {
         self.relink_components();
     }
 
-    /// Bring back component `id`, which an undo took away.
+    /// Bring back component `id`, which an undo removed.
     fn revive_component(&mut self, id: ComponentId) {
         let Some(at) = self.project.removed.iter().position(|c| c.id == id) else { return };
         let component = self.project.removed.remove(at);
@@ -112,7 +96,7 @@ impl App {
         self.relink_components();
     }
 
-    /// Carry out the component question the dialog was answered yes to.
+    /// Carry out the component question answered yes.
     pub fn confirm_component_ask(&mut self) {
         let ask = self.component_ask.take();
         self.modal = Modal::None;

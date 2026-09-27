@@ -7,13 +7,10 @@ use crate::ui;
 use simple3d_core::scene::{ExportBody, NodeId, Scene};
 
 impl App {
-    /// What the export is about to do. Drawn before the rest of the window and
-    /// at the bottom of it, so a body list long enough to scroll cannot push the
-    /// count out of sight.
+    /// What the export is about to do, drawn first and at the bottom so a long body list cannot hide it.
     pub(super) fn export_summary_line(&mut self, ui: &mut egui::Ui) {
         if self.evaluated.errors.is_empty() {
-            // The count is of what will actually be written -- the scene
-            // or the selection -- rather than always of the whole scene.
+            // Counts what will be written (scene or selection).
             let Some(summary) = self.export_summary() else {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -37,13 +34,8 @@ impl App {
         }
     }
 
-    /// The rows the body picker shows: the export's own roots, and the children
-    /// of every group that has been split open, in tree order.
-    ///
-    /// Only what can be answered is listed. A group that is a body is one solid
-    /// and what is inside it is not a decision to be made -- splitting it is
-    /// what turns its children into rows, which is also what makes the list
-    /// short enough to read on a scene of any size.
+    /// The body picker's rows: the export roots and the children of split-open groups, in tree order.
+    /// A body group's insides are no decision, which keeps the list short.
     pub(super) fn body_rows(&self) -> Vec<(NodeId, usize)> {
         fn walk(scene: &Scene, id: NodeId, depth: usize, rows: &mut Vec<(NodeId, usize)>) {
             if !scene.contains(id) {
@@ -63,17 +55,14 @@ impl App {
         rows
     }
 
-    /// Which body each node goes in, chosen a row at a time. The marks live on
-    /// the nodes, so they are saved with the project and a later export only
-    /// has to say what has changed since (issue 58).
+    /// Which body each node goes in, row by row; marks live on nodes, so they are saved (issue 58).
     pub(super) fn body_picker(&mut self, ui: &mut egui::Ui) {
         let rows = self.body_rows();
         if rows.is_empty() {
             ui.label(theme::hint("Nothing to export, so there are no bodies to group."));
             return;
         }
-        // One past the highest in use, so picking the last entry is how a new
-        // body gets made.
+        // One past the highest in use, so picking the last entry makes a new body.
         let offered = self.scene.highest_export_body() + 1;
         let mut change: Option<(NodeId, Option<ExportBody>)> = None;
 
@@ -82,8 +71,7 @@ impl App {
             .stroke(egui::Stroke::new(1.0_f32, theme::token::SURFACE_3))
             .inner_margin(egui::Margin::same(6))
             .show(ui, |ui| {
-                // As tall as the list needs, up to whatever the window has
-                // left under the controls above it; past that it scrolls.
+                // As tall as needed, up to the room left; beyond that it scrolls.
                 let room = (ui.available_height() - 24.0).max(80.0);
                 let (area, restore) = theme::list_scroll_area(ui);
                 area.max_height(room).auto_shrink([false, true]).show(ui, |ui| {

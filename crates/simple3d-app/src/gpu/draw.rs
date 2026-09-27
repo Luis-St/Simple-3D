@@ -1,4 +1,4 @@
-//! One frame's passes, in the order they are drawn.
+//! One frame's passes, in drawing order.
 
 use super::*;
 use crate::render::Request;
@@ -19,15 +19,8 @@ impl Gpu {
         self.resize(&gl, width, height)?;
         let target = self.target.as_ref().expect("resize leaves a target");
 
-        // Larger keys are nearer; OpenGL wants smaller nearer. `depth.x` is the
-        // key that maps to the front of the buffer and `depth.y` the scale, so
-        // the whole scene lands inside the range with a margin either side for
-        // the biases.
-        // The nearest key maps to `-1 + margin` and the furthest to
-        // `1 - margin`, leaving room at each end for a line's own bias to move
-        // it without falling out of the buffer -- and, at the far end, room to
-        // stay in front of the cleared value, or the ground grid would lose the
-        // depth test against nothing at all.
+        // Map keys (larger nearer) to OpenGL depth (smaller nearer): nearest to `-1 + margin`, furthest to
+        // `1 - margin`, leaving room for line bias and keeping the grid in front of the cleared value.
         let (lo, hi) = passes.key_range.unwrap_or((0.0, 1.0));
         let span = (hi - lo).max(1e-6);
         let scale = (2.0 - 2.0 * DEPTH_MARGIN) / span;
@@ -41,7 +34,7 @@ impl Gpu {
         gl.clear_depth_f64(1.0);
         gl.clear(glow::DEPTH_BUFFER_BIT);
 
-        // The background, and with it the tag buffer cleared to "no body".
+        // The background, and the tag buffer cleared to "no body".
         gl.disable(glow::DEPTH_TEST);
         gl.disable(glow::BLEND);
         gl.use_program(Some(self.background.program));
@@ -70,16 +63,14 @@ impl Gpu {
         let viewport = [width as f32, height as f32];
         let depth = [offset, scale];
 
-        // The grid: under the model, blended, and never claiming a pixel's
-        // depth or its body -- exactly `write_depth: false` in the rasterizer.
+        // The grid: under the model, blended, writing neither depth nor tag (`write_depth: false`).
         gl.enable(glow::BLEND);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.draw_grid(&gl, ground, view, viewport, depth);
 
-        // The model: opaque, writing depth and the body tag an axis will ask
-        // about.
+        // The model: opaque, writing depth and the body tag axes ask about.
         gl.disable(glow::BLEND);
         gl.depth_mask(true);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
@@ -90,8 +81,7 @@ impl Gpu {
         if let Some(csg) = &request.live.csg {
             self.draw_csg(&gl, request, csg, viewport, depth);
         }
-        // The faces are down and no line is yet: what "what is drawn here"
-        // means to the interface (`depth.rs`).
+        // Faces are drawn and no lines yet: what `depth.rs` reads as the picture.
         self.copy_depth(&gl, width, height, depth);
         self.draw_lines(&gl, &plan.lines, view, section, viewport, depth);
         if let (Some(csg), Some(colour)) = (&request.live.csg, plan.csg_edges) {
@@ -100,10 +90,8 @@ impl Gpu {
         self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
         self.draw_crossings(&gl, &plan.crossings, view, viewport, depth);
 
-        // Ghosts, and a tool's preview: blended over what is there, tested
-        // against the model and claiming nothing. The preview is here rather
-        // than with the grid because it is drawn *on* the model -- the grid
-        // goes under it.
+        // Ghosts and tool previews: blended, depth-tested, writing nothing. The preview is drawn on the
+        // model, unlike the grid under it.
         gl.enable(glow::BLEND);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         gl.depth_mask(false);
@@ -111,17 +99,14 @@ impl Gpu {
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
         self.draw_lines(&gl, &plan.overlays, view, section, viewport, depth);
 
-        // The glow of a body inside another one, over everything and tested
-        // against nothing: what is in front of it is exactly what it has to be
-        // seen through.
+        // Glows of buried bodies, over everything with no depth test.
         if !plan.glows.is_empty() {
             gl.disable(glow::DEPTH_TEST);
             self.draw_faces(&gl, &plan.glows, view, section, viewport, depth);
             gl.enable(glow::DEPTH_TEST);
         }
 
-        // The axes, in the overlay pass, where the depth and tag buffers are
-        // readable rather than attached.
+        // The axes, in the overlay pass where depth and tag buffers are readable.
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.overlay));
         gl.viewport(0, 0, width as i32, height as i32);
         gl.disable(glow::DEPTH_TEST);
@@ -129,7 +114,7 @@ impl Gpu {
         gl.enable(glow::BLEND);
         self.draw_axes(&gl, ground, view, viewport, depth);
 
-        // Put the pipeline back the way egui expects to find it.
+        // Restore the pipeline state egui expects.
         gl.bind_vertex_array(None);
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         gl.front_face(glow::CCW);

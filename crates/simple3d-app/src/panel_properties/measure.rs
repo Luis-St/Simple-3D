@@ -47,9 +47,7 @@ pub(crate) fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selecte
     }
 }
 
-/// The same text with the unit held to the number before it. A readout that
-/// wraps in a narrow panel is fine; one that wraps between "25" and "mm" and
-/// puts the unit on a line of its own is not.
+/// Keep units attached to their numbers, so a wrap never puts "mm" on its own line.
 fn unit_kept(text: String) -> String {
     match text.rfind(' ') {
         Some(at) => format!("{}\u{a0}{}", &text[..at], &text[at + 1..]),

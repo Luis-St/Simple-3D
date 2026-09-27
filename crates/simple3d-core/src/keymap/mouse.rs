@@ -23,7 +23,7 @@ impl MouseButton {
     }
 }
 
-/// A mouse drag binding for a navigation action.
+/// A mouse drag binding for navigation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Drag {
     pub button: MouseButton,
@@ -48,8 +48,7 @@ impl Drag {
         Drag { ctrl: true, ..Drag::new(button) }
     }
 
-    /// Modifier state has to match exactly, so `Shift+Middle` for pan does not
-    /// also fire plain-`Middle` orbit.
+    /// Modifiers must match exactly, so `Shift+Middle` pan does not also fire `Middle` orbit.
     pub fn matches(&self, button: MouseButton, ctrl: bool, shift: bool, alt: bool) -> bool {
         self.button == button && self.ctrl == ctrl && self.shift == shift && self.alt == alt
     }

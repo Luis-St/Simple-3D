@@ -1,12 +1,9 @@
-//! Cancelling face pairs that occupy the same place facing opposite ways.
+//! Cancelling coincident, opposite-facing face pairs.
 
 use crate::mesh::{FastMap, Mesh};
 
-/// Drop triangle pairs that describe the same three vertices with opposite
-/// winding. They are two coincident, oppositely-facing surface patches that
-/// enclose no volume, which a boolean can legitimately produce when an
-/// operand's face lies exactly on the result's boundary; leaving them in makes
-/// every one of their edges used twice in the same direction.
+/// Drop triangle pairs on the same vertices with opposite winding. Booleans produce them where an
+/// operand's face lies on the result's boundary, and they make every edge used twice in one direction.
 pub(crate) fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
     let key = |t: &[u32; 3]| {
         let mut k = *t;
@@ -22,7 +19,7 @@ pub(crate) fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
         if group.len() < 2 {
             continue;
         }
-        // Winding sign relative to the first triangle of the group.
+        // Winding sign relative to the group's first triangle.
         let mut pos: Vec<usize> = Vec::new();
         let mut neg: Vec<usize> = Vec::new();
         let reference = mesh.indices[group[0]];

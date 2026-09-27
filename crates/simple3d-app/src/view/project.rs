@@ -11,23 +11,19 @@ impl View {
         Vec3::new(d.dot(right), d.dot(up), d.dot(self.forward()))
     }
 
-    /// View-space point to screen pixels. Returns the depth alongside, which is
-    /// view-space Z -- positive for anything in front of the eye.
+    /// View-space point to screen pixels, with the view-space depth (positive in front of the eye).
     pub fn view_to_screen(&self, v: Vec3) -> (egui::Pos2, f64) {
         let s = self.pixels_per_mm();
         let (x, y) = (v.x * s, v.y * s);
         (egui::pos2(self.centre.x + x as f32, self.centre.y - y as f32), v.z)
     }
 
-    /// Where a world point lands. `Some` for every point, orthographic
-    /// projection having no near plane to fall behind; the option is kept
-    /// because callers read better for asking.
+    /// Where a world point lands; always `Some` under orthographic projection.
     pub fn project(&self, world: Vec3) -> Option<(egui::Pos2, f64)> {
         Some(self.view_to_screen(self.to_view(world)))
     }
 
-    /// Ray through a screen position: `(origin, direction)`, direction normalised.
-    /// Every ray runs along the view direction; only where it starts changes.
+    /// The ray through a screen position: `(origin, direction)`, direction normalised and constant.
     pub fn ray(&self, screen: egui::Pos2) -> (Vec3, Vec3) {
         let (right, up) = self.basis();
         let dx = (screen.x - self.centre.x) as f64;
@@ -36,19 +32,13 @@ impl View {
         (self.eye() + right * (dx / s) + up * (dy / s), self.forward())
     }
 
-    /// How many world units one screen pixel covers at `world`. Used to keep
-    /// handles a constant on-screen size regardless of zoom, and to convert a
-    /// drag in pixels into a drag in millimetres.
+    /// World units per screen pixel, for constant-size handles and pixel-to-millimetre drags.
     pub fn mm_per_pixel_at(&self, _world: Vec3) -> f64 {
         1.0 / self.pixels_per_mm().max(1e-9)
     }
 
-    /// Where a screen ray meets a plane through `origin` with normal `normal`.
-    /// `None` when the ray runs parallel to it.
-    ///
-    /// A drag uses this and must never fail on the plane it grabbed, so the hit
-    /// counts wherever it is along the ray -- including behind the camera plane,
-    /// which is where a handle ends up when the view is zoomed right into it.
+    /// Where a screen ray meets a plane through `origin` with normal `normal`; `None` if parallel. The
+    /// hit counts anywhere along the ray, even behind the camera plane, so a drag never loses its plane.
     pub fn ray_plane(&self, screen: egui::Pos2, origin: Vec3, normal: Vec3) -> Option<Vec3> {
         let (ro, rd) = self.ray(screen);
         let denom = rd.dot(normal);
@@ -58,13 +48,8 @@ impl View {
         Some(ro + rd * ((origin - ro).dot(normal) / denom))
     }
 
-    /// The same hit, but only when it lies in front of the camera.
-    ///
-    /// This is what "the pointer is on the ground" means, and it is not the same
-    /// question: a parallel projection meets the ground plane for every pixel of
-    /// the frame, including the ones above the horizon, where the meeting point
-    /// is behind the viewer. Those pixels are sky, and clicking one has to mean
-    /// what it looks like it means.
+    /// The same hit, but only in front of the camera: pixels above the horizon meet the ground behind
+    /// the viewer, and are sky.
     pub fn ray_plane_ahead(&self, screen: egui::Pos2, origin: Vec3, normal: Vec3) -> Option<Vec3> {
         let (ro, rd) = self.ray(screen);
         let denom = rd.dot(normal);
@@ -75,9 +60,8 @@ impl View {
         (t >= 0.0).then(|| ro + rd * t)
     }
 
-    /// The closest point to a screen ray on the line through `origin` along
-    /// `axis`, as a distance along that axis. This is what an axis-arrow drag
-    /// solves: the handle follows the cursor while staying on its axis.
+    /// The closest point on the line through `origin` along `axis` to a screen ray, as a distance
+    /// along the axis: what an axis-arrow drag solves.
     pub fn ray_axis(&self, screen: egui::Pos2, origin: Vec3, axis: Vec3) -> Option<f64> {
         let (ro, rd) = self.ray(screen);
         let axis = axis.normalized();

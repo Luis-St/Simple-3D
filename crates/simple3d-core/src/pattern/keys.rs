@@ -50,8 +50,7 @@ pub(crate) const fn angle(
     }
 }
 
-/// The axis a turning pattern turns about, and whose perpendicular a radius is
-/// measured in.
+/// The axis a turning pattern turns about, whose perpendicular a radius is measured in.
 pub(crate) const AXES: &[&str] = &["X", "Y", "Z"];
 
 pub(crate) const fn axis(key: &'static str, when: (&'static str, u32)) -> ParamSpec {
@@ -59,17 +58,14 @@ pub(crate) const fn axis(key: &'static str, when: (&'static str, u32)) -> ParamS
         key,
         label: "Axis",
         kind: ParamKind::Choice { options: AXES },
-        // Z by default: a ring or a helix stands up, which is what a build plate
-        // wants.
+        // Z by default: rings and helices stand up on the build plate.
         default: ParamValue::Choice(2),
         lock_group: 0,
         shown_when: Some(when),
     }
 }
 
-/// What one stage of a custom rule does (issue 79). A choice like the axis, and
-/// like the axis it carries no unit and no number, so every stage's may share
-/// one label.
+/// What one custom stage does (issue 79): a unitless choice, so all stages share one label.
 pub(crate) const fn does(key: &'static str, default: u32) -> ParamSpec {
     ParamSpec {
         key,
@@ -81,13 +77,8 @@ pub(crate) const fn does(key: &'static str, default: u32) -> ParamSpec {
     }
 }
 
-/// How far a copy may be nudged off where the rule puts it (issue 79).
-///
-/// Unbounded either way, like a position and unlike a dimension. It is read as
-/// a distance -- the scatter runs both ways whatever the sign, which is what
-/// [`Noise::of`](super::Noise::of) takes the absolute value for -- but a field
-/// that snapped a typed `-5` back to zero was the one number in the panel that
-/// refused a minus sign, and refused it without saying why.
+/// How far a copy may be nudged (issue 79). Unbounded either way, since the scatter uses the
+/// absolute value ([`Noise::of`](super::Noise::of)) and a field refusing `-5` looked broken.
 pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec {
     ParamSpec {
         key,
@@ -95,14 +86,12 @@ pub(crate) const fn jitter(key: &'static str, label: &'static str) -> ParamSpec 
         kind: ParamKind::Length { min: f64::NEG_INFINITY },
         default: ParamValue::Length(0.0),
         lock_group: 0,
-        // Every kind, not one: a run of planks wants a little randomness as much
-        // as a rule built out of stages does.
+        // Every kind: planks in a run want randomness too.
         shown_when: None,
     }
 }
 
-/// How many of something a stage has -- its variations (issue 79). Unlike a
-/// count of copies it can be none.
+/// How many of something a stage has (its variations, issue 79); unlike a copy count it can be zero.
 pub(crate) const fn tally(key: &'static str, label: &'static str, max: u32) -> ParamSpec {
     ParamSpec {
         key,
@@ -114,8 +103,7 @@ pub(crate) const fn tally(key: &'static str, label: &'static str, max: u32) -> P
     }
 }
 
-/// How far a copy may be turned off where the rule puts it, about one axis
-/// (issue 79).
+/// How far a copy may be turned about one axis (issue 79).
 pub(crate) const fn turn_jitter(key: &'static str, label: &'static str) -> ParamSpec {
     ParamSpec {
         key,

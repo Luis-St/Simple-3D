@@ -1,10 +1,7 @@
-//! The grid, the origin axes and a tool's preview, drawn on the card.
+//! The grid, origin axes and tool preview, drawn on the card.
 //!
-//! None of them comes off a mesh, and the CPU renderer works each out as
-//! primitives in `render.rs`. The GPU is handed only what decides them -- the
-//! grid's levels and reach, where each axis's arms run and the stretches of
-//! material along it, the preview's loops once -- and finds every pixel of
-//! them itself, so the frame costs the CPU nothing per line.
+//! The CPU renderer builds these as primitives in `render.rs`; the GPU gets only the deciding
+//! parameters and computes every pixel itself.
 
 use super::*;
 use crate::render::{
@@ -18,15 +15,14 @@ use simple3d_geom::Vec3;
 pub(super) struct Ground {
     grid: Option<GridDraw>,
     axes: Vec<AxisDraw>,
-    /// Per axis, the stretches of material along it: where each starts and
-    /// ends and the tag of the body it is in.
+    /// Per axis, the material spans along it: start, end and body tag.
     spans: [Vec<[f32; 4]>; 3],
 }
 
 struct GridDraw {
     /// The coarse level's snapped centre, which the quad is placed around.
     origin: Vec3,
-    /// How far the quad reaches each way from it.
+    /// How far the quad reaches each way.
     reach: f64,
     fine: f64,
     coarse: f64,
@@ -40,7 +36,7 @@ struct GridDraw {
 
 struct AxisDraw {
     axis: usize,
-    /// The arm's two ends in the world, each with where it is along the axis.
+    /// The arm's two ends in world space, each with its position along the axis.
     ends: [[f32; 4]; 2],
     start: f64,
     reach: f64,
@@ -48,8 +44,7 @@ struct AxisDraw {
     colour: [f32; 4],
 }
 
-/// Work out the frame's grid and axes, and widen the depth range to take them
-/// in.
+/// Compute the frame's grid and axes, and widen the depth range to take them in.
 pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
     let view = &request.view;
     let grid = &request.grid;
@@ -119,8 +114,8 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
 }
 
 impl Gpu {
-    /// The grid: under the model, blended, and claiming neither depth nor a
-    /// body. Expects the model pass's framebuffer, with colour alone drawn to.
+    /// The grid: under the model, blended, writing neither depth nor tag. Expects the model pass's
+    /// framebuffer with only colour drawn to.
     pub(super) unsafe fn draw_grid(
         &self,
         gl: &glow::Context,
@@ -176,8 +171,7 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// The axes, in the overlay pass, where the depth and tag buffers are
-    /// readable rather than attached.
+    /// The axes, in the overlay pass where depth and tag buffers are readable.
     pub(super) unsafe fn draw_axes(
         &self,
         gl: &glow::Context,
@@ -262,8 +256,7 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// A tool's preview loops as lines the card keeps, made again only when
-    /// the loops change.
+    /// A tool's preview loops as card-resident lines, rebuilt only when the loops change.
     pub(super) fn refresh_preview(&mut self, request: &Request<'_>) {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

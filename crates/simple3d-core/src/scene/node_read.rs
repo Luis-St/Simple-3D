@@ -8,12 +8,10 @@ use simple3d_geom::Vec3;
 use std::sync::Arc;
 
 impl Node {
-    /// The smallest a scale factor may get. Zero collapses a solid into a plane
-    /// and negative turns it inside out, and neither is a thing to export.
+    /// The smallest scale factor: zero flattens and negative inverts the solid.
     pub const MIN_SCALE: f64 = 1e-4;
 
-    /// The node's own visibility, as the one three-state answer the interface
-    /// asks for rather than as the two flags that store it.
+    /// The node's visibility as one three-state answer rather than two flags.
     pub fn visibility(&self) -> Visibility {
         match (self.visible, self.ghost) {
             (true, _) => Visibility::Visible,
@@ -44,7 +42,7 @@ impl Node {
         matches!(self.body, Body::Mesh { .. })
     }
 
-    /// Whether this node is a shape that was broken into its pieces (issue 82).
+    /// Whether this node is a shape broken into pieces (issue 82).
     pub fn is_split(&self) -> bool {
         matches!(self.body, Body::Split { .. })
     }
@@ -62,8 +60,7 @@ impl Node {
         }
     }
 
-    /// The operation an integration uses in place of its component's own, if
-    /// it has chosen one.
+    /// The operation an integration uses instead of its component's, if chosen.
     pub fn component_op(&self) -> Option<GroupOp> {
         match self.body {
             Body::Component { op, .. } => op,
@@ -71,7 +68,7 @@ impl Node {
         }
     }
 
-    /// The object a split was made from, for a node that is one.
+    /// The object a split was made from.
     pub fn split_original(&self) -> Option<&Arc<NodeData>> {
         match &self.body {
             Body::Split { original, .. } => Some(original),
@@ -79,9 +76,7 @@ impl Node {
         }
     }
 
-    /// How a split's pieces were cut, for one cut into a pattern of cells.
-    /// `None` for a node that is not a split, and for a split that was
-    /// separated into the pieces it was already in rather than cut.
+    /// How a split's pieces were cut; `None` for non-splits and plain separations.
     pub fn split_plan(&self) -> Option<&SplitPlan> {
         match &self.body {
             Body::Split { plan, .. } => plan.as_ref(),
@@ -89,7 +84,7 @@ impl Node {
         }
     }
 
-    /// The geometry this node owns, for a body that owns any.
+    /// The geometry this node owns, if any.
     pub fn mesh(&self) -> Option<&Arc<MeshData>> {
         match &self.body {
             Body::Mesh { mesh } => Some(mesh),
@@ -97,8 +92,7 @@ impl Node {
         }
     }
 
-    /// What kind of thing this node is, in one word, for a status line or a
-    /// tooltip. Not the primitive's own label -- "Box" -- but the family.
+    /// The node's family in one word ("Group", not the primitive's own label), for status and tooltips.
     pub fn kind_label(&self) -> &'static str {
         match &self.body {
             Body::Group { .. } => "group",
@@ -110,16 +104,13 @@ impl Node {
         }
     }
 
-    /// Whether this node can hold children: a group, a pattern or a split. A
-    /// primitive and a mesh cannot, and a drag or an Add that would put a child
-    /// under one is refused.
+    /// Whether this node can hold children: a group, pattern or split.
     pub fn can_hold_children(&self) -> bool {
         self.is_group() || self.is_pattern() || self.is_split()
     }
 
-    /// The node's own boolean operation, which only a group has. A split
-    /// combines its children too -- see [`Node::combine_op`] -- but it is not a
-    /// group, and nothing that edits an operation may reach it.
+    /// The node's own boolean operation, groups only; splits combine too ([`Node::combine_op`]) but
+    /// are not editable as groups.
     pub fn group_op(&self) -> Option<GroupOp> {
         match self.body {
             Body::Group { op } => Some(op),
@@ -127,9 +118,7 @@ impl Node {
         }
     }
 
-    /// How this node's children are combined, for the bodies that combine
-    /// children at all: the group's own operation, and a union for a split,
-    /// because pieces of one shape standing side by side is what a union is.
+    /// How this node combines its children: a group's operation, or a union for a split.
     pub fn combine_op(&self) -> Option<GroupOp> {
         match self.body {
             Body::Group { op } => Some(op),

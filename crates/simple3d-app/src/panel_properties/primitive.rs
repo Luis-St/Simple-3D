@@ -8,7 +8,7 @@ use simple3d_core::primitive::{ParamKind, ParamValue};
 use simple3d_core::scene::NodeId;
 use simple3d_core::unit::Unit;
 
-/// What one node currently holds for a parameter.
+/// What one node holds for a parameter.
 pub(crate) fn param_value(app: &App, id: NodeId, key: &str, default: ParamValue) -> ParamValue {
     app.scene.node(id).params().and_then(|p| p.get(key).copied()).unwrap_or(default)
 }
@@ -22,16 +22,13 @@ pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], ty
     let unit = app.unit();
     let params = app.scene.node(id).params().cloned().unwrap_or_default();
 
-    // Which axes each dimension measures along, told by the same drivers the
-    // resize handles use (issue 110). Asked of the type's own defaults rather
-    // than of this node: a cylinder cut to a pie slice withdraws its X and Y
-    // handles, but its diameter is still the width it was, and a chip that came
-    // and went with the sweep would be saying something else.
+    // The axes each dimension measures along, from the resize drivers (issue 110), asked of the type's
+    // defaults so a swept shape's chips do not change.
     let drivers = (spec.axes)(&spec.default_params());
     let along = |key: &str| -> Vec<usize> {
         (0..3).filter(|&axis| drivers[axis].is_some_and(|driver| driver.param == key)).collect()
     };
-    // A type with no axis to show, a polyhedron, gets no chip column at all.
+    // A type with no axis to show gets no chip column.
     let chips = drivers.iter().any(Option::is_some);
     for param in spec.params {
         if !spec.param_visible(param, &params) {
@@ -86,15 +83,8 @@ pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], ty
     }
 }
 
-/// Apply one typed value to every selected node.
-///
-/// An absolute entry gives them all the same number; a delta (`+2`) is resolved
-/// against each node's own value, which is the whole point of having one --
-/// "two millimetres wider" means something different for every shape it is
-/// applied to.
-///
-/// A value none of them can read leaves every one of them alone and marks the
-/// field. Nothing partial: the selection does not end up half-edited.
+/// Apply one typed value to every selected node; a delta (`+2`) resolves per node. A value none
+/// can read marks the field and changes nothing.
 pub(crate) fn set_shared_param(
     app: &mut App,
     targets: &[NodeId],
@@ -104,8 +94,7 @@ pub(crate) fn set_shared_param(
     field_id: egui::Id,
     text: String,
 ) {
-    // The em dash is what the field shows for a disagreement; leaving it there
-    // and tabbing away must not write it to anything.
+    // The em dash means disagreement; leaving it must write nothing.
     if text.trim() == ui::MIXED {
         app.fields.accept(field_id);
         return;

@@ -2,38 +2,12 @@
 
 use crate::vec3::Vec3;
 
-/// Every vertex of the mesh lying strictly inside edge `e` of `tri`, in order
-/// along the edge. Written into `out` rather than returned so the walk over a
-/// large mesh allocates nothing per triangle.
-/// Split a triangle's boundary into simple loops wherever it touches the same
-/// vertex twice.
+/// Split a triangle's boundary into simple loops wherever it touches the same vertex twice.
 ///
-/// A vertex is spliced into the boundary of *every* edge it lies on, and near a
-/// sharp corner it can genuinely lie on both edges meeting there. The BSP
-/// produces needles routinely -- two long, nearly parallel sides and a very
-/// short end, 2.3 mm long and 5 microns wide in the case that prompted this --
-/// and around one of those a vertex sitting exactly on one long side is inside
-/// the `tol` band of the other as well.
-///
-/// Removing one of the two occurrences is what the pass used to do, and it is
-/// the reason a boolean of two finely tessellated operands came out
-/// non-manifold. The decision is made per triangle, but an edge is shared with a
-/// neighbour that has no reason to make the same one: whichever occurrence is
-/// dropped, the triangle across that edge still splits there, and the two sides
-/// no longer agree. It cannot be repaired by running the pass again either --
-/// each run manufactures a fresh disagreement somewhere else, which is why
-/// repeating it diverged instead of converging.
-///
-/// Keeping both occurrences makes every triangle agree with its neighbours,
-/// because whether a vertex lies on a segment depends on the segment alone. What
-/// it costs is a boundary that is pinched at that vertex, and a pinched loop
-/// cannot be fanned as one polygon -- the two triangles either side of the pinch
-/// would share an edge in the same direction. So it is cut into simple loops
-/// here, and each is fanned separately.
-///
-/// Every vertex of the boundary lies on the original triangle's own sides, so
-/// each loop is convex and its own centroid is strictly inside it -- which is
-/// what makes fanning each piece from its own centre sound.
+/// Near a sharp corner of a BSP needle a vertex can lie on both adjacent edges and is spliced into
+/// both. Dropping one occurrence made neighbours disagree and the mesh non-manifold (re-running
+/// diverged). Keeping both keeps neighbours consistent but pinches the boundary, so it is cut into
+/// simple loops, each convex and fanned from its own centroid.
 pub(crate) fn split_pinched_loops(boundary: &[u32]) -> Vec<Vec<u32>> {
     let mut loops: Vec<Vec<u32>> = Vec::new();
     let mut stack: Vec<u32> = Vec::with_capacity(boundary.len());
@@ -54,24 +28,11 @@ pub(crate) fn split_pinched_loops(boundary: &[u32]) -> Vec<Vec<u32>> {
     loops
 }
 
-/// Triangulate a triangle's boundary once its edges have been subdivided, by
-/// fanning it from a new vertex at the triangle's centre.
+/// Triangulate a subdivided triangle's boundary by fanning from a new centre vertex.
 ///
-/// The obvious triangulations both fail here. A fan from one of the corners
-/// leaves every split point on the two edges meeting at that corner sitting in
-/// the interior of an emitted edge -- the T-junction is not removed, only
-/// moved. An ear clipper stalls: a boundary that is a triangle's own sides is
-/// convex but full of collinear triples, and on a boolean's sliver triangles
-/// *every* triple comes out collinear to within the tolerance, so it gives up
-/// and drops the face, which tears a hole in the surface. Both were measured
-/// doing exactly that before this was written.
-///
-/// The centre point is inside the triangle by construction, a third of the
-/// height away from each side, so every triangle of the fan has real area and
-/// every split point is a corner of two of them. It costs one vertex per
-/// subdivided face, and `retriangulate_flat_regions` -- which runs immediately
-/// after and rebuilds each flat region from its boundary alone -- drops them
-/// again.
+/// A corner fan only moves the T-junctions, and an ear clipper stalls on sliver triangles whose
+/// triples all look collinear, dropping the face. The centre is a third of the height from each
+/// side, so every fan triangle has area. `retriangulate_flat_regions` removes the extra vertex.
 pub(crate) fn fan_from_centre(
     pos: &[Vec3],
     tri: &[u32; 3],
@@ -91,10 +52,7 @@ pub(crate) fn fan_from_centre(
     }
 }
 
-/// Fan a loop from its own centroid, for the pieces a pinched boundary is cut
-/// into. Unlike [`fan_from_centre`] there is no original triangle to take the
-/// centre from -- the piece is only part of one -- but the piece is convex, so
-/// the average of its own vertices is inside it.
+/// Fan a loop from its own centroid, for the pieces of a pinched boundary; each piece is convex.
 pub(crate) fn fan_loop_from_own_centre(
     pos: &[Vec3],
     loop_: &[u32],

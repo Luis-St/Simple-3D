@@ -1,5 +1,4 @@
-//! What a boolean leaves behind: where the hole is, and whether nesting
-//! them changes the answer.
+//! What a boolean leaves: where the hole is, and whether nesting changes it.
 
 use super::*;
 use crate::vec3::Vec3;
@@ -29,7 +28,6 @@ pub(crate) fn hole_in_plate_is_round_and_in_the_right_place() {
     assert_manifold("plate_hole_placement", &result);
     assert_bounds("plate_hole_placement", &result, Vec3::new(40.0, 20.0, 4.0), 1e-9);
 
-    // Every vertex introduced by the cut sits on the hole's circle.
     let on_hole: Vec<&Vec3> =
         result.positions.iter().filter(|p| ((p.x - centre_x).powi(2) + p.y * p.y).sqrt() < 3.0 + 1e-6).collect();
     assert!(!on_hole.is_empty(), "no vertices found on the hole boundary");
@@ -42,8 +40,7 @@ pub(crate) fn hole_in_plate_is_round_and_in_the_right_place() {
 
 #[test]
 pub(crate) fn nested_booleans_stay_manifold() {
-    // The output of one boolean is the input of the next; a T-junction left
-    // behind by the first would compound.
+    // A T-junction left by one boolean would compound in the next.
     let plate = primitives::box_mesh(40.0, 20.0, 4.0);
     let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 24).translated(Vec3::new(-8.0, 0.0, 0.0));
     let drilled = evaluate_boolean(BooleanOp::Difference, &[plate, hole]);
@@ -74,8 +71,7 @@ pub(crate) fn boolean_evaluation_is_deterministic() {
 
 #[test]
 pub(crate) fn a_swept_solid_is_closed_by_its_cut_faces() {
-    // A shape short of a full turn is a pie slice, and the two faces it was
-    // cut on have to close it -- an open sector would export as a shell.
+    // A partial sweep is closed by its two cut faces; an open sector would export as a shell.
     for sweep in [30.0, 90.0, 180.0, 270.0, 359.0] {
         let name = format!("sweep {sweep}");
         assert_manifold(&format!("cylinder {name}"), &primitives::cylinder_sector_mesh(20.0, 20.0, 10.0, 32, sweep));
@@ -89,8 +85,7 @@ pub(crate) fn a_swept_solid_is_closed_by_its_cut_faces() {
 
 #[test]
 pub(crate) fn a_full_sweep_is_the_unswept_shape_exactly() {
-    // The sweep parameter defaults to a full turn, so every existing project
-    // has to keep the geometry it had: same vertices, not merely same size.
+    // Full turn is the default, so existing projects must keep identical vertices.
     let full = primitives::cylinder_sector_mesh(20.0, 12.0, 10.0, 32, 360.0);
     let plain = primitives::cylinder_mesh(20.0, 12.0, 10.0, 32);
     assert_eq!(full.positions, plain.positions);
@@ -99,8 +94,7 @@ pub(crate) fn a_full_sweep_is_the_unswept_shape_exactly() {
 
 #[test]
 pub(crate) fn a_quarter_cylinder_spans_one_radius_not_one_diameter() {
-    // What makes the X and Y resize handles withdraw on a partial sweep: the
-    // shape's width stops being its diameter.
+    // Why the X and Y resize handles withdraw on a partial sweep: width stops being the diameter.
     let quarter = primitives::cylinder_sector_mesh(20.0, 20.0, 10.0, 32, 90.0);
     assert_bounds("quarter cylinder", &quarter, Vec3::new(10.0, 10.0, 10.0), 1e-9);
 }

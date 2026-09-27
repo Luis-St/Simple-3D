@@ -5,15 +5,14 @@ use crate::app::App;
 use crate::theme::{metric, token};
 use simple3d_core::config::{Panel, Side};
 
-/// Draw one dock. Returns nothing: everything it changes, it changes on `app`.
+/// Draw one dock; everything it changes is on `app`.
 pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
     if app.settings.layout.docks_hidden {
         return;
     }
     let panels = app.settings.layout.panels(side).to_vec();
     if panels.is_empty() {
-        // An empty dock still has to be a drop target, or a panel dragged out of
-        // it could never be put back.
+        // An empty dock is still a drop target, or panels could never return.
         if app.dock_drag.panel.is_none() {
             return;
         }
@@ -31,21 +30,16 @@ pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
     let response =
         builder.frame(frame).resizable(true).default_width(width).width_range(200.0..=620.0).show(ctx, |ui| {
             new_width = ui.available_width();
-            // Claim the dock's full width up front. egui remembers a panel by
-            // the rectangle its *content* filled, so a panel whose contents
-            // happened to be narrower than the dock would shrink the dock to
-            // fit them -- and, being remembered, would keep shrinking it.
+            // Claim the full width, since egui remembers a panel by its content rect and narrow contents
+            // would keep shrinking the dock.
             ui.expand_to_include_rect(ui.max_rect());
             ui.set_min_width(new_width);
             ui.spacing_mut().item_spacing = egui::vec2(metric::GAP, 2.0);
             let filler = app.settings.layout.filler(side);
             let mut centres: Vec<f32> = Vec::new();
 
-            // Everything above the filler stacks from the top; everything below
-            // it stacks from the bottom, so the order on screen is the order in
-            // the layout however many are collapsed.
-            // With every panel rolled up there is no filler, and then every one
-            // of them is a strip from the top -- the dock is a stack of headers.
+            // Panels above the filler stack from the top, those below from the bottom, keeping layout order.
+            // With everything rolled up there is no filler, just a stack of headers.
             let split = filler.and_then(|f| panels.iter().position(|p| *p == f));
             let above = split.unwrap_or(panels.len());
             for panel in &panels[..above] {
@@ -74,9 +68,8 @@ pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
     app.dock_rects.push((side, response.response.rect));
 }
 
-/// A panel that is not the one taking the leftover height: a strip of its own,
-/// resizable when it has a body and exactly one header high when it is rolled
-/// up. Returns the vertical centre of its header.
+/// A panel that is not the filler: its own strip, resizable with a body, one header high when rolled
+/// up. Returns its header's vertical centre.
 pub(crate) fn strip(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side, from_top: bool) -> f32 {
     let collapsed = app.settings.layout.is_collapsed(panel);
     let id = egui::Id::new(("dock-strip", side, panel));

@@ -4,22 +4,14 @@ use super::*;
 use simple3d_core::eval::Evaluator;
 use simple3d_geom::Vec3;
 
-/// Issue 76 and issue 68 together, through the window: holding the snap key --
-/// Ctrl on its own, which is only bindable at all because of issue 76 -- during
-/// a move drag is what makes the drag snap to another body's geometry.
-///
-/// Every other test of this reaches one half of it: `geometry_snap_wanted` is
-/// asked directly whether Ctrl means snap, and the drag arithmetic is driven
-/// with `snap_requested` already set. Nothing until this drove a hand holding
-/// Ctrl and dragging, which is the way anybody actually meets the feature.
+/// Issues 76 and 68 through the window: holding Ctrl alone during a move drag snaps to another
+/// body's geometry. Other tests cover each half; this drives the actual gesture.
 #[test]
 pub(crate) fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
     let mut harness = harness_configured("snap-while-held", |app| {
         app.settings.geometry_snap = simple3d_core::config::SnapMode::WhileHeld;
-        // Two boxes rather than the starting plate: a small body to carry, and
-        // one to snap it to, well clear of it so the target is unambiguous. The
-        // grid step is coarse so a grid landing and a geometry landing cannot be
-        // the same number by accident.
+        // Two boxes, well apart so the target is unambiguous; a coarse grid step so grid and geometry
+        // landings cannot coincide.
         let root = app.scene.root();
         for id in app.scene.node(root).children.clone() {
             app.scene.remove(id);
@@ -46,9 +38,7 @@ pub(crate) fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
     modifiers(&mut harness, egui::Modifiers::COMMAND);
     press(&mut harness, at);
     move_to(&mut harness, at + egui::vec2(12.0, 0.0));
-    // Dragged across the other box a step at a time: somewhere along the way the
-    // pointer passes one of its corners, and that is what the carried box lands
-    // on.
+    // Dragged across the other box step by step, so the pointer passes one of its corners.
     let mut snapped = false;
     let mut landed = Vec3::ZERO;
     for step in 1..=16 {
@@ -65,27 +55,16 @@ pub(crate) fn holding_the_snap_key_through_a_drag_snaps_to_another_body() {
     harness.step();
 
     assert!(snapped, "the drag never met a feature of the other body to snap to");
-    // The grid step is 10 mm, so a landing off it is one only the geometry can
-    // have chosen.
+    // The grid step is 10 mm, so an off-grid landing must be the geometry's.
     assert!(
         (landed.x / 10.0).fract().abs() > 1e-6,
         "the drag landed on the grid step at {landed:?}, so nothing snapped to the body"
     );
 }
 
-/// Issue 68, the whole point of it: two bodies brought face to face.
-///
-/// Placing a part against another is what geometry snapping is *for*, and it is
-/// the case the feature could not do. The target used to be whatever feature the
-/// *pointer* was over, and the manipulator handle is grabbed some seventy pixels
-/// out from the body -- so by the time the pointer reached the corner to meet,
-/// the body it was carrying had already been dragged on top of that corner. Two
-/// 20 mm boxes could be snapped into the same 20 mm of space, and into nothing
-/// else: the landing where their faces touch was never once offered.
-///
-/// The carried box starts at the origin and the target sits at 75, so the two
-/// stand 55 mm apart with a 20 mm box between them. Their faces meet when the
-/// carried box is at 55, which is the number this drag has to be able to reach.
+/// Issue 68: two bodies brought face to face. Pointer-based targets could never offer the touching
+/// landing, since the handle is grabbed far out from the body. With the carried box at the origin
+/// and the target at 75, the faces meet at 55, which this drag must reach.
 #[test]
 pub(crate) fn a_snapped_drag_can_put_two_boxes_face_to_face() {
     let mut harness = harness_configured("snap-face-to-face", |app| {
@@ -97,8 +76,7 @@ pub(crate) fn a_snapped_drag_can_put_two_boxes_face_to_face() {
         let carried = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
         let target = app.scene.add_primitive("box", root, 1).expect("the box is in the registry");
         app.scene.get_mut(target).unwrap().position = Vec3::new(75.0, 0.0, 0.0);
-        // A grid step that cannot land on 55 by itself, so a landing there is one
-        // the geometry chose.
+        // A grid step that cannot land on 55 by itself.
         app.scene.settings.snap_step = 10.0;
         app.select_only(carried);
     });
@@ -118,9 +96,7 @@ pub(crate) fn a_snapped_drag_can_put_two_boxes_face_to_face() {
 
     modifiers(&mut harness, egui::Modifiers::COMMAND);
     press(&mut harness, at);
-    // Crossed the whole gap a millimetre at a time, keeping every place the drag
-    // snapped to. A person doing this by eye stops at the one they wanted; the
-    // test only has to prove it was offered at all.
+    // Cross the gap a millimetre at a time, collecting every landing offered.
     let mut landings: Vec<f64> = Vec::new();
     for step in 1..=90 {
         let to = view.project(start + gizmo.axes[0] * step as f64).expect("the drag ran off screen").0;
@@ -139,11 +115,8 @@ pub(crate) fn a_snapped_drag_can_put_two_boxes_face_to_face() {
     );
 }
 
-/// Ctrl is the default snap key (issue 77) and also what resizes a face about
-/// the centre. Held to snap, it did both: a face pulled with Ctrl down moved its
-/// opposite face out by the same amount, so the one key could not be pressed
-/// for the snap without the resize changing under it. Where the two collide the
-/// snap has the key, and the far face stays where it is.
+/// Ctrl is both the default snap key (issue 77) and the symmetric-resize modifier; where they
+/// collide the snap wins and the far face stays put.
 #[test]
 pub(crate) fn a_face_pulled_with_the_snap_key_held_does_not_resize_about_the_centre() {
     let mut harness = harness_configured("snap-resize-ctrl", |app| {
@@ -152,8 +125,7 @@ pub(crate) fn a_face_pulled_with_the_snap_key_held_does_not_resize_about_the_cen
         for id in app.scene.node(root).children.clone() {
             app.scene.remove(id);
         }
-        // Alone in the scene, so there is nothing to snap to and the drag is
-        // the grid resize -- the question is only what Ctrl did to it.
+        // Alone in the scene, so the drag is a plain grid resize and only Ctrl's effect is tested.
         let block = app.scene.add_primitive("box", root, 0).expect("the box is in the registry");
         app.select_only(block);
     });

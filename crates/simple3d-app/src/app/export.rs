@@ -9,8 +9,7 @@ use std::collections::BTreeMap;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 
-/// What the export dialog was last asked to count, so the answer can be reused
-/// until something it depends on changes.
+/// What the export dialog last counted, reused until an input changes.
 #[derive(Clone, PartialEq)]
 pub(crate) struct ExportPreviewKey {
     pub selection_only: bool,
@@ -27,49 +26,35 @@ pub struct ExportSummary {
     pub bodies: usize,
 }
 
-/// The parts an export writes, worked out ahead of time, and the count the
-/// dialog shows of them. Kept whole so pressing Export reuses them instead of
-/// working them out a second time.
+/// The parts an export writes, prepared ahead, with the dialog's count; reused by Export.
 #[derive(Clone)]
 pub(crate) struct ExportPrepared {
     pub summary: ExportSummary,
     pub parts: Arc<Vec<(String, Arc<Mesh>)>>,
 }
 
-/// The export dialog's count, worked out on a thread of its own (issue 111).
-///
-/// Counting means evaluating every body, booleans and all, and unioning the
-/// ones marked to share a body. Done on the interface thread, as it was, that
-/// froze the window each time a body was picked or the selection changed with
-/// the dialog open. One count runs at a time: a change while one is running
-/// waits for it and then asks again, so picking through a list of bodies
-/// does not start one thread per click.
+/// The export dialog's count, computed on its own thread (issue 111), since evaluating every
+/// body froze the window. One count at a time; a change during one waits and then asks again.
 #[derive(Default)]
 pub(crate) struct ExportPreview {
-    /// The newest finished count, and what it counted; `None` inside when the
-    /// thread working it out stopped without an answer.
+    /// The newest finished count and its key; `None` inside if the thread gave no answer.
     pub done: Option<(ExportPreviewKey, Option<ExportPrepared>)>,
     pub running: Option<(ExportPreviewKey, Receiver<ExportPrepared>)>,
 }
 
-/// Everything working out an export's parts needs, copied off the document so
-/// the work can happen away from the interface thread.
+/// What preparing an export needs, copied off the document for a background thread.
 pub(crate) struct ExportInput {
     scene: Scene,
     roots: Vec<NodeId>,
     frames: BTreeMap<NodeId, Xform>,
     bodies: simple3d_export::BodyMode,
-    /// The whole evaluated scene, when that is what a single body is: the
-    /// evaluation already made it, so there is nothing to work out.
+    /// The whole evaluated scene, when that is the single body, so nothing needs computing.
     whole: Option<Arc<Mesh>>,
 }
 
 impl ExportInput {
-    /// The single mesh a merged export writes. A selection is re-evaluated
-    /// subtree by subtree rather than merged out of `Evaluated::node_meshes`,
-    /// which holds primitives only -- merging those wrote a selected boolean
-    /// group as its raw operands, so a difference kept its cutter and a union
-    /// was refused as non-manifold.
+    /// The single mesh a merged export writes. A selection is re-evaluated per subtree, since
+    /// merging `Evaluated::node_meshes` (primitives only) wrote booleans as their raw operands.
     pub fn mesh(&self) -> Arc<Mesh> {
         match &self.whole {
             Some(mesh) => mesh.clone(),
@@ -77,9 +62,7 @@ impl ExportInput {
         }
     }
 
-    /// The objects an export keeps apart. A node is one object however deep
-    /// it goes -- a boolean group is the shape it evaluates to, the same body
-    /// the viewport draws, not its operands.
+    /// The objects an export keeps apart; a boolean group is one object, as the viewport draws it.
     pub fn parts(&self) -> Vec<simple3d_core::eval::Part> {
         match self.bodies {
             simple3d_export::BodyMode::One => Vec::new(),
@@ -92,11 +75,8 @@ impl ExportInput {
         }
     }
 
-    /// Exactly what the export job writes, and the count of it.
-    ///
-    /// Separated bodies are counted unmerged, which is what will be written:
-    /// merging two touching bodies drops the triangles buried inside the join,
-    /// and keeping them apart does not.
+    /// Exactly what the export job writes, and its count. Separate bodies are counted unmerged,
+    /// as written, since merging drops triangles buried in joins.
     pub fn prepare(&self) -> ExportPrepared {
         let parts: Vec<(String, Arc<Mesh>)> = if self.bodies.separates() {
             self.parts().into_iter().map(|part| (part.name, Arc::new(part.mesh))).collect()
@@ -112,15 +92,13 @@ impl ExportInput {
 impl App {
     // -- export -------------------------------------------------------------
 
-    /// The mesh an export writes: the whole scene, or just what is selected.
-    /// Worked out on the spot, which only a test can afford.
+    /// The mesh an export writes, computed synchronously; tests only.
     #[cfg(test)]
     pub fn export_mesh(&self) -> Arc<Mesh> {
         self.export_input().mesh()
     }
 
-    /// The objects an export keeps apart: the scene's own top-level nodes, or
-    /// the top-level nodes of the selection. Worked out on the spot, as above.
+    /// The objects an export keeps apart, computed synchronously; tests only.
     #[cfg(test)]
     pub fn export_parts(&self) -> Vec<simple3d_core::eval::Part> {
         self.export_input().parts()
@@ -136,9 +114,7 @@ impl App {
         }
     }
 
-    /// What this export's bodies really are: the mode chosen, unless the format
-    /// has nowhere to put more than one, in which case there is only ever the
-    /// single merged body.
+    /// The effective body mode: the chosen one, or a single merged body if the format holds only one.
     pub fn export_body_mode(&self) -> simple3d_export::BodyMode {
         if self.export_format.keeps_objects_separate() {
             self.export_bodies
@@ -147,9 +123,8 @@ impl App {
         }
     }
 
-    /// The nodes an export starts from: the scene's own top level, or the
-    /// top-level nodes of the selection. Also what the body picker's tree
-    /// shows, and where `Scene::body_lock` stops walking upwards.
+    /// The nodes an export starts from: the scene's or the selection's top level. Also the body
+    /// picker's roots and where `Scene::body_lock` stops.
     pub fn export_roots(&self) -> Vec<NodeId> {
         if self.export_selection_only {
             self.top_level_selection()
@@ -158,12 +133,8 @@ impl App {
         }
     }
 
-    /// What the export dialog promises: how many triangles will be verified as
-    /// watertight, and how many bodies they will be written as. `None` while
-    /// that is still being worked out, see [`ExportPreview`].
-    ///
-    /// The key carries the export body marks as well as the evaluation, since
-    /// regrouping changes the answer without changing any geometry.
+    /// The dialog's promise: triangles to verify and bodies to write; `None` while still computing
+    /// (see [`ExportPreview`]). The key includes body marks, since regrouping changes the answer.
     pub fn export_summary(&mut self) -> Option<ExportSummary> {
         self.export_prepared().map(|prepared| prepared.summary)
     }
@@ -212,8 +183,7 @@ impl App {
             self.fail("The export scale must be greater than zero", "Enter a positive scale factor.");
             return;
         }
-        // A boolean the kernel could not evaluate means the mesh is not
-        // trustworthy; refuse with the specific reason and name the node.
+        // An unevaluated boolean makes the mesh untrustworthy; refuse and name the node.
         if !self.evaluated.errors.is_empty() {
             let detail = self
                 .evaluated
@@ -226,8 +196,7 @@ impl App {
             return;
         }
         let bodies = self.export_body_mode();
-        // The dialog's count already worked the parts out; when it has not
-        // finished, the export's own thread does it, never this one (issue 111).
+        // Reuse the dialog's prepared parts; if unfinished, the export thread computes them (issue 111).
         let prepared = self.export_prepared();
         if prepared.as_ref().is_some_and(|prepared| prepared.summary.triangles == 0) {
             self.fail("There is nothing to export", "The scene, or the selection, has no visible geometry.");
@@ -252,10 +221,8 @@ impl App {
         {
             dialog = dialog.set_directory(dir);
         }
-        // Everything the export needs is settled here, before the dialog goes
-        // up, and travels with it: the answer arrives on a later frame, and the
-        // job must be the one the user asked for and not whatever the document
-        // looks like by the time they have finished choosing a folder.
+        // Settled before the dialog opens, so the job is what was asked for even if the document
+        // changes while a folder is being chosen.
         let options = simple3d_export::Options {
             format: self.export_format,
             scale,

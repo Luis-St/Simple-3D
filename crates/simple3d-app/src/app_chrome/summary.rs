@@ -4,16 +4,12 @@ use crate::app::{App, Modal};
 use crate::ui;
 
 impl App {
-    /// "2 selected", or the name when there is exactly one -- the name is more
-    /// use than the count when the count is one.
+    /// "2 selected", or the name when exactly one is.
     pub(crate) fn selection_summary(&self) -> String {
         match self.selection.len() {
             0 => "Nothing selected".to_string(),
-            // Asked of the scene rather than taken from the selection: an id the
-            // scene no longer holds is a panic from `Scene::node`, and this is
-            // drawn on every frame of the status bar -- so it would be the first
-            // thing to run after whatever left the id behind, and would take the
-            // window down before anything could prune it.
+            // Asked of the scene: a stale id panics in `Scene::node`, and this runs every frame, so it would crash
+            // the window before the id could be pruned.
             1 => match self.scene.get(self.selection[0]) {
                 Some(node) => node.name.clone(),
                 None => "Nothing selected".to_string(),
@@ -22,8 +18,7 @@ impl App {
         }
     }
 
-    /// The bounding size of what is selected, or of the whole scene when nothing
-    /// is -- the status bar's answer to "will this fit".
+    /// Bounding size of the selection, or the whole scene when nothing is: "will this fit".
     pub(crate) fn selection_size_text(&self) -> String {
         let unit = self.unit();
         let bounds = match self.primary() {
@@ -38,7 +33,7 @@ impl App {
 
     pub(crate) fn modals(&mut self, ctx: &egui::Context) {
         match self.modal {
-            // Nothing open, so the next dialog to open is placed afresh.
+            // Nothing open, so the next dialog is placed afresh.
             Modal::None => self.dialog_placed = None,
             Modal::Export => self.export_window(ctx),
             Modal::Keymap => self.keymap_window(ctx),

@@ -8,19 +8,16 @@ fn bounds() -> egui::Rect {
 
 #[test]
 fn a_popup_opens_inside_the_viewport_it_belongs_to() {
-    // Not in the middle of the screen the way a dialog does: it is drawn in
-    // the viewport, and the viewport is not the window.
+    // Inside the viewport, not centred on the screen like a dialog.
     let placed = settle(&Placement::default(), 320.0, bounds());
     assert!(bounds().contains(placed), "{placed:?} is outside {:?}", bounds());
-    // In the top right corner (issue 103), clear of the edge by the same margin
-    // on both sides.
+    // Top right (issue 103), with equal margins.
     assert_eq!(placed, egui::pos2(bounds().right() - 320.0 - 16.0, bounds().top() + 16.0));
 }
 
 #[test]
 fn a_popup_dragged_off_the_edge_keeps_its_title_bar_in_reach() {
-    // Every edge, because a window pushed out of any of them is a window
-    // that cannot be dragged back -- there is nothing left to grab.
+    // Every edge, since a window pushed out of any cannot be dragged back.
     let bar = egui::vec2(320.0, TITLE_BAR);
     for away in [egui::vec2(-4000.0, 0.0), egui::vec2(4000.0, 0.0), egui::vec2(0.0, -4000.0), egui::vec2(0.0, 4000.0)] {
         let out = clamp_into(bounds().center() + away, bar, bounds());
@@ -32,11 +29,8 @@ fn a_popup_dragged_off_the_edge_keeps_its_title_bar_in_reach() {
 
 #[test]
 fn rolling_a_window_up_leaves_its_title_bar_exactly_where_it_was() {
-    // The bug: a tall window near the bottom edge was lifted to fit, and
-    // rolling it up removed the reason for the lift -- so the bar dropped
-    // back down, out from under the chevron that had just been clicked.
-    // Against a 600 px viewport, a 500 px window dropped at y = 400 was
-    // lifted to y = 100, and collapsing it put it back at 400.
+    // Regression: a tall window lifted to fit dropped back on roll-up, out from under the chevron
+    // (a 500 px window at y = 400 in a 600 px viewport).
     let mut placement = Placement { pos: None, collapsed: false, height: 500.0 };
     placement.pos = Some(egui::pos2(300.0, 400.0));
     let open = settle(&placement, 320.0, bounds());
@@ -47,8 +41,7 @@ fn rolling_a_window_up_leaves_its_title_bar_exactly_where_it_was() {
     let rolled = settle(&placement, 320.0, bounds());
     assert_eq!(rolled, open, "rolling the window up moved its title bar");
 
-    // And unrolling it does not move it either, because it was already
-    // standing somewhere the whole window fits.
+    // Unrolling does not move it either.
     placement.collapsed = false;
     assert_eq!(settle(&placement, 320.0, bounds()), open, "unrolling the window moved its title bar");
 }
@@ -61,8 +54,7 @@ fn a_window_that_fits_where_it_was_left_is_not_moved_at_all() {
 
 #[test]
 fn a_viewport_smaller_than_the_popup_still_leaves_it_somewhere_to_be() {
-    // Dragging the panels out until the viewport is narrower than the
-    // window must not produce a negative range to clamp into.
+    // A viewport narrower than the window must not give a negative clamp range.
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(40.0, 20.0));
     let out = clamp_into(egui::pos2(500.0, 500.0), egui::vec2(320.0, TITLE_BAR), tiny);
     assert_eq!(out, tiny.left_top());
@@ -70,10 +62,7 @@ fn a_viewport_smaller_than_the_popup_still_leaves_it_somewhere_to_be() {
 
 #[test]
 fn a_popup_taller_than_the_viewport_ends_inside_it() {
-    // The bug: the room the body was given left out part of the window's own
-    // chrome, so a body that had to scroll came out taller than the viewport
-    // and its foot hung over the status bar. Against a viewport from y = 54 to
-    // y = 855 the rule builder ran on to y = 867.
+    // Regression: the body room omitted some chrome, so scrolling popups overhung the status bar.
     for tall in [300.0_f32, 520.0, 801.0] {
         let bounds = egui::Rect::from_min_size(egui::pos2(300.0, 54.0), egui::vec2(780.0, tall));
         let ctx = egui::Context::default();

@@ -1,4 +1,4 @@
-//! The small dialogs: about, errors, and the ones a tool opens.
+//! The small dialogs: about, errors, and those a tool opens.
 
 use super::*;
 use crate::app::{App, Modal, APP_NAME, PROJECT_EXTENSION, VERSION};
@@ -7,8 +7,8 @@ use crate::ui;
 use simple3d_core::config::{self};
 
 impl App {
-    /// The keymap editor: every command grouped by area, with a search box, the
-    /// current binding shown, and click-to-record (spec section 8.2).
+    /// The keymap editor: commands by area, a search box, current bindings, and click-to-record (spec
+    /// section 8.2).
     pub(super) fn keymap_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
@@ -29,10 +29,7 @@ impl App {
 impl App {
     pub(super) fn about_window(&mut self, ctx: &egui::Context) {
         let title = format!("About {APP_NAME}");
-        // Nothing but text, of a length that depends on where this machine
-        // keeps its settings, so the window is exactly as tall as the lines
-        // turn out to be: no band of empty surface under the last of them, and
-        // no line cut off at the bottom either.
+        // Text only, of machine-dependent length, so the window fits its lines exactly.
         self.dialog(
             ctx,
             DialogSpec {
@@ -66,11 +63,9 @@ impl App {
 }
 
 impl App {
-    /// Failures are shown in a scrollable, copyable window with the specific
-    /// reason, never a generic message (spec section 9).
+    /// Failures in a scrollable, copyable window with the specific reason (spec section 9).
     pub(super) fn error_window(&mut self, ctx: &egui::Context) {
-        // A window with no title in its bar reads as a broken window; every
-        // failure names itself, but nothing here depends on that.
+        // Always titled, since an untitled window looks broken.
         let title =
             if self.error_title.is_empty() { "Something went wrong".to_string() } else { self.error_title.clone() };
         self.dialog(
@@ -90,15 +85,12 @@ impl App {
 
     pub(super) fn error_body(&mut self, ui: &mut egui::Ui) {
         let mut detail = self.error_detail.clone();
-        // The field fills the window: a failure is often a path and a system
-        // message, and the room to read it is the point of the window.
+        // The field fills the window, since the room to read a path and message is the point.
         let height = ui.available_height().max(120.0);
         let (area, restore) = theme::list_scroll_area(ui);
         area.show(ui, |ui| {
             ui.set_style(restore);
-            // A read-only multiline field, so the text can be selected
-            // and copied. Sized to the room the window has rather than to a
-            // row count, so the field is the window and not a box in it.
+            // A read-only multiline field so the text can be copied, sized to the window.
             ui.add_sized(
                 egui::vec2(ui.available_width(), height),
                 egui::TextEdit::multiline(&mut detail).desired_width(f32::INFINITY).interactive(true),

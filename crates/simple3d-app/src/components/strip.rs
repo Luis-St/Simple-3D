@@ -1,13 +1,11 @@
-//! The second row of tabs: the components of the project on screen.
+//! The second tab row: the components of the project on screen.
 
 use super::*;
 use crate::app::App;
 use crate::icon::{self, Glyph};
 use crate::theme::{self, metric, token};
 
-/// Whether the second row is drawn at all: only once a project open in this
-/// window has a component beyond its root. Until then every project is the one
-/// tree it always was, and the window looks as it always did.
+/// Whether the second row is drawn: only once a project in this window has a non-root component.
 pub fn wanted(app: &App) -> bool {
     app.project.uses_components()
         || app.tabs.iter().enumerate().any(|(index, doc)| index != app.active && doc.project.uses_components())
@@ -24,7 +22,7 @@ struct Listed {
     unsaved: bool,
 }
 
-/// What the row was asked to do, carried out after it has finished drawing.
+/// What the row was asked to do, carried out after drawing.
 enum Ask {
     Pick(ComponentId),
     Close(ComponentId),
@@ -33,9 +31,7 @@ enum Ask {
     New,
 }
 
-/// The row of the project's open components, under the row of projects: the
-/// root component first and always there, the others as they were opened, and
-/// at the end the list of every component the project has.
+/// The row of open components: the root first, the others as opened, then the full list.
 pub fn show(app: &mut App, ctx: &egui::Context) {
     if !wanted(app) {
         return;
@@ -104,13 +100,12 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// The grip a component's tab is, so a test can find it.
+/// A component tab's id, for tests.
 pub(crate) fn tab_id(id: ComponentId) -> egui::Id {
     egui::Id::new(("component-tab", id))
 }
 
-/// One component's tab. Drawn like a document's, a little quieter, with a
-/// close cross on every tab but the root's.
+/// One component's tab: like a document tab but quieter, closable except for the root.
 fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bool, asked: &mut Option<Ask>) {
     const MIN: f32 = 80.0;
     const MAX: f32 = 200.0;
@@ -198,9 +193,8 @@ fn tab(ui: &mut egui::Ui, id: ComponentId, name: &str, unsaved: bool, active: bo
     });
 }
 
-/// The arrow at the end of the row, which lists every component of the
-/// project: to open one, to delete one or to make a new one. Painted rather
-/// than typed, since the interface font has no small triangles.
+/// The arrow listing every component, to open, delete or create one. Painted because the UI
+/// font has no small triangles.
 fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     let size = egui::vec2(28.0, ui.available_height());
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -213,9 +207,7 @@ fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     let response = response.on_hover_text(format!("Every component ({})", listed.len()));
     egui::Popup::menu(&response).show(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
-        // As wide as the longest name wants, within reason, so the delete
-        // buttons line up down the right edge and a long name is cut short
-        // rather than stretching the menu across the screen.
+        // Sized to the longest name within reason, so delete buttons line up and long names are cut.
         let font = egui::FontId::proportional(theme::font::VALUE);
         let widest = listed
             .iter()
@@ -244,18 +236,16 @@ fn list(ui: &mut egui::Ui, listed: &[Listed], asked: &mut Option<Ask>) {
     });
 }
 
-/// Room in a row of the list beside its name: the glyph before it, the marks
-/// and the delete button after it.
+/// Room beside a list row's name for the glyph, marks and delete button.
 const LIST_ROOM: f32 = 96.0;
 
-/// The id of a component's row in the list, so a test can find it.
+/// A component's list row id, for tests.
 pub(crate) fn list_row_id(id: ComponentId) -> egui::Id {
     egui::Id::new(("component-list-row", id))
 }
 
-/// One component in the list: the whole row opens it, and the bin at its
-/// right end deletes it. The component on screen is lit like the active tab,
-/// and the ones open in a tab are named brighter than the ones put away.
+/// One component in the list: the row opens it, the bin deletes it. The active one is lit, and
+/// open ones are brighter than closed ones.
 fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<Ask>) {
     const BIN: f32 = 20.0;
     let root = entry.id == ROOT_COMPONENT;
@@ -284,7 +274,6 @@ fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<As
         egui::Rect::from_center_size(egui::pos2(rect.left() + 16.0, rect.center().y), egui::Vec2::splat(12.0));
     icon::draw(painter, glyph_rect, Glyph::Component, glyph_colour);
 
-    // The name, then what is worth knowing about it in the quieter colour.
     let text_colour = if entry.active || entry.open || row.hovered() { token::TEXT_HI } else { token::TEXT_LO };
     let mut job = egui::text::LayoutJob::default();
     job.append(&entry.name, 0.0, egui::TextFormat::simple(egui::FontId::proportional(theme::font::VALUE), text_colour));
@@ -308,8 +297,7 @@ fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<As
     painter.galley(egui::pos2(rect.left() + 30.0, rect.center().y - galley.size().y * 0.5), galley, text_colour);
 
     if let Some(bin) = bin {
-        // Quiet until the row is under the pointer, so a column of bins does
-        // not shout louder than the names; red only once it is the bin itself.
+        // Quiet until the row is hovered, red only on the bin itself.
         let colour = if bin.hovered() {
             painter.rect_filled(bin_rect, radius, token::SURFACE_2);
             token::DANGER
@@ -325,8 +313,7 @@ fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<As
         }
     }
 
-    // Only the root says anything on hover: a tooltip under every row would
-    // cover the row below it while the pointer runs down the list.
+    // Only the root has a tooltip, which would otherwise cover the next row while scanning the list.
     let row =
         if root { row.on_hover_text("The root component is the project itself, and cannot be deleted") } else { row };
     if row.clicked() {
@@ -334,7 +321,7 @@ fn list_row(ui: &mut egui::Ui, entry: &Listed, width: f32, asked: &mut Option<As
     }
 }
 
-/// The last row of the list, the same as the plus at the end of the tabs.
+/// The list's last row, like the plus at the end of the tabs.
 fn new_row(ui: &mut egui::Ui, width: f32) -> bool {
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, metric::ROW + 2.0), egui::Sense::click());
     let painter = ui.painter();

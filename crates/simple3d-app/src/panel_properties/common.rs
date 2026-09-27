@@ -1,4 +1,4 @@
-//! What every selected node shows: its name, its colour and its visibility.
+//! What every selected node shows: name, colour and visibility.
 
 use super::*;
 use crate::app::App;
@@ -17,8 +17,7 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
 
     field_row(ui, "Name", "", |ui| {
         if many {
-            // Renaming several nodes to one name would make the outliner
-            // unreadable, so the field says what is selected instead.
+            // Several selected: say so rather than rename them all to one name.
             ui.add(egui::Label::new(theme::value(format!("{} objects selected", targets.len()))).selectable(false));
         } else if ui.add(egui::TextEdit::singleline(&mut name).desired_width(f32::INFINITY)).changed() {
             app.edit("Rename", Some(&format!("name:{id}")));
@@ -28,9 +27,7 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
-    // Three states rather than a checkbox: hidden means *gone*, and a body that
-    // has to be seen while it is positioned -- the one about to be subtracted --
-    // is a ghost, which is a property of that body and not of the document.
+    // Three states: hidden is gone, while a ghost (for positioning a subtraction) stays visible.
     field_row(
         ui,
         "Shown",
@@ -61,29 +58,21 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         "What this node is painted. Painting a group paints everything in it, \
              and the colour follows each surface through a boolean.",
         |ui| {
-            // The swatch starts from whatever the node shows now -- its own colour,
-            // one inherited from a group above it, or the theme's colour for an
-            // unpainted solid -- so opening the picker never jumps to black.
+            // The swatch starts from the node's effective colour, so the picker never jumps to black.
             let inherited = app.scene.effective_colour(id);
             let mut rgb = inherited.map_or_else(|| unpainted_swatch(ui.visuals().dark_mode), |c| c.0);
             let mixed = targets.iter().any(|t| app.scene.effective_colour(*t) != inherited);
-            // The picker's own popup, named the way the widget names it: the id
-            // is taken before the button is added, which is the moment the
-            // widget takes it too. What it is for is below.
+            // The picker popup's id, taken before the button is added, as the widget does.
             let picker_popup = ui.auto_id_with("popup");
             if ui.color_edit_button_srgb(&mut rgb).changed() {
-                // One undo step for a whole drag through the picker, the way a
-                // scrubbed field is one step.
+                // One undo step for a whole drag through the picker.
                 app.paint_from_picker(targets, rgb);
             }
-            // And one swatch on the recent row for the whole visit, put there
-            // when the picker is put away rather than while it is being dragged
-            // through: the shades a drag passes over are not choices (issue 85).
+            // One recent swatch per picker visit, added when it closes (issue 85).
             if !egui::Popup::is_id_open(ui.ctx(), picker_popup) {
                 app.picker_closed();
             }
-            // Enabled only where clearing would do something: a node that merely
-            // inherits a group's colour has none of its own to take away.
+            // Enabled only when something has paint of its own to clear.
             let painted = targets.iter().any(|t| app.scene.subtree_is_painted(*t));
             if ui.add_enabled(painted, egui::Button::new("Clear")).on_hover_text("Back to the theme's colour").clicked()
             {
@@ -95,9 +84,7 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         },
     );
 
-    // The same swatches the outliner's menu offers, and the colours this
-    // document has actually been painted in: opening the picker to find a
-    // colour that is already in the project is the slow way round.
+    // The outliner menu's presets, and the colours this document already uses.
     swatch_row(app, ui, "", &theme::PAINT_PRESETS.map(|(name, colour)| (name.to_string(), colour)), targets);
     let recent: Vec<(String, egui::Color32)> = app
         .custom_recent_colours()
@@ -125,10 +112,7 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     });
 }
 
-/// A row of colour swatches that paints the selection when one is clicked.
-///
-/// Plain buttons rather than a picker, for the same reason the outliner's menu
-/// uses them: one click, and the colour is on the shape.
+/// A row of swatches painting the selection on click: one click, no picker.
 pub(crate) fn swatch_row(
     app: &mut App,
     ui: &mut egui::Ui,
@@ -137,8 +121,7 @@ pub(crate) fn swatch_row(
     targets: &[NodeId],
 ) {
     let mut chosen: Option<Colour> = None;
-    // The label column is kept even when empty, so the swatches line up under
-    // the picker rather than under the labels.
+    // The label column is kept even when empty, so swatches line up under the picker.
     field_row(ui, label, "", |ui| {
         for (name, colour) in colours {
             let swatch = egui::Button::new("")
@@ -155,7 +138,7 @@ pub(crate) fn swatch_row(
     }
 }
 
-/// The colour an unpainted solid is drawn in, which is where the picker starts.
+/// The colour an unpainted solid is drawn in, where the picker starts.
 pub(crate) fn unpainted_swatch(dark: bool) -> [u8; 3] {
     let solid = crate::render::Palette::for_dark_mode(dark).solid;
     [solid[0], solid[1], solid[2]]

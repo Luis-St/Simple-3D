@@ -1,4 +1,4 @@
-//! The files that are refused, and what the message says.
+//! Refused files, and the messages.
 
 use super::*;
 use crate::scene::Scene;
@@ -36,7 +36,7 @@ pub(crate) fn a_file_that_is_not_a_project_is_rejected() {
         let err = from_str(text).unwrap_err();
         assert!(!err.to_string().is_empty(), "{text:?} produced an empty message");
     }
-    // And never a silently empty scene.
+    // Never a silently empty scene.
     assert!(from_str("{}").is_err());
 }
 
@@ -48,7 +48,7 @@ pub(crate) fn a_mesh_body_whose_geometry_is_damaged_fails_the_file_rather_than_l
     let root = scene.root();
     scene.add_mesh("Baked", MeshData::new(simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0)), root, 0);
     let text = to_string(&scene);
-    // Cut the vertex array short, as a truncated copy or a bad edit would.
+    // Cut the vertex array short, as truncation or a bad edit would.
     let damaged = text.replacen("\"positions\": \"", "\"positions\": \"AAAA", 1);
     let err = from_str(&damaged).unwrap_err();
     assert!(err.to_string().contains("geometry"), "{err}");

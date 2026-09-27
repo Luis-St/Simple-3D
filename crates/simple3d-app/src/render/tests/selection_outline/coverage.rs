@@ -4,22 +4,13 @@ use super::*;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_core::scene::Camera;
 use simple3d_geom::primitives;
 
 #[test]
 pub(crate) fn a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over() {
-    // Both halves of one bug, measured against the picture the feature
-    // edges used to draw -- which is still what `prepare` alone gives, so
-    // the old and the new can be rendered side by side.
-    //
-    // A 32-segment sphere creases at 11.25 degrees, under the 20-degree
-    // feature-edge threshold, so it had no feature edges at all: selecting
-    // one drew nothing, and only the manipulator said what was selected. A
-    // torus at the same segment count creases past the threshold around its
-    // tube, so selecting one scribbled concentric rings across the surface.
+    // Compared with the old feature-edge outline (`prepare` alone): a 32-segment sphere had no feature
+    // edges and drew nothing, a torus scribbled rings across its surface.
     let ball = primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 32);
     let (creased, _) = selection_coverage_of(&Renderable::prepare(&ball));
     assert_eq!(creased, 0, "the sphere is only interesting because the creases drew nothing");
@@ -31,8 +22,7 @@ pub(crate) fn a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over
     let (creased, creased_middle) = selection_coverage_of(&Renderable::prepare(&ring));
     let (outlined, middle) = selection_coverage_of(&Renderable::prepare_outlined(&ring));
     assert!(outlined > 50, "the torus got no selection outline: {outlined} pixels");
-    // The hole is in the middle of the frame at this camera, so the inner
-    // silhouette does cross it; the creases covered it three times over.
+    // The hole is mid-frame, so the inner silhouette crosses it; creases covered it three times over.
     assert!(
         middle * 3 <= creased_middle,
         "the outline still scribbles over the torus: {middle} pixels in the middle against {creased_middle}"
@@ -42,21 +32,9 @@ pub(crate) fn a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over
 
 #[test]
 pub(crate) fn the_selection_outline_goes_all_the_way_round() {
-    // A silhouette edge is the one line a depth test cannot draw: it lies
-    // exactly where the surface turns away from the eye, so the face beside
-    // it is nearly edge-on and its depth changes by more across one pixel
-    // than a bias can cover. Drawn once, the outline of a 32-segment sphere
-    // came out as a row of dots -- seventeen of these hundred and eighty
-    // sectors with nothing in them at all, and raising the bias tenfold
-    // still left six. The second pass, one pixel out from the shape, is over
-    // background rather than over the shape and has nothing to win from.
-    //
-    // Asked as "is the rim drawn all the way round" rather than "how many
-    // pixels are orange", because a dotted line and a solid one differ by
-    // very little on a pixel count and by everything to look at.
-    // A frame big enough for the question: at the stock test size the rim is
-    // forty pixels across and a two-degree sector is less than one of them,
-    // so bare sectors would say nothing about the drawing.
+    // Silhouettes need a second pass one pixel out, since depth tests fail at the rim (a single pass
+    // left 17 of 180 sectors empty). Checked sector by sector, since a dotted rim barely changes the
+    // pixel count. The frame is large enough for two-degree sectors to be meaningful.
     fn wide<'a>(items: Vec<Item<'a>>) -> Request<'a> {
         Request {
             view: View::new(
@@ -87,8 +65,7 @@ pub(crate) fn the_selection_outline_goes_all_the_way_round() {
         Item { renderable: &prepared, style: Style::Selected },
     ]));
 
-    // Every pixel the outline changed, measured as the difference selecting
-    // makes: an alpha-blended line is never exactly its own colour.
+    // Every pixel the outline changed, as a difference, since blended lines never match exactly.
     let changed: Vec<usize> = (0..plain.width * plain.height)
         .filter(|&i| plain.color[i * 4..i * 4 + 4] != outlined.color[i * 4..i * 4 + 4])
         .collect();

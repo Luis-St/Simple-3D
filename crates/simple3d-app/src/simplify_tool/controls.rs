@@ -1,10 +1,10 @@
-//! The numbers and the guards a simplification is described by.
+//! The simplification's numbers and guards.
 
 use super::*;
 use crate::app::App;
 use crate::theme;
 
-/// How much to drop, and what may not be dropped on the way.
+/// How much to drop, and what must be kept.
 pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SimplifyTool) {
     let length = format!("({})", app.unit().suffix());
     egui::Grid::new("simplify-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {

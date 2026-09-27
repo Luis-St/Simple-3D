@@ -1,19 +1,11 @@
-//! Whether the kernel's answers are still sound across the shapes that
-//! have broken it before.
+//! Whether the kernel stays sound on the shapes that broke it before.
 
 use super::*;
 use crate::{primitives, BooleanOp};
 
-/// Every ordered pair of primitives, through every operation, checked for a
-/// closed surface and for a volume the operation allows.
-///
-/// The suite's own boolean tests are all on shapes meeting squarely. This meets
-/// them at an angle and off-centre, which is where the kernel's fixed-epsilon
-/// classification actually fails, and it is how the counts in `KNOWN_ISSUES.md`
-/// were arrived at: 22 of these pairs were not closed before the near-face
-/// clip, 18 after, 9 once the general path clipped against near faces too, and
-/// none once `repair` learned to put a lid on the hole that is left. It asserts
-/// that now. Still `#[ignore]`d only because it takes a quarter of a minute.
+/// Every ordered pair of primitives, through every operation, checked for a closed surface and a
+/// plausible volume. Meets them at an angle and off-centre, where fixed-epsilon classification fails;
+/// open pairs went 22, 18, 9, then 0 once `repair` capped holes. `#[ignore]`d only for its runtime.
 #[test]
 #[ignore]
 pub(crate) fn bench_boolean_audit() {
@@ -40,8 +32,7 @@ pub(crate) fn bench_boolean_audit() {
             if na == nb {
                 continue;
             }
-            // Off-centre and off-axis on purpose: squarely meeting shapes hide
-            // the grazing contacts that break plane classification.
+            // Off-centre and off-axis on purpose: square contacts hide the grazing ones that break classification.
             let b = b.transformed(Vec3::new(3.0, 2.0, 1.0), Vec3::new(10.0, 0.0, 0.0));
             for op in [BooleanOp::Union, BooleanOp::Difference, BooleanOp::Intersection] {
                 let result = crate::evaluate_boolean(op, &[a.clone(), b.clone()]);

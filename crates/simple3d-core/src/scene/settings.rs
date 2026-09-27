@@ -1,5 +1,4 @@
-//! The settings a scene carries with it, so a reopened project looks the
-//! way it was left.
+//! The settings a scene carries, so a reopened project looks as it was left.
 
 use super::*;
 use crate::unit::Unit;
@@ -14,41 +13,26 @@ pub struct SceneSettings {
     pub notes: String,
     pub grid_spacing: f64,
     pub grid_visible: bool,
-    /// How far one step of a move or resize goes: the increment a drag snaps to
-    /// and one press of a nudge key covers. Its own setting rather than the grid
-    /// spacing, which is about what the ground looks like -- 1 mm is the step
-    /// most people want and a 1 mm grid is unreadable.
+    /// The move and resize step, separate from the grid spacing, since 1 mm is the usual step but a
+    /// 1 mm grid is unreadable.
     #[serde(default = "default_snap_step")]
     pub snap_step: f64,
-    /// The three origin axes, each on its own. An axis running through the model
-    /// is a distraction when it is not the one being worked to.
+    /// The three origin axes, each switchable.
     #[serde(default = "all_axes")]
     pub axes_visible: [bool; 3],
     #[serde(default)]
     pub axis_style: AxisStyle,
-    /// Draw, on the surface of a solid, the line where a principal plane cuts
-    /// through it. Where the ground plane crosses a shape is a real dimension
-    /// -- how much of it is below the build plate -- and it is invisible until
-    /// something marks it.
+    /// Mark where the principal planes cut solids, showing e.g. how much is below the build plate.
     #[serde(default = "default_true")]
     pub plane_marks: bool,
-    /// What the viewport does while a tool draws a preview over it (issue 82).
-    /// Absent from the file while it is the default, so a project written by
-    /// this version still diffs cleanly against one written before in-place
-    /// previews existed.
+    /// What the viewport hides under a tool preview (issue 82); omitted from the file at its default.
     #[serde(default, skip_serializing_if = "is_no_change")]
     pub preview_viewport: PreviewViewport,
-    /// The plane the model is cut with on screen (issue 71). Off, and absent
-    /// from the file, until it is asked for.
-    ///
-    /// It is also the first of the sections, and the one whose `enabled` says
-    /// whether any of them cut: the tool is on or off as a whole. Kept as its
-    /// own field so a file written before there could be several still opens
-    /// with the one it had.
+    /// The on-screen section plane (issue 71), off and omitted until used. Also the first section,
+    /// whose `enabled` switches them all; kept separate so older single-section files still open.
     #[serde(default, skip_serializing_if = "is_off")]
     pub section: SectionView,
-    /// The sections after the first, each cutting on its own at the same time
-    /// as the rest: what the model shows is what all of them leave.
+    /// The sections after the first, all cutting at once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub more_sections: Vec<SectionView>,
 }
@@ -57,8 +41,7 @@ impl Default for SceneSettings {
     fn default() -> Self {
         SceneSettings {
             unit: Unit::Millimetre,
-            // 32 segments keeps a 3mm pin smooth and a 2m cylinder acceptable
-            // without the user touching the setting (spec section 5.1).
+            // 32 segments keeps a 3 mm pin smooth and a 2 m cylinder acceptable (spec section 5.1).
             default_segments: 32,
             notes: String::new(),
             grid_spacing: 10.0,
@@ -75,12 +58,12 @@ impl Default for SceneSettings {
 }
 
 impl SceneSettings {
-    /// How many sections there are: the first, and those after it.
+    /// How many sections there are.
     pub fn section_count(&self) -> usize {
         1 + self.more_sections.len()
     }
 
-    /// Section `index`, clamped to the last there is.
+    /// Section `index`, clamped to the last.
     pub fn section_at(&self, index: usize) -> &SectionView {
         match index {
             0 => &self.section,
@@ -103,16 +86,14 @@ impl SceneSettings {
         std::iter::once(&self.section).chain(self.more_sections.iter())
     }
 
-    /// Add a section after the last, and say which it is.
+    /// Add a section after the last and return its index.
     pub fn add_section(&mut self, section: SectionView) -> usize {
         self.more_sections.push(section);
         self.more_sections.len()
     }
 
-    /// Take section `index` away. The first cannot go while it is the only
-    /// one: with none left there would be nothing for the tool to show. When
-    /// it goes and others are left, the next one takes its place, keeping the
-    /// switch that says the tool is on.
+    /// Remove section `index`; the only one cannot be removed. When the first goes, the next takes its
+    /// place and keeps the on switch.
     pub fn remove_section(&mut self, index: usize) {
         if index == 0 {
             if self.more_sections.is_empty() {

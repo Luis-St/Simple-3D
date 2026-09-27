@@ -1,4 +1,4 @@
-//! Reaching nodes: by id, by walk, and by where they sit in the tree.
+//! Reaching nodes: by id, by walk, and by position in the tree.
 
 use super::*;
 use simple3d_geom::Vec3;
@@ -59,13 +59,8 @@ impl Scene {
         self.nodes.get_mut(&id)
     }
 
-    /// The node, or a panic. For the many callers that have already established
-    /// the id is live -- one walked out of the tree, one just created -- and
-    /// would only have `unwrap` to write instead.
-    ///
-    /// `#[track_caller]` because the panic is never about this line. An id that
-    /// outlived its node is a bug where the id was *kept*, and a report naming
-    /// `scene.rs` gives no way to tell which of the forty callers held it.
+    /// The node, or a panic, for callers that know the id is live. `#[track_caller]` so the panic
+    /// names the caller that kept a stale id.
     #[track_caller]
     pub fn node(&self, id: NodeId) -> &Node {
         match self.nodes.get(&id) {
@@ -84,7 +79,7 @@ impl Scene {
         id
     }
 
-    /// Depth-first order, root first -- the outliner's order.
+    /// Depth-first order, root first: the outliner's order.
     pub fn depth_first(&self) -> Vec<NodeId> {
         let mut out = Vec::with_capacity(self.nodes.len());
         self.push_depth_first(self.root, &mut out);
@@ -115,9 +110,7 @@ impl Scene {
         false
     }
 
-    /// Whether a node is actually drawn: hidden itself, or under anything
-    /// hidden, and it is not. Hiding a group hides everything in it, so asking
-    /// the node's own `visible` flag is not the same question.
+    /// Whether a node is actually drawn: neither it nor any ancestor hidden.
     pub fn is_shown(&self, id: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
@@ -138,15 +131,10 @@ impl Scene {
         d
     }
 
-    /// Where a new node goes given the current selection: into it if it is a
-    /// group, otherwise directly after it as a sibling (spec sections 7.2, 8.1).
+    /// Where a new node goes given the selection: into a group, else right after it (spec sections 7.2, 8.1).
     pub fn insertion_point(&self, selection: Option<NodeId>) -> (NodeId, usize) {
         match selection.and_then(|id| self.nodes.get(&id)) {
-            // A collection is a container the tree does not open, so nothing is
-            // put inside one by accident: a shape added while one is selected
-            // stands beside it, the way it would beside a shape (issue 82).
-            // Dragging something in is still a drop into it, because that is
-            // aimed at rather than defaulted to.
+            // Not into a collection, which the tree does not open (issue 82); dragging in is still allowed.
             Some(node) if node.can_hold_children() && !node.is_split() => (node.id, node.children.len()),
             Some(node) => {
                 let parent = node.parent.unwrap_or(self.root);
@@ -157,18 +145,12 @@ impl Scene {
         }
     }
 
-    /// Every name in the document, which is what a new name has to be free of.
+    /// Every name in the document, which a new name must avoid.
     pub fn taken_names(&self) -> HashSet<String> {
         self.nodes.values().map(|n| n.name.clone()).collect()
     }
 
-    /// A name no other node in the document carries, so the outliner stays
-    /// readable.
-    ///
-    /// Scoped to the whole tree rather than to one parent's children: the
-    /// outliner shows every depth at once, so two rows reading "Box 2" are two
-    /// rows the user cannot tell apart, whether or not they happen to share a
-    /// parent.
+    /// A name unique across the whole document, since the outliner shows every depth at once.
     pub(super) fn unique_name(&self, base: &str) -> String {
         free_name(&self.taken_names(), base)
     }

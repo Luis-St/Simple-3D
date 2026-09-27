@@ -6,21 +6,14 @@ use simple3d_core::primitive::Params;
 use simple3d_core::scene::{Node, NodeId, Scene};
 use simple3d_geom::Vec3;
 
-/// An in-progress drag. Everything needed to reproduce the node's pre-drag state
-/// exactly, so Escape restores it and the whole drag is one undo step.
+/// An in-progress drag, holding the exact pre-drag state so Escape restores it and the drag is one
+/// undo step.
 #[derive(Clone, Debug)]
 pub struct Drag {
     pub node: NodeId,
     pub handle: Handle,
-    /// The manipulator **as it stood when the handle was grabbed**.
-    ///
-    /// A drag must be measured against a frame that does not move, and the live
-    /// gizmo is rebuilt every frame from the very node the drag is moving. Using
-    /// it here meant the reference slid along with the result: once the node had
-    /// moved 10 mm, `gizmo.origin` had moved 10 mm too, the cursor measured 10 mm
-    /// nearer, and the next frame wrote the node back to where it started. The
-    /// position then flipped between the two on alternate frames, and where a
-    /// drag finished came down to which frame the button happened to come up on.
+    /// The manipulator as it stood when grabbed. The live gizmo moves with the node, so measuring
+    /// against it made the position flip every other frame.
     pub(super) gizmo: Gizmo,
     pub start_position: Vec3,
     pub start_rotation: Vec3,
@@ -28,7 +21,7 @@ pub struct Drag {
     pub start_params: Params,
     pub start_local_lo: Vec3,
     pub start_local_hi: Vec3,
-    /// The scalar the handle was grabbed at, in whatever the handle measures.
+    /// The scalar the handle was grabbed at, in the handle's measure.
     pub(super) grab: f64,
     /// Where a plane handle was grabbed, in world space.
     pub(super) grab_point: Vec3,
@@ -82,8 +75,7 @@ impl Drag {
             }
             Handle::ResizeCorner(sides) => {
                 let anchor = gizmo.own.point(gizmo.corner(sides));
-                // A corner is dragged in the plane facing the camera, and each
-                // axis takes the component of that movement along itself.
+                // A corner drags in the camera-facing plane, each axis taking its component.
                 drag.grab_point = view.ray_plane(cursor, anchor, view.forward())?;
             }
         }

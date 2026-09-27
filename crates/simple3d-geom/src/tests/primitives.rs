@@ -1,4 +1,4 @@
-//! Every primitive generator: closed, and the size it was asked for.
+//! Every primitive generator: closed, and the requested size.
 
 use super::*;
 use crate::primitives;
@@ -6,20 +6,14 @@ use crate::vec3::Vec3;
 
 #[test]
 pub(crate) fn a_box_is_twelve_triangles_and_eight_vertices() {
-    // It was 16 and 10: `extrude_frustum_polygon` fanned both caps from a
-    // vertex added in the middle of the face, so each square cap was four
-    // triangles around a centre rather than two across the diagonal. Nothing
-    // was wrong with it -- watertight, manifold, no T-vertices -- but the two
-    // invented cap centres went into every 3MF, STL, OBJ and PLY written, of
-    // the shape a reader is most likely to open a file to check.
+    // Regression: square caps were fanned from an added centre (16 triangles, 10 vertices), and those
+    // centres went into every export.
     let welded = primitives::box_mesh(20.0, 20.0, 20.0).weld();
     assert_eq!(welded.triangle_count(), 12, "a cube is two triangles a face");
     assert_eq!(welded.positions.len(), 8, "a cube has eight corners and nothing else");
     assert_manifold("box", &welded);
 
-    // A round cap keeps its centre: fanning a circle from one point on its rim
-    // gives slivers, and the boolean kernel classifies by the normals it
-    // computes off them.
+    // Round caps keep their centre, since rim fans give slivers the kernel classifies badly.
     let cylinder = primitives::cylinder_mesh(20.0, 20.0, 20.0, 32).weld();
     assert_eq!(cylinder.positions.len(), 32 * 2 + 2, "the cylinder's caps lost their centres");
     assert_manifold("cylinder", &cylinder);
@@ -52,10 +46,7 @@ pub(crate) fn regular_prism_hex_across_flats_is_10mm() {
     assert_manifold("hex_prism", &m);
     // Across-flats distance = max X extent * 2 when a flat faces +X (angle 0 vertex).
     let (lo, hi) = m.bounds().unwrap();
-    // For a hexagon with a vertex at angle 0, X spans [-R, R] where R is the
-    // circumradius; verify the apothem-derived circumradius gives 10mm across flats
-    // by checking the flat-to-flat width along Y (vertex at angle 0 means flats
-    // are perpendicular to the axes at 30/90/150...). Just assert overall size sane.
+    // A rough size check.
     assert!((hi.x - lo.x) > 9.9 && (hi.x - lo.x) < 11.6);
 }
 

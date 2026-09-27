@@ -1,21 +1,10 @@
-//! Components (issue 113): a project is made of several node trees, and a node
-//! can stand for a whole other one.
+//! Components (issue 113): a project of several node trees, where a node can stand for another tree.
 //!
-//! Each component is a `Scene` of its own, edited in a tab of its own. The
-//! first one is the project's root component; every other one is reached from
-//! it -- or from another component -- through an *integration*: a single node,
-//! [`Body::Component`], carrying nothing but its own place in the tree and the
-//! id of the component it stands for. Everything inside comes from the
-//! component, so an edit made to it shows up in every integration of it.
-//!
-//! The components a scene integrates travel with it, in [`Scene::components`],
-//! each already holding the ones *it* integrates. Evaluation therefore needs
-//! nothing but the scene it is handed -- a worker thread, an export and an
-//! undo snapshot all carry the whole of what they need -- and the map is
-//! built from the leaves up, which is only possible because a component may
-//! never end up inside itself. [`link`] is where that is enforced for what is
-//! evaluated, and [`reaches`] is what the interface asks before it makes an
-//! integration.
+//! Each component is its own `Scene` in its own tab; the first is the root. Others are placed by
+//! an integration ([`Body::Component`]), so edits show in every integration. A scene carries the
+//! components it integrates in [`Scene::components`], so evaluation needs nothing else. The map is
+//! built from the leaves up, which requires no component to contain itself: [`link`] enforces that
+//! for evaluation and [`reaches`] is checked before making an integration.
 
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,12 +12,10 @@ use std::sync::Arc;
 
 pub type ComponentId = u64;
 
-/// The project's first component: the one a project that has never used
-/// components consists of, and the one a file written before components
-/// existed is read into.
+/// The project's first component, into which pre-component files are read.
 pub const ROOT_COMPONENT: ComponentId = 0;
 
-/// Every component a scene integrates, directly or through another one, by id.
+/// Every component a scene integrates, directly or indirectly, by id.
 pub type Components = BTreeMap<ComponentId, Arc<Scene>>;
 
 impl Scene {
@@ -42,8 +29,7 @@ impl Scene {
         self.components.get(&component)
     }
 
-    /// Every component this scene integrates directly, without looking inside
-    /// them.
+    /// Every component this scene integrates directly.
     pub fn used_components(&self) -> BTreeSet<ComponentId> {
         self.nodes.values().filter_map(Node::component).collect()
     }
@@ -78,18 +64,9 @@ impl Scene {
         id
     }
 
-    /// Turn the group `id` into an integration of `component`, and give back
-    /// what the component has to be made of: the group's contents, with its
-    /// operation and its colour, standing at the component's origin.
-    ///
-    /// The node keeps its id, its name, its place in the tree, its transform
-    /// and whether it is shown -- everything that is about *where* the group
-    /// is rather than what it is -- so nothing that pointed at it has to be
-    /// told anything, and the model looks exactly as it did. Its colour goes
-    /// into the component, where it paints what it always painted: the shapes
-    /// in the group that carry no colour of their own.
-    ///
-    /// Refuses the root and anything that is not a group.
+    /// Turn group `id` into an integration of `component`, returning the group's contents (with its
+    /// operation and colour) for the component. The node keeps its id, name, place, transform and
+    /// visibility, so the model looks the same. Refuses the root and non-groups.
     pub fn make_integration(&mut self, id: NodeId, component: ComponentId) -> Option<NodeData> {
         if id == self.root || !self.nodes.get(&id)?.is_group() {
             return None;
@@ -109,8 +86,7 @@ impl Scene {
         let node = self.nodes.get_mut(&id)?;
         node.colour = None;
         node.segments = None;
-        // A group taken apart for an export is the one mark an integration
-        // cannot carry: there is nothing in the tree to reach into.
+        // An integration cannot carry a split-export mark: there is nothing in the tree to reach into.
         if node.export_body == Some(ExportBody::Split) {
             node.export_body = None;
         }
@@ -118,8 +94,7 @@ impl Scene {
         Some(data)
     }
 
-    /// A scene made of one portable subtree, as its root -- what a component
-    /// made from a group, a saved primitive or a pasted one starts as.
+    /// A scene with one portable subtree as its root, as a new component starts.
     pub fn from_root(data: &NodeData, settings: SceneSettings) -> Option<Scene> {
         let mut scene = Scene::new();
         scene.settings = settings;
@@ -127,8 +102,7 @@ impl Scene {
         Some(scene)
     }
 
-    /// Point every integration at the component `map` says it now is, for a
-    /// subtree brought in from somewhere the ids meant something else.
+    /// Re-point every integration per `map`, for a subtree whose component ids came from elsewhere.
     pub fn remap_components(&mut self, map: &BTreeMap<ComponentId, ComponentId>) {
         for node in self.nodes.values_mut() {
             if let Body::Component { component, .. } = &mut node.body {
@@ -164,12 +138,8 @@ impl NodeData {
     }
 }
 
-/// Whether `from` has `target` in it anywhere: is `target` itself, or
-/// integrates a component that reaches it.
-///
-/// What has to be false before an integration of `from` is put into `target`,
-/// since that would put `target` inside itself -- and a model inside itself is
-/// one that never finishes evaluating.
+/// Whether `from` is or reaches `target`. Must be false before integrating `from` into `target`,
+/// or the model would contain itself.
 pub fn reaches<'a>(scenes: &impl Fn(ComponentId) -> Option<&'a Scene>, from: ComponentId, target: ComponentId) -> bool {
     let mut seen = BTreeSet::new();
     let mut stack = vec![from];
@@ -187,13 +157,9 @@ pub fn reaches<'a>(scenes: &impl Fn(ComponentId) -> Option<&'a Scene>, from: Com
     false
 }
 
-/// Every component of a project, each holding in its [`Scene::components`]
-/// the ones it integrates -- ready to be evaluated on its own.
-///
-/// Built from the leaves up. A component that would have to hold itself --
-/// which the interface never allows, but a file edited by hand can say -- is
-/// left out of the map that would close the loop, so its integration there
-/// evaluates as missing and says so rather than never finishing.
+/// Every component of a project, each holding the ones it integrates, ready to evaluate alone.
+/// Built from the leaves up; a self-containing component (only possible via hand-edited files)
+/// is left out where it would close the loop, so it evaluates as missing.
 pub fn link(scenes: &BTreeMap<ComponentId, &Scene>) -> Components {
     fn visit(
         id: ComponentId,

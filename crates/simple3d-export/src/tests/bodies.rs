@@ -6,8 +6,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn separate_objects_write_one_component_each_with_its_node_s_name() {
-    // Issue 58: a 3MF whose objects are all one component gives a slicer
-    // nothing to select. Two boxes, well apart, exported separately.
+    // Issue 58: a single-component 3MF gives a slicer nothing to select.
     let left = plate();
     let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
     let parts = [Part { name: "Base plate", mesh: &left }, Part { name: "Peg", mesh: &right }];
@@ -18,18 +17,16 @@ pub(crate) fn separate_objects_write_one_component_each_with_its_node_s_name() {
     assert_eq!(text.matches("<object id=").count(), 2, "{text}");
     assert!(text.contains("<object id=\"1\" type=\"model\" name=\"Base plate\">"), "{text}");
     assert!(text.contains("<object id=\"2\" type=\"model\" name=\"Peg\">"), "{text}");
-    // Both have to be in the build, or a slicer loads an empty plate.
+    // Both must be in the build, or a slicer loads an empty plate.
     assert!(text.contains("<item objectid=\"1\"/>"), "{text}");
     assert!(text.contains("<item objectid=\"2\"/>"), "{text}");
-    // Every triangle of both is there: the split is in the file's structure,
-    // not in what it holds.
+    // Every triangle is present; the split is only in the file's structure.
     assert_eq!(text.matches("<triangle ").count(), left.weld().indices.len() + right.weld().indices.len(), "{text}");
 }
 
 #[test]
 pub(crate) fn the_same_objects_merge_into_one_component_when_the_option_is_off() {
-    // The other half of the assertion above: without the option the file is
-    // exactly the single-object one it always was.
+    // Without the option the file is the single-object one it always was.
     let left = plate();
     let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
     let parts = [Part { name: "Base plate", mesh: &left }, Part { name: "Peg", mesh: &right }];
@@ -44,8 +41,7 @@ pub(crate) fn the_same_objects_merge_into_one_component_when_the_option_is_off()
 
 #[test]
 pub(crate) fn a_separated_object_is_verified_on_its_own_and_named_when_it_fails() {
-    // Merged, a hole in one body can be hidden by the surface of another;
-    // kept apart it cannot, and the message has to say which object to fix.
+    // Merged, one body's hole can be hidden by another's surface; apart it cannot, and the message names it.
     let good = plate();
     let mut broken = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
     broken.indices.pop();

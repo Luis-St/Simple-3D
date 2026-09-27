@@ -21,14 +21,14 @@ pub(crate) fn a_new_shape_lands_where_the_placement_says_and_the_hint_agrees() {
     app.add_node(Some("sphere"), GroupOp::Union);
     assert_eq!(app.scene.node(app.primary().unwrap()).position, Vec3::new(30.0, -10.0, 5.0));
 
-    // What the camera is looking at, rounded to the step.
+    // What the camera looks at, rounded to the step.
     app.settings.placement = Placement::ViewCentre;
     app.scene.settings.snap_step = 5.0;
     app.scene.camera.target = Vec3::new(12.0, -3.0, 0.0);
     assert_eq!(app.insertion_point_world(0.0), Vec3::new(10.0, -5.0, 0.0));
     assert!(insertion_hint(&app).contains("camera"), "{}", insertion_hint(&app));
 
-    // Beside the selection: clear of it, not inside it.
+    // Beside the selection: clear of it.
     app.clear_selection();
     let plate = app.scene.depth_first().into_iter().find(|&id| id != app.scene.root()).unwrap();
     app.select_only(plate);
@@ -38,9 +38,7 @@ pub(crate) fn a_new_shape_lands_where_the_placement_says_and_the_hint_agrees() {
     assert_eq!(app.insertion_point_world(0.0).x, hi.x + app.move_snap());
 }
 
-/// The point of "beside the selection" is that the two do not overlap. An
-/// assertion on the formula cannot see that -- it restates it -- so this
-/// adds the shape and measures where it actually ended up.
+/// "Beside the selection" means no overlap, measured on the added shape rather than restating the formula.
 #[test]
 pub(crate) fn a_shape_added_beside_the_selection_does_not_overlap_it() {
     for type_id in ["box", "sphere", "tetrahedron", "cylinder"] {
@@ -64,7 +62,7 @@ pub(crate) fn a_shape_added_beside_the_selection_does_not_overlap_it() {
             lo2.x,
             hi.x
         );
-        // One step of air between them, no more and no less.
+        // Exactly one step of air between them.
         assert!(
             (lo2.x - hi.x - app.move_snap()).abs() < 1e-6,
             "a {type_id} left {} of air, not one step of {}",
@@ -76,9 +74,7 @@ pub(crate) fn a_shape_added_beside_the_selection_does_not_overlap_it() {
 
 #[test]
 pub(crate) fn a_shape_added_into_a_rotated_group_still_lands_where_the_placement_says() {
-    // `Node::position` is in the parent's coordinates. Writing a world point
-    // into it unchanged would put the shape somewhere else entirely as soon
-    // as the group it goes into is turned or moved.
+    // `Node::position` is parent-relative; an unconverted world point misplaces it in a turned group.
     let mut app = headless_app();
     let plate = app.primary().unwrap();
     app.select_only(plate);

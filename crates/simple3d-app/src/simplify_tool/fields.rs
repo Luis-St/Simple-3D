@@ -1,12 +1,10 @@
-//! One field of the plan, and what it is called: the popup's own controls, on
-//! this tool's numbers.
+//! The simplify tool's fields and their names.
 
 use super::*;
 use crate::app::App;
 use crate::popup;
 
-/// Which fields are this tool's, so a drag handed between two tools' windows
-/// cannot edit the wrong number.
+/// Scopes fields to this tool, so a drag passed between tool windows cannot edit the wrong number.
 const SCOPE: &str = "simplify-field";
 
 pub(crate) use popup::label;

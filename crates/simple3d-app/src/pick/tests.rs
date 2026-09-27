@@ -106,8 +106,7 @@ fn a_node_inside_a_hidden_group_is_not_pickable_either() {
 
 #[test]
 fn clicking_the_wall_of_a_hole_selects_the_tool_that_cut_it() {
-    // A consequence of picking per node rather than on the merged result,
-    // and the behaviour you want: the cylinder is what you would adjust.
+    // Picking per node means a hole's wall selects the cutter, the thing to adjust.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -132,20 +131,15 @@ fn picking_respects_a_groups_transform() {
     scene.get_mut(group).unwrap().position = Vec3::new(0.0, 0.0, 60.0);
     let id = boxed(&mut scene, group, Vec3::ZERO);
     let out = Evaluator::new().evaluate(&scene, &Cancel::new());
-    // At the group's original position there is nothing any more.
+    // Nothing is left at the group's original position.
     assert_eq!(pick(&scene, &out, Vec3::new(0.0, -300.0, 0.0), Vec3::new(0.0, 1.0, 0.0)), None);
     assert_eq!(pick(&scene, &out, Vec3::new(0.0, -300.0, 60.0), Vec3::new(0.0, 1.0, 0.0)), Some(id));
 }
 
 #[test]
 fn a_click_anywhere_on_a_pattern_selects_the_pattern_however_it_was_built() {
-    // Issue 67: over the original copy a pattern's own mesh and the mesh of
-    // the child it repeats are the same triangles at the same distance. The
-    // tie used to fall to the lower node id, so the answer depended on the
-    // order the two nodes happened to be made in: wrapping a shape (child
-    // first) answered "child" on the original and "pattern" on every copy,
-    // while filling an empty pattern (pattern first) answered "pattern" even
-    // over the child. Both orders must now agree.
+    // Issue 67: over the original copy, pattern and child tie; the lower id used to win, so the answer
+    // depended on creation order. Both orders must now pick the pattern.
     for wrap in [false, true] {
         let mut scene = Scene::new();
         let root = scene.root();
@@ -181,11 +175,8 @@ fn a_click_anywhere_on_a_pattern_selects_the_pattern_however_it_was_built() {
 
 #[test]
 fn the_tree_finds_exactly_what_walking_every_triangle_finds() {
-    // A large mesh is cast at through a bounding volume hierarchy. It is only a
-    // way of skipping triangles, so it has to give the very same distance --
-    // to the bit -- for every ray, including the ones that graze an edge or
-    // run straight at a vertex, where a box cut too tight would turn the ray
-    // away from the triangle it should have hit.
+    // The BVH only skips triangles, so it must give bit-identical distances for every ray, including
+    // grazing edges and hitting vertices.
     let mut mesh = primitives::ellipsoid_mesh(30.0, 24.0, 18.0, 64);
     mesh.append(&primitives::torus_mesh(40.0, 8.0, 360.0, 48).translated(Vec3::new(10.0, 5.0, -3.0)));
     mesh.append(&primitives::box_mesh(12.0, 12.0, 12.0).translated(Vec3::new(-25.0, 0.0, 0.0)));
@@ -200,20 +191,19 @@ fn the_tree_finds_exactly_what_walking_every_triangle_finds() {
         (seed >> 11) as f64 / (1u64 << 53) as f64
     };
     let mut targets: Vec<Vec3> = Vec::new();
-    // Every vertex, and the middle of every edge of a sample of triangles.
+    // Every seventh vertex, and edge middles of sampled triangles.
     targets.extend(mesh.positions.iter().step_by(7).copied());
     for tri in mesh.indices.iter().step_by(11) {
         let [a, b, _] = tri.map(|corner| mesh.positions[corner as usize]);
         targets.push((a + b) * 0.5);
     }
-    // And points anywhere in and around the model.
+    // And points in and around the model.
     for _ in 0..2000 {
         targets.push(Vec3::new(next() * 120.0 - 60.0, next() * 100.0 - 50.0, next() * 60.0 - 30.0));
     }
     let mut hits = 0;
     for (index, &target) in targets.iter().enumerate() {
-        // From every side, including straight down an axis, where the slab
-        // test takes its parallel branch.
+        // From every side, including straight down an axis, the slab test's parallel branch.
         let dir = match index % 4 {
             0 => Vec3::new(0.0, 1.0, 0.0),
             1 => Vec3::new(0.0, 0.0, -1.0),

@@ -4,13 +4,12 @@ use super::*;
 use crate::scene::Scene;
 use serde::Deserialize;
 
-/// A project of one component, the way every project was before there could
-/// be more.
+/// A project of one component, as every project was before components.
 pub fn to_string(scene: &Scene) -> String {
     write(scene, &[])
 }
 
-/// A whole project, with its root component first.
+/// A whole project, root component first.
 pub fn project_to_string(root: &Scene, components: &[(ComponentId, &Scene)]) -> String {
     write(root, components)
 }
@@ -32,23 +31,20 @@ fn write(scene: &Scene, components: &[(ComponentId, &Scene)]) -> String {
             })
             .collect(),
     };
-    // `to_string_pretty` plus a trailing newline: one value per line is what
-    // makes a project file diffable.
+    // Pretty-printed with a trailing newline: one value per line keeps files diffable.
     let mut text = serde_json::to_string_pretty(&file).expect("a scene always serialises");
     text.push('\n');
     text
 }
 
-/// The root component of a project, for a caller that only wants that.
+/// Only a project's root component.
 pub fn from_str(text: &str) -> Result<Scene, LoadError> {
     project_from_str(text).map(|project| project.root)
 }
 
-/// A whole project. A file written before components existed is a project of
-/// its root component alone, which is what it always was.
+/// A whole project; pre-component files are their root component alone.
 pub fn project_from_str(text: &str) -> Result<ProjectData, LoadError> {
-    // Read the version before anything else, so a file from a newer build gets
-    // the version message rather than a confusing field error.
+    // Read the version first, so newer files get the version message, not a field error.
     #[derive(Deserialize)]
     struct VersionProbe {
         format: u32,
@@ -59,7 +55,7 @@ pub fn project_from_str(text: &str) -> Result<ProjectData, LoadError> {
         }
         Ok(_) => {}
         Err(e) if e.is_syntax() || e.is_eof() => return Err(LoadError::Malformed(describe(&e))),
-        // Missing or wrongly-typed `format` field: not a project file.
+        // Missing or mistyped `format` field: not a project file.
         Err(e) => return Err(LoadError::Invalid(format!("no readable format version ({})", describe(&e)))),
     }
 
@@ -74,8 +70,7 @@ pub fn project_from_str(text: &str) -> Result<ProjectData, LoadError> {
     let root = read_scene(file.settings, file.camera, &file.root)?;
     let mut components: Vec<(ComponentId, Scene)> = Vec::new();
     for component in file.components {
-        // Two components under one id could not both be reached, and the root
-        // component's id is the root's alone.
+        // Duplicate ids could not both be reached, and the root's id is its own.
         if component.id == crate::scene::ROOT_COMPONENT || components.iter().any(|(id, _)| *id == component.id) {
             return Err(LoadError::Invalid(format!("component {} appears more than once", component.id)));
         }

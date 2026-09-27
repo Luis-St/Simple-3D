@@ -40,7 +40,7 @@ pub(crate) fn a_move_drag_snaps_to_the_increment_and_a_modifier_frees_it() {
 pub(crate) fn a_plane_handle_moves_two_axes_and_leaves_the_third() {
     let mut f = Fixture::new("box");
     let gizmo = f.gizmo(Mode::Move);
-    let handle = Handle::MovePlane(2); // the XY plane
+    let handle = Handle::MovePlane(2);
     let start = gizmo.handle_point(handle, &f.view);
     drag_to(&mut f, handle, start + Vec3::new(20.0, 30.0, 0.0), Mods { free: true, ..Default::default() }, 10.0);
     let p = f.scene.node(f.node).position;
@@ -74,23 +74,21 @@ pub(crate) fn a_move_drag_on_a_rotated_child_writes_parent_frame_coordinates() {
     f.reevaluate();
 
     let gizmo = f.gizmo(Mode::Move);
-    // Drag along the child's local X, which the group has turned into world +Y.
+    // Along the child's local X, which the group turned into world +Y.
     let handle = Handle::MoveAxis(0);
     let start = gizmo.handle_point(handle, &f.view);
     drag_to(&mut f, handle, start + Vec3::new(0.0, 30.0, 0.0), Mods { free: true, ..Default::default() }, 10.0);
     let position = f.scene.node(f.node).position;
-    // Stored in the parent's frame, so it reads as +30 on X, not on Y.
+    // Stored in the parent's frame, so +30 on X, not Y.
     assert!((position.x - 30.0).abs() < 0.3, "{position:?}");
     assert!(position.y.abs() < 0.3, "{position:?}");
-    // And the geometry really moved along world +Y.
+    // The geometry really moved along world +Y.
     let (lo, hi) = f.world_bounds();
     assert!(((lo.y + hi.y) / 2.0 - 30.0).abs() < 0.3, "{lo:?} {hi:?}");
 }
 
-/// Issue 90, continued: a group's handle stands in the middle of what it
-/// holds, which is measured by the evaluation -- and an evaluation comes back
-/// after the drag has already moved the group. The handle has to go with the
-/// group in the meantime, as a shape's does, not wait at the old middle.
+/// Issue 90: a group's handle sits at its evaluated middle, but evaluation lags the drag, so the
+/// handle must move with the group meanwhile rather than wait at the old middle.
 #[test]
 pub(crate) fn a_group_handle_moves_with_the_group_before_it_is_evaluated_again() {
     let mut f = Fixture::new("box");
@@ -101,7 +99,6 @@ pub(crate) fn a_group_handle_moves_with_the_group_before_it_is_evaluated_again()
     f.reevaluate();
     let before = Gizmo::build(&f.scene, &f.evaluated, group, Mode::Move).unwrap().origin;
 
-    // Moved and turned, with no evaluation since.
     let node = f.scene.get_mut(group).unwrap();
     node.position = Vec3::new(0.0, 25.0, 0.0);
     node.rotation = Vec3::new(0.0, 0.0, 90.0);

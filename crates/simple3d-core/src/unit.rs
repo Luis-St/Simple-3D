@@ -1,8 +1,5 @@
-//! Display units (spec section 4).
-//!
-//! Lengths are stored in millimetres everywhere. A `Unit` only changes how a
-//! number is shown and read back, never the model: with metres selected,
-//! typing `1.8` stores 1800mm and the field afterwards reads `1.8`.
+//! Display units (spec section 4). Lengths are always stored in millimetres; a `Unit` only changes
+//! display and input: in metres, typing `1.8` stores 1800mm.
 
 mod format;
 pub use format::{format_angle, format_length, format_number, wrap_degrees};
@@ -34,7 +31,6 @@ impl Default for Unit {
 impl Unit {
     pub const ALL: [Unit; 3] = [Unit::Millimetre, Unit::Centimetre, Unit::Metre];
 
-    /// Millimetres per one of this unit.
     pub fn mm_per(self) -> f64 {
         match self {
             Unit::Millimetre => 1.0,
@@ -51,9 +47,7 @@ impl Unit {
         }
     }
 
-    /// Decimal places worth showing so that a value entered in this unit round
-    /// -trips: millimetres are stored exactly, so three places is ample; metres
-    /// need six to express a single millimetre.
+    /// Decimals needed to round-trip a value: three for millimetres, six for metres.
     pub fn decimals(self) -> usize {
         match self {
             Unit::Millimetre => 4,

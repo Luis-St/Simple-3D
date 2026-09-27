@@ -13,7 +13,7 @@ fn the_identity_leaves_points_alone() {
 
 #[test]
 fn it_matches_the_rotation_the_mesh_transform_performs() {
-    // The whole point of building the matrix from rotated basis vectors.
+    // The point of building the matrix from rotated basis vectors.
     for rotation in
         [Vec3::new(30.0, 0.0, 0.0), Vec3::new(0.0, 45.0, 0.0), Vec3::new(0.0, 0.0, 90.0), Vec3::new(15.0, -40.0, 70.0)]
     {
@@ -47,8 +47,7 @@ fn the_inverse_undoes_the_transform() {
 
 #[test]
 fn a_scaled_transform_inverts_and_composes_like_any_other() {
-    // The inverse used to be the transpose, which is only right while the
-    // linear part is orthonormal. A scale is exactly what makes it not.
+    // Regression: the inverse was the transpose, wrong once a scale makes the linear part non-orthonormal.
     let xf =
         Xform::from_pos_rot_scale(Vec3::new(3.0, -7.0, 2.0), Vec3::new(20.0, 35.0, -50.0), Vec3::new(2.0, 0.5, 3.0));
     let inv = xf.inverse();
@@ -57,7 +56,7 @@ fn a_scaled_transform_inverts_and_composes_like_any_other() {
         assert!(close(xf.point(inv.point(p)), p), "{p:?}");
     }
 
-    // And the scale is applied in the node's own axes, before the rotation.
+    // Scale applies in the node's own axes, before rotation.
     let scaled = Xform::from_pos_rot_scale(Vec3::ZERO, Vec3::new(0.0, 0.0, 90.0), Vec3::new(2.0, 1.0, 1.0));
     assert!(close(scaled.point(Vec3::new(1.0, 0.0, 0.0)), Vec3::new(0.0, 2.0, 0.0)));
 
@@ -68,7 +67,7 @@ fn a_scaled_transform_inverts_and_composes_like_any_other() {
         assert!(close(combined.point(p), outer.point(inner.point(p))), "{p:?}");
     }
 
-    // A zero scale cannot be inverted; it must still return something finite.
+    // A zero scale is not invertible but must still give something finite.
     let flat = Xform::from_pos_rot_scale(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO, Vec3::ZERO);
     assert!(flat.inverse().point(Vec3::ZERO).length().is_finite());
 }

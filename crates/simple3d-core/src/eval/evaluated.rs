@@ -1,5 +1,4 @@
-//! What an evaluation produced: the meshes, the bounds, and what went wrong
-//! where.
+//! What an evaluation produced: the meshes, the bounds, and the errors.
 
 use super::*;
 use crate::scene::NodeId;
@@ -12,56 +11,33 @@ use std::sync::Arc;
 pub struct Evaluated {
     /// The whole scene as one mesh, ready to export.
     pub mesh: Arc<Mesh>,
-    /// `mesh`'s bounding box, measured once. The interface asks for the size of
-    /// the scene on every frame -- the status bar, the document panel, the
-    /// bounding box overlay and the section plane all show it -- and measuring
-    /// it meant a pass over every vertex of the model each time.
+    /// `mesh`'s bounding box, measured once, since the interface asks for it every frame.
     pub bounds: Option<(Vec3, Vec3)>,
-    /// Each primitive's own mesh in world space, for picking, selection
-    /// highlighting and the translucent display of hidden nodes. Hidden nodes are
-    /// included so they can be drawn as ghosts.
+    /// Each primitive's mesh in world space, for picking, highlighting and ghosts (hidden nodes
+    /// included).
     pub node_meshes: BTreeMap<NodeId, Arc<Mesh>>,
-    /// Each node's *parent* frame in world space, including any anchor shift an
-    /// ancestor group applied. A manipulator handle needs this to place itself,
-    /// and its inverse to turn a world-space drag back into the parent-frame
-    /// coordinates `Node::position` is stored in.
+    /// Each node's parent frame in world space, including ancestor anchor shifts; manipulators need it
+    /// and its inverse.
     pub node_frames: BTreeMap<NodeId, Xform>,
-    /// What each *group* evaluates to, in the frame `node_frames` records for
-    /// it -- its own boolean result, not its operands.
-    ///
-    /// A group has no surface of its own to click on, which is why it is not in
-    /// `node_meshes`, but it does have a shape, and the selection outline has to
-    /// draw that shape rather than the shapes that went into it. Held
-    /// untransformed and shared with the subtree cache, so recording it costs an
-    /// `Arc` rather than a copy of the geometry.
+    /// What each group evaluates to, in its `node_frames` frame: its result, not its operands, for the
+    /// selection outline. Shared with the subtree cache, so recording it is an `Arc` clone.
     pub group_meshes: BTreeMap<NodeId, Arc<Mesh>>,
-    /// Each node's own bounding box in its own frame, after its anchor and before
-    /// its rotation and position. This is what the resize handles sit on.
+    /// Each node's bounding box in its own frame, after anchoring and before rotation and position:
+    /// where the resize handles sit.
     pub node_local_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
-    /// Each node's bounding box in world space -- what the property editor
-    /// reports as the node's measured size. Present for groups as well as
-    /// primitives: a group has no mesh of its own in `node_meshes`, but the
-    /// assembly it evaluates to is exactly what a user asking "how big is this"
-    /// means.
+    /// Each node's world-space bounding box, groups included: the measured size shown in the property
+    /// editor.
     pub node_world_bounds: BTreeMap<NodeId, (Vec3, Vec3)>,
-    /// Which vertices of `mesh` each node's geometry is, for every node whose
-    /// geometry came through into it untouched -- laid beside the rest, or
-    /// unioned with nothing it touched, all the way up to the root. A node
-    /// that went into a boolean with something else, or into a pattern, is
-    /// not here: its geometry is not in `mesh` as it was.
-    ///
-    /// Its triangles are the ones that use those vertices, and they are all
-    /// its own unless another node's geometry shares a position with it, which
-    /// the viewport checks for before relying on it.
+    /// The vertex range of `mesh` for each node whose geometry passed through untouched to the root.
+    /// Nodes combined in a boolean or pattern are absent. Shared positions with other nodes are
+    /// checked for by the viewport.
     pub ranges: BTreeMap<NodeId, std::ops::Range<u32>>,
-    /// Each node's own placement in its parent's frame -- position, rotation
-    /// and scale -- as it stood for this evaluation. With `node_frames`, what
-    /// says how far a node has been moved since.
+    /// Each node's placement in its parent's frame for this evaluation; with `node_frames`, tells how
+    /// far a node has moved since.
     pub placements: BTreeMap<NodeId, Xform>,
     /// Nodes whose own evaluation failed. Non-empty means export must refuse.
     pub errors: Vec<NodeError>,
-    /// Set when the run was superseded by a later edit; the result is partial
-    /// and should be discarded.
+    /// Set when the run was superseded by a later edit; the result is partial and should be discarded.
     pub cancelled: bool,
 }
 
@@ -70,13 +46,8 @@ impl Evaluated {
         self.errors.iter().find(|e| e.node == node)
     }
 
-    /// A node's own result in world space: what the node *is*, booleans and all.
-    ///
-    /// This is what the selection outline draws. Outlining a group by outlining
-    /// its children instead draws shapes the result does not contain -- a
-    /// difference's cutter as two rims hanging in mid-air where nothing is, an
-    /// intersection's whole uncut box as a cage around the small lens it
-    /// actually leaves.
+    /// A node's own result in world space, booleans and all, for the selection outline. Outlining a
+    /// group's children instead would show cutters and uncut boxes the result does not contain.
     pub fn result_mesh(&self, id: NodeId) -> Option<std::borrow::Cow<'_, Mesh>> {
         if let Some(mesh) = self.node_meshes.get(&id) {
             return Some(std::borrow::Cow::Borrowed(mesh));

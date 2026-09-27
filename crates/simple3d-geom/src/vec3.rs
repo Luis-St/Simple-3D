@@ -45,8 +45,7 @@ impl Vec3 {
         self + (o - self) * t
     }
 
-    /// Componentwise product. A scale is three independent factors, not a
-    /// direction, so it multiplies this way rather than through `Mul<f64>`.
+    /// Componentwise product, for scales.
     pub fn scaled_by(self, o: Vec3) -> Vec3 {
         Vec3::new(self.x * o.x, self.y * o.y, self.z * o.z)
     }
@@ -59,19 +58,16 @@ impl Vec3 {
         Vec3::new(self.x.max(o.x), self.y.max(o.y), self.z.max(o.z))
     }
 
-    /// Rotate by X, then Y, then Z, each in degrees (matches Node.rotation order in the spec).
+    /// Rotate by X, then Y, then Z, in degrees (the spec's Node.rotation order).
     pub fn rotate_xyz_deg(self, deg: Vec3) -> Vec3 {
         let rx = deg.x.to_radians();
         let ry = deg.y.to_radians();
         let rz = deg.z.to_radians();
         let mut v = self;
-        // rotate about X
         let (s, c) = rx.sin_cos();
         v = Vec3::new(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
-        // rotate about Y
         let (s, c) = ry.sin_cos();
         v = Vec3::new(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
-        // rotate about Z
         let (s, c) = rz.sin_cos();
         v = Vec3::new(v.x * c - v.y * s, v.x * s + v.y * c, v.z);
         v

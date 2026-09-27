@@ -1,5 +1,4 @@
-//! A bounding volume hierarchy over a mesh's triangles, so a ray asks a few
-//! dozen triangles where it used to ask every one.
+//! A bounding volume hierarchy over a mesh's triangles, for ray casts.
 
 use super::ray::ray_triangle;
 use crate::render::map_in_order;
@@ -7,8 +6,7 @@ use simple3d_geom::{Mesh, Vec3};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
-/// Below this a mesh is simply walked: building the tree costs more than the
-/// handful of casts a small body ever gets.
+/// Smaller meshes are walked directly; building the tree costs more than the few casts they get.
 pub(super) const MIN_TRIANGLES: usize = 2_048;
 
 /// How many triangles a leaf holds.
@@ -24,8 +22,7 @@ pub(crate) struct Bvh {
 struct Node {
     lo: Vec3,
     hi: Vec3,
-    /// A leaf's first entry in `order`, or an inner node's first child -- its
-    /// second child is the node after that.
+    /// A leaf's first entry in `order`, or an inner node's first child (the second follows it).
     first: u32,
     /// How many triangles a leaf holds; 0 for an inner node.
     count: u32,
@@ -33,9 +30,7 @@ struct Node {
 
 impl Bvh {
     pub(crate) fn build(mesh: &Mesh) -> Bvh {
-        // Each triangle's box and centre, worked out once: the build asks for
-        // them at every level of the tree, and looking the corners up again
-        // each time made building the tree for a large import take seconds.
+        // Boxes and centres computed once; recomputing per level made large imports take seconds.
         let corners = |index: usize| mesh.indices[index].map(|corner| mesh.positions[corner as usize]);
         let boxes: Vec<(Vec3, Vec3)> = map_in_order(mesh.indices.len(), |index| {
             let [a, b, c] = corners(index);
@@ -49,11 +44,8 @@ impl Bvh {
         let mut order: Vec<u32> = (0..mesh.indices.len() as u32).collect();
         let (boxes, centres) = (&boxes[..], &centres[..]);
 
-        // The top of the tree on this thread, down to a few stretches of
-        // triangles per core; each of those is then a subtree of its own,
-        // built side by side and joined on afterwards. The first cast at a
-        // large import waits for the whole build, so this is time the user
-        // sees.
+        // The top of the tree is built here down to a few stretches per core, which are then built in
+        // parallel and joined; the first cast on a large import waits for the whole build.
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
         let chunk = (order.len() / (cores * 4)).max(8_192);
         let mut nodes = vec![Node::blank()];
@@ -82,9 +74,8 @@ impl Bvh {
                 .collect();
             handles.into_iter().map(|handle| handle.join().expect("a tree-building thread panicked")).collect()
         });
-        // A subtree's root takes the place left for it; the rest go on the end.
-        // Its children were numbered from its own root and its leaves from the
-        // start of its own stretch, so both are moved to where they now are.
+        // A subtree's root takes its reserved slot and the rest are appended; child and leaf indices
+        // are relocated accordingly.
         for (at, from, local) in built {
             let base = nodes.len();
             nodes[at] = local[0].moved(base, from);
@@ -93,10 +84,7 @@ impl Bvh {
         Bvh { nodes, order }
     }
 
-    /// The nearest hit along the ray, exactly as walking every triangle with
-    /// `ray_triangle` finds it: the same test on the same triangles, only
-    /// skipping the ones in boxes the ray cannot reach before the best hit so
-    /// far.
+    /// The nearest hit along the ray, exactly as `ray_triangle` over every triangle would find it.
     pub(crate) fn nearest(&self, mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<f64> {
         let mut nearest: Option<f64> = None;
         let mut stack = vec![0u32];
@@ -118,8 +106,7 @@ impl Bvh {
                 }
                 continue;
             }
-            // The nearer child last, so it is looked at first and the best hit
-            // shrinks before the farther one is asked.
+            // Push the nearer child last so it is visited first and shrinks the best hit sooner.
             let (left, right) = (node.first, node.first + 1);
             let near_left = enters(origin, dir, self.nodes[left as usize].lo, self.nodes[left as usize].hi, limit);
             let near_right = enters(origin, dir, self.nodes[right as usize].lo, self.nodes[right as usize].hi, limit);
@@ -140,9 +127,7 @@ impl Node {
         Node { lo: Vec3::ZERO, hi: Vec3::ZERO, first: 0, count: 0 }
     }
 
-    /// A node of a subtree built on its own, as it reads once the subtree's
-    /// nodes after its root are appended at `base` and its leaves cover the
-    /// stretch of the whole order starting at `from`.
+    /// A separately built subtree's node, relocated to nodes at `base` and leaves from `from`.
     fn moved(&self, base: usize, from: usize) -> Node {
         match self.count {
             0 => Node { first: (base + self.first as usize - 1) as u32, ..*self },
@@ -151,13 +136,9 @@ impl Node {
     }
 }
 
-/// Grow the tree for `order` into `nodes`, whose first entry is its root:
-/// split at the median centre along the longest side of the centres' own box,
-/// down to leaves of a few triangles.
-///
-/// A stretch of no more than `defer` triangles is not built but listed in
-/// `deferred`, as the node it belongs at and the stretch of `order` it covers,
-/// for the caller to build separately.
+/// Grow the tree for `order` into `nodes` (first entry the root), splitting at the median centre
+/// along the longest axis. Stretches of at most `defer` triangles go into `deferred` for the
+/// caller to build separately.
 fn grow(
     order: &mut [u32],
     boxes: &[(Vec3, Vec3)],
@@ -166,8 +147,7 @@ fn grow(
     defer: usize,
     deferred: &mut Vec<(usize, usize, usize)>,
 ) {
-    // Each entry is a node still to be filled in, and the stretch of `order`
-    // it covers.
+    // Nodes still to fill in, with the stretch of `order` each covers.
     let mut pending = vec![(0usize, 0usize, order.len())];
     while let Some((at, from, to)) = pending.pop() {
         if to - from > LEAF && to - from <= defer {
@@ -178,9 +158,8 @@ fn grow(
             let (a, b) = boxes[index as usize];
             (lo.min(a), hi.max(b))
         });
-        // A little room round every box: a ray that hits a triangle on its very
-        // edge -- where `ray_triangle`'s own tolerance lets it -- must not be
-        // turned away by the box the triangle is in.
+        // Padding, so a ray hitting a triangle's very edge (within `ray_triangle`'s tolerance) is not
+        // rejected by its box.
         let pad = (hi - lo).length() * 1e-9 + 1e-9;
         let pad = Vec3::new(pad, pad, pad);
         let (lo, hi) = (lo - pad, hi + pad);
@@ -213,8 +192,7 @@ fn grow(
     }
 }
 
-/// Where the ray enters the box, if it does before `limit`. The slab test of
-/// `ray_box`, with the far end cut short at the best hit so far.
+/// Where the ray enters the box, if before `limit`: `ray_box`'s slab test, clipped at the best hit.
 fn enters(origin: Vec3, dir: Vec3, lo: Vec3, hi: Vec3, limit: f64) -> Option<f64> {
     let (mut near, mut far) = (0.0_f64, limit);
     for axis in 0..3 {
@@ -238,7 +216,7 @@ fn enters(origin: Vec3, dir: Vec3, lo: Vec3, hi: Vec3, limit: f64) -> Option<f64
     Some(near)
 }
 
-/// A box that holds nothing, for a fold to grow from.
+/// An empty box, for a fold to grow from.
 fn empty() -> (Vec3, Vec3) {
     let (inf, neg) = (f64::INFINITY, f64::NEG_INFINITY);
     (Vec3::new(inf, inf, inf), Vec3::new(neg, neg, neg))
@@ -252,13 +230,10 @@ fn component(v: Vec3, axis: usize) -> f64 {
     }
 }
 
-/// The tree for a mesh, built the first time a ray is cast at it and kept for
-/// as long as the mesh lives.
+/// The tree for a mesh, built on first cast and kept while the mesh lives.
 ///
-/// Keyed by the mesh's address, and holding a `Weak` to it: a `Weak` keeps the
-/// allocation from being freed, so no other mesh can be given that address
-/// while the entry remembers it, and a mesh that has been dropped is seen to be
-/// gone -- and its tree let go of -- the next time a ray is cast at anything.
+/// Keyed by address with a `Weak`, which keeps the allocation (and so the address) from being
+/// reused while remembered, and reveals dropped meshes on the next cast.
 pub(crate) fn tree_for(mesh: &Arc<Mesh>) -> Arc<Bvh> {
     type Trees = HashMap<usize, (Weak<Mesh>, Arc<Bvh>)>;
     static TREES: Mutex<Option<Trees>> = Mutex::new(None);
@@ -271,8 +246,7 @@ pub(crate) fn tree_for(mesh: &Arc<Mesh>) -> Arc<Bvh> {
             return tree.clone();
         }
     }
-    // Built outside the lock: a large mesh takes a moment, and nothing else
-    // needs to wait for it.
+    // Built outside the lock, so nothing else waits on a large build.
     let tree = Arc::new(Bvh::build(mesh));
     let mut trees = TREES.lock().expect("the tree cache lock");
     trees.get_or_insert_with(HashMap::new).insert(key, (Arc::downgrade(mesh), tree.clone()));

@@ -5,24 +5,18 @@ use crate::app::App;
 use crate::theme::{self};
 use simple3d_core::scene::{Body, NodeId};
 
-/// The panel's contents, without the dock around them, so the same panel can be
-/// drawn in either dock.
+/// The panel's contents without the dock, so it can be drawn in either dock.
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, 2.0);
-    // A command a button in here asks for is run *after* the panel is drawn,
-    // never on the spot: the sections below this one are still to be laid out
-    // from the selection this frame started with, and a command that changes
-    // the tree -- joining a split back together takes a node out of it -- would
-    // leave them drawing a row that is no longer there.
+    // Commands requested in here run after the panel is drawn, since tree changes (a Join) would leave
+    // later sections drawing removed rows.
     let mut command: Option<simple3d_core::keymap::Command> = None;
-    // Opening a component switches the whole scene the panel reads, so it too
-    // waits until the panel is drawn.
+    // Opening a component switches the scene, so it waits too.
     let mut open_component = false;
     let (area, restore) = theme::list_scroll_area(ui);
     area.show(ui, |ui| {
         ui.set_style(restore);
-        // Everything the panel edits, primary last -- the same order the
-        // selection itself is in, so "the one being edited" is unambiguous.
+        // Everything the panel edits, primary last, as in the selection.
         let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
         let Some(primary) = app.primary() else {
             document(app, ui);
@@ -45,14 +39,10 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 }
                 Body::Split { .. } if targets.len() == 1 => {
                     section(ui, "Split", |ui| split_body(app, ui, primary, &mut command));
-                    // The pieces are inside the collection rather than in the
-                    // tree, so this is the only place they can be got at
-                    // (issue 82).
+                    // Pieces live inside the collection, so this is the only place to reach them (issue 82).
                     section(ui, "Pieces", |ui| pieces_list(app, ui, primary));
                 }
-                // A selection of different types has no shared dimension to
-                // offer. Saying so beats an empty panel or a set of fields that
-                // would edit only one of them without saying which.
+                // Mixed types share no dimensions; say so rather than edit one silently.
                 _ => section(ui, "Dimensions", |ui| {
                     ui.add(
                         egui::Label::new(theme::hint(
@@ -77,9 +67,7 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// The primitive type every selected node has, or `None` when they are not all
-/// the same kind of thing. This is what decides whether a Dimensions panel can
-/// speak for the whole selection.
+/// The primitive type all selected nodes share, or `None`; decides if Dimensions can cover them all.
 pub(crate) fn shared_type(app: &App, targets: &[NodeId]) -> Option<String> {
     let mut found: Option<String> = None;
     for id in targets {

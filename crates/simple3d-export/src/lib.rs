@@ -1,16 +1,9 @@
-//! Mesh export (spec section 9): 3MF, STL, OBJ and PLY, with binary variants
-//! where the format has one.
+//! Mesh export (spec section 9): 3MF, STL, OBJ and PLY, binary where the format has it.
 //!
-//! Three things the spec insists on and this module implements:
-//!
-//! * **Verify before writing.** A mesh that is not watertight, manifold and
-//!   consistently wound with outward normals is reported -- naming the node
-//!   responsible -- rather than written out to fail in a slicer later.
-//! * **No partial file.** Everything is written to a sibling temporary file and
-//!   renamed into place only once it is complete, so a cancelled or failed
-//!   export leaves nothing behind.
-//! * **Cancellable with progress.** The caller passes a callback that reports
-//!   progress and returns `false` to cancel.
+//! * Verify before writing: a non-watertight, non-manifold or inward-wound mesh is reported with its
+//!   node instead of failing later in a slicer.
+//! * No partial file: written to a sibling temp file and renamed into place when complete.
+//! * Cancellable: the progress callback returns `false` to cancel.
 
 mod format;
 pub use format::{BodyMode, Format, Unit3mf};

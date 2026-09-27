@@ -7,18 +7,10 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-/// A mesh being taken apart (issue 108).
-///
-/// Here rather than on the interaction path for the reason the simplification
-/// is: separating a mesh of a hundred thousand triangles into its bodies and
-/// fitting a shape to each of them is a fraction of a second, and it is a
-/// fraction of a second the window would not be answering in -- while the
-/// window is being *scrubbed*. Every change of a number asks for a new answer,
-/// so a run is also something that has to be abandoned: the answer to the
-/// number before last is of no interest the moment the next one is typed.
+/// A mesh being taken apart (issue 108), off the interaction path since it takes a noticeable
+/// fraction of a second, and abandonable since every scrubbed number asks again.
 pub struct ReassembleJob {
-    /// What this run was asked for, so the tool can tell whether the answer
-    /// that lands is still the answer to the question on screen.
+    /// What this run was asked, so a late answer can be checked against the numbers on screen.
     pub plan: Reassemble,
     cancelled: Arc<AtomicBool>,
     result: Receiver<Option<Assembly>>,
@@ -48,14 +40,12 @@ impl ReassembleJob {
         self.started.elapsed()
     }
 
-    /// What the mesh was found to be made of, once it is known. The inner
-    /// `None` is a run that was abandoned: there is no answer, and nothing is
-    /// to be shown.
+    /// The result once known; the inner `None` means abandoned.
     pub fn poll(&self) -> Option<Option<Assembly>> {
         match self.result.try_recv() {
             Ok(found) => Some(found),
             Err(TryRecvError::Empty) => None,
-            // The thread died, which is not something to change a document on.
+            // The thread died: nothing to show.
             Err(TryRecvError::Disconnected) => Some(None),
         }
     }

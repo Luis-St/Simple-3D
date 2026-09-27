@@ -1,24 +1,16 @@
-//! What the last frame drew where: the depth of the model's faces, read back
-//! from the card for the questions the interface asks about the picture.
+//! The last frame's face depth, read back from the card to answer visibility and
+//! surface-under-pointer queries.
 //!
-//! "Can this point be seen?" and "what surface is under the pointer?" were
-//! answered by casting a ray through the whole evaluated scene, which needs a
-//! bounding volume hierarchy of every triangle in it -- built again, on the
-//! interface thread, after every evaluation. The frame the card has just drawn
-//! already knows the answer for every pixel. Its depth is copied, once the
-//! faces and the section's cap are down and before any line is drawn over
-//! them, into a pixel buffer the card fills while it goes on drawing, and read
-//! out only when a question is asked: a frame nobody asks about costs nothing
-//! beyond the copy, and the copy is only made while somebody is asking.
-//!
-//! The answers are the picture's: a section's cut-away material is gone, a
-//! dragged body is where the drag has got to, and a ghost hides nothing.
+//! Replaces ray casts against a BVH rebuilt after every evaluation. The depth is copied after
+//! faces and caps but before lines, into a pixel buffer read only when asked; the copy is only
+//! made while queries are coming in. Answers match the picture: cut material is gone, dragged
+//! bodies are where they were drawn, ghosts hide nothing.
 
 use super::*;
 use eframe::glow::{self, HasContext};
 use std::cell::{Cell, RefCell};
 
-/// One frame's depth, as the interface asks about it.
+/// One frame's depth, as the interface queries it.
 pub(crate) struct DepthImage {
     /// The frame it was copied from.
     frame: u64,
@@ -26,12 +18,10 @@ pub(crate) struct DepthImage {
     height: usize,
     /// One window depth per pixel, rows from the top of the picture.
     depth: Vec<f32>,
-    /// The frame's depth mapping -- see `draw` -- to turn a depth back into a
-    /// key.
+    /// The frame's depth mapping (see `draw`), to turn depths back into keys.
     offset: f32,
     scale: f32,
-    /// Where the picture's top-left corner is in the interface, and how many
-    /// pixels a point is.
+    /// The picture's top-left in interface coordinates, and pixels per point.
     origin: egui::Pos2,
     pixels_per_point: f32,
 }
@@ -39,16 +29,14 @@ pub(crate) struct DepthImage {
 /// The read-back machinery, held by the `Gpu`.
 pub(crate) struct DepthReadback {
     buffer: glow::Buffer,
-    /// Whether a question was asked since the last frame, so the next one
-    /// copies its depth.
+    /// Whether a query came since the last frame, so the next one copies its depth.
     wanted: Cell<bool>,
-    /// A copy on its way, with what is needed to read it.
+    /// A copy in flight, with what is needed to read it.
     pending: Cell<Option<Pending>>,
     image: RefCell<Option<DepthImage>>,
     /// Where the panel is, for the frame being drawn.
     placement: Cell<(egui::Pos2, f32)>,
-    /// How many frames have been drawn: a copy answers for the frame it was
-    /// made from and no other.
+    /// Frames drawn so far; a copy answers only for its own frame.
     frame: Cell<u64>,
 }
 
@@ -77,19 +65,15 @@ impl DepthReadback {
 }
 
 impl DepthImage {
-    /// The key of the face drawn at a point of the interface: `Some(None)` for
-    /// a pixel no face covers, `None` off the picture.
+    /// The face key at an interface point: `Some(None)` for no face, `None` off the picture.
     ///
-    /// Read between the four pixel centres round the point where they lie on
-    /// one plane -- a flat face, which the depth is linear across -- and off
-    /// the pixel the point is in where they do not: across an edge or an
-    /// outline, which interpolating would put a point in mid-air.
+    /// Interpolated between the four surrounding pixel centres when they are coplanar (a flat face),
+    /// otherwise the containing pixel's, since interpolating across an edge lands in mid-air.
     fn key_at(&self, screen: egui::Pos2) -> Option<Option<f32>> {
         self.key_between(screen).map(|key| key.map(|(key, _)| key))
     }
 
-    /// [`DepthImage::key_at`], with whether it was read between pixel centres
-    /// -- exact on a flat face -- or off the one pixel.
+    /// [`DepthImage::key_at`], plus whether it was interpolated (exact on a flat face).
     fn key_between(&self, screen: egui::Pos2) -> Option<Option<(f32, bool)>> {
         let x = (screen.x - self.origin.x) * self.pixels_per_point;
         let y = (screen.y - self.origin.y) * self.pixels_per_point;
@@ -117,7 +101,7 @@ impl DepthImage {
         Some(Some((top + (bottom - top) * ty, true)))
     }
 
-    /// The key of the one pixel a point of the interface falls in.
+    /// The key of the pixel an interface point falls in.
     fn pixel_key_at(&self, screen: egui::Pos2) -> Option<Option<f32>> {
         let x = (screen.x - self.origin.x) * self.pixels_per_point;
         let y = (screen.y - self.origin.y) * self.pixels_per_point;
@@ -127,8 +111,7 @@ impl DepthImage {
         self.pixel_key(x as usize, y as usize)
     }
 
-    /// One pixel's key, `Some(None)` where no face is drawn and `None` off
-    /// the picture.
+    /// One pixel's key: `Some(None)` for no face, `None` off the picture.
     fn pixel_key(&self, x: usize, y: usize) -> Option<Option<f32>> {
         if x >= self.width || y >= self.height {
             return None;
@@ -137,9 +120,8 @@ impl DepthImage {
         Some((z < 1.0).then(|| (self.offset - (2.0 * z - 1.0)) / self.scale))
     }
 
-    /// How much the key changes across one pixel at a point, along x and y
-    /// together: each measured to whichever neighbour is nearer in key, which
-    /// is the one on the same face when the point is beside an edge.
+    /// The key change across one pixel, measured to the neighbour nearest in key (the same face
+    /// beside an edge).
     fn slope_at(&self, screen: egui::Pos2) -> f32 {
         let x = ((screen.x - self.origin.x) * self.pixels_per_point) as usize;
         let y = ((screen.y - self.origin.y) * self.pixels_per_point) as usize;
@@ -157,20 +139,20 @@ impl DepthImage {
         [dx, dy].into_iter().filter(|d| d.is_finite()).sum()
     }
 
-    /// How far apart in key two neighbouring steps of the depth buffer are.
+    /// The key distance between neighbouring depth buffer steps.
     fn step(&self) -> f32 {
         2.0 / (self.scale * (1 << 24) as f32)
     }
 }
 
 impl Gpu {
-    /// Say where the panel the next frame is painted into sits.
+    /// Set where the next frame's panel sits.
     pub fn place(&self, origin: egui::Pos2, pixels_per_point: f32) {
         self.depth.placement.set((origin, pixels_per_point));
     }
 
-    /// Copy the faces' depth into the pixel buffer, if a question was asked
-    /// since the last frame. Called with the model pass's framebuffer bound.
+    /// Copy face depth into the pixel buffer if a query came since the last frame. Expects the
+    /// model pass's framebuffer bound.
     pub(super) unsafe fn copy_depth(&self, gl: &glow::Context, width: usize, height: usize, depth: [f32; 2]) {
         let frame = self.depth.frame.get() + 1;
         self.depth.frame.set(frame);
@@ -203,10 +185,8 @@ impl Gpu {
         }));
     }
 
-    /// The key of the model's face drawn at a point of the interface in the
-    /// last frame: `Some(None)` where no face is drawn, and `None` when the
-    /// picture has not been read back yet -- the asker then answers the
-    /// question some other way this once, and the next frame is copied.
+    /// The last frame's face key at an interface point: `Some(None)` for no face, `None` if not read
+    /// back yet (the caller falls back this once and the next frame is copied).
     pub fn surface_key(&self, screen: egui::Pos2) -> Option<Option<f32>> {
         self.depth.wanted.set(true);
         if let Some(pending) = self.depth.pending.take() {
@@ -217,9 +197,7 @@ impl Gpu {
         image.as_ref().filter(|image| image.frame == self.depth.frame.get())?.key_at(screen)
     }
 
-    /// Whether a question about the picture went unanswered because the frame
-    /// on screen was never copied: the viewport then draws it again, copying
-    /// it this time, rather than leave the asker to fall back for good.
+    /// Whether a query went unanswered for lack of a copy, so the viewport redraws and copies.
     pub fn depth_wanted(&self) -> bool {
         let frame = self.depth.frame.get();
         let fresh = self.depth.pending.get().is_some_and(|pending| pending.frame == frame)
@@ -227,32 +205,25 @@ impl Gpu {
         self.depth.wanted.get() && !fresh
     }
 
-    /// Whether the last frame shows a point whose depth key is `key` at a
-    /// point of the interface, or a face stands in front of it: `None` when
-    /// that cannot be said from the picture -- it is off it, or not read back
-    /// yet.
+    /// Whether the last frame shows a point with depth key `key` at an interface point, or a face
+    /// hides it; `None` if unknown (off the picture or not read back).
     ///
-    /// Shown when nothing is drawn at the point, or what is drawn there is no
-    /// nearer than the point: read off the face at the point where it is flat
-    /// across the pixels round it, and give or take the face's slope across a
-    /// pixel where an edge runs between them. A point on an edge is also shown
-    /// when a pixel beside it has its face.
+    /// Shown when nothing nearer is drawn there, with a slope tolerance across edges; a point on an
+    /// edge is also shown when a neighbouring pixel has its face.
     pub fn in_sight(&self, screen: egui::Pos2, key: f32) -> Option<bool> {
         self.surface_key(screen)?;
         let image = self.depth.image.borrow();
         let image = image.as_ref()?;
         let Some((surface, exact)) = image.key_between(screen)? else { return Some(true) };
-        // A hundredth of a millimetre, as the ray cast allowed, a few of the
-        // depth buffer's own steps, and -- where the depth is the one pixel's
-        // rather than read off the face at the point -- the slope across it.
+        // A hundredth of a millimetre (as the ray cast allowed), a few depth steps, and the pixel's
+        // slope when not interpolated.
         let slope = if exact { 0.0 } else { image.slope_at(screen) };
         let tolerance = 1e-2 + 4.0 * image.step();
         if surface <= key + tolerance + slope {
             return Some(true);
         }
-        // A point on an edge is drawn beside its own face, which the pixel it
-        // falls in may not be: one of the four next to it showing a face no
-        // nearer than the point is that face.
+        // A point on an edge may fall in the neighbouring face's pixel, so any of the four neighbours
+        // showing a face no nearer than the point counts.
         let step = 1.0 / image.pixels_per_point;
         let beside = [(-step, 0.0), (step, 0.0), (0.0, -step), (0.0, step)];
         Some(beside.into_iter().any(
@@ -274,9 +245,8 @@ impl Gpu {
             Some(values)
         };
         gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
-        // The rows came back from the bottom of the framebuffer up, and the
-        // bottom of the framebuffer is the top of the picture (see
-        // `VERTEX_SOURCE`), so they are in the picture's own order already.
+        // Rows come back bottom-up, and the framebuffer's bottom is the picture's top (see
+        // `VERTEX_SOURCE`), so they are already in picture order.
         depth.map(|depth| DepthImage {
             frame: pending.frame,
             width: pending.width,

@@ -1,11 +1,6 @@
-//! Per-user settings that are *not* part of a project (spec sections 7.1, 9,
-//! 11): window geometry, panel sizes, display mode, the keymap, the recent-file
-//! list and the last export choices.
-//!
-//! Stored in the platform-appropriate per-user location, with a portable mode
-//! that keeps everything beside the executable instead. The binary never
-//! requires the source tree, a working directory or sibling files to be present:
-//! if the settings file is missing or unreadable, defaults apply.
+//! Per-user settings outside any project (spec sections 7.1, 9, 11): window, panels, display mode,
+//! keymap, recent files, last export choices. Stored per-user or beside the executable in portable
+//! mode; missing or unreadable settings fall back to defaults.
 
 mod display;
 pub use display::{DisplayMode, RenderEngine};
@@ -33,6 +28,5 @@ const KEYMAP_FILE: &str = "keymap.json";
 
 const MAX_RECENT: usize = 10;
 
-/// A row of swatches, no more: past that it is a list to search rather than a
-/// set to glance at.
+/// One row of swatches; more would be a list to search.
 const MAX_RECENT_COLOURS: usize = 8;

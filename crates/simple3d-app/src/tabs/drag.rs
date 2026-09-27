@@ -1,18 +1,8 @@
 //! Dragging a tab off its row, and onto another window's (issue 107).
 //!
-//! Two gestures, one drag. A tab pulled off the row of tabs and let go opens in
-//! a window of its own; a tab -- or a whole window's row, dragged by the empty
-//! space beside the tabs -- let go over another window's row of tabs moves
-//! there, and a window whose last document leaves is closed behind it.
-//!
-//! The second gesture needs to know where the other windows are, and that is
-//! not something every window system will say. X11 and Windows answer; Wayland
-//! does not, and will not: a client there is never told where it is on screen,
-//! so a pointer that has left this window cannot be placed against another
-//! window's row of tabs by arithmetic, and the drop has nothing to aim at. That
-//! is why the same two moves are on the tab's own menu, which needs no
-//! coordinates at all and is the way this works on a Wayland desktop -- see
-//! `strip::menu`.
+//! A tab released off the row opens in its own window; a tab (or a whole window, dragged by the
+//! row's empty space) released over another window's row moves there. Wayland never reveals
+//! window positions, so the tab menu offers the same moves without coordinates (`strip::menu`).
 
 use crate::app::App;
 use crate::shell::{OtherWindow, WindowRequest};
@@ -21,58 +11,38 @@ use crate::theme::{self, token};
 /// A tab being carried: which one, and where the pointer has taken it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TabDrag {
-    /// The tab under the pointer when the drag started. For a whole-window drag
-    /// it is the one on screen, which is what the ghost shows.
+    /// The tab under the pointer when the drag started; for a whole-window drag, the one on screen.
     pub tab: usize,
-    /// Whether the whole window is being carried rather than one tab: the drag
-    /// that starts on the empty part of the row.
+    /// Whether the whole window is carried: a drag started on the row's empty part.
     pub whole_window: bool,
-    /// Where the pointer is, in this window's own coordinates.
-    ///
-    /// Kept here frame by frame rather than read at the moment of release,
-    /// because a pointer that has been dragged outside the window is one the
-    /// toolkit may already have reported as gone -- and the position it was last
-    /// seen at is exactly what says the tab was pulled out.
+    /// The pointer in this window's coordinates, tracked per frame since the toolkit may already
+    /// report a pointer outside the window as gone at release.
     pub pos: egui::Pos2,
 }
 
-/// What letting go of a drag would do with the tab.
+/// What releasing the drag would do with the tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TabDrop {
-    /// Leave the tabs as they are: the pointer never left the row.
+    /// Nothing: the pointer never left the row.
     Stay,
-    /// Open it in a window of its own.
+    /// Open it in its own window.
     NewWindow,
     /// Move it into the window with this id.
     Into(u64),
-    /// Let go outside this window, with no way of telling what it was let go
-    /// over: hold it out and let whichever window the pointer turns up in take
-    /// it. See `Shell::resolve_offer`.
+    /// Released outside with no way to tell over what: hold it out for the window the pointer
+    /// reaches. See `Shell::resolve_offer`.
     Offer,
 }
 
-/// How far off the row a drag has to be before releasing it takes the tab out of
-/// the window.
-///
-/// Most of a tab's own height: far enough that sliding along the row, or
-/// overshooting it by a few pixels on the way to the close cross, is not a
-/// window being opened -- and near enough that pulling a tab away is one
-/// movement rather than a journey.
+/// How far off the row a release must be to take the tab out: most of a tab's height, so
+/// sliding along the row or overshooting is not a detach.
 pub const PULL_OUT: f32 = 20.0;
 
-/// Where a drag released at `pointer` would put what it is carrying.
+/// Where releasing at `pointer` would put what is carried.
 ///
-/// `pointer`, `strip` and `contents` are in this window's coordinates; `origin`
-/// is where this window's contents start on the desktop, and the strips in
-/// `others` are on the desktop as well. A window system that does not say where
-/// its windows are gives `None` for the origin, and then only the two gestures
-/// that are about this window alone can be resolved.
-///
-/// Another window is only ever dropped on from *outside* this one. Windows
-/// overlap, and two windows of the same application overlap along their rows of
-/// tabs in particular: without this, dragging a tab along its own row while
-/// another window happened to sit under that row would have moved the document
-/// into the window nobody could see.
+/// `pointer`, `strip` and `contents` are window coordinates; `origin` and `others` are desktop
+/// coordinates, `origin` being `None` where unknown. Other windows are only dropped on from outside
+/// this one, since overlapping windows would otherwise capture drags along the own row.
 pub fn drop_of(
     pointer: egui::Pos2,
     strip: egui::Rect,
@@ -83,9 +53,7 @@ pub fn drop_of(
 ) -> TabDrop {
     if !contents.contains(pointer) {
         match origin {
-            // Where the window system says where windows are, the drop is
-            // settled here and now: this is where the pointer is on the
-            // desktop, and that is whose row of tabs it is over.
+            // Window positions known: resolve against the desktop now.
             Some(origin) => {
                 let on_screen = pointer + origin.to_vec2();
                 let onto = others.iter().find(|other| other.strip.is_some_and(|strip| strip.contains(on_screen)));
@@ -93,17 +61,13 @@ pub fn drop_of(
                     return TabDrop::Into(other.id);
                 }
             }
-            // Where it does not -- Wayland, which tells a client nothing about
-            // where it is -- the tab is held out instead, and the window the
-            // pointer turns up over claims it. The pointer only reaches that
-            // window once the button is up, because until then this window
-            // holds it, so the question can only be asked after the drop.
+            // Positions unknown (Wayland): hold the tab out; the target window can only see the pointer
+            // after the button is up.
             None if !others.is_empty() => return TabDrop::Offer,
             None => {}
         }
     }
-    // A whole window has nowhere else to go: the gesture that carries one is
-    // only ever about putting it into another window.
+    // A whole window can only go into another window.
     if whole_window {
         return TabDrop::Stay;
     }
@@ -115,17 +79,15 @@ pub fn drop_of(
     }
 }
 
-/// Follow the drag, say on screen what letting go would do, and do it when the
-/// button comes up. Called once a frame after the row has drawn, the way a dock
-/// drag is resolved after both docks have.
+/// Follow the drag, show what releasing would do, and do it on release. Called after the row
+/// has drawn, like dock drags.
 pub fn resolve_drag(app: &mut App, ctx: &egui::Context) {
     let Some(mut drag) = app.tab_drag else { return };
     if let Some(pos) = ctx.input(|i| i.pointer.latest_pos()) {
         drag.pos = pos;
     }
     app.tab_drag = Some(drag);
-    // The tab may have gone while the drag ran -- closed from a menu, or moved
-    // by the window at the other end of it.
+    // The tab may have gone during the drag (closed or moved away).
     if drag.tab >= app.tab_count() {
         app.tab_drag = None;
         return;
@@ -152,9 +114,7 @@ pub fn resolve_drag(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// The tab under the pointer while it is being carried, and a line saying what
-/// would become of it. Drawn in the foreground layer so it is over the viewport
-/// the pointer is usually above by then.
+/// The carried tab under the pointer with a line on what would happen, in the foreground layer.
 fn ghost(app: &App, ctx: &egui::Context, drag: TabDrag, drop: TabDrop) {
     let name = if drag.whole_window { app.window_summary() } else { app.tab_summary(drag.tab).0 };
     let says = match drop {
@@ -188,9 +148,8 @@ fn ghost(app: &App, ctx: &egui::Context, drag: TabDrag, drop: TabDrop) {
 }
 
 impl App {
-    /// Where this window's row of tabs is on the desktop, for another window to
-    /// drop a tab onto. `None` wherever the window system does not say where a
-    /// window is, which is every Wayland compositor.
+    /// This window's tab row on the desktop, for other windows to drop onto; `None` where unknown
+    /// (Wayland).
     pub(crate) fn strip_on_screen(&self) -> Option<egui::Rect> {
         let origin = self.window_rect?.min;
         Some(self.strip_rect.translate(origin.to_vec2()))

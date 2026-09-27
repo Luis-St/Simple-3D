@@ -1,14 +1,11 @@
-//! Dragging a tab off its row, and clicking one (issue 107).
-//!
-//! The same widget carries both gestures now, so the thing that can go wrong is
-//! that it cannot tell them apart -- and the drag has to be claimed by the tab
-//! rather than by the viewport it is dragged over.
+//! Dragging a tab off its row, and clicking one (issue 107). One widget carries both, so they must be
+//! told apart, and the tab must claim the drag from the viewport under it.
 
 use super::*;
 use crate::shell::WindowRequest;
 use crate::tabs::strip::tab_id;
 
-/// Two documents, so a tab pulled out of the row is one of several.
+/// Two documents, so a pulled-out tab is one of several.
 fn two_tabs(name: &str) -> Harness<'static, App> {
     let mut harness = harness_configured(name, |app| {
         app.new_project();
@@ -66,9 +63,7 @@ fn clicking_a_tab_still_shows_it() {
     assert_eq!(harness.state().window_request, None, "a click was taken for a drag out of the window");
 }
 
-/// The empty part of the row carries the whole window, and only when there is
-/// another window to carry it to: with one window open there is nowhere for it
-/// to go, so the gesture does not start at all.
+/// The row's empty part carries the window, only when another window exists to carry it to.
 #[test]
 fn the_row_itself_carries_nothing_while_there_is_only_one_window() {
     let mut harness = two_tabs("tab-strip-alone");

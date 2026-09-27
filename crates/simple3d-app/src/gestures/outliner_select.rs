@@ -1,4 +1,4 @@
-//! Selecting rows by click, shift and ctrl.
+//! Selecting rows by click, Shift and Ctrl.
 
 use super::*;
 use crate::app::App;
@@ -6,8 +6,7 @@ use egui_kittest::Harness;
 
 // -- the outliner: selecting, and the rename that is not a selection ----------
 
-/// Three rows under the root, and the harness that shows them, for the
-/// selection gestures below. Returns the ids in the order the tree draws them.
+/// Three rows under the root and a harness showing them; ids in drawn order.
 pub(crate) fn outliner_harness(name: &str) -> (Harness<'static, App>, Vec<simple3d_core::scene::NodeId>) {
     let mut ids = Vec::new();
     let harness = harness_stepping(name, 1.0 / 60.0, |app| {
@@ -17,17 +16,14 @@ pub(crate) fn outliner_harness(name: &str) -> (Harness<'static, App>, Vec<simple
         }
         app.clear_selection();
     });
-    // The plate the shared harness adds is the first row; these three follow it.
+    // The shared harness's plate is the first row; these three follow.
     (harness, ids)
 }
 
-/// Let egui's double-click window go by, so the next click starts a fresh one
-/// rather than continuing the run before it. Time in the harness moves one
-/// frame at a time, so waiting is stepping.
+/// Let egui's double-click window pass, so the next click starts fresh.
 pub(crate) fn wait_out_the_double_click_window(harness: &mut Harness<'_, App>) {
-    // The clock egui classifies clicks against is its own, not the raw input's
-    // (the harness leaves that unset), and it moves a predicted frame at a
-    // time. A second of it is well past egui's 0.3 s window.
+    // egui classifies clicks on its own clock, advancing a predicted frame at a time; a second is well
+    // past its 0.3 s window.
     let now = |harness: &Harness<'_, App>| harness.ctx.input(|i| i.time);
     let start = now(harness);
     let mut frames = 0;
@@ -47,23 +43,20 @@ pub(crate) fn click_row(harness: &mut Harness<'_, App>, id: simple3d_core::scene
 
 #[test]
 pub(crate) fn a_click_on_one_row_after_a_click_on_another_selects_it_and_does_not_rename_it() {
-    // Issue 59. egui decides a double click from the delay between two clicks
-    // alone -- neither the position nor the widget comes into it -- so clicking
-    // down a list quickly opened the rename field on whichever row was clicked
-    // second, on what is a single click as far as anyone using it is concerned.
+    // Issue 59: egui detects double clicks by timing alone, so quickly clicking down a list opened a
+    // rename on the second row.
     let (mut harness, ids) = outliner_harness("outliner-select-rename");
 
     click_row(&mut harness, ids[0]);
     assert_eq!(harness.state().selection, vec![ids[0]]);
     assert!(harness.state().rename.is_none(), "one click opened a rename");
 
-    // Immediately afterwards, within egui's double-click delay, on another row.
+    // Immediately afterwards, within the double-click delay, on another row.
     click_row(&mut harness, ids[1]);
     assert_eq!(harness.state().selection, vec![ids[1]], "the second row was not selected");
     assert!(harness.state().rename.is_none(), "a click on a second row opened a rename on it");
 
-    // And a real double click, both halves of it on the same row, still does.
-    // After a pause, or egui reads it as the third click of a run.
+    // A real double click on one row still renames, after a pause so it is not a third click.
     wait_out_the_double_click_window(&mut harness);
     click_row(&mut harness, ids[1]);
     assert!(harness.state().rename.is_none(), "the first click of the pair opened a rename on its own");
@@ -75,9 +68,7 @@ pub(crate) fn a_click_on_one_row_after_a_click_on_another_selects_it_and_does_no
 
 #[test]
 pub(crate) fn shift_selects_the_range_and_ctrl_adds_and_removes_one_row() {
-    // Issue 60: the outliner had one selection mode -- a plain click replaced
-    // the selection and any modifier at all toggled a single row, so a range
-    // could only be built one Ctrl+click at a time.
+    // Issue 60: any modifier toggled one row, so ranges needed many Ctrl+clicks.
     let (mut harness, ids) = outliner_harness("outliner-modifiers");
     let rows = crate::panel_outliner::visible_rows(harness.state());
     let plate = rows[1];
@@ -86,15 +77,13 @@ pub(crate) fn shift_selects_the_range_and_ctrl_adds_and_removes_one_row() {
     click_row(&mut harness, plate);
     assert_eq!(harness.state().selection, vec![plate]);
 
-    // Shift takes everything from the anchor to the row clicked, in the order
-    // the tree shows them, and nothing else.
+    // Shift selects from the anchor to the clicked row, in tree order.
     modifiers(&mut harness, egui::Modifiers::SHIFT);
     click_row(&mut harness, ids[1]);
     assert_eq!(harness.state().selection, vec![plate, ids[0], ids[1]], "shift did not select the range");
     assert!(harness.state().rename.is_none(), "a shift-click opened a rename");
 
-    // Shift again re-measures from the same anchor rather than piling ranges
-    // up: shortening the range takes rows back out of it.
+    // Shift again re-measures from the same anchor, so shortening removes rows.
     click_row(&mut harness, ids[0]);
     assert_eq!(harness.state().selection, vec![plate, ids[0]], "shift did not re-measure from the anchor");
 
@@ -102,11 +91,11 @@ pub(crate) fn shift_selects_the_range_and_ctrl_adds_and_removes_one_row() {
     modifiers(&mut harness, egui::Modifiers::COMMAND);
     click_row(&mut harness, ids[2]);
     assert_eq!(harness.state().selection, vec![plate, ids[0], ids[2]], "ctrl did not add the row");
-    // ...and takes it out again.
+    // ...and removes it again.
     click_row(&mut harness, ids[2]);
     assert_eq!(harness.state().selection, vec![plate, ids[0]], "ctrl did not remove the row");
 
-    // A plain click starts again from one row, which is the third mode.
+    // A plain click restarts from one row.
     modifiers(&mut harness, egui::Modifiers::NONE);
     click_row(&mut harness, ids[2]);
     assert_eq!(harness.state().selection, vec![ids[2]], "a plain click did not replace the selection");
@@ -114,9 +103,7 @@ pub(crate) fn shift_selects_the_range_and_ctrl_adds_and_removes_one_row() {
 
 #[test]
 pub(crate) fn a_shift_range_never_reaches_into_a_collapsed_group() {
-    // The range runs over the rows on screen. A group that is shut has no rows
-    // to select, and picking up its contents invisibly is exactly the surprise
-    // a collapsible tree exists to avoid.
+    // The range covers visible rows only, never a collapsed group's contents.
     let mut inner = Vec::new();
     let mut group = None;
     let mut tail = None;

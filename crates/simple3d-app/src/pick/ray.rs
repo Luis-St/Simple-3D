@@ -4,9 +4,8 @@ use super::bvh::{tree_for, MIN_TRIANGLES};
 use simple3d_geom::{Mesh, Vec3};
 use std::sync::Arc;
 
-/// Distance along the ray at which it enters the triangle, if it does.
-/// Moeller-Trumbore, accepting either facing so a click inside a solid still
-/// finds it.
+/// The distance at which the ray enters the triangle, if it does: Moeller-Trumbore, either facing,
+/// so a click inside a solid still hits.
 pub fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f64> {
     let e1 = b - a;
     let e2 = c - a;
@@ -33,13 +32,8 @@ pub fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Optio
     Some(t)
 }
 
-/// Nearest hit on a mesh, if the ray meets it at all.
-///
-/// A large mesh is asked through a bounding volume hierarchy, built the first
-/// time it is asked and kept for as long as the mesh lives: the measure tool
-/// casts at the whole scene on every frame the pointer moves over it, and
-/// walking two million triangles each time was most of that frame. The answer
-/// is the one walking every triangle gives -- see [`Bvh::nearest`].
+/// The nearest hit on a mesh. Large meshes use a cached BVH, since the measure tool casts every
+/// frame; the answer matches walking every triangle ([`Bvh::nearest`]).
 ///
 /// [`Bvh::nearest`]: super::bvh::Bvh::nearest
 pub fn ray_mesh(mesh: &Arc<Mesh>, origin: Vec3, dir: Vec3) -> Option<f64> {
@@ -51,8 +45,7 @@ pub fn ray_mesh(mesh: &Arc<Mesh>, origin: Vec3, dir: Vec3) -> Option<f64> {
 
 /// The same, by walking every triangle.
 pub(crate) fn ray_mesh_linear(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<f64> {
-    // A bounding-box reject first: with 200 primitives this is the difference
-    // between a click feeling instant and feeling like work.
+    // A bounding-box reject first, keeping clicks instant with many primitives.
     let (lo, hi) = mesh.bounds()?;
     ray_box(origin, dir, lo, hi)?;
     let mut nearest: Option<f64> = None;

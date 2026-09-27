@@ -1,4 +1,4 @@
-//! The edits the builder and the window make to a pattern's scatter.
+//! The builder's and window's edits to a pattern's scatter.
 
 use super::*;
 use crate::app::App;
@@ -8,12 +8,7 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
-    /// Whether anything here has been moved off what a fresh pattern holds.
-    ///
-    /// Asked of all of them rather than of the scatter itself: a seed stepped
-    /// past a scatter that looked wrong is something the user set and something
-    /// Reset puts back, so a button that went grey while it still said something
-    /// would be lying about what it does.
+    /// Whether any scatter parameter differs from a fresh pattern's, including a stepped seed.
     pub(crate) fn noise_is_set(&self, id: NodeId) -> bool {
         let Some(params) = self.scene.get(id).and_then(|node| node.params()) else { return false };
         pattern::noise_keys()
@@ -21,12 +16,7 @@ impl App {
             .any(|key| default_of(key).is_some_and(|default| params.get(*key).is_some_and(|value| *value != default)))
     }
 
-    /// Take the scatter off: every one of the six back to what a fresh pattern
-    /// holds.
-    ///
-    /// One undo step for the lot. Four numbers typed back to zero by hand is
-    /// four of them, and stopping halfway through leaves a pattern that is still
-    /// scattered by whatever is left.
+    /// Reset the whole scatter to a fresh pattern's, as one undo step.
     pub(crate) fn reset_noise(&mut self, id: NodeId) {
         if !self.noise_is_set(id) {
             return;
@@ -37,8 +27,7 @@ impl App {
         self.touch();
     }
 
-    /// Put `keys` back to what a fresh pattern holds, as part of an edit already
-    /// begun.
+    /// Reset `keys` to a fresh pattern's, within an edit already begun.
     fn reset_noise_keys(&mut self, id: NodeId, keys: &[&str]) {
         let Some(params) = self.scene.get_mut(id).and_then(|node| node.params_mut()) else { return };
         for key in keys {
@@ -48,8 +37,7 @@ impl App {
         }
     }
 
-    /// Whether the builder is keeping `part` on screen for `id` although it is
-    /// at nothing.
+    /// Whether the builder shows `part` for `id` although it is at zero.
     pub(super) fn noise_part_open(&self, id: NodeId, part: Part) -> bool {
         self.noise_parts_open.0 == Some(id) && self.noise_parts_open.1[part.index()]
     }
@@ -61,12 +49,8 @@ impl App {
         self.noise_parts_open.1[part.index()] = open;
     }
 
-    /// Add one part to the scatter, at an amount that shows what it does.
-    ///
-    /// A nudge is a twentieth of the shape's narrower side, along the two axes
-    /// a plank laid on a floor wanders in: enough to see, and well short of the
-    /// gap a fresh pattern leaves between its copies, so adding it does not
-    /// weld them together. A turn is three degrees, a size five percent.
+    /// Add one scatter part at a visible amount: a nudge of a twentieth of the narrower side along the
+    /// floor axes (short of the default gap), three degrees of turn, or five percent of size.
     pub(crate) fn add_noise_part(&mut self, id: NodeId, part: Part) {
         let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
         self.edit("Add noise", None);
@@ -90,7 +74,7 @@ impl App {
         self.touch();
     }
 
-    /// Take one part of the scatter off, leaving the others as they are.
+    /// Remove one scatter part, leaving the others.
     pub(crate) fn drop_noise_part(&mut self, id: NodeId, part: Part) {
         self.edit("Remove noise", None);
         self.reset_noise_keys(id, part.keys());
@@ -98,8 +82,7 @@ impl App {
         self.touch();
     }
 
-    /// Move the turn about `from` onto `to`, amount and all -- unless `to` has a
-    /// turn of its own already.
+    /// Move the turn about `from` onto `to`, unless `to` already has one.
     pub(crate) fn move_noise_turn(&mut self, id: NodeId, from: usize, to: usize) {
         let (from, to) = (from.min(2), to.min(2));
         if from == to || self.noise_part_open(id, Part::Turn(to)) {
@@ -120,11 +103,7 @@ impl App {
         self.touch();
     }
 
-    /// Step the seed on to the next scatter of the same size.
-    ///
-    /// One undo step however many times it is pressed in a row: shuffling is
-    /// looking for a scatter that looks right, and the way back from a search
-    /// that found nothing is to where it started, not one seed back.
+    /// Step the seed to the next scatter of the same size; consecutive presses are one undo step.
     pub(crate) fn shuffle_noise(&mut self, id: NodeId) {
         let Some(seed) = self.scene.get(id).and_then(|node| node.params()).map(|params| params.int("noise_seed"))
         else {
@@ -138,7 +117,7 @@ impl App {
     }
 }
 
-/// What a fresh pattern holds for one of the scatter's parameters.
+/// A fresh pattern's value for one scatter parameter.
 fn default_of(key: &str) -> Option<ParamValue> {
     pattern::param_spec(key).map(|param| param.default)
 }

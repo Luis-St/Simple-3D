@@ -22,15 +22,12 @@ pub mod token {
     /// Labels, units, disabled.
     pub const TEXT_LO: Color32 = Color32::from_rgb(0x8B, 0x95, 0xA5);
 
-    /// The scrollbar handle at rest. The divider grey the scrollbar has always
-    /// been described as, rather than the widget fill it was taking, which sat
-    /// one shade off the dock behind it and left a list with more rows than fit
-    /// looking complete.
+    /// The scrollbar handle at rest, distinct from the dock so overflowing lists do not look complete.
     pub const SCROLL_HANDLE: Color32 = Color32::from_rgb(0x3E, 0x46, 0x54);
-    /// And under the pointer, on its way to [`TEXT_LO`] while it is dragged.
+    /// Under the pointer, on its way to [`TEXT_LO`] while dragged.
     pub const SCROLL_HANDLE_HOVER: Color32 = Color32::from_rgb(0x55, 0x5F, 0x70);
 
-    /// Selection, active tool, focus ring -- a machined-brass amber.
+    /// Selection, active tool, focus ring: a machined-brass amber.
     pub const ACCENT: Color32 = Color32::from_rgb(0xE8, 0xA3, 0x3D);
     /// Dimension readouts, the measure tool, snap indicators.
     pub const MEASURE: Color32 = Color32::from_rgb(0x4F, 0xC3, 0xD9);
@@ -42,8 +39,7 @@ pub mod token {
     pub const AXIS_Z: Color32 = Color32::from_rgb(0x55, 0x90, 0xD9);
 }
 
-/// Row and control metrics. Density over comfort: this is a tool used for
-/// hours, so rows are tight and there is no decorative whitespace.
+/// Row and control metrics: dense, since this is a tool used for hours.
 pub mod metric {
     /// Height of one outliner row.
     pub const ROW: f32 = 22.0;
@@ -55,50 +51,36 @@ pub mod metric {
     pub const GAP: f32 = 4.0;
     /// Width of the tool rail.
     pub const RAIL: f32 = 40.0;
-    /// Height of the menu bar. The window's own title bar sits above it and is
-    /// the window system's business, so this row holds nothing but menus.
+    /// Height of the menu bar, below the window system's own title bar.
     pub const MENU_BAR: f32 = 28.0;
-    /// The row of document tabs under it (issue 61).
+    /// The document tab row under it (issue 61).
     pub const TAB_BAR: f32 = 26.0;
-    /// The row of buttons along the foot of every dialog, and the size each of
-    /// those buttons is: one place, so no dialog can drift from the rest.
+    /// The dialog button row's height and each button's size, shared by every dialog.
     pub const DIALOG_ACTIONS: f32 = 44.0;
-    /// The margin inside a dialog, the same on all four sides of the contents
-    /// and inside the row of buttons, so what a dialog says sits the same
-    /// distance from the window's edge as from the rule over its buttons.
+    /// A dialog's inner margin, on all sides and inside the button row.
     pub const DIALOG_PAD: f32 = 12.0;
     pub const DIALOG_BUTTON: f32 = 26.0;
     pub const DIALOG_BUTTON_WIDTH: f32 = 96.0;
     /// Height of the status bar.
     pub const STATUS_BAR: f32 = 24.0;
-    /// Room kept clear at the right end of the status bar for the timing, node
-    /// and triangle readout, so a long message is elided rather than being drawn
-    /// straight over it.
+    /// Room reserved at the status bar's right end for the readout, so long messages are elided.
     pub const STATUS_READOUT: f32 = 260.0;
     /// Side of the orientation cube in the viewport's bottom-right corner.
     pub const VIEW_CUBE: f32 = 72.0;
 }
 
-/// Type sizes. Labels are one step below values so a column of numbers reads
-/// as the content and the words around it as the frame.
+/// Type sizes. Labels are a step below values, so numbers read as content.
 pub mod font {
     pub const LABEL: f32 = 12.0;
     pub const VALUE: f32 = 13.0;
     pub const HEADER: f32 = 12.0;
-    /// A dialog's own title, where one is written into the body: bigger than the
-    /// text under it, or it is not a title at all.
+    /// A dialog title written into the body, larger than the text below it.
     pub const TITLE: f32 = 17.0;
     pub const SMALL: f32 = 11.0;
 }
 
-/// The colours offered as one click in the outliner's context menu.
-///
-/// A menu cannot hold egui's colour picker -- the picker is a popup, and
-/// opening one closes the menu underneath it before anything can be chosen --
-/// so the menu offers a short palette of ordinary buttons instead and the
-/// property editor keeps the full picker. These are chosen to stay legible as
-/// shaded solids against the viewport's dark ground and its light one, and to
-/// stay apart from the accent amber a selection is drawn in.
+/// One-click colours in the outliner's context menu, since a picker popup would close the menu.
+/// Legible on dark and light grounds and distinct from the selection amber.
 pub const PAINT_PRESETS: [(&str, Color32); 8] = [
     ("Slate", Color32::from_rgb(0x8C, 0x97, 0xA8)),
     ("Blue", Color32::from_rgb(0x2E, 0x7D, 0xD2)),

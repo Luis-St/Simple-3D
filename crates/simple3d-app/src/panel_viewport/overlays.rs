@@ -6,16 +6,15 @@ use crate::gizmo::{self, Gizmo, Handle};
 use crate::theme::{self, token};
 use crate::view::View;
 
-/// Everything drawn over the rasterized image: the manipulator, the bounding
-/// boxes with their numeric dimensions, the axis legend and the live drag value.
+/// Everything over the rasterised image: manipulator, bounding boxes with dimensions, axis legend
+/// and the live drag value.
 pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view: &View) {
     let painter = ui.painter_at(rect);
 
     if app.settings.show_bounding_box {
         if let Some((lo, hi)) = app.selection_bounds() {
             draw_box(&painter, view, lo, hi, token::ACCENT, 1.5);
-            // Dimensions are measurements, so they read in the measure colour,
-            // never in the selection's.
+            // Dimensions are measurements, so they use the measure colour.
             label_box(&painter, ui, view, lo, hi, app.unit(), token::MEASURE);
         }
         if let Some((lo, hi)) = app.evaluated.bounds {
@@ -32,9 +31,7 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // The 3D cursor, where the next shape would land.
     draw_cursor(app, &painter, view);
 
-    // Where a drag has snapped onto another body's feature (issue 68): a hollow
-    // square on the caught point, in the accent so it reads as "this is what it
-    // caught" the way a selection does.
+    // A snapped feature (issue 68): a hollow accent square on the caught point.
     if let Some(at) = app.snap_indicator {
         if let Some((screen, _)) = view.project(at) {
             painter.rect_stroke(
@@ -46,31 +43,21 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
         }
     }
 
-    // A pattern's lay-out grips: a diamond on each of the numbers that place its
-    // copies, dragged to lay them out by eye rather than by typing (issue 67).
+    // Pattern lay-out grips (issue 67).
     draw_pattern_grips(app, &painter, view);
 
-    // And, while the creation tool is open on a pattern that has nothing in it
-    // to repeat, a mark on every place the rule would put a copy (issue 96).
+    // Rule placements while the tool is open on an empty pattern (issue 96).
     draw_pattern_placements(app, &painter, view);
 
-    // Where the section plane stands, and the grip that slides it (issue 71).
-    // Over the image rather than in it: everything the cut keeps is behind the
-    // plane, so there is nothing here that could hide the frame.
+    // The section frame and grip (issue 71), over the image since nothing kept is in front of it.
     crate::section_tool::draw(app, &painter, view);
 
     if app.measure.active {
         draw_measure(app, ui, &painter, view);
     }
 
-    // The one thing about this viewport that can differ from one moment to the
-    // next: which tool is held. The projection was named here too, and it is
-    // always orthographic (`scene::Camera`, where a saved file's `orthographic`
-    // flag is read and ignored); the handle frame was named here after that,
-    // and there is one frame now (issue 100). A word that cannot change is not
-    // information, and this strip's whole job is to be read at a glance.
-    // The measure tool is held instead of the manipulator while it is open, and
-    // the strip said "Move" through the whole of a measurement.
+    // Only the held tool is shown; projection and handle frame were dropped as they never change
+    // (issue 100). The measure tool is named while open.
     let tool = if app.measure.active { "Measure" } else { app.mode.label() };
     let galley =
         painter.layout_no_wrap(tool.to_string(), egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
@@ -86,7 +73,7 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     if let Some(drag) = &app.drag {
         if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
             let at = cursor + egui::vec2(14.0, -18.0);
-            // Cyan, in the numeric face: a measurement, not a message.
+            // Cyan monospace: a measurement, not a message.
             let galley = painter.layout_no_wrap(drag.readout.clone(), egui::FontId::monospace(13.0), token::MEASURE);
             let background = egui::Rect::from_min_size(at, galley.size()).expand(5.0);
             painter.rect_filled(background, 3.0, token::SURFACE_1.gamma_multiply(0.92));
@@ -112,11 +99,9 @@ pub(crate) fn draw_gizmo(
     let handles = gizmo.handles(is_group);
     if handles.is_empty() {
         if app.mode == gizmo::Mode::Resize {
-            // Say why, rather than leaving the user wondering.
+            // Say why resizing is unavailable.
             let Some((origin, _)) = view.project(gizmo.origin) else { return };
-            // On a plate of its own, like the tool's name in the corner: in the
-            // weak text colour straight onto the model it vanished wherever it
-            // crossed a grey face, and read as hidden behind the shape.
+            // On its own plate, since plain weak text vanished over grey faces.
             let galley = painter.layout_no_wrap(
                 if is_group { "Groups have no resize handles" } else { "This shape has no resizable axis" }.to_string(),
                 egui::FontId::proportional(11.0),

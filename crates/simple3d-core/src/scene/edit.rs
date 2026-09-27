@@ -32,8 +32,7 @@ impl Scene {
         true
     }
 
-    /// Deep copy with fresh identities, inserted directly after the original
-    /// (spec section 7.2). Every property is preserved.
+    /// Deep copy with fresh ids, inserted right after the original (spec section 7.2).
     pub fn duplicate(&mut self, id: NodeId) -> Option<NodeId> {
         if id == self.root {
             return None;
@@ -41,21 +40,15 @@ impl Scene {
         let parent = self.nodes.get(&id)?.parent?;
         let index = self.nodes[&parent].children.iter().position(|&c| c == id)? + 1;
         let mut data = self.export_subtree(id)?;
-        // A duplicate is a copy of something already in the document, so it is
-        // named the way a pasted copy is -- "Box copy", not a second "Box".
+        // Named like a pasted copy: "Box copy", not a second "Box".
         data.name = free_name(&self.taken_names(), &copy_name(&data.name));
         let new_id = self.import_subtree(&data, parent, index)?;
         self.rename_subtree_uniquely(new_id, true);
         Some(new_id)
     }
 
-    /// Give every node of a freshly imported subtree a name no other node in the
-    /// document carries.
-    ///
-    /// `keep_top` is for a top whose name was already chosen against the
-    /// document -- a duplicate's "Box copy", a paste's -- so it is not put
-    /// through the rule twice and does not come out "Box copy 2" when nothing
-    /// clashed.
+    /// Make every name in a freshly imported subtree unique. `keep_top` skips a top already named
+    /// against the document (a duplicate's or paste's), avoiding "Box copy 2" for no clash.
     pub fn rename_subtree_uniquely(&mut self, id: NodeId, keep_top: bool) {
         let subtree: HashSet<NodeId> = std::iter::once(id).chain(self.descendants(id)).collect();
         let mut taken: HashSet<String> =
@@ -75,8 +68,7 @@ impl Scene {
         }
     }
 
-    /// Move `id` under `new_parent` at `index`. Refuses to create a cycle and
-    /// refuses to move the root (spec section 7.2).
+    /// Move `id` under `new_parent` at `index`, refusing cycles and the root (spec section 7.2).
     pub fn reparent(&mut self, id: NodeId, new_parent: NodeId, index: usize) -> Result<(), &'static str> {
         self.reparent_many(&[id], new_parent, index)
     }

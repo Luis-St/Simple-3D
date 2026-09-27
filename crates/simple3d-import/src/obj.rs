@@ -1,30 +1,20 @@
 //! OBJ.
 //!
-//! Vertices are numbered across the whole file and faces name them by that
-//! number, so the parts are built by collecting each one's faces first and
-//! remapping the vertices they actually use afterwards -- an object of twelve
-//! triangles out of a file of a million vertices carries twelve triangles'
-//! worth of them, not the file's.
-//!
-//! Coordinates are taken as written. OBJ has no unit and no agreed up axis;
-//! this workspace writes Z up in millimetres and an OBJ from elsewhere is
-//! assumed to mean what it says, because the alternative is guessing at a
-//! rotation the file does not record. Whatever it turns out to be, the node it
-//! lands on can be rotated in the property editor.
+//! Vertices are numbered file-wide, so each part collects its faces first and then remaps only the
+//! vertices it uses. Coordinates are taken as written (OBJ has no unit or up axis); the node can be
+//! rotated afterwards.
 
 use super::*;
 use simple3d_geom::Vec3;
 
-/// A face as the file names it: indices into the file's own vertex list.
+/// A face as the file names it: indices into the file's vertex list.
 type Face = Vec<usize>;
 
 pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, ImportError> {
     let text = text(bytes);
     let lines = text.lines().count().max(1);
     let mut positions: Vec<Vec3> = Vec::new();
-    // Every group named so far, and the faces gathered under it. The unnamed
-    // first group holds whatever comes before the first `o` or `g`, which is
-    // the whole file for the many OBJs that name nothing.
+    // Every group so far with its faces; the unnamed first one holds everything before any `o` or `g`.
     let mut groups: Vec<(String, Vec<Face>)> = vec![(String::new(), Vec::new())];
     for (number, line) in text.lines().enumerate() {
         let line = line.split('#').next().unwrap_or("");
@@ -45,14 +35,10 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
                 }
                 positions.push(Vec3::new(read[0], read[1], read[2]));
             }
-            // A new object or group starts a part. Both keywords do, because
-            // programs disagree about which one an object is written as, and a
-            // file that uses both nests them in that order anyway.
+            // `o` and `g` both start a part, since programs disagree which one an object is.
             "o" | "g" => {
                 let name = words.collect::<Vec<_>>().join(" ");
-                // A group named before any face is one the previous group never
-                // got any geometry into; replacing it keeps an `o` followed by
-                // a `g` from leaving an empty part behind.
+                // A group named before any face replaces the empty previous one, so `o` then `g` leaves no empty part.
                 match groups.last_mut() {
                     Some((current, faces)) if faces.is_empty() => *current = name,
                     _ => groups.push((name, Vec::new())),
@@ -61,16 +47,13 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
             "f" => {
                 let mut face: Face = Vec::new();
                 for word in words {
-                    // `v`, `v/vt`, `v/vt/vn` and `v//vn`: only the first field
-                    // is geometry, and the texture and normal indices are of no
-                    // use to a solid.
+                    // `v`, `v/vt`, `v/vt/vn`, `v//vn`: only the vertex index is geometry.
                     let field = word.split('/').next().unwrap_or("");
                     let index = field
                         .parse::<isize>()
                         .ok()
                         .ok_or_else(|| malformed(format!("line {}: {word:?} is not a vertex index", number + 1)))?;
-                    // Negative indices count back from the vertices read so
-                    // far, which is how a streamed OBJ refers to its own.
+                    // Negative indices count back from the vertices read so far.
                     let resolved = if index < 0 {
                         positions.len().checked_sub(index.unsigned_abs())
                     } else {
@@ -101,8 +84,7 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
     Ok(Model { format: Format::Obj, unit: None, parts })
 }
 
-/// One part's mesh: the vertices it uses, in the order it first uses them, and
-/// its faces fanned into triangles.
+/// One part's mesh: its used vertices in first-use order, and faces fanned into triangles.
 fn build(positions: &[Vec3], faces: &[Face]) -> Mesh {
     let mut mesh = Mesh::new();
     let mut mapped: std::collections::HashMap<usize, u32> = std::collections::HashMap::new();
@@ -116,8 +98,7 @@ fn build(positions: &[Vec3], faces: &[Face]) -> Mesh {
             indices.push(index);
         }
         for i in 1..indices.len() - 1 {
-            // A degenerate corner of a polygon -- the same vertex named twice --
-            // would make a triangle of no area, which welding would drop anyway.
+            // Skip degenerate corners naming a vertex twice; they would have no area.
             if indices[0] != indices[i] && indices[i] != indices[i + 1] && indices[0] != indices[i + 1] {
                 mesh.indices.push([indices[0], indices[i], indices[i + 1]]);
                 mesh.tags.push(0);

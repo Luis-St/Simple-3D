@@ -1,17 +1,8 @@
-//! Pattern nodes (issue 67): a node that repeats its children under a set of
-//! transforms rather than as manual duplicates.
+//! Pattern nodes (issue 67): a node repeating its children under a rule (line, grid, ring, mirror,
+//! helix, spiral) instead of manual duplicates.
 //!
-//! A pattern holds children the way a group does, but it evaluates to copies of
-//! them laid out by a rule -- a line, a grid, a ring, a mirror, a helix or a
-//! spiral. Editing the original edits every copy, and the count is a number
-//! rather than a hundred pasted nodes to keep in step.
-//!
-//! Its parameters ride in the same [`Params`] map a primitive uses, so the
-//! property editor renders and validates them with no code of its own, the
-//! project file and the clipboard carry them already, and undo covers them. The
-//! kind is the first parameter -- a choice -- and every other parameter is shown
-//! only for the kind it belongs to, exactly as a primitive hides "wall
-//! thickness" behind its own choice.
+//! Parameters live in the same [`Params`] map primitives use, so the property editor, project file,
+//! clipboard and undo need nothing extra. The kind is the first parameter, a choice gating the rest.
 
 mod keys;
 pub(crate) use keys::*;
@@ -58,8 +49,7 @@ pub(crate) use grips_curved::*;
 #[cfg(test)]
 mod tests;
 
-/// The kinds of pattern, in the order they appear in the "kind" choice; the
-/// index into this list is the value the choice parameter holds.
+/// The pattern kinds in choice order; the index is the parameter's value.
 pub const KINDS: &[&str] = &["Linear", "Grid", "Circular", "Mirror", "Helix", "Spiral", "Custom"];
 
 const LINEAR: u32 = 0;
@@ -74,5 +64,5 @@ const HELIX: u32 = 4;
 
 const SPIRAL: u32 = 5;
 
-/// A rule the user built themselves, out of stages (issue 67).
+/// A rule built by the user out of stages (issue 67).
 pub const CUSTOM: u32 = 6;

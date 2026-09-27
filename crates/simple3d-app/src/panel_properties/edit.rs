@@ -1,5 +1,4 @@
-//! Writing a value back, and the axis locks that decide what a resize
-//! carries with it.
+//! Writing a value back, and the axis locks that decide what a resize carries.
 
 use crate::app::{App, Status};
 use simple3d_core::primitive::{ParamValue, ParamsExt};
@@ -20,9 +19,8 @@ pub(crate) fn set_param(app: &mut App, id: NodeId, key: &str, value: ParamValue)
     }
 }
 
-/// Whether a lock group's parameters currently hold the same value. The lock is
-/// not stored in the model -- it is a property of the numbers themselves, so a
-/// project file has no hidden state that could disagree with what it shows.
+/// Whether a lock group's parameters hold the same value; the lock is derived from the numbers, so
+/// files hold no hidden state.
 pub(crate) fn is_locked(app: &App, id: NodeId, group: u8) -> bool {
     let Some(spec) = app.scene.node(id).spec() else { return false };
     let Some(params) = app.scene.node(id).params() else { return false };
@@ -36,14 +34,12 @@ pub(crate) fn is_locked(app: &App, id: NodeId, group: u8) -> bool {
     }
 }
 
-/// Clicking the lock either equalises the group to the clicked field's value or,
-/// if it is already locked, nudges one member so it visibly unlocks.
+/// Clicking the lock equalises the group to the clicked field, or if locked, just reports unlocking.
 pub(crate) fn toggle_lock(app: &mut App, id: NodeId, group: u8, key: &str) {
     let Some(spec) = app.scene.node(id).spec() else { return };
     let keys: Vec<String> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
     if is_locked(app, id, group) {
-        // Nothing to change: the fields are already independent as far as the
-        // model is concerned. Just tell the user.
+        // Nothing to change; the fields are already independent in the model.
         app.status = Status::Info("Unlocked; edit the diameters independently".into());
         return;
     }
@@ -59,14 +55,12 @@ pub(crate) fn apply_lock(app: &mut App, id: NodeId, group: u8, key: &str, value:
     if group == 0 {
         return;
     }
-    // Read the lock state from before this edit: the field just changed, so the
-    // group is no longer equal, and asking now would always say "unlocked".
+    // Judge the lock from before this edit, since the group no longer agrees now.
     let Some(spec) = app.scene.node(id).spec() else { return };
     let keys: Vec<String> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
     let others: Vec<&String> = keys.iter().filter(|k| k.as_str() != key).collect();
     let Some(params) = app.scene.node(id).params() else { return };
-    // Locked before the edit means every *other* member still agrees with every
-    // other member.
+    // Locked before means every other member still agrees.
     let was_locked = match others.split_first() {
         Some((first, rest)) => {
             let reference = params.num(first);
@@ -84,9 +78,8 @@ pub(crate) fn apply_lock(app: &mut App, id: NodeId, group: u8, key: &str, value:
     app.fields.clear();
 }
 
-/// Switching a tube between "wall thickness" and "inner diameter" carries the
-/// current geometry across, so the shape does not jump when the user only meant
-/// to change how they express it.
+/// Switching a tube between wall thickness and inner diameter carries the geometry across, so the
+/// shape does not jump.
 pub(crate) fn sync_wall_mode(app: &mut App, id: NodeId, key: &str, chosen: u32) {
     if key != "wall_mode" {
         return;

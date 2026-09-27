@@ -9,15 +9,9 @@ use simple3d_core::keymap::Command;
 impl App {
     // -- commands -----------------------------------------------------------
 
-    /// Whether the chord bound to `command` is being held down right now.
-    ///
-    /// What a *hold* binding asks, as against a press: the chord's modifiers
-    /// count as much as its keys, so a hold rebound to Ctrl+V does not fire on
-    /// a bare V, and a chord that is modifiers alone -- which is what both of
-    /// the holds default to (issue 77) -- has no key to ask about and is
-    /// nothing but the modifier state. One of several keys wants all of them
-    /// down. `key_down` answers whether a toolkit key is currently pressed,
-    /// which only a panel with the input in reach can see.
+    /// Whether `command`'s chord is held now. Modifiers count as much as keys, so a hold on Ctrl+V does
+    /// not fire on V, and a modifier-only chord (the holds' default, issue 77) is just the modifier
+    /// state. `key_down` reports toolkit keys.
     pub fn holding(&self, command: Command, key_down: impl Fn(egui::Key) -> bool, mods: egui::Modifiers) -> bool {
         self.keymap.binding(command).is_some_and(|chord| {
             chord.satisfied_by(
@@ -102,30 +96,22 @@ impl App {
                 self.status = Status::Info("Panel layout reset".into());
             }
 
-            // Reaching for a transform tool puts the measure tool away: only one
-            // of them can own a click.
+            // A transform tool puts the measure tool away: only one can own a click.
             ModeMove => self.pick_transform(Mode::Move),
             ModeRotate => self.pick_transform(Mode::Rotate),
             ModeResize => self.pick_transform(Mode::Resize),
             ModeScale => self.pick_transform(Mode::Scale),
             MeasureTool => self.toggle_measure(),
-            // A hold key, read live while a drag runs rather than acted on when
-            // pressed, so pressing it on its own does nothing (issue 68).
+            // A hold key read live during a drag, so pressing it alone does nothing (issue 68).
             SnapToGeometry => {}
-            // The other hold key, read live by the wheel rather than acted on
-            // when pressed (issue 97).
+            // The other hold key, read live by the wheel (issue 97).
             ZoomToPointer => {}
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),
         }
     }
 
-    /// Switch the section plane on or off (issue 71).
-    ///
-    /// Switching it on puts it in the middle of the model along its axis unless
-    /// it has already been placed somewhere. A plane left at zero cuts nothing
-    /// at all for a part that stands beside the origin, and a section that
-    /// appears to do nothing reads as a broken one rather than as a plane that
-    /// needs sliding.
+    /// Switch the section on or off (issue 71). Unplaced, it starts through the model's middle, since
+    /// a plane at zero may cut nothing and look broken.
     pub(super) fn toggle_section(&mut self) {
         let on = !self.scene.settings.section.enabled;
         self.scene.settings.section.enabled = on;
@@ -140,12 +126,8 @@ impl App {
         });
     }
 
-    /// Slide the section plane to `offset`, in millimetres along its own axis.
-    /// Nothing about the model changes, so this is not an edit and there is no
-    /// undo step for it -- see [`crate::section_tool`].
-    ///
-    /// Which way it went is kept as well, for the kept side that follows the
-    /// plane's motion; a slide that goes nowhere leaves it as it was.
+    /// Slide the section to `offset` along its axis. Not an edit, so no undo step
+    /// (see [`crate::section_tool`]). The direction is kept for the motion-based side.
     pub fn set_section_offset(&mut self, offset: f64) {
         let section = self.section_mut();
         if offset != section.offset {
@@ -155,20 +137,18 @@ impl App {
         self.status = Status::Info(crate::section_tool::readout(self));
     }
 
-    /// Stand the section showing about the middle of the model as it is now:
-    /// the point it turns about, and the one its rectangle is centred on.
+    /// Recentre the shown section's pivot and rectangle on the model's current middle.
     pub fn recentre_section(&mut self) {
         let middle = self.model_middle();
         self.section_mut().centre = middle;
     }
 
-    /// The middle of the model, or nothing while there is no model.
+    /// The middle of the model, or nothing without one.
     fn model_middle(&self) -> Option<simple3d_geom::Vec3> {
         self.evaluated.bounds.map(|bounds| simple3d_core::scene::SectionView::pivot(Some(bounds)))
     }
 
-    /// The section the window is showing, which is the one its fields and the
-    /// offset setter above act on.
+    /// The section the window shows, which its fields and the setters act on.
     pub fn section(&self) -> &simple3d_core::scene::SectionView {
         self.scene.settings.section_at(self.section_tab)
     }
@@ -184,8 +164,7 @@ impl App {
         self.status = Status::Info(format!("{name} axis {}", if on { "shown" } else { "hidden" }));
     }
 
-    /// Switch to a transform tool, which also takes the measure tool out of the
-    /// pointer's way and clears its span.
+    /// Switch to a transform tool, putting the measure tool away and clearing its span.
     pub(super) fn pick_transform(&mut self, mode: Mode) {
         self.mode = mode;
         if self.measure.active {
@@ -194,9 +173,7 @@ impl App {
         }
     }
 
-    /// Turn the measure tool on or off. Leaving it clears the span it was showing
-    /// -- that is what "dismiss" means -- so the next time it is picked up it
-    /// starts clean rather than with a stale line hanging in the scene.
+    /// Toggle the measure tool; leaving it clears the span so it starts clean next time.
     pub fn toggle_measure(&mut self) {
         self.measure.active = !self.measure.active;
         if self.measure.active {

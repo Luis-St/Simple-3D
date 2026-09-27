@@ -1,6 +1,4 @@
-//! More than one variation on a stage, each building up or repeating over the
-//! copies it reaches, and the rules from before a stage held such a list
-//! (issue 79).
+//! Several variations per stage, building up or repeating, and migration of older rules (issue 79).
 
 use super::*;
 use crate::primitive::{ParamValue, Params};
@@ -25,10 +23,7 @@ fn turned_to(copy: &Instance) -> f64 {
     x.y.atan2(x.x).to_degrees()
 }
 
-/// Asked for from the running application: a stage could vary its copies in
-/// only one section. Two shifts reaching different copies is the case one
-/// section could not say -- every other copy moved along X, every third lifted
-/// up Z.
+/// Two shifts reaching different copies on one stage: every other copy along X, every third up Z.
 #[test]
 pub(crate) fn two_variations_of_one_kind_on_one_stage_add_up() {
     let staged = Stage::run(6, Vec3::new(0.0, 10.0, 0.0))
@@ -44,10 +39,8 @@ pub(crate) fn two_variations_of_one_kind_on_one_stage_add_up() {
     }
 }
 
-/// Asked for from the running application: "every" could not reach the
-/// original, nor every copy. Every one from the first reaches all of them;
-/// every other one from the first reaches the original and every other copy
-/// after it.
+/// "Every" can reach the original: every one from the first reaches all copies, every other one
+/// from the first reaches the original and every other copy.
 #[test]
 pub(crate) fn a_variation_can_reach_every_copy_and_the_original() {
     let run = || Stage::run(4, Vec3::new(10.0, 0.0, 0.0));
@@ -62,16 +55,12 @@ pub(crate) fn a_variation_can_reach_every_copy_and_the_original() {
     assert_eq!(lift(2, 2), vec![0.0, 1.0, 0.0, 1.0]);
     assert_eq!(lift(3, 2), vec![0.0, 1.0, 0.0, 0.0], "every third copy from the second reached another");
 
-    // Building up, the copies it reaches get a step more each time and the ones
-    // between them get none.
     let climbing = run().with(Variation::shift(2, 1.0).reaching(2, 1));
     let zs: Vec<f64> = instances(&rule(&[climbing])).iter().map(|c| c.xform.t.z).collect();
     assert_eq!(zs, vec![1.0, 0.0, 2.0, 0.0]);
 }
 
-/// Every kind steps either way: building up copy by copy, or repeating on the
-/// copies it reaches -- a spin that flips every other copy, a size that
-/// alternates, a gap that pairs the copies off.
+/// Every kind can build up or repeat: a flipping spin, an alternating size, paired gaps.
 #[test]
 pub(crate) fn every_kind_of_variation_can_build_up_or_repeat() {
     let run = || Stage::run(4, Vec3::new(10.0, 0.0, 0.0));
@@ -100,8 +89,7 @@ pub(crate) fn every_kind_of_variation_can_build_up_or_repeat() {
     assert_eq!(zs, vec![0.0, 2.0, 4.0, 6.0], "a shift that builds up did not build up");
 }
 
-/// A size is along one axis or all three: a plank that grows longer copy by
-/// copy stays as wide and as thick as the first.
+/// A size along one axis only: a plank growing longer keeps its width and thickness.
 #[test]
 pub(crate) fn a_size_can_stretch_the_copies_along_one_axis() {
     let longer = Stage::run(3, Vec3::new(0.0, 10.0, 0.0)).with(Variation::resize(0, 1.5));
@@ -111,9 +99,8 @@ pub(crate) fn a_size_can_stretch_the_copies_along_one_axis() {
     assert!((x - 2.25).abs() < 1e-12 && (y - 1.0).abs() < 1e-12, "the third copy is {x} by {y}");
 }
 
-/// Variations are applied in the order they are listed: a shift before a spin
-/// moves the copy and turns it where it landed; after it, the shift goes the
-/// way the copy now faces.
+/// Variations apply in list order: a shift before a spin moves then turns; after, it follows
+/// the new facing.
 #[test]
 pub(crate) fn variations_are_applied_in_the_order_they_are_listed() {
     let shift = Variation::shift(0, 10.0);
@@ -124,9 +111,8 @@ pub(crate) fn variations_are_applied_in_the_order_they_are_listed() {
     assert!(near(second.xform.t, Vec3::new(0.0, 10.0, 0.0)), "spin then shift put the copy at {:?}", second.xform.t);
 }
 
-/// A rule saved while a stage carried one of each -- a growing gap, a shift on
-/// a cycle, a spin and a size -- comes back as a list of variations that lays
-/// the copies down where they always were.
+/// A rule saved with one of each old per-stage field migrates to variations that place the
+/// copies unchanged.
 #[test]
 pub(crate) fn a_stage_from_before_it_held_a_list_keeps_what_it_varied() {
     let mut old = rule(&[Stage::run(4, Vec3::new(10.0, 0.0, 0.0)), Stage::turning(3, 30.0, 20.0, 0.0, 0.0, 2)]);
@@ -139,7 +125,7 @@ pub(crate) fn a_stage_from_before_it_held_a_list_keeps_what_it_varied() {
         ("stage1_shift_every", ParamValue::Count(3)),
         ("stage1_spin", ParamValue::Angle(10.0)),
         ("stage1_scale", ParamValue::Count(90)),
-        // A turn never had gaps: this one must not become a variation.
+        // A turn never had gaps, so this must not become a variation.
         ("stage2_gap_growth", ParamValue::Length(4.0)),
         ("stage2_spin", ParamValue::Angle(5.0)),
     ] {
@@ -151,9 +137,7 @@ pub(crate) fn a_stage_from_before_it_held_a_list_keeps_what_it_varied() {
         run.variations(),
         [
             Variation::widen(2.0),
-            // A cycle of three gave nought, one and two steps: two variations,
-            // one reaching the copies it gave one step and one the copies it
-            // gave two.
+            // A cycle of three gave 0, 1 and 2 steps: two variations, reaching the one-step and two-step copies.
             Variation::shift(0, 5.0).repeating(3).reaching(3, 2),
             Variation::shift(0, 10.0).repeating(3).reaching(3, 3),
             Variation::spin(2, 10.0),
@@ -163,20 +147,16 @@ pub(crate) fn a_stage_from_before_it_held_a_list_keeps_what_it_varied() {
     );
     assert_eq!(stage(&migrated, 1).variations(), [Variation::spin(2, 5.0)], "a turn was given a gap it never had");
 
-    // Copy 2 of the run: two steps and one growth along, shifted two fifths of
-    // its cycle on, and spun and shrunk twice where it stands.
     let copy = run.place(2);
     assert!(near(copy.t, Vec3::new(22.0 + 10.0, 0.0, 0.0)), "copy 2 landed at {:?}", copy.t);
     assert!((copy.axis_vector(0).length() - 0.81).abs() < 1e-12);
     let x = copy.axis_vector(0);
     assert!((x.y.atan2(x.x).to_degrees() - 20.0).abs() < 1e-9);
-    // Migrated once, a rule is not migrated again.
+    // Migration is idempotent.
     assert_eq!(migrate_params(&migrated), migrated);
 }
 
-/// A rule saved while a stage had four variation slots -- a shift as a vector,
-/// cycles that always left the original alone -- lays its copies down where it
-/// did, and loses the slots' old names on the way.
+/// A rule saved with four variation slots migrates without moving copies and drops the old names.
 #[test]
 pub(crate) fn a_stage_from_when_it_had_four_slots_keeps_its_copies_where_they_were() {
     let mut old = rule(&[Stage::run(5, Vec3::new(10.0, 0.0, 0.0))]);
@@ -207,9 +187,7 @@ pub(crate) fn a_stage_from_when_it_had_four_slots_keeps_its_copies_where_they_we
     assert_eq!(migrate_params(&migrated), migrated);
 }
 
-/// A stage takes as many variations as there are different ones, refuses a
-/// second one just like one it holds, and one taken from the middle leaves the
-/// others in their order.
+/// A stage accepts distinct variations, refuses duplicates, and keeps order when one is removed.
 #[test]
 pub(crate) fn variations_are_added_while_they_differ_and_dropped_from_anywhere() {
     let mut params = rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0))]);
@@ -238,9 +216,8 @@ pub(crate) fn variations_are_added_while_they_differ_and_dropped_from_anywhere()
     assert_eq!(variation_count(&params, 0), list.len() - 1, "dropping a slot nobody has dropped one that is");
 }
 
-/// The limit is the stage's own: one variation of a kind for each axis, way of
-/// stepping and set of copies it can reach -- so a stage of one copy holds six
-/// shifts, and a seventh is nowhere to be found.
+/// The limit is one variation per kind, axis, stepping and reach, so a one-copy stage holds six
+/// shifts and no seventh.
 #[test]
 pub(crate) fn a_stage_holds_every_different_variation_its_copies_allow() {
     let size = Vec3::new(10.0, 10.0, 10.0);
@@ -255,14 +232,13 @@ pub(crate) fn a_stage_holds_every_different_variation_its_copies_allow() {
     assert!(!has_room_for(&stage(&params, 0), Vary::Shift));
     assert!(has_room_for(&stage(&params, 0), Vary::Spin), "the shifts used up the spins' room");
 
-    // More copies, more to reach: the same stage of four has room again.
+    // More copies, more to reach: a stage of four has room again.
     params.insert("stage1_count".to_string(), ParamValue::Count(4));
     assert!(has_room_for(&stage(&params, 0), Vary::Shift));
 }
 
-/// A variation that is added shows what it does straight away, sized to the
-/// shape and to the stage it is on -- and where the stage holds one just like
-/// it, the chip gives the next one along rather than nothing.
+/// A new variation is visible immediately, sized to the shape and stage; with a duplicate present
+/// the chip offers the next one along.
 #[test]
 pub(crate) fn a_fresh_variation_is_sized_to_the_stage_it_is_added_to() {
     let size = Vec3::new(10.0, 20.0, 5.0);
@@ -289,8 +265,7 @@ pub(crate) fn a_fresh_variation_is_sized_to_the_stage_it_is_added_to() {
     assert_eq!((next.what, next.axis), (Vary::Shift, 1), "the next shift is not along the next axis");
 }
 
-/// A gap that repeats is judged at its narrowest, not at its first: copies
-/// paired off stand closest inside each pair.
+/// A repeating gap is judged at its narrowest: paired copies are closest within each pair.
 #[test]
 pub(crate) fn a_scatter_is_warned_about_at_the_narrowest_gap_a_cycle_leaves() {
     let size = Vec3::new(15.0, 5.0, 5.0);
@@ -306,8 +281,7 @@ pub(crate) fn a_scatter_is_warned_about_at_the_narrowest_gap_a_cycle_leaves() {
     assert_eq!(crowding(&even, size), None, "an even run with room to spare was said to crowd");
 }
 
-/// Every variation's numbers are parameters with a label of their own, however
-/// many slots a stage has, and name themselves back.
+/// Every variation number is a labelled parameter whose key parses back.
 #[test]
 pub(crate) fn every_variation_key_is_a_parameter_with_a_label_of_its_own() {
     let mut labels: Vec<&'static str> = Vec::new();
@@ -316,8 +290,7 @@ pub(crate) fn every_variation_key_is_a_parameter_with_a_label_of_its_own() {
             let spec = param_spec(&key).unwrap_or_else(|| panic!("{key} is not a parameter"));
             assert_eq!(spec.key, key);
             assert!(parse_vary_key(&key).is_some(), "{key} does not read back");
-            // Choices carry no value field, so only numbers need a name of
-            // their own.
+            // Choices carry no value field, so only numbers need their own name.
             if !matches!(spec.kind, crate::primitive::ParamKind::Choice { .. }) {
                 assert!(!labels.contains(&spec.label), "two numbers answer to {}", spec.label);
                 labels.push(spec.label);

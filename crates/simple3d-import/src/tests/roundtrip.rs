@@ -1,11 +1,8 @@
-//! What issue 105 asks for, measured directly: every format the exporter
-//! writes is read back, and what comes back is the shape that went out.
+//! Issue 105 measured directly: every exported format reads back as the shape that went out.
 
 use super::*;
 
-/// The issue in one test: for each of the six things the export dialog offers,
-/// write a plate and read the file back. Every one has to come back as the same
-/// surface -- the same triangles, the same corners, still watertight.
+/// For each export dialog option, a plate written and read back is the same watertight surface.
 #[test]
 pub(crate) fn every_format_the_exporter_writes_can_be_read_back() {
     let mesh = plate();
@@ -37,9 +34,8 @@ pub(crate) fn every_format_the_exporter_writes_can_be_read_back() {
     }
 }
 
-/// The format is read out of the bytes, so a file whose extension is wrong --
-/// or missing, as a downloaded file often is -- still reads as what it is.
-/// Only OBJ needs its name, having no header to be recognised by.
+/// The format is detected from content, so wrong or missing extensions still read; only OBJ needs
+/// its name.
 #[test]
 pub(crate) fn a_file_is_read_by_its_content_rather_than_by_its_name() {
     let mesh = plate();
@@ -50,15 +46,13 @@ pub(crate) fn a_file_is_read_by_its_content_rather_than_by_its_name() {
         let bytes = exported(&mesh, format);
         let model = read_all(&bytes, None).unwrap_or_else(|e| panic!("{}: {e}", format.label()));
         assert!(model.triangle_count() > 0, "{} was not recognised from its content", format.label());
-        // And the wrong name is not believed over the content.
+        // A wrong name is not believed over the content.
         let lied_to = read_all(&bytes, Some(Format::Stl)).unwrap_or_else(|e| panic!("{}: {e}", format.label()));
         assert_eq!(lied_to.triangle_count(), model.triangle_count());
     }
 }
 
-/// A 3MF written as several named bodies (issue 58) comes back as several named
-/// parts, which is what makes the import the other half of that export: the
-/// rows that went into the file are the rows that come out of it.
+/// A 3MF of several named bodies (issue 58) comes back as those named parts.
 #[test]
 pub(crate) fn a_three_mf_of_several_bodies_comes_back_as_those_bodies() {
     let left = plate();
@@ -71,15 +65,12 @@ pub(crate) fn a_three_mf_of_several_bodies_comes_back_as_those_bodies() {
     for part in &model.parts {
         assert_eq!(part.mesh.weld().triangle_count(), left.weld().triangle_count());
     }
-    // And they came back where they were, not stacked on one another.
+    // They came back where they were, not stacked.
     let (lo, hi) = model.merged().bounds().unwrap();
     assert!((hi.x - lo.x - 140.0).abs() < 1e-6, "the two plates span {} rather than 140", hi.x - lo.x);
 }
 
-/// The unit a 3MF records is applied on the way in. Everything above this crate
-/// is millimetres, so a file in inches has to arrive twenty-five times larger
-/// than its numbers -- and the import has to be able to say what it converted
-/// from.
+/// A 3MF's unit is applied on import, so inches arrive 25.4 times larger, and the import reports it.
 #[test]
 pub(crate) fn a_three_mf_in_another_unit_is_converted_to_millimetres() {
     let model = read_all(&package(&tetrahedron_model("inch", "", "")), None).unwrap();
@@ -94,9 +85,7 @@ pub(crate) fn a_three_mf_in_another_unit_is_converted_to_millimetres() {
     assert!((plain.merged().bounds().unwrap().1.x - 10.0).abs() < 1e-9);
 }
 
-/// A painted export comes back painted (issue 84's colours through issue 105's
-/// import), and an unpainted one does not come back painted in the exporter's
-/// stand-in grey.
+/// A painted export comes back painted, and an unpainted one not in the exporter's stand-in grey.
 #[test]
 pub(crate) fn the_colours_a_three_mf_carries_come_back_on_the_faces_that_had_them() {
     let mut painted = plate();
@@ -118,22 +107,19 @@ pub(crate) fn the_colours_a_three_mf_carries_come_back_on_the_faces_that_had_the
     );
 }
 
-/// Nothing is brought in from a file that holds no triangles, whichever way it
-/// manages to hold none.
+/// Nothing is imported from a file with no triangles, however it manages that.
 #[test]
 pub(crate) fn a_file_with_no_geometry_in_it_is_refused_as_empty() {
     assert_eq!(read_all(b"", None).unwrap_err(), ImportError::Empty);
     assert_eq!(read_all(b"# only a comment\n", Some(Format::Obj)).unwrap_err(), ImportError::Empty);
-    // Vertices with no faces are not a surface.
+    // Vertices without faces are not a surface.
     assert_eq!(read_all(b"v 0 0 0\nv 1 0 0\nv 0 1 0\n", Some(Format::Obj)).unwrap_err(), ImportError::Empty);
     let empty_ply = b"ply\nformat ascii 1.0\nelement vertex 0\nproperty float x\nproperty float y\n\
         property float z\nelement face 0\nproperty list uchar uint vertex_indices\nend_header\n";
     assert_eq!(read_all(empty_ply, None).unwrap_err(), ImportError::Empty);
 }
 
-/// A reader that is asked to stop, stops -- the same contract the exporter's
-/// progress callback has, and what lets the application's import run on a
-/// thread with a Cancel button beside it.
+/// A reader asked to stop stops, as the exporter's callback contract says, allowing Cancel.
 #[test]
 pub(crate) fn an_import_stops_when_the_caller_says_so() {
     let mesh = plate();
@@ -149,9 +135,7 @@ pub(crate) fn an_import_stops_when_the_caller_says_so() {
     }
 }
 
-/// Progress runs from nothing to done. It is what the footer's bar reads, so a
-/// reader that only ever reports 0.0 would leave the bar sitting still through
-/// a minute of work.
+/// Progress runs from nothing to done, so the footer's bar moves.
 #[test]
 pub(crate) fn progress_is_reported_up_to_one() {
     let mesh = plate();

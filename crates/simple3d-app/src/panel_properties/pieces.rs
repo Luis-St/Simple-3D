@@ -4,19 +4,8 @@ use crate::app::App;
 use crate::theme::{self, token};
 use simple3d_core::scene::NodeId;
 
-/// A tiling in one line: what shape the cells are, how big, which way they run
-/// and whether they were cut into layers as well.
-/// A collection's pieces, as a list that can be picked through (issue 82).
-///
-/// The collection is one row in the outliner however many thousand pieces it
-/// holds, so this list is where a piece is reached at all: ticked here or by
-/// pointing at it in the viewport, and then extracted -- given a row of its own
-/// under the collection -- or put back inside.
-///
-/// Virtualised, because "however many thousand" is meant literally: a hexagon
-/// tiling over a plate is a few thousand pieces, and a list that lays out every
-/// name every frame is a panel that stops the application whether or not
-/// anybody scrolls it.
+/// A collection's pieces as a pickable list (issue 82), where pieces are ticked and then extracted
+/// or put back. Virtualised, since a tiling can have thousands of pieces.
 pub(crate) fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     let pieces = app.scene.node(id).children.clone();
     if pieces.is_empty() {
@@ -34,14 +23,10 @@ pub(crate) fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.add_space(theme::metric::GAP);
 
     let row = theme::metric::ROW;
-    // Ten rows of room, or fewer when there are fewer: enough to pick through
-    // without the list taking the panel over from the transform below it.
+    // Up to ten rows, so the list does not take over the panel.
     let rows = pieces.len().min(VISIBLE_PIECE_ROWS);
     egui::Frame::NONE.fill(token::SURFACE_0B).corner_radius(3.0).inner_margin(egui::Margin::same(2)).show(ui, |ui| {
-        // The panel's own scroll area, not a bare one: the handle takes its
-        // colour from the style, and the default leaves it invisible until it
-        // is being dragged -- a list of a thousand pieces with no sign that it
-        // scrolls at all.
+        // The panel's scroll area, whose handle is visible at rest.
         let (area, restore) = theme::list_scroll_area(ui);
         area.id_salt(("pieces", id)).max_height(rows as f32 * row).show_rows(ui, row, pieces.len(), |ui, range| {
             ui.set_style(restore);
@@ -55,10 +40,7 @@ pub(crate) fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     ui.add_space(theme::metric::GAP);
     let ticked = app.piece_ticks.len();
     ui.horizontal_wrapped(|ui| {
-        // Select, not tick: the box on a row is what the pointer ticks, and a
-        // button called "Tick all" reads as one that ticks every box rather
-        // than as one that selects every piece -- which is what it does, and
-        // what the viewport shows outlined while it holds.
+        // "Select all", since "Tick all" would read as ticking boxes rather than selecting pieces.
         if ui.add_enabled(ticked < pieces.len(), egui::Button::new("Select all")).clicked() {
             app.piece_ticks = pieces.iter().copied().collect();
         }
@@ -97,8 +79,7 @@ pub(crate) fn pieces_list(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
 /// How many pieces the list shows without scrolling.
 pub(crate) const VISIBLE_PIECE_ROWS: usize = 10;
 
-/// One piece in the list: a tick, its name, and a mark on the ones that have
-/// been extracted.
+/// One piece row: a tick, its name, and a mark if extracted.
 pub(crate) fn piece_row(app: &mut App, ui: &mut egui::Ui, id: NodeId, height: f32) {
     let Some(node) = app.scene.get(id) else { return };
     let (name, extracted, visible) = (node.name.clone(), node.extracted, node.visible);
@@ -122,8 +103,7 @@ pub(crate) fn piece_row(app: &mut App, ui: &mut egui::Ui, id: NodeId, height: f3
         painter.rect_filled(box_rect.shrink(3.0), 1.0, token::ACCENT);
     }
 
-    // The mark on an extracted piece is the same one the outliner puts on a
-    // split, turned round: it says this one is out in the tree.
+    // The extracted mark is the outliner's split mark turned round.
     let mut right = rect.right() - 4.0;
     if extracted {
         let mark = egui::Rect::from_min_size(egui::pos2(right - 14.0, rect.top() + 4.0), egui::Vec2::splat(14.0));

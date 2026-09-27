@@ -1,4 +1,4 @@
-//! The tool's window itself: where it goes up, and what it opens on.
+//! The tool's window: where it opens, and what it opens on.
 
 use super::*;
 use crate::app::App;
@@ -7,14 +7,8 @@ use simple3d_core::keymap::Command;
 use simple3d_core::pattern;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 
-/// The tool is an in-place popup over the viewport, not a dialog in front of
-/// the application (issue 96).
-///
-/// It used to be a window most of the screen wide, half of it a second viewport
-/// rendering the very same scene -- a picture of the pattern, in front of the
-/// picture of the pattern, with the model it was actually being laid out on
-/// blocked by a modal backdrop. Driven through the real frame, because what is
-/// being checked is where the window is drawn and what it leaves reachable.
+/// The tool is an in-place popup over the viewport, not a modal dialog with a second viewport
+/// (issue 96). Driven through a real frame to check placement and reachability.
 #[test]
 pub(crate) fn the_pattern_tool_goes_up_over_the_viewport_rather_than_in_front_of_it() {
     use egui_kittest::kittest::Queryable;
@@ -28,8 +22,7 @@ pub(crate) fn the_pattern_tool_goes_up_over_the_viewport_rather_than_in_front_of
     assert!(harness.state().pattern_tool.is_some(), "the tool did not open");
     assert_eq!(harness.state().modal, crate::app::Modal::None, "the tool went up as a modal dialog");
 
-    // Inside the viewport it floats over, which is what "in place" means: it
-    // cannot be dragged onto the other screen and left there.
+    // Kept inside the viewport it floats over.
     let window = harness
         .ctx
         .memory(|memory| memory.area_rect(egui::Id::new(("in-place-popup", "pattern-tool"))))
@@ -40,16 +33,13 @@ pub(crate) fn the_pattern_tool_goes_up_over_the_viewport_rather_than_in_front_of
         "the tool is at {window:?}, outside the {viewport:?} it belongs to"
     );
 
-    // And Done puts it away without undoing anything: the numbers it showed are
-    // already on the pattern.
+    // Done closes it without undoing anything: the numbers are already on the pattern.
     let pattern = harness.state().pattern_tool.expect("the tool is open on a pattern");
     let linear = rect_of(&harness, crate::pattern_tool::template_id(0));
     press(&mut harness, linear.center());
     release(&mut harness, linear.center());
-    // Several frames: the window grows by the stages the answer brought up, and
-    // a popup keeps itself inside the viewport from the height it came out at
-    // last frame -- so it is still moving for a frame or two afterwards, and a
-    // click aimed at where a button was before it settled lands on nothing.
+    // Several frames: the popup keeps moving for a frame or two as it grows and clamps itself,
+    // and a click aimed at an unsettled button lands on nothing.
     for _ in 0..8 {
         harness.step();
     }
@@ -64,13 +54,8 @@ pub(crate) fn the_pattern_tool_goes_up_over_the_viewport_rather_than_in_front_of
     );
 }
 
-/// The window opens by asking what the rule starts from, and shows the stages
-/// only once that is answered (issue 79).
-///
-/// A blank form of stage numbers says nothing about what a rule is for, and
-/// every rule anyone wants is one of the six fixed layouts with something added
-/// to it. Until the question is answered nothing is written to the pattern
-/// either, so a window opened by accident changes no numbers.
+/// The window first asks what the rule starts from and shows stages only once answered (issue 79);
+/// nothing is written before that, so an accidental open changes nothing.
 #[test]
 pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
     use egui_kittest::kittest::Queryable;
@@ -82,9 +67,7 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
     for _ in 0..4 {
         harness.step();
     }
-    // Every one of the six, and the blank sheet -- and no stage yet. Asked for
-    // by id: the properties panel behind the window has a Kind row carrying the
-    // same seven words.
+    // All six plus the blank sheet, and no stage yet. By id, since the properties panel has the same words.
     for kind in 0..=pattern::CUSTOM {
         assert!(
             harness.ctx.read_response(crate::pattern_tool::template_id(kind)).is_some(),
@@ -100,7 +83,6 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
         "asking the question already changed the pattern"
     );
 
-    // Answered, the stages appear.
     let blank = rect_of(&harness, crate::pattern_tool::template_id(pattern::CUSTOM));
     press(&mut harness, blank.center());
     release(&mut harness, blank.center());
@@ -108,9 +90,7 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
     harness.step();
     assert_eq!(harness.state().scene.node(id).params().unwrap().int("kind"), pattern::CUSTOM);
     assert!(stage_shown(&harness).is_some(), "answering the question did not bring the stages up");
-    // And the question goes with the answer: a row of seven layouts left
-    // standing over the stages they produced is seven buttons that throw the
-    // editing away, at the top of the window.
+    // The question disappears once answered, as its buttons would discard the edits.
     for kind in 0..=pattern::CUSTOM {
         assert!(
             harness.ctx.read_response(crate::pattern_tool::template_id(kind)).is_none(),
@@ -118,29 +98,18 @@ pub(crate) fn the_window_asks_what_to_start_from_before_it_shows_any_stages() {
             pattern::KINDS[kind as usize]
         );
     }
-    // From nothing, which is what Custom means here: one stage, and it does not
-    // move the copy it makes.
+    // Custom starts from nothing: one stage that does not move its copy.
     let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
     assert_eq!(params.int("stages"), 1);
     assert_eq!(pattern::instance_count(&params).1, 1, "the blank sheet was not blank");
 }
 
-/// A pattern the custom-kind menu item makes is a custom one from the moment it
-/// exists, and it is blank: one copy, and every number on it zero.
-///
-/// Asked for from the running application, twice. Add > Custom pattern first put
-/// a pattern on the scene whose Kind row read "Linear" while the tool for
-/// building a custom rule was up in front of it -- the sidebar contradicting the
-/// menu item that had just been pressed. Saying Custom without changing the
-/// numbers then left the second half of the same contradiction: a run of three
-/// copies at a 20 mm step is the linear kind's layout wearing the custom kind's
-/// name. A rule built by hand starts from nothing, and the question the window
-/// asks is what the six fixed layouts are still there for.
+/// A pattern made by the custom-pattern menu item is custom and blank from the start: one copy,
+/// every number zero. Regression: it first read "Linear", then was a linear layout named Custom.
 #[test]
 pub(crate) fn a_pattern_made_for_the_tool_starts_custom_and_blank() {
     let mut harness = harness("pattern-tool-born-custom");
-    // What is selected is a shape, not a pattern, so the tool makes one -- which
-    // is what Add > Custom pattern does.
+    // A shape is selected, so the tool makes a pattern, as Add > Custom pattern does.
     harness.state_mut().open_pattern_tool();
     for _ in 0..4 {
         harness.step();
@@ -149,7 +118,7 @@ pub(crate) fn a_pattern_made_for_the_tool_starts_custom_and_blank() {
     let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
     assert_eq!(params.int("kind"), pattern::CUSTOM, "the pattern the custom tool made calls itself something else");
 
-    // One stage, one copy, and that copy exactly where the original stands.
+    // One stage, one copy, exactly where the original stands.
     assert_eq!(params.int("stages"), 1, "a rule built by hand started with more than one stage on it");
     let copies = pattern::instances(&params);
     assert_eq!(copies.len(), 1, "a blank rule laid down {} copies", copies.len());
@@ -167,8 +136,7 @@ pub(crate) fn a_pattern_made_for_the_tool_starts_custom_and_blank() {
         );
     }
 
-    // And the rule is still unstarted, so the window is still asking what to
-    // start it from rather than opening on the stages.
+    // The rule is still unstarted, so the window still asks what to start from.
     assert!(!harness.state().pattern_tool_started, "the question was answered by the pattern being made");
     for kind in 0..=pattern::CUSTOM {
         assert!(
@@ -179,24 +147,22 @@ pub(crate) fn a_pattern_made_for_the_tool_starts_custom_and_blank() {
     }
     assert!(stage_shown(&harness).is_none(), "the stages were shown before the question was answered");
 
-    // The six are still six: starting from one of them writes what that kind
-    // lays out, from the numbers the fixed kinds are still holding.
+    // Starting from a fixed kind uses the numbers the fixed kinds still hold.
     harness.state_mut().start_rule_from(id, 0);
     harness.step();
     let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
     assert_eq!(pattern::instance_count(&params).1, 3, "starting from linear did not lay out what linear lays out");
 }
 
-/// Starting from a fixed kind lays the rule out as exactly what that kind lays
-/// out, with the numbers the pattern is already holding rather than the kind's
-/// defaults (issue 79).
+/// Starting from a fixed kind lays out exactly that kind, with the pattern's current numbers
+/// rather than defaults (issue 79).
 #[test]
 pub(crate) fn starting_from_a_kind_keeps_the_layout_the_pattern_already_had() {
     let mut harness = harness("pattern-tool-template");
     harness.state_mut().run(Command::Pattern);
     let id = harness.state().primary().expect("the pattern is selected");
 
-    // A ring of five, which is nothing a stage default says.
+    // A ring of five, which no stage default gives.
     {
         let params = harness.state_mut().scene.get_mut(id).and_then(|n| n.params_mut()).expect("a pattern");
         params.insert("kind".to_string(), ParamValue::Choice(2));
@@ -214,7 +180,7 @@ pub(crate) fn starting_from_a_kind_keeps_the_layout_the_pattern_already_had() {
     assert_eq!(params.int("kind"), pattern::CUSTOM, "starting the rule did not switch the pattern to it");
     assert_eq!(pattern::instances(&params), ring, "starting from circular laid the copies out somewhere else");
 
-    // And the same for a grid, from the grid numbers still sitting on the node.
+    // The same for a grid, from the grid numbers on the node.
     let grid = {
         let mut as_grid = params.clone();
         as_grid.insert("kind".to_string(), ParamValue::Choice(1));
@@ -226,8 +192,7 @@ pub(crate) fn starting_from_a_kind_keeps_the_layout_the_pattern_already_had() {
     assert_eq!(pattern::instances(&params), grid, "starting from the grid did not lay out what the grid lays out");
 }
 
-/// A pattern that is already custom has a rule, so the question is answered and
-/// the window opens straight onto the stages.
+/// An already custom pattern opens straight onto its stages.
 #[test]
 pub(crate) fn a_pattern_that_already_has_a_rule_opens_on_its_stages() {
     let mut harness = harness("pattern-tool-existing-rule");
@@ -248,9 +213,8 @@ pub(crate) fn a_pattern_that_already_has_a_rule_opens_on_its_stages() {
     assert!(stage_shown(&harness).is_some(), "a rule that exists was hidden behind the question");
 }
 
-/// Whether the first stage's own fields are on screen. Asked of a field rather
-/// than of the "Stage 1" heading, which is drawn letter-spaced and uppercased
-/// and so reads as nothing a label query can match.
+/// The first stage's field, if shown. Queried by field since the "Stage 1" heading is
+/// letter-spaced and uppercased, which label queries do not match.
 fn stage_shown(harness: &Harness<'_, App>) -> Option<egui::Response> {
     harness.ctx.read_response(crate::panel_properties::grip_id("tool:1 Copies"))
 }

@@ -6,14 +6,8 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::reassemble::Reassemble;
 use std::time::{Duration, Instant};
 
-/// A document holding one mesh node: a plate with a pin standing on it, as two
-/// shells in one bag of triangles.
-///
-/// Built by appending the two solids rather than by unioning them, because that
-/// is what an imported assembly *is*: a printer file holds every body's surface
-/// side by side and nothing in it says they are one solid. Putting the two
-/// through the boolean kernel first would weld them into one surface, which is
-/// a different object and one the recognition is right to refuse.
+/// A document with one mesh node: a plate and a pin as two shells in one bag of triangles.
+/// Appended rather than unioned, as in an imported assembly; a union would weld them into one.
 fn app_with_an_assembly(name: &str) -> (App, NodeId) {
     use simple3d_geom::primitives as gen;
     let mut app = app_in(temp_config_dir(name));
@@ -28,9 +22,7 @@ fn app_with_an_assembly(name: &str) -> (App, NodeId) {
     (app, id)
 }
 
-/// Wait for the run the tool has started, the way the frame loop does: the
-/// analysis is on a thread precisely so the window does not wait for it, so a
-/// test has to.
+/// Wait for the tool's background run, as the frame loop would.
 fn wait_for_answer(app: &mut App) {
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
@@ -76,7 +68,6 @@ fn a_baked_assembly_comes_back_as_objects() {
 
     assert!(app.reassemble_tool.is_none(), "the window stayed open");
     assert!(app.scene.node(id).is_group(), "the mesh did not become a group");
-    // A box and a cylinder, both recognised, both with their parameters back.
     assert_eq!(kinds(&app, id), vec!["box".to_string(), "cylinder".to_string()]);
     let box_id = app
         .scene
@@ -104,16 +95,10 @@ fn the_node_keeps_its_name_and_its_place() {
     assert_eq!(app.selection, vec![id], "the reassembled group is not what is selected");
 }
 
-/// The one thing that has to be exactly right: a pin that comes back somewhere
-/// other than where it stood is a reassembly of a different model.
+/// The pin must come back exactly where it stood.
 ///
-/// Measured one way round, and that is not a weaker test than it looks. The
-/// objects are combined by a union, which takes out the faces where the pin
-/// meets the plate -- the pin's own bottom cap is inside the solid now, and was
-/// a surface in the mesh, so measuring the mesh against the result finds it and
-/// calls the difference three millimetres. What the result may not have is a
-/// surface anywhere the mesh had none, and a shape placed even slightly off
-/// has one everywhere.
+/// Measured one way only: the union removes the pin's buried bottom cap, so mesh-to-result
+/// differs by 3 mm, but a misplaced shape would add surface where the mesh had none.
 #[test]
 fn the_shape_lands_where_the_triangles_were() {
     let (mut app, _) = app_with_an_assembly("reassemble-place");
@@ -151,8 +136,7 @@ fn cancelling_changes_nothing() {
     assert_eq!(app.history.undo_len(), 0, "cancelling left an undo step behind");
 }
 
-/// Nothing goes into the document until Reassemble is pressed. The window is
-/// open, a run has landed, and the tree is still the one mesh it was.
+/// Nothing enters the document until Reassemble is pressed.
 #[test]
 fn the_document_is_untouched_while_the_window_is_open() {
     let (mut app, id) = app_with_an_assembly("reassemble-open");
@@ -168,13 +152,12 @@ fn bodies_that_touch_are_grouped_only_when_asked() {
     let (mut app, id) = app_with_an_assembly("reassemble-group");
     open_with(&mut app, Reassemble { group_touching: false, ..Reassemble::default() });
     app.apply_reassemble();
-    // Two objects straight under the reassembled node, and no group between.
+    // Two objects directly under the reassembled node, with no group between.
     assert_eq!(app.scene.node(id).children.len(), 2);
     assert!(app.scene.node(id).children.iter().all(|&child| !app.scene.node(child).is_group()));
 }
 
-/// The cap is the setting the whole feature needs, and it has to hold: what is
-/// past it stays in one mesh rather than becoming a node apiece.
+/// Bodies past the cap stay in one mesh rather than becoming nodes.
 #[test]
 fn the_cap_holds_and_the_rest_is_kept_as_one_mesh() {
     let (mut app, id) = app_with_an_assembly("reassemble-cap");
@@ -192,13 +175,11 @@ fn recognition_can_be_turned_off_to_leave_the_bodies_as_meshes() {
     let (mut app, id) = app_with_an_assembly("reassemble-raw");
     open_with(&mut app, Reassemble { recognise: false, ..Reassemble::default() });
     app.apply_reassemble();
-    // One group in the whole assembly is the reassembled node itself, so the
-    // two bodies stand straight under it rather than inside a second group.
+    // The reassembled node is the only group, so both bodies sit directly under it.
     assert_eq!(kinds(&app, id), vec!["mesh".to_string(), "mesh".to_string()]);
 }
 
-/// A mesh that is one body and nothing recognisable is the mesh it already is,
-/// and the tool says so rather than offering to wrap it in a group.
+/// A single unrecognisable body stays as it is, and the tool says so.
 #[test]
 fn a_mesh_with_nothing_in_it_is_not_offered() {
     let mut app = app_in(temp_config_dir("reassemble-nothing"));
@@ -223,9 +204,8 @@ fn only_a_mesh_can_be_reassembled() {
     assert!(app.status_text().contains("mesh"), "the refusal does not say what it wants: {}", app.status_text());
 }
 
-/// A run in flight has to keep the frames coming: it hands its answer back over
-/// a channel, which is not an event the toolkit knows about, so a frame loop
-/// that goes to sleep after the number was typed never shows what it did.
+/// A run in flight keeps requesting frames: its channel answer is not a toolkit event, so a
+/// sleeping frame loop would never show it.
 #[test]
 fn a_run_in_flight_keeps_the_frames_coming() {
     let (mut app, _) = app_with_an_assembly("reassemble-frames");
@@ -235,10 +215,8 @@ fn a_run_in_flight_keeps_the_frames_coming() {
     assert!(app.work_in_flight(), "the loop would go to sleep with the answer still to come");
 }
 
-/// The viewport keeps its last image while nothing that went into it has
-/// changed, so anything that *does* change it has to be part of the key that
-/// image is kept under -- and what was found is drawn over the mesh rather than
-/// being the mesh, so nothing else in the key moves with it.
+/// The found overlay must be part of the viewport's image cache key, since nothing else in the
+/// key changes with it.
 #[test]
 fn turning_the_preview_off_redraws_the_viewport() {
     let (mut app, _) = app_with_an_assembly("reassemble-key");
@@ -250,8 +228,7 @@ fn turning_the_preview_off_redraws_the_viewport() {
     assert_ne!(crate::panel_viewport::image_key(&app, size, true), before, "the picture would not be drawn again");
 }
 
-/// What is drawn lands on the model rather than beside it: the bodies are found
-/// in the mesh's own frame, and the node it is on has a transform.
+/// The overlay lands on the model: bodies are found in the mesh's frame and the node is transformed.
 #[test]
 fn what_is_drawn_stands_on_the_model() {
     let (mut app, id) = app_with_an_assembly("reassemble-draw");
@@ -274,7 +251,7 @@ fn leaving_the_tab_puts_the_tool_away() {
     assert!(app.reassemble_tool.is_none(), "the tool followed the document it was not about");
 }
 
-/// The window draws, with every field and the summary in it, on a real frame.
+/// The window draws with every field and the summary on a real frame.
 #[test]
 fn the_window_draws() {
     let (mut app, _) = app_with_an_assembly("reassemble-window");
@@ -283,13 +260,8 @@ fn the_window_draws() {
     assert!(app.reassemble_tool.is_some(), "drawing the window closed it");
 }
 
-/// A recognised sphere still draws something.
-///
-/// Every other shape is drawn by its corners, and a finely tessellated sphere
-/// has none: its facets meet at a few degrees each. Asking for its corners asks
-/// for nothing, and a sphere that came back recognised but drawn as *nothing at
-/// all* reads, in a viewport where everything else is outlined, as a body the
-/// tool missed.
+/// A recognised sphere still draws something: it has no corners to outline, and drawing nothing
+/// looks like a missed body.
 #[test]
 fn a_sphere_is_still_drawn() {
     let mut app = app_in(temp_config_dir("reassemble-sphere"));

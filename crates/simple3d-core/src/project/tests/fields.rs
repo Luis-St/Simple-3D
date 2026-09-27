@@ -4,10 +4,8 @@ use super::*;
 
 #[test]
 pub(crate) fn a_section_plane_is_saved_with_the_document_and_absent_while_it_is_off() {
-    // It is a view of the model, not a change to it, but the offset is a
-    // place *in this model*: it belongs to the document the way the camera
-    // does. Off, it writes nothing at all, so a project made by this build
-    // still diffs cleanly against one made before sections existed.
+    // The section offset is a place in this model, so it is saved like the camera; off, it writes nothing
+    // so files still diff cleanly against older ones.
     let mut scene = sample();
     assert!(!to_string(&scene).contains("section"), "an unused section was written to the file");
 
@@ -26,8 +24,7 @@ pub(crate) fn a_section_plane_is_saved_with_the_document_and_absent_while_it_is_
     let back = from_str(&text).expect("it reads back");
     assert_eq!(back.settings.section, scene.settings.section);
 
-    // And a file written before the field existed still opens, with the
-    // section simply off.
+    // Older files without the field open with the section off.
     let older = text.replace("\"section\":", "\"unknown_to_this_build\":");
     assert!(!from_str(&older).expect("an older file still opens").settings.section.enabled);
 }
@@ -46,15 +43,13 @@ pub(crate) fn a_colour_survives_the_file_and_reads_as_hex() {
 
 #[test]
 pub(crate) fn an_unpainted_scene_writes_no_colour_at_all() {
-    // A file written by this version has to diff cleanly against one
-    // written before colours existed.
+    // Must diff cleanly against files from before colours.
     assert!(!to_string(&sample()).contains("colour"));
 }
 
 #[test]
 pub(crate) fn export_bodies_survive_the_file_so_a_re_export_only_needs_what_changed() {
-    // Issue 58: the whole point of choosing the bodies is not having to
-    // choose them again. They live on the nodes, so saving carries them.
+    // Issue 58: the chosen bodies live on the nodes, so saving carries them.
     use crate::scene::{ExportBody, GroupOp};
 
     let mut scene = sample();
@@ -78,7 +73,7 @@ pub(crate) fn export_bodies_survive_the_file_so_a_re_export_only_needs_what_chan
 
 #[test]
 pub(crate) fn a_colour_that_is_not_a_colour_loads_as_unpainted() {
-    // A hand-edited or truncated value must not fail the whole file.
+    // A bad hand-edited value must not fail the whole file.
     let text = to_string(&sample()).replace("\"visible\": true", "\"visible\": true, \"colour\": \"nonsense\"");
     let scene = from_str(&text).expect("the file should still load");
     assert!(scene.node(scene.node(scene.root()).children[0]).colour.is_none());

@@ -6,11 +6,7 @@ use crate::theme;
 use crate::ui;
 
 impl App {
-    /// Naming a group, or a whole project, before it goes on the palette.
-    ///
-    /// A window rather than an inline field because the name is going into the
-    /// user's library, not into the document: it outlives this project, and it
-    /// is the only thing the palette will show, so it is worth stopping to type.
+    /// Naming a group or project for the palette, in a window since the name outlives the document.
     pub(super) fn save_primitive_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,

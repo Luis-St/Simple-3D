@@ -14,9 +14,7 @@ pub(crate) fn every_primitive_builds_a_manifold_mesh_from_its_defaults() {
 
 #[test]
 pub(crate) fn a_chamfered_box_measures_the_dimensions_it_was_given() {
-    // Whichever edges are cut, and however large the chamfer typed in, the
-    // box is still exactly its stated size -- criterion 2 for a shape whose
-    // parameter has to be clamped.
+    // However large the chamfer, the box keeps its stated size: criterion 2 for a clamped parameter.
     let spec = lookup("chamfered_box").expect("the chamfered box is declared");
     for edges in 0..3 {
         for chamfer in [0.0, 1.0, 4.0, 1000.0] {
@@ -57,8 +55,7 @@ pub(crate) fn flat_shape_aliases_match_their_general_forms() {
     assert_eq!(a.indices, b.indices);
     assert_eq!(a.positions, b.positions);
 
-    // A rounded plate with no radius is still exactly the box, which is
-    // what lets the corner radius be optional on a shape that is an alias.
+    // A zero-radius rounded plate is exactly the box, which keeps the alias's radius optional.
     let mut sharp = plate.default_params();
     sharp.insert("corner_radius".into(), ParamValue::Length(0.0));
     assert_eq!((plate.build)(&sharp, 32).positions, b.positions);

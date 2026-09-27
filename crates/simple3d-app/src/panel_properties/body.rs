@@ -89,6 +89,7 @@ pub(crate) fn split_body(
     });
 }
 
+/// A tiling in one line: cell shape, size, direction and any layers.
 pub(crate) fn describe_tiling(tiling: &simple3d_geom::tiling::Tiling, unit: simple3d_core::unit::Unit) -> String {
     // With the unit on the numbers, unlike a field: this is a sentence about
     // what was done, and "in layers of 4" reads as four layers.

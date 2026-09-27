@@ -7,18 +7,14 @@ use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_geom::primitives;
 
-/// The plane through the origin perpendicular to `axis`, cutting the
-/// material past it away.
+/// The plane through the origin perpendicular to `axis`, removing material past it.
 pub(crate) fn section_at(axis: usize, offset: f64) -> Plane {
     Plane::on_axis(axis, offset, false)
 }
 
-/// How many pixels the cap was drawn on: it is filled flat, in one colour
-/// worked out once, so counting that colour is counting the cut.
+/// How many pixels the cap covers, counted by its single flat colour.
 pub(crate) fn cap_pixels(frame: &Image, palette: &Palette, plane: &Plane, view: &View) -> usize {
     let colour = shade(palette.cut, plane.normal, view.forward(), 255);
     (0..frame.width * frame.height).filter(|i| frame.color[i * 4..i * 4 + 4] == colour[..]).count()
@@ -26,15 +22,13 @@ pub(crate) fn cap_pixels(frame: &Image, palette: &Palette, plane: &Plane, view: 
 
 #[test]
 pub(crate) fn a_section_takes_the_material_past_the_plane_out_of_the_picture() {
-    // Two boxes far enough apart to project to their own corners of the
-    // frame, so what is drawn where can be asked of one of them at a time.
+    // Two boxes far apart, so each can be checked on its own.
     let mut mesh = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(-60.0, 0.0, 0.0));
     mesh.append(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(60.0, 0.0, 0.0)));
     let prepared = Renderable::prepare(&mesh);
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
     req.section = vec![section_at(0, 0.0)];
-    // The axes off: both boxes are centred on X, and an axis drawn through
-    // where one of them was would answer the question for it.
+    // Axes off, since an axis through one box's old place would answer the question for it.
     req.grid.axes = [false; 3];
     let frame = render(&req);
     let palette = Palette::dark();
@@ -67,9 +61,7 @@ pub(crate) fn the_cut_is_capped_so_a_sectioned_solid_still_reads_as_solid() {
 
 #[test]
 pub(crate) fn a_wall_reads_as_a_wall_and_not_as_a_full_face() {
-    // What the feature is for. A tube cut across shows a ring of material
-    // and a hole through the middle of it, so the cap has to cover less
-    // than the solid cylinder of the same size would.
+    // A cut tube shows a ring with a hole, so the cap covers less than a solid cylinder's.
     let plane = section_at(2, 0.0);
     let solid = Renderable::prepare(&primitives::cylinder_mesh(40.0, 40.0, 40.0, 48));
     let tube = Renderable::prepare(&primitives::tube_mesh(40.0, 28.0, 40.0, 48));
@@ -87,10 +79,8 @@ pub(crate) fn a_wall_reads_as_a_wall_and_not_as_a_full_face() {
 
 #[test]
 pub(crate) fn a_wireframe_section_says_where_the_shape_was_cut() {
-    // Wireframe fills nothing, so a cut with no line round it is a shape
-    // whose edges simply stop in mid-air. The probe is the middle of one
-    // side of the cut, where the box has no edge of its own: it is drawn
-    // only if the cut brought its own outline.
+    // Wireframe fills nothing, so the cut must bring its own outline; the probe is mid-side, where the
+    // box has no edge.
     let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
     let items = || vec![Item { renderable: &prepared, style: Style::Solid }];
     let palette = Palette::dark();
@@ -110,9 +100,7 @@ pub(crate) fn a_wireframe_section_says_where_the_shape_was_cut() {
 
 #[test]
 pub(crate) fn what_the_cut_removed_no_longer_hides_an_origin_axis() {
-    // The axis rule asks the model where it runs through material. With the
-    // top of a box cut away, the stretch of Z that ran through it is in
-    // open air and the line has to be drawn there again.
+    // With the box's top cut away, Z runs through open air there and is drawn again.
     let mesh = primitives::box_mesh(40.0, 40.0, 40.0);
     let prepared = Renderable::prepare(&mesh);
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
@@ -126,22 +114,19 @@ pub(crate) fn what_the_cut_removed_no_longer_hides_an_origin_axis() {
 
 #[test]
 pub(crate) fn a_line_of_the_model_is_cut_with_the_faces() {
-    // Edges, outlines and marks all go through one place, so one of them
-    // standing for the rest is fair -- what would break is a path that
-    // forgot to ask at all, and this is the check that it asked.
+    // Edges, outlines and marks share one path, so one stands for all.
     let plane = section_at(2, 0.0);
     assert!(kept_line(&[plane], Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 9.0)).is_empty());
     let kept = *kept_line(&[plane], Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, 5.0)).first().expect("half of it");
     assert!((kept.1.z).abs() < 1e-9, "the line was not trimmed at the plane: {kept:?}");
-    // And with no section, every line is left exactly as it was.
+    // With no section, lines are unchanged.
     let (a, b) = (Vec3::new(1.0, 2.0, 3.0), Vec3::new(4.0, 5.0, 6.0));
     assert_eq!(&*kept_line(&[], a, b), &[(a, b)]);
 }
 
 #[test]
 pub(crate) fn a_shape_the_ground_plane_cuts_is_marked_where_it_cuts_it() {
-    // Issue 16: how much of a shape is below the build plate is a real
-    // dimension, and it is invisible until something marks it.
+    // Issue 16: how much of a shape is below the plate is marked.
     let straddling = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
     let clear = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0).translated(Vec3::new(0.0, 0.0, 60.0)));
     let marks = |renderable: &Renderable, on: bool| {
@@ -150,8 +135,7 @@ pub(crate) fn a_shape_the_ground_plane_cuts_is_marked_where_it_cuts_it() {
             Grid { visible: false, spacing: 10.0, axes: [false, false, true], style: AxisStyle::Grid, plane_marks: on };
         pixels_of(&render(&req), req.palette.axis_z)
     };
-    // Measured as the difference the switch makes, because the Z axis
-    // itself is drawn in the same colour wherever the box does not hide it.
+    // Measured as the switch's difference, since the Z axis is drawn in the same colour.
     assert!(
         marks(&straddling, true) > marks(&straddling, false),
         "the ground plane cuts this box and nothing said where"
@@ -161,10 +145,7 @@ pub(crate) fn a_shape_the_ground_plane_cuts_is_marked_where_it_cuts_it() {
 
 #[test]
 pub(crate) fn a_plane_mark_follows_the_switch_of_the_axis_it_is_drawn_as() {
-    // Issue 75. A mark is recognised by its colour and by nothing else, and
-    // X's and Y's are exchanged on purpose, so the switch has to follow the
-    // exchange too: the X box shows and hides the mark drawn in X's red,
-    // whichever plane happens to leave it.
+    // Issue 75: marks are recognised by colour and X/Y are swapped, so the X switch controls the red mark.
     let renderable = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
     let pixels = |marked: bool, colour: Rgba| {
         let mut req = request(vec![Item { renderable: &renderable, style: Style::Solid }], DisplayMode::Shaded);
@@ -177,8 +158,7 @@ pub(crate) fn a_plane_mark_follows_the_switch_of_the_axis_it_is_drawn_as() {
         };
         pixels_of(&render(&req), colour)
     };
-    // Measured as the difference the marks make, because the X axis line is
-    // drawn in the same red wherever the box does not hide it.
+    // Measured as the marks' difference, since the X axis is the same red.
     let palette = Palette::dark();
     assert!(
         pixels(true, palette.axis_x) > pixels(false, palette.axis_x),

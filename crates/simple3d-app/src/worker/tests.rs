@@ -47,10 +47,8 @@ fn an_evaluation_comes_back_from_the_worker() {
     assert!(worker.last_elapsed.is_some());
 }
 
-/// The radius of the hole in a drilled plate. Nothing sits inside the hole,
-/// so the closest vertex to its axis is on its wall -- a more reliable
-/// measure than the farthest, since the boolean scatters T-junction
-/// vertices across the plate's faces near the hole too.
+/// A drilled plate's hole radius: the vertex nearest the axis is on the wall, more reliable than the
+/// farthest given T-junction vertices nearby.
 fn hole_radius(result: &Evaluated) -> f64 {
     result.mesh.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min)
 }
@@ -68,15 +66,8 @@ fn burst(worker: &mut EvalWorker, diameters: [f64; 5]) {
 
 #[test]
 fn a_burst_of_edits_keeps_answering_and_settles_on_the_newest() {
-    // What a drag is: an edit on every frame, faster than the evaluation
-    // they ask for. Each one used to cancel the run in flight, so while the
-    // scene was expensive enough to matter -- a shape being dragged into
-    // another one, where the union stops being a bounding-box rejection and
-    // becomes a real boolean -- nothing ever finished and the viewport
-    // showed the same picture for the whole gesture.
-    //
-    // Now the newest edit waits, so answers keep arriving; the last of them
-    // is the newest scene, which is the part that was never negotiable.
+    // A drag submits every frame; cancelling each run meant expensive scenes never finished. Now the
+    // newest waits, answers keep coming, and the last is the newest scene.
     let mut worker = EvalWorker::spawn();
     burst(&mut worker, [4.0, 5.0, 6.0, 7.0, 8.0]);
 
@@ -89,21 +80,19 @@ fn a_burst_of_edits_keeps_answering_and_settles_on_the_newest() {
         assert!(Instant::now() < deadline, "the worker never finished the burst");
         std::thread::sleep(Duration::from_millis(1));
     }
-    // Answers, plural: a burst that produces one picture is a frozen
-    // viewport, whatever it settles on afterwards.
+    // Several answers: one picture for a whole burst is a frozen viewport.
     assert!(answers.len() >= 2, "the whole burst produced one answer: {answers:?}");
-    // The final 8mm hole, not one of the ones it overtook.
+    // The final 8 mm hole, not one it overtook.
     let last = *answers.last().unwrap();
     assert!((last - 4.0).abs() < 1e-6, "settled on radius {last}, expected 4mm");
-    // Nothing left queued behind it.
+    // Nothing left queued.
     assert!(worker.poll().map(|(result, _)| result).is_none());
     assert!(!worker.is_busy());
 }
 
 #[test]
 fn a_document_shown_supersedes_the_evaluation_of_the_one_left_behind() {
-    // A tab switch is the one submission that must not wait: the answer the
-    // old document is still working on would be applied to the new one.
+    // A tab switch must not wait, or the old document's answer would land on the new one.
     let mut worker = EvalWorker::spawn();
     burst(&mut worker, [4.0, 5.0, 6.0, 7.0, 8.0]);
     let mut other = drilled_plate();
@@ -133,7 +122,7 @@ fn the_cache_survives_between_submissions_so_repeat_edits_get_faster() {
     worker.submit(&scene);
     wait_for(|| worker.poll().map(|(result, _)| result));
     let cold = worker.last_elapsed.unwrap();
-    // The identical scene is a pure cache hit on the worker's own evaluator.
+    // The identical scene is a pure cache hit on the worker's evaluator.
     worker.submit(&scene);
     wait_for(|| worker.poll().map(|(result, _)| result));
     let warm = worker.last_elapsed.unwrap();
@@ -170,8 +159,7 @@ fn a_cancelled_export_reports_cancellation_and_leaves_no_file() {
     );
     job.cancel();
     let outcome = wait_for(|| job.poll());
-    // Fast machines may finish before the cancel lands; either way no
-    // half-written file may survive.
+    // A fast machine may finish first; either way no half-written file may survive.
     match outcome {
         Err(ExportError::Cancelled) => assert!(!path.exists(), "cancelling left a file behind"),
         Ok(()) => {

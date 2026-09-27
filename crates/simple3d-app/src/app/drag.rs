@@ -2,19 +2,13 @@
 
 use simple3d_core::scene::NodeId;
 
-/// What a drag over the outliner is holding.
-///
-/// Rows already in the tree are moved by it; a shape from the palette is not in
-/// the scene at all until the drop lands, so the two are told apart here rather
-/// than by whether the load happens to be empty.
+/// What an outliner drag holds. Palette shapes are not in the scene until dropped, so they are a
+/// separate case rather than an empty load.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Carried {
-    /// The row that was grabbed. What travels with it is `dragged_nodes`: the
-    /// whole selection when the grabbed row is part of it, that row alone
-    /// otherwise.
+    /// The grabbed row; `dragged_nodes` carries the whole selection if the row is part of it.
     Rows(NodeId),
-    /// A primitive type from the palette, dropped into the tree rather than
-    /// added at the document's insertion point.
+    /// A palette primitive dropped into the tree instead of added at the insertion point.
     Shape(&'static str),
 }
 
@@ -23,7 +17,6 @@ pub enum Carried {
 pub struct DropTarget {
     pub parent: NodeId,
     pub index: usize,
-    /// Set when the drop is *into* a group rather than between two siblings, so
-    /// the indicator can differ.
+    /// Set when dropping into a group rather than between siblings, so the indicator differs.
     pub into: Option<NodeId>,
 }

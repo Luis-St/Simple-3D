@@ -31,13 +31,8 @@ fn assert_bounds(name: &str, mesh: &Mesh, expect: Vec3, tol: f64) {
     );
 }
 
-/// A rolling landscape tile: a grid of heights turned into a closed solid with
-/// a skirt and a floor, a hundred samples across.
-///
-/// Built here rather than taken from anywhere, because what the test below
-/// needs is simply a *dense, many-planed* solid -- eighteen thousand faces in
-/// as many directions -- which is the shape of operand the kernel used to fall
-/// apart on.
+/// A closed landscape solid from a height grid: dense and many-planed, the operand the kernel used to
+/// fall apart on.
 fn landscape(nx: usize, ny: usize) -> Mesh {
     let (width, depth) = (200.0, 200.0);
     let at = |i: usize, j: usize| {
@@ -60,7 +55,7 @@ fn landscape(nx: usize, ny: usize) -> Mesh {
             quad(floor(i, j), floor(i, j + 1), floor(i + 1, j + 1), floor(i + 1, j));
         }
     }
-    // The four skirts, each walking one edge of the grid down to the floor.
+    // The four skirts, each walking one grid edge down to the floor.
     for i in 0..nx - 1 {
         quad(at(i, 0), floor(i, 0), floor(i + 1, 0), at(i + 1, 0));
         quad(at(i + 1, ny - 1), floor(i + 1, ny - 1), floor(i, ny - 1), at(i, ny - 1));
@@ -72,9 +67,8 @@ fn landscape(nx: usize, ny: usize) -> Mesh {
     mesh.weld()
 }
 
-/// The volume the mesh encloses, by the divergence theorem. Any boolean that
-/// leaves an operand's interior faces in the result, or loses part of the
-/// surface, gets this badly wrong -- which a triangle count alone will not show.
+/// Enclosed volume by the divergence theorem; catches leftover interior faces or lost surface that a
+/// triangle count would not.
 fn volume(mesh: &Mesh) -> f64 {
     let mut total = 0.0;
     for t in &mesh.indices {

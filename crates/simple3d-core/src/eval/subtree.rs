@@ -1,5 +1,4 @@
-//! Evaluating one subtree: the boolean of its children, or the mesh of the
-//! primitive at its leaf.
+//! Evaluating one subtree: the boolean of its children, or its leaf primitive's mesh.
 
 use super::*;
 use crate::scene::{Anchor, Body, GroupOp, NodeId, Scene};
@@ -9,9 +8,8 @@ use std::ops::Range;
 use std::sync::Arc;
 
 impl Evaluator {
-    /// The mesh of a node in its *parent's* frame: generated geometry, then the
-    /// anchor, then rotation, then position. Anchoring before rotating is what
-    /// makes changing the anchor move only the origin, never the shape.
+    /// A node's mesh in its parent's frame: geometry, anchor, rotation, position. Anchoring before
+    /// rotating makes anchor changes move only the origin.
     pub(super) fn subtree(&mut self, scene: &Scene, id: NodeId, cancel: &Cancel) -> Arc<SubtreeResult> {
         let key = self.subtree_key(scene, id);
         if let Some(hit) = self.subtrees.get(&key) {
@@ -27,7 +25,7 @@ impl Evaluator {
             Err(errors) => return Arc::new(SubtreeResult::abandoned(errors)),
         };
         let (errors, passed) = (local.errors.clone(), local.passed.clone());
-        // Each step below makes a new mesh, so the cached one is only read.
+        // Each step makes a new mesh, so the cached one is only read.
         let mut placed = std::borrow::Cow::Borrowed(&*local.mesh);
 
         let anchor_offset = match (node.anchor, placed.bounds()) {
@@ -37,26 +35,17 @@ impl Evaluator {
         if anchor_offset.z != 0.0 {
             placed = std::borrow::Cow::Owned(placed.translated(anchor_offset));
         }
-        // Anchor, then scale, then rotate, then translate -- the same order
-        // `Xform::from_pos_rot_scale` composes, so the per-node world frames the
-        // manipulator uses and the mesh agree. Scaling *after* the anchor is what
-        // keeps a base-anchored shape standing on z = 0 whatever it is scaled by.
+        // Same order as `Xform::from_pos_rot_scale`, so the manipulator's frames agree with the mesh.
+        // Scaling after anchoring keeps a base-anchored shape on z = 0.
         let scale = crate::scene::Node::sane_scale(node.scale);
         if scale != Vec3::ONE {
             placed = std::borrow::Cow::Owned(placed.scaled(scale));
         }
         let mesh = placed.transformed(node.position, node.rotation);
-        // Placing a mesh moves its vertices and keeps their order, so where
-        // each child's landed still holds.
+        // Placement keeps vertex order, so the children's ranges still hold.
         let result = Arc::new(SubtreeResult { mesh: Arc::new(mesh), anchor_offset, errors, passed });
-        // Nothing computed under cancellation is kept, however finished it
-        // looks. An abandoned boolean gives back an empty mesh, and the
-        // evaluator -- and so this cache -- outlives the run that was
-        // abandoned: cached, that empty mesh is what every later evaluation of
-        // the same content gets back, so the shapes vanish from the viewport
-        // and stay vanished until something changes the content hash. The
-        // cancelled run's own answer is dropped by the worker; this is the
-        // other half of dropping it.
+        // Nothing computed under cancellation is cached: an abandoned boolean returns an empty mesh,
+        // and caching it would make the shapes vanish until the content hash changed.
         if !cancel.is_cancelled() {
             self.subtrees.insert(key, result.clone());
         }
@@ -65,14 +54,10 @@ impl Evaluator {
 }
 
 impl Evaluator {
-    /// What a node makes of its body and its children, in its own frame and
-    /// before it is anchored or placed -- or, when the run is abandoned part
-    /// way, the errors found so far.
+    /// A node's own-frame result from its body and children, or the errors so far if abandoned.
     ///
-    /// A group's, a split's and a pattern's are cached by their content alone
-    /// (`Evaluator::locals`), so a node that has only moved gets its boolean
-    /// back from the cache. A primitive's and a stored mesh's are a copy with
-    /// the colour stamped on, which costs less to make again than to keep.
+    /// Groups, splits and patterns are cached by content (`Evaluator::locals`), so a moved node hits
+    /// the cache. Primitives and stored meshes are recoloured copies, cheaper to redo than keep.
     fn local(&mut self, scene: &Scene, id: NodeId, cancel: &Cancel) -> Result<Arc<LocalResult>, Vec<NodeError>> {
         let cached = matches!(scene.node(id).body, Body::Group { .. } | Body::Split { .. } | Body::Pattern { .. });
         let key = cached.then(|| self.content_key(scene, id));
@@ -83,9 +68,7 @@ impl Evaluator {
         }
         let node = scene.node(id);
         let mut errors: Vec<NodeError> = Vec::new();
-        // The children whose geometry comes through into this mesh untouched,
-        // by their place among the visible children, with where their
-        // vertices landed in it.
+        // Children passed through untouched, by visible index, with where their vertices landed.
         let mut passed: Vec<(usize, u32)> = Vec::new();
         let mesh = match &node.body {
             Body::Mesh { mesh } => {
@@ -96,9 +79,7 @@ impl Evaluator {
                 copy
             }
             Body::Primitive { .. } => {
-                // The generated mesh is cached by its shape alone and shared
-                // between identical primitives, so the colour is stamped on the
-                // copy this node keeps, never on the cached original.
+                // The generated mesh is shared between identical primitives, so colour goes on this copy only.
                 let mut mesh = (*self.primitive_mesh(scene, id)).clone();
                 mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                 mesh
@@ -123,23 +104,9 @@ impl Evaluator {
                 passed.extend(untouched.into_iter().map(|(index, offset)| (places[index], offset)));
                 mesh
             }
-            // A split is its pieces, side by side -- appended, not unioned
-            // (issue 82).
-            //
-            // The pieces were cut out of one solid by cells that do not
-            // overlap, so they are disjoint by construction and a union has
-            // nothing to resolve. What it does instead is undo the split: every
-            // pair of them meets along a whole face, the kernel welds the pair
-            // into one body, and what comes back out is the shape they were cut
-            // from -- a plate cut into 378 squares evaluated to the twelve
-            // triangles of the plate, in a tenth of a second in release and
-            // seconds in a debug build, on every edit of the scene.
-            //
-            // Appending is what a pattern does with its unit for the same
-            // reason, and it keeps each piece a body of its own: its own
-            // colour, its own tag, its own shell for the exporter to write.
-            // Nothing is welded, so nothing shares an edge between two pieces
-            // and the result stays manifold shell by shell.
+            // A split's pieces are appended, not unioned (issue 82). They are disjoint by construction,
+            // and a union would weld neighbours back into the original shape, slowly, on every edit.
+            // Appending also keeps each piece its own body, colour, tag and shell.
             Body::Split { .. } => {
                 let mut pieces = Mesh::new();
                 let visible = node.children.iter().filter(|&&child| scene.node(child).visible);
@@ -154,10 +121,8 @@ impl Evaluator {
                 }
                 pieces
             }
-            // What the component makes, placed at the integration's own origin
-            // (issue 113). The component is a scene of its own, evaluated as
-            // its own tab evaluates it -- its root's transform and all -- and
-            // this node's placement goes on top of that, as any node's does.
+            // The component's result placed at the integration's origin (issue 113), evaluated as its own
+            // tab does, with this node's placement on top.
             Body::Component { component, op } => match scene.linked_component(*component).cloned() {
                 Some(inner) => {
                     let root = inner.root();
@@ -172,9 +137,7 @@ impl Evaluator {
                         }
                         _ => self.subtree(&inner, root, cancel),
                     };
-                    // The component's own nodes are not in this scene, so what
-                    // is wrong inside it is reported on the node that stands for
-                    // it, naming the node it is wrong with.
+                    // The component's nodes are not in this scene, so errors are reported on this node.
                     errors.extend(result.errors.iter().map(|e| NodeError {
                         node: id,
                         name: node.name.clone(),
@@ -199,10 +162,7 @@ impl Evaluator {
                 }
             },
             Body::Pattern { params } => {
-                // The unit the pattern repeats: its children, placed by their own
-                // positions and appended. A pattern lays copies side by side, it
-                // does not boolean them, so this is a concatenation and stays fast
-                // however many copies there are.
+                // The repeated unit: children placed and appended, not booleaned, so this stays fast.
                 let mut unit = Mesh::new();
                 for &child in &node.children {
                     if !scene.node(child).visible {
@@ -217,40 +177,25 @@ impl Evaluator {
                 }
                 let mut copies: Vec<Mesh> = Vec::new();
                 for instance in crate::pattern::instances(params) {
-                    // Checked per copy, not just before the loop: a pattern is
-                    // the one node whose cost is a number someone types, so a
-                    // count that turns out to be too large has to be abandonable
-                    // rather than run to the end.
+                    // Checked per copy, since the count is typed and may be too large to run to the end.
                     if cancel.is_cancelled() {
                         return Err(errors);
                     }
                     let mut copy = apply(&instance.xform, &unit);
-                    // A reflection reverses the winding, so its faces point the
-                    // wrong way until they are flipped back.
+                    // A reflection reverses the winding, so the faces are flipped back.
                     if instance.mirrored {
                         copy.flip_winding();
                     }
                     copies.push(copy);
                 }
-                // The copies are *unioned*, not concatenated. A pattern stands in
-                // for manual duplicates, so it has to produce what those would:
-                // duplicates dropped in a union group meet the kernel as separate
-                // operands and come out one clean solid, and copies that merely
-                // touch -- which is what a step equal to the shape's own width
-                // gives -- must do the same. Concatenating them instead welded
-                // the contact into an edge shared by four triangles, and the
-                // enclosing group then reported the whole scene non-manifold.
-                //
-                // This costs nothing for the copies that stand clear of each
-                // other, which is the ordinary case and the one a helix makes
-                // many of: `union_all` rejects non-overlapping operands on their
-                // bounding boxes and never enters the BSP kernel for them.
+                // Copies are unioned, to match manual duplicates in a union group: touching copies must merge
+                // into a clean solid, and concatenating made shared edges non-manifold. Non-overlapping copies
+                // are free, since `union_all` rejects them on their boxes before the BSP kernel.
                 combine(GroupOp::Union, &copies, id, &node.name, &mut errors, cancel).0
             }
         };
         let local = Arc::new(LocalResult { mesh: Arc::new(mesh), errors, passed, node: id });
-        // Kept only when the run was not abandoned, for the reason `subtree`
-        // gives for its own cache.
+        // Cached only when not abandoned, as in `subtree`.
         if let (Some(key), false) = (key, cancel.is_cancelled()) {
             self.locals.insert(key, local.clone());
         }
@@ -259,13 +204,8 @@ impl Evaluator {
 }
 
 impl Evaluator {
-    /// Which vertices of `id`'s mesh each node below it is -- see
-    /// [`Evaluated::ranges`] -- with `id` itself starting at `start`.
-    ///
-    /// Found by walking the tree rather than kept with the cached results:
-    /// those are shared by every node with the same content, so a result
-    /// knows which of its children came through, but not which nodes they
-    /// are.
+    /// Which vertices of `id`'s mesh each node below it owns ([`Evaluated::ranges`]), with `id`
+    /// starting at `start`. Walked from the tree, since cached results are shared across nodes.
     pub(super) fn ranges(
         &mut self,
         scene: &Scene,

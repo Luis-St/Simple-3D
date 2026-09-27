@@ -2,15 +2,12 @@
 
 use crate::theme::{self, token};
 
-/// A collapsible panel in the right dock: a header bar, and a padded body that
-/// is only drawn when the panel is open.
+/// A collapsible right-dock panel: header bar and a padded body drawn only when open.
 pub(crate) fn section(ui: &mut egui::Ui, name: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     section_titled(ui, name, "", add_contents)
 }
 
-/// A section whose header carries a second, quieter word on the right: the
-/// primitive's type beside "Dimensions", so the panel keeps a stable name while
-/// still saying what is selected.
+/// A section with a quieter note on the right, such as the primitive type beside "Dimensions".
 pub(crate) fn section_titled(ui: &mut egui::Ui, name: &str, note: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
     let id = ui.id().with(("section", name));
     let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(true);

@@ -7,29 +7,23 @@ use simple3d_core::primitive::ParamValue;
 use simple3d_core::scene::NodeId;
 use simple3d_core::unit::{format_length, Unit};
 
-/// A view centre is shown to a hundredth of a millimetre, not to the four
-/// decimals a measurement gets.
-///
-/// The camera's target is wherever a drag happened to stop, so it carries
-/// all four of those places nearly all of the time -- and `-8.2888` in a
-/// field sized for `40` is the number that would not fit. Two decimals at
-/// every magnitude, so the readout keeps its shape as the view travels.
+/// A view centre shows two decimals at every magnitude, since four made pan leftovers too long for
+/// the field.
 #[test]
 pub(crate) fn a_view_centre_is_shown_to_a_hundredth_of_a_millimetre() {
     let shown = |mm: f64| format_length(shown_view_centre(mm), Unit::Millimetre);
     assert_eq!(shown(-8.288812), "-8.29");
     assert_eq!(shown(39.236851), "39.24");
-    // A rounding, not a truncation.
+    // Rounded, not truncated.
     assert_eq!(shown_view_centre(0.005), 0.01);
     assert_eq!(shown_view_centre(-0.005), -0.01);
-    // It never lengthens a number that was already short.
+    // Short numbers are not lengthened.
     assert_eq!(shown(40.0), "40");
     assert_eq!(shown(0.0), "0");
-    // And the two decimals stay on however far out the camera is taken.
+    // Two decimals however far out the camera goes.
     assert_eq!(shown(-12345.678912), "-12345.68");
     assert_eq!(shown(-6248194.994), "-6248194.99");
-    // Never more than two, which is the whole point: four made every value
-    // a pan left behind too long for the field.
+    // Never more than two.
     for mm in [-8.288812, 39.236851, -6248194.994, 1234.5678, -0.0051] {
         let text = shown(mm);
         let decimals = text.split_once('.').map_or(0, |(_, rest)| rest.len());
@@ -69,7 +63,7 @@ pub(crate) fn an_absolute_value_applies_to_the_whole_selection_and_a_delta_appli
     set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "+2".into());
     assert_eq!((width_of(&app, a), width_of(&app, b)), (42.0, 62.0), "a delta is relative to each node's own value");
 
-    // And the field's other tricks reach the model the same way.
+    // The field's other tricks reach the model too.
     set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "4cm".into());
     assert_eq!((width_of(&app, a), width_of(&app, b)), (40.0, 40.0), "a value in another unit did not convert");
     set_shared_param(&mut app, &[a, b], param, param.kind, unit, field, "12+8".into());
@@ -78,7 +72,7 @@ pub(crate) fn an_absolute_value_applies_to_the_whole_selection_and_a_delta_appli
 
 #[test]
 pub(crate) fn an_em_dash_left_alone_edits_nothing() {
-    // Tabbing through a panel of mixed values must not flatten them.
+    // Tabbing through mixed values must not flatten them.
     let mut app = headless_app();
     let (a, b) = two_plates(&mut app);
     let unit = app.unit();
@@ -89,8 +83,7 @@ pub(crate) fn an_em_dash_left_alone_edits_nothing() {
 
 #[test]
 pub(crate) fn a_value_that_cannot_be_read_leaves_every_node_alone_and_marks_the_field() {
-    // Acceptance criterion 14, and the design's rule that the typed text
-    // stays put: it is the thing the user has to correct.
+    // Acceptance criterion 14: an unreadable value leaves every node alone and keeps the typed text.
     let mut app = headless_app();
     let (a, b) = two_plates(&mut app);
     let unit = app.unit();

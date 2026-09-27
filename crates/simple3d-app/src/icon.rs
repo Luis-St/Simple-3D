@@ -1,12 +1,6 @@
-//! Geometric line icons, drawn rather than loaded.
-//!
-//! A single self-contained binary is a hard constraint, so there is no icon
-//! font and no SVG loader here: every glyph is a handful of strokes in a unit
-//! square, scaled into whatever rectangle it is asked to fill. That also keeps
-//! them crisp at fractional DPI scaling, which a bitmap sheet would not.
-//!
-//! The house style is the design's: 16 px, 1.5 px stroke, geometric, and no
-//! filled pictograms except the object-type glyphs in the outliner.
+//! Geometric line icons, drawn as strokes in a unit square: no icon font or SVG loader in a single
+//! binary, and crisp at fractional DPI. House style: 16 px, 1.5 px stroke, filled only for outliner
+//! object-type glyphs.
 
 mod glyph;
 pub use glyph::Glyph;

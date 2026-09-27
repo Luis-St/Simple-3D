@@ -13,15 +13,13 @@ impl Keymap {
 
         set(New, Chord::ctrl("N"));
         set(Open, Chord::ctrl("O"));
-        // The document keys every tabbed program shares, so nobody has to look
-        // them up (issue 61).
+        // The standard document keys of tabbed programs (issue 61).
         set(CloseTab, Chord::ctrl("W"));
         set(NextTab, Chord::ctrl("Tab"));
         set(PreviousTab, Chord::ctrl_shift("Tab"));
         set(Save, Chord::ctrl("S"));
         set(SaveAs, Chord::ctrl_shift("S"));
-        // Beside Export, which it is the other half of (issue 105). I for
-        // import, which no preset spends on anything else.
+        // I for import, beside Export (issue 105).
         set(Import, Chord::ctrl("I"));
         set(Export, Chord::ctrl("E"));
         set(Quit, Chord::ctrl("Q"));
@@ -35,28 +33,19 @@ impl Keymap {
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
         set(Pattern, Chord::ctrl_shift("P"));
-        // Making a component of a group (issue 113). O for the object it becomes,
-        // which no preset spends on anything with a Ctrl and a Shift on it.
+        // Make component (issue 113): O for object, free with Ctrl+Shift in every preset.
         set(MakeComponent, Chord::ctrl_shift("O"));
-        // An empty component (issue 113). C for component, which no preset
-        // spends on anything on its own.
+        // New empty component (issue 113): C, free on its own in every preset.
         set(NewComponent, Chord::key("C"));
-        // Baking a shape into the triangles it evaluates to (issue 80).
+        // Bake a shape into its triangles (issue 80).
         set(ConvertToMesh, Chord::ctrl_shift("M"));
-        // Dropping detail from a mesh (issue 106). R for "reduce", beside the
-        // conversion that makes the meshes it works on; the plain R names the
-        // resize tool, and no preset spends it with a Ctrl and a Shift on it.
+        // Simplify (issue 106): R for reduce, beside Convert; plain R is resize.
         set(SimplifyMesh, Chord::ctrl_shift("R"));
-        // Taking a mesh back apart into the objects it is made of (issue 108).
-        // A for "assemble", beside the conversion it is the way back from, and
-        // no preset spends the plain A on anything.
+        // Reassemble (issue 108): A for assemble, beside the conversion it undoes.
         set(Reassemble, Chord::ctrl_shift("A"));
-        // Cutting a shape into a pattern of pieces (issue 82). K for the knife
-        // it is, which no preset spends on anything with a Ctrl and a Shift on
-        // it.
+        // Split into pieces (issue 82): K for knife.
         set(SplitIntoPieces, Chord::ctrl_shift("K"));
-        // The way back from it (issue 82), beside it in every menu and one key
-        // along from it: J for "join", which no preset spends on anything else.
+        // Rejoin (issue 82): J for join, one key along from K.
         set(Rejoin, Chord::ctrl_shift("J"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
@@ -65,10 +54,7 @@ impl Keymap {
 
         set(FrameSelection, Chord::key("F"));
         set(FrameAll, Chord::shift("F"));
-        // Held for the wheel to walk the view towards whatever is under the
-        // pointer (issue 97). Alt on its own: Ctrl is the snap hold and Shift
-        // is the coarse-snap modifier, and a wheel gesture wants a modifier a
-        // hand can hold without also arming something a drag would use.
+        // Zoom to pointer while held (issue 97): Alt alone, since Ctrl snaps and Shift is coarse.
         set(ZoomToPointer, Chord::modifiers(false, false, true));
         set(ViewTop, Chord::key("7"));
         set(ViewBottom, Chord::ctrl("7"));
@@ -78,19 +64,17 @@ impl Keymap {
         set(ViewLeft, Chord::ctrl("3"));
         set(ViewIsometric, Chord::key("0"));
         set(ToggleGrid, Chord::key("5"));
-        // Alt+X / Y / Z: the axis is named by the key, and none of the three is
-        // spoken for by anything else in any preset.
+        // Alt+X / Y / Z: free in every preset.
         set(ToggleAxisX, Chord::alt("X"));
         set(ToggleAxisY, Chord::alt("Y"));
         set(ToggleAxisZ, Chord::alt("Z"));
-        // The one number left on the row the view switches live on, beside the
-        // grid it is a companion to.
+        // The last free number on the view-toggle row, beside the grid.
         set(ToggleSection, Chord::key("4"));
         set(DisplayShaded, Chord::key("8"));
         set(DisplayShadedEdges, Chord::key("9"));
         set(DisplayWireframe, Chord::key("6"));
         set(ToggleBoundingBox, Chord::key("B"));
-        // Tab clears the docks to leave the viewport alone with the model.
+        // Tab clears the docks, leaving the viewport alone with the model.
         set(ToggleDocks, Chord::key("Tab"));
         set(ResetLayout, Chord::ctrl_shift("L"));
 
@@ -100,10 +84,7 @@ impl Keymap {
         set(NudgeDown, Chord::key("Down"));
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
-        // Held during a drag to snap to geometry. Ctrl on its own (issue 77):
-        // it is the modifier a hand already rests on for a precise gesture, it
-        // needs no letter key to be free in any preset, and a chord that is
-        // modifiers alone can now be bound at all.
+        // Snap to geometry while dragging (issue 77): Ctrl alone, the precise-gesture modifier.
         set(SnapToGeometry, Chord::modifiers(true, false, false));
 
         let nav = match preset {
@@ -115,16 +96,8 @@ impl Keymap {
                 set(MeasureTool, Chord::key("M"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Right),
-                    // The middle button on its own, and no modifier (issue 72).
-                    // Pan used to be Shift+right-drag: the only navigation that
-                    // asked for a modifier, and so the only one nobody found.
-                    // What is left when it is not found is orbit and zoom, both
-                    // of which turn about the camera's target and leave the
-                    // origin exactly where it started -- in the middle of the
-                    // frame, which is what "the viewport is locked to the
-                    // origin" is. The wheel is beside the button, so a hand
-                    // already on the mouse can move about the ground without
-                    // reaching for the keyboard at all.
+                    // Pan on the plain middle button (issue 72); Shift+right-drag was never found, leaving the view
+                    // stuck around its target.
                     pan: Drag::new(MouseButton::Middle),
                     invert_zoom: false,
                 }
@@ -146,7 +119,7 @@ impl Keymap {
                 set(ModeRotate, Chord::key("R"));
                 set(ModeResize, Chord::key("T"));
                 set(ModeScale, Chord::shift("T"));
-                // M names the move tool in this preset, so measure takes K.
+                // M is move in this preset, so measure takes K.
                 set(MeasureTool, Chord::key("K"));
                 NavMap {
                     orbit: Drag::new(MouseButton::Middle),

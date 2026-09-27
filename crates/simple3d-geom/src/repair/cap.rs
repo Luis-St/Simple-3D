@@ -2,45 +2,25 @@
 
 use crate::mesh::{FastMap, Mesh};
 
-/// The largest hole this is willing to put a lid on, as a fraction of the
-/// model's own extent. A boolean of two closed solids has a closed result, so
-/// every boundary loop in one is a defect; but a defect the size of the model
-/// is a wrong answer, not a missing lid, and covering it over would hide that
-/// where reporting the node as non-manifold does not.
+/// The largest hole to cap, as a fraction of the model's extent. A bigger hole is a wrong answer
+/// that should be reported, not covered.
 pub(crate) const CAP_SPAN: f64 = 0.01;
 
-/// Close what is left open, where what is left open is a hole rather than a
-/// wrong answer.
+/// Close holes left open, where they are holes rather than wrong answers.
 ///
-/// The passes above all fix a surface that is *there* and mis-shared: welded,
-/// collapsed, split at its T-junctions. None of them can do anything about a
-/// triangle nothing ever emitted, and that is what the boolean's remaining
-/// failures are. Every one of them, measured across every ordered pair of the
-/// five primitives through all three operations, is a single closed loop of
-/// three or four vertices spanning at most 0.38 mm on a 40 mm body: two faces
-/// meeting at a grazing angle, one of them keeping a corner that lies within
-/// `csg_bsp::EPSILON` of the plane that should have trimmed it, and the sliver
-/// between that corner and where the other body's surface really comes down
-/// belonging to neither operand. There is no T-junction there to split and no
-/// pair of vertices close enough to weld -- the corners are microns to tenths
-/// of a millimetre apart, which is a real distance -- so nothing here could
-/// close it.
+/// The other passes fix surface that exists but is mis-shared. The boolean's remaining failures
+/// are missing triangles: small closed loops (at most 0.38 mm on a 40 mm body across all primitive
+/// pairs and operations) from grazing faces within `csg_bsp::EPSILON`, with nothing to weld or
+/// split. A closed loop defines its own lid, and fanning it is exact for three vertices and within
+/// the loop's diameter otherwise.
 ///
-/// A closed loop, though, already says what the missing surface is: the loop
-/// *is* the hole's boundary, and the lid that fills it is the only surface it
-/// can bound. Fanning it is exact for the three-vertex case and within the
-/// loop's own diameter of exact for the rest, which is to say within the error
-/// that opened the hole in the first place.
-///
-/// Only simple closed loops, only loops smaller than `CAP_SPAN` of the model,
-/// and only when the result is actually sounder than what went in.
+/// Only simple closed loops below `CAP_SPAN`, and only when the result is sounder.
 pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
     use std::collections::{BTreeMap, BTreeSet};
     let Some((lo, hi)) = mesh.bounds() else { return mesh };
     let span = (hi - lo).length() * CAP_SPAN;
 
-    // Only looked up and walked in no particular order, so hashed: this runs
-    // over every edge of a boolean's result, several times a boolean.
+    // Hashed, since it is only looked up and this runs over every edge several times per boolean.
     let mut count: FastMap<(u32, u32), i32> = FastMap::default();
     count.reserve(mesh.indices.len() * 3);
     for t in &mesh.indices {
@@ -48,9 +28,7 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
             *count.entry((t[k], t[(k + 1) % 3])).or_insert(0) += 1;
         }
     }
-    // One outgoing boundary edge per vertex, or none: a vertex where two holes
-    // meet does not say which loop continues through it, and guessing is how a
-    // repair invents surface.
+    // One outgoing boundary edge per vertex or none: where two holes meet, guessing would invent surface.
     let mut next: BTreeMap<u32, u32> = BTreeMap::new();
     let mut ambiguous: BTreeSet<u32> = BTreeSet::new();
     for (&(x, y), &c) in &count {
@@ -68,9 +46,7 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
         if seen.contains(&start) {
             continue;
         }
-        // Walk the chain of boundary edges from here. It is a loop worth
-        // capping only if it comes back to where it started without meeting a
-        // vertex two holes share.
+        // Worth capping only if the chain returns to its start without meeting a shared vertex.
         let mut loop_verts: Vec<u32> = Vec::new();
         let mut cur = start;
         let closed = loop {
@@ -101,18 +77,14 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
         if (bhi - blo).length() > span {
             continue;
         }
-        // A fan from one corner also lays down the diagonals from it, and a
-        // diagonal that is already an edge of the mesh would be used a third
-        // time -- which is how a lid over a quad whose corners are joined
-        // across turns one defect into another. Fan from a corner whose
-        // diagonals are new, and leave the loop alone if no corner has any.
+        // Fan from a corner whose diagonals are not already mesh edges, which would be used a third
+        // time; skip the loop if there is none.
         let n = loop_verts.len();
         let free = |a: u32, b: u32| !count.contains_key(&(a, b)) && !count.contains_key(&(b, a));
         let Some(apex) = (0..n).find(|&k| (2..n - 1).all(|i| free(loop_verts[k], loop_verts[(k + i) % n]))) else {
             continue;
         };
-        // Wound against the loop: an edge the mesh used as `a -> b` is missing
-        // its `b -> a`, so the lid has to run the other way round.
+        // Wound against the loop: the mesh's `a -> b` edge is missing its `b -> a`.
         let tag = capped.tags.first().copied().unwrap_or(0);
         for i in 1..n - 1 {
             capped.indices.push([loop_verts[apex], loop_verts[(apex + i + 1) % n], loop_verts[(apex + i) % n]]);
@@ -122,21 +94,11 @@ pub(crate) fn cap_boundary_loops(mesh: Mesh) -> Mesh {
     sounder_of(mesh, capped)
 }
 
-/// Whichever of the two is fit to be returned: a manifold mesh in preference to
-/// a broken one, the less broken of two broken ones, and the smaller of the two
-/// when there is nothing to choose between them on either count.
+/// The fitter of the two: manifold over broken, less broken over more, then fewer triangles.
 ///
-/// Never the broken one while a whole mesh is on the table. The rule this
-/// replaces kept the *first* candidate unless the second was strictly smaller,
-/// which quietly let a broken result through whenever both were broken -- and
-/// that is exactly the position a boolean that has gone marginally differently
-/// on another platform puts this in.
-///
-/// Between two broken ones, fewer triangles was the tie-break until a boolean
-/// on a dense imported surface showed what that costs: the retriangulated
-/// candidate is always the smaller, and it came out with 74 open edges where
-/// the one it replaced had 8 -- small enough for `cap_boundary_loops` to close,
-/// and thrown away before it could.
+/// The old rule kept the first unless the second was smaller, letting a broken result through
+/// when both were. Fewer triangles is not the tie-break between broken ones either: on a dense
+/// import the smaller had 74 open edges against 8 that `cap_boundary_loops` could have closed.
 pub(crate) fn sounder_of(healed: Mesh, simplified: Mesh) -> Mesh {
     let (h, s) = (defect_count(&healed), defect_count(&simplified));
     match (h == 0, s == 0) {
@@ -154,8 +116,8 @@ pub(crate) fn sounder_of(healed: Mesh, simplified: Mesh) -> Mesh {
     }
 }
 
-/// How many directed edges of the welded mesh are not matched by their
-/// reverse: zero exactly when `Mesh::manifold_issue` has nothing to report.
+/// Directed edges of the welded mesh without their reverse: zero exactly when
+/// `Mesh::manifold_issue` reports nothing.
 pub(crate) fn defect_count(mesh: &Mesh) -> usize {
     let welded = mesh.weld();
     let mut directed: FastMap<(u32, u32), u32> = FastMap::default();
@@ -167,19 +129,12 @@ pub(crate) fn defect_count(mesh: &Mesh) -> usize {
     directed.iter().filter(|(&(a, b), &count)| directed.get(&(b, a)).copied().unwrap_or(0) != count).count()
 }
 
-/// Replace every needle -- a triangle whose three corners lie on one line --
-/// and its neighbour across the needle's long side by two real triangles.
+/// Replace every needle (a triangle with collinear corners) and its neighbour across the long side
+/// by two real triangles.
 ///
-/// `cap_boundary_loops` lays exactly such a lid over a slit whose corners are
-/// collinear: the loop is closed and the mesh manifold, but a triangle with no
-/// area has no normal, and the exporter rightly refuses a file with one in it
-/// -- the black of a coloured import came back from its boolean with two. The middle corner lies on the long
-/// side, so splitting the neighbour there is exact, and the two edges the
-/// needle shared with the rest of the mesh go to the two halves unchanged.
-///
-/// A lid over a collinear loop of more than three corners is a fan of needles,
-/// each one's long side shared with the next, so this runs until a pass finds
-/// nothing: every split gives the needle beside it a real neighbour.
+/// `cap_boundary_loops` produces these over collinear slits, and the exporter rejects zero-area
+/// triangles. Splitting the neighbour at the middle corner is exact. A lid over a longer collinear
+/// loop is a fan of needles, so this repeats until a pass finds nothing.
 pub(crate) fn split_needles(mut mesh: Mesh, tol: f64) -> Mesh {
     for _ in 0..16 {
         let (split, changed) = split_needles_once(mesh, tol);
@@ -200,8 +155,7 @@ fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
         }
         (b - a).cross(p - a).length() / base
     };
-    // The long side runs from corner `k` to corner `k + 1`; the corner left
-    // over is the one lying on it.
+    // The long side runs from corner `k` to `k + 1`; the remaining corner lies on it.
     let needle = |mesh: &Mesh, t: [u32; 3]| {
         let lengths: [f64; 3] =
             std::array::from_fn(|k| (mesh.positions[t[(k + 1) % 3] as usize] - mesh.positions[t[k] as usize]).length());
@@ -214,11 +168,8 @@ fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
     if needles.is_empty() {
         return (mesh, false);
     }
-    // The triangle across each needle's long side, and nothing else: a map of
-    // every edge of the mesh was the whole of this pass's cost, a million
-    // triangles' worth of it up to sixteen times a boolean, for the handful of
-    // edges ever looked up in it. The last triangle using an edge wins, as it
-    // did in the map of all of them.
+    // Only the edges across needles' long sides are indexed: a map of every edge dominated the cost.
+    // The last triangle using an edge wins, as before.
     let mut by_edge: FastMap<(u32, u32), usize> = needles.iter().map(|&(_, (a, c, _))| ((c, a), usize::MAX)).collect();
     for (i, t) in mesh.indices.iter().enumerate() {
         for k in 0..3 {
@@ -229,8 +180,7 @@ fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
     }
     let mut done = vec![false; mesh.indices.len()];
     let mut changed = false;
-    // Found before any triangle changed, which is the state every one of them
-    // is read in: a needle that the loop has not yet touched is unchanged.
+    // Found before any triangle changed, the state every one of them is read in.
     for (i, (a, c, b)) in needles {
         if done[i] {
             continue;
@@ -245,8 +195,7 @@ fn split_needles_once(mut mesh: Mesh, tol: f64) -> (Mesh, bool) {
             continue;
         }
         let tag = mesh.tag(j);
-        // The needle runs a -> c -> b and `u` runs c -> a -> d, with `b`
-        // between c and a: `u` split at `b`, and the needle gone.
+        // The needle runs a -> c -> b and `u` runs c -> a -> d, with `b` between c and a: `u` split at `b`.
         mesh.indices[i] = [c, b, d];
         mesh.indices[j] = [b, a, d];
         if mesh.tags.len() == mesh.indices.len() {

@@ -1,4 +1,4 @@
-//! Where a new shape goes: beside what is selected, clear of what is there.
+//! Where a new shape goes: beside the selection, clear of what is there.
 
 use super::*;
 use simple3d_core::config::Placement;
@@ -6,8 +6,7 @@ use simple3d_core::scene::{GroupOp, NodeId};
 use simple3d_geom::Vec3;
 
 impl App {
-    /// The topmost selected nodes: selecting a group and one of its children acts
-    /// on the group only.
+    /// The topmost selected nodes: a selected group and its child act on the group only.
     pub fn top_level_selection(&self) -> Vec<NodeId> {
         let order = self.scene.depth_first();
         let mut tops: Vec<NodeId> = self
@@ -22,13 +21,8 @@ impl App {
         tops
     }
 
-    /// What an outliner drag started on `source` actually carries: the whole
-    /// selection when the row that was grabbed is part of it, and that row
-    /// alone otherwise -- dragging something unselected is a statement about
-    /// that node, not about whatever was selected before (issue 43).
-    ///
-    /// Topmost nodes only, in document order, which is both the order they land
-    /// in and the set `Scene::reparent_many` expects.
+    /// What an outliner drag from `source` carries: the selection if `source` is in it, else just that
+    /// row (issue 43). Topmost nodes in document order, as `Scene::reparent_many` expects.
     pub fn dragged_nodes(&self, source: NodeId) -> Vec<NodeId> {
         if self.is_selected(source) && self.selection.len() > 1 {
             let tops = self.top_level_selection();
@@ -48,21 +42,12 @@ impl App {
         };
         match created {
             Some(id) => {
-                // Where a new shape lands is the user's choice; the palette's
-                // hint line says which choice is in force. How big the shape is
-                // is part of the answer, so the point is asked for only now, with
-                // the node in the scene and its own size there to be measured.
+                // Asked only now, with the node in the scene, since its size is part of the answer.
                 let at = self.insertion_point_world(self.near_face_x(&[id]).unwrap_or(0.0));
                 if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
-                // A pattern that has just gained its first child can now be
-                // measured, the same as when one is dropped in or pasted in.
-                // Without this an empty pattern kept the stock 20 mm step, and
-                // a 20 mm shape added into it afterwards was repeated at
-                // exactly its own width -- one welded bar rather than shapes
-                // standing clear, which is not what the tool gives for the same
-                // shapes the other way round.
+                // A pattern's first child lets it be sized, as when dropped or pasted in.
                 self.size_fresh_patterns();
                 self.select_only(id);
                 self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
@@ -71,15 +56,9 @@ impl App {
         }
     }
 
-    /// Where the near side of what is being added sits relative to its own
-    /// origin, along X, across all of it.
-    ///
-    /// Measured from the nodes themselves rather than guessed from their
-    /// parameters, because a shape's width is not always one of them: the
-    /// regular polyhedra name an edge length, and the capsule drives no X
-    /// extent at all. `None` when there is nothing to measure, or when the
-    /// placement in force does not care -- only "beside the selection" does, so
-    /// nothing is built for the other three.
+    /// The near side of what is being added along X, relative to its origin, measured from the nodes
+    /// since not every shape has a width parameter. `None` if nothing to measure or not needed (only
+    /// "beside the selection" needs it).
     pub(super) fn near_face_x(&self, ids: &[NodeId]) -> Option<f64> {
         if self.settings.placement != Placement::BesideSelection {
             return None;
@@ -90,21 +69,9 @@ impl App {
             .reduce(f64::min)
     }
 
-    /// Where the next shape goes, in world millimetres, under the current
-    /// placement choice.
-    ///
-    /// `near_face_x` is where the near side of the thing being added sits
-    /// relative to its own origin -- for a centred 40 mm box, -20. Only
-    /// "beside the selection" needs it, and it needs it badly: the point it
-    /// answers with is written to `Node::position`, so leaving the shape's own
-    /// width out of the sum buries it half inside what it was meant to stand
-    /// clear of. Pass 0 where nothing is being added and the answer is only
-    /// being described, as the palette's hint line does.
-    ///
-    /// World rather than parent-frame: adding into a rotated group would
-    /// otherwise put the shape somewhere else entirely. `Node::position` is in
-    /// the parent's coordinates, so the answer is carried back through the
-    /// parent's frame before it is written.
+    /// Where the next shape goes in world millimetres under the current placement. `near_face_x`
+    /// keeps the shape's own width from burying it in the selection; pass 0 when only describing.
+    /// Converted into the parent's frame before writing, so rotated groups work.
     pub fn insertion_point_world(&self, near_face_x: f64) -> Vec3 {
         let world = match self.settings.placement {
             Placement::Origin => Vec3::ZERO,
@@ -115,8 +82,7 @@ impl App {
                 Vec3::new((t.x / step).round() * step, (t.y / step).round() * step, (t.z / step).round() * step)
             }
             Placement::BesideSelection => match self.selection_bounds() {
-                // Clear of the selection along +X with one step of air, so the
-                // new shape is next to what is selected rather than inside it.
+                // Clear of the selection along +X, with one step of air.
                 Some((lo, hi)) => {
                     Vec3::new(hi.x + self.move_snap() - near_face_x, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
                 }
@@ -125,9 +91,7 @@ impl App {
         };
         let (parent, _) = self.scene.insertion_point(self.primary());
         match self.evaluated.node_frames.get(&parent) {
-            // The frame stored for a node is its *parent's*; a child of `parent`
-            // is placed in `parent`'s own frame, which is that composed with its
-            // transform.
+            // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
             Some(frame) => {
                 let node = self.scene.node(parent);
                 frame

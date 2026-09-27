@@ -1,16 +1,8 @@
 //! Several documents open at once, one per tab (issue 61).
 //!
-//! The application still has exactly one *current* document, and every panel,
-//! command and gesture goes on reading it straight off `App` as it always did.
-//! What tabs add is the documents that are not current: their state is lifted
-//! off `App` into a `Document` and put back when the tab is picked again, so
-//! nothing in the rest of the application has to know how many are open.
-//!
-//! The invariant the switching rests on: `App::tabs` has one entry per open
-//! document, and the entry at `App::active` is a stand-in whose contents are
-//! stale -- the live state of that document is the one on `App` itself. Nothing
-//! outside this module reads a `Document` directly; the tab bar asks the
-//! helpers below, which know to answer for the active tab from `App`.
+//! There is still one current document, read straight off `App` everywhere. Other tabs' state is
+//! lifted into a `Document` and put back when picked. The entry at `App::active` is a stale
+//! stand-in; only this module reads a `Document`, answering the active tab from `App`.
 
 mod close;
 pub(crate) mod drag;
@@ -28,10 +20,8 @@ use simple3d_geom::Vec3;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-/// One open document: everything about the model in a tab, and nothing about
-/// the window it is shown in. The camera travels inside `scene`, the tool mode,
-/// the dock layout and the settings are the application's and stay put when the
-/// tab changes.
+/// One open document: everything about the model in a tab (camera included, in `scene`), but not
+/// the window's tool mode, dock layout or settings.
 pub struct Document {
     pub scene: Scene,
     pub history: History,
@@ -42,17 +32,14 @@ pub struct Document {
     pub collapsed: HashSet<NodeId>,
     pub cursor: Option<Vec3>,
     pub frame_when_evaluated: bool,
-    /// The last evaluation of this scene, so coming back to a tab shows the
-    /// model at once rather than an empty viewport while it is recomputed.
+    /// The last evaluation, so returning to a tab shows the model at once.
     pub evaluated: Evaluated,
-    /// The rest of the project: every component but the one described above,
-    /// which is the one that was on screen (issue 113).
+    /// The rest of the project: every component but the one that was on screen (issue 113).
     pub project: crate::components::Project,
 }
 
 impl Document {
-    /// An empty, unsaved document -- what a new tab starts as, and what stands
-    /// in for the active tab while its real state lives on `App`.
+    /// An empty, unsaved document: a new tab, or the active tab's stand-in.
     pub fn empty() -> Document {
         Document {
             scene: Scene::new(),
@@ -78,8 +65,7 @@ impl Document {
     }
 }
 
-/// The result of evaluating nothing: what a document shows before its first
-/// evaluation lands.
+/// The result of evaluating nothing, shown before the first evaluation lands.
 pub fn empty_evaluation() -> Evaluated {
     Evaluated {
         mesh: std::sync::Arc::new(simple3d_geom::Mesh::new()),
@@ -96,7 +82,7 @@ pub fn empty_evaluation() -> Evaluated {
     }
 }
 
-/// What a document is called: its file name, or `Untitled` before it has one.
+/// A document's name: its file name, or `Untitled` before it has one.
 pub fn document_name(path: Option<&Path>) -> String {
     match path {
         Some(path) => path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),

@@ -1,11 +1,9 @@
-//! Copying a selection out and putting it back somewhere else.
+//! Copying a selection out and putting it back elsewhere.
 
 use super::*;
 use crate::scene::{ComponentId, NodeData, NodeId, Scene};
 
-/// Copy the topmost nodes of a selection, in tree order. Selecting a group and
-/// one of its children copies the group only -- otherwise the child would arrive
-/// twice.
+/// Copy a selection's topmost nodes in tree order, so a group and its child do not copy the child twice.
 pub fn copy(scene: &Scene, selection: &[NodeId]) -> Option<Clip> {
     let order = scene.depth_first();
     let mut tops: Vec<NodeId> = selection
@@ -24,8 +22,7 @@ pub fn copy(scene: &Scene, selection: &[NodeId]) -> Option<Clip> {
     Some(Clip { format: CLIP_VERSION, nodes, components, origin: None })
 }
 
-/// The components `nodes` integrate, and the ones those integrate, as the
-/// scene they were copied from sees them.
+/// The components `nodes` integrate, transitively, as their source scene sees them.
 pub fn carried_components(scene: &Scene, nodes: &[NodeData]) -> Vec<ClipComponent> {
     let mut used = std::collections::BTreeSet::new();
     for node in nodes {
@@ -48,17 +45,14 @@ pub fn carried_components(scene: &Scene, nodes: &[NodeData]) -> Vec<ClipComponen
     out
 }
 
-/// Paste a clip, following the same target rule as Add: into the selected group,
-/// or as a sibling of the selected leaf. Returns the new nodes, which the caller
-/// leaves selected so a nudge or a drag can follow immediately.
+/// Paste a clip like Add: into a selected group, or beside a selected leaf. Returns the new nodes,
+/// which the caller leaves selected.
 pub fn paste(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>) -> Vec<NodeId> {
     insert(scene, clip, selection, true)
 }
 
-/// Paste, saying whether the arriving node is a *copy* of something already
-/// here. It is for the clipboard, and it is not for a saved primitive dropped in
-/// from the library: that is not a copy of anything in this project, and calling
-/// it "Bracket copy" would be a lie the user then has to correct.
+/// Paste, saying whether the node is a copy of something here; library primitives are not, so they
+/// are not named "copy".
 pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy: bool) -> Vec<NodeId> {
     let (parent, index) = scene.insertion_point(selection);
     let mut created = Vec::new();
@@ -73,11 +67,8 @@ pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy
     created
 }
 
-/// `Plate` -> `Plate copy` -> `Plate copy 2`, or `Bracket` -> `Bracket 2` when
-/// the node is not a copy of anything. Measured against every name in the
-/// document, not just the new parent's children, because the outliner shows
-/// every depth at once; the descendants that arrive with it are put through the
-/// same rule by `rename_subtree_uniquely`.
+/// `Plate` -> `Plate copy` -> `Plate copy 2`, or `Bracket` -> `Bracket 2` when not a copy, unique
+/// across the whole document; descendants go through `rename_subtree_uniquely`.
 pub(crate) fn unique_name(scene: &Scene, name: &str, as_copy: bool) -> String {
     let base = if as_copy { crate::scene::copy_name(name) } else { name.to_string() };
     crate::scene::free_name(&scene.taken_names(), &base)

@@ -4,8 +4,7 @@ use crate::vec3::Vec3;
 use super::*;
 use crate::primitives;
 
-/// The area of a set of triangles, which is how a cap is checked: what it
-/// covers is the question, not how it happens to be triangulated.
+/// The area of a set of triangles, since a cap is judged by what it covers, not its triangulation.
 fn area(triangles: &[[Vec3; 3]]) -> f64 {
     triangles.iter().map(|t| (t[1] - t[0]).cross(t[2] - t[0]).length() * 0.5).sum()
 }
@@ -29,8 +28,7 @@ fn a_triangle_wholly_on_either_side_is_kept_or_dropped_whole() {
 #[test]
 fn clipping_a_triangle_leaves_the_part_on_the_kept_side() {
     let plane = Plane::new(Vec3::new(1.0, 0.0, 0.0), 5.0);
-    // A right triangle of area 50 in the z = 0 plane, cut at x = 5: the
-    // kept part is the trapezium from x = 0 to x = 5.
+    // A right triangle of area 50 in z = 0, cut at x = 5: the trapezium from x = 0 to 5 is kept.
     let tri = [Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0)];
     let clipped = clip_triangle(&plane, tri);
     assert_eq!(clipped.triangles().len(), 2, "a triangle with two corners kept is a quad");
@@ -41,8 +39,7 @@ fn clipping_a_triangle_leaves_the_part_on_the_kept_side() {
 
 #[test]
 fn a_corner_exactly_on_the_plane_still_gives_a_cut_edge() {
-    // The case a strict sign change misses, and the one an axis-aligned
-    // plane through a box's own vertices lands in constantly.
+    // The case a strict sign change misses, common for planes through a box's vertices.
     let plane = Plane::new(Vec3::new(1.0, 0.0, 0.0), 0.0);
     let tri = [Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(-10.0, 10.0, 0.0)];
     let cut = clip_triangle(&plane, tri).cut.expect("one corner sits on the plane and the far one crosses it");
@@ -55,7 +52,7 @@ fn a_segment_is_trimmed_at_the_plane() {
     let (a, b) = clip_segment(&plane, Vec3::new(0.0, 0.0, -4.0), Vec3::new(0.0, 0.0, 6.0)).expect("it crosses");
     assert_eq!(a, Vec3::new(0.0, 0.0, -4.0));
     assert!((b.z - 2.0).abs() < 1e-9, "trimmed to {b:?}");
-    // The far side of the same segment, whichever way round it is given.
+    // The far side of the same segment, given either way round.
     let (a, b) = clip_segment(&plane, Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -4.0)).expect("it crosses");
     assert!((a.z - 2.0).abs() < 1e-9, "trimmed to {a:?}");
     assert_eq!(b, Vec3::new(0.0, 0.0, -4.0));
@@ -74,8 +71,7 @@ fn a_box_cut_through_the_middle_caps_with_its_own_cross_section() {
 
 #[test]
 fn the_cap_faces_the_side_that_was_cut_away() {
-    // Which way the cap faces is the whole of the winding rule, and getting
-    // it backwards is invisible in an area check.
+    // The cap's facing is the winding rule, invisible to an area check.
     let plane = Plane::new(Vec3::new(0.0, 0.0, 1.0), 0.0);
     for triangle in cap(&box_mesh(), &plane) {
         let normal = (triangle[1] - triangle[0]).cross(triangle[2] - triangle[0]).normalized();
@@ -85,8 +81,7 @@ fn the_cap_faces_the_side_that_was_cut_away() {
 
 #[test]
 fn a_tube_is_capped_as_a_ring_so_its_wall_can_be_measured() {
-    // The case the feature exists for: the cut has to show a wall, which
-    // means the outline inside it has to come back as a hole.
+    // The cut must show a wall, so the inner outline must come back as a hole.
     let outer = 20.0;
     let inner = 14.0;
     let tube = primitives::tube_mesh(outer, inner, 30.0, 64).weld();
@@ -95,8 +90,7 @@ fn a_tube_is_capped_as_a_ring_so_its_wall_can_be_measured() {
     assert_eq!(outlines.len(), 2, "a tube's cut is an outer outline and a hole");
     let filled = cap(&tube, &plane);
     let expected = std::f64::consts::PI * ((outer / 2.0).powi(2) - (inner / 2.0).powi(2));
-    // A 64-segment circle is a polygon, so the area is a little under the
-    // circle's: within a percent is the tessellation, not a hole in the cap.
+    // A 64-segment circle is slightly smaller than a true one: within a percent is tessellation.
     let covered = area(&filled);
     assert!(covered < expected && covered > expected * 0.99, "the ring covers {covered} of about {expected}");
 }
@@ -110,9 +104,7 @@ fn a_plane_that_misses_the_model_cuts_nothing() {
 
 #[test]
 fn a_plane_exactly_on_a_face_of_the_model_leaves_it_whole_and_uncapped() {
-    // Cutting a 20mm box at z = 10 takes nothing off it: every triangle is
-    // on the kept side or in the plane, and a cap over a face that is
-    // already there would only fight with it for the pixels.
+    // Cutting a 20 mm box at z = 10 removes nothing, and a cap would fight the existing face.
     let plane = Plane::new(Vec3::new(0.0, 0.0, 1.0), 10.0);
     let mesh = box_mesh();
     assert!(loops(&mesh, &plane).is_empty(), "a cut that removed nothing produced an outline");
@@ -148,9 +140,7 @@ fn a_window_takes_out_only_the_box_behind_it() {
     assert!(plane.keeps(Vec3::new(3.0, 0.0, 5.0)), "beside the window goes");
     assert!(plane.keeps(Vec3::new(0.0, 0.0, -5.0)), "in front of the plane goes");
 
-    // A wall standing across the whole cut, in the plane x = 0 from z = -4 to
-    // z = 4 and y = -4 to 4: the window takes a 2 x 4 notch out of its top
-    // half, and every other part of it stays.
+    // A wall across the cut in x = 0 (z and y from -4 to 4); the window notches 2 x 4 out of its top half.
     let quad =
         [Vec3::new(0.0, -4.0, -4.0), Vec3::new(0.0, 4.0, -4.0), Vec3::new(0.0, 4.0, 4.0), Vec3::new(0.0, -4.0, 4.0)];
     let mut left = Vec::new();
@@ -183,7 +173,7 @@ fn a_window_opens_five_faces_each_bounded_by_the_others() {
         [Vec3::new(-9.0, -9.0, 0.0), Vec3::new(9.0, -9.0, 0.0), Vec3::new(9.0, 9.0, 0.0), Vec3::new(-9.0, 9.0, 0.0)];
     let front = within(&big, &opened[0].bounds);
     assert!(front.iter().all(|p| p.x.abs() <= 1.0 + 1e-9 && p.y.abs() <= 1.0 + 1e-9), "{front:?}");
-    // Only a triangle the plane crosses inside the window touches it.
+    // Only a triangle crossed inside the window touches it.
     let across = |x: f64| [Vec3::new(x, -0.5, -1.0), Vec3::new(x, 0.5, -1.0), Vec3::new(x, 0.0, 1.0)];
     assert!(triangle_touches(&plane, across(0.0)));
     assert!(!triangle_touches(&plane, across(3.0)));
@@ -191,9 +181,8 @@ fn a_window_opens_five_faces_each_bounded_by_the_others() {
 
 #[test]
 fn several_cuts_take_away_what_any_of_them_does() {
-    // One plane takes the top off, the other the right-hand side: a square in
-    // the plane y = 0, 20 across and centred on the origin, keeps the quarter
-    // that neither of them reaches.
+    // One plane removes the top, the other the right side; a 20-wide square in y = 0 keeps the quarter
+    // neither reaches.
     let cuts = [Plane::new(Vec3::new(0.0, 0.0, 1.0), 0.0), Plane::new(Vec3::new(1.0, 0.0, 0.0), 0.0)];
     let square = [
         Vec3::new(-10.0, 0.0, -10.0),
@@ -206,11 +195,11 @@ fn several_cuts_take_away_what_any_of_them_does() {
         left.extend_from_slice(clip_by_all(&cuts, tri).triangles());
     }
     assert!((area(&left) - 100.0).abs() < 1e-9, "left {} of the square", area(&left));
-    // A line across both loses what either takes.
+    // A line across both loses what either removes.
     let kept = kept_by_all(&cuts, Vec3::new(-10.0, 0.0, -5.0), Vec3::new(10.0, 0.0, -5.0));
     assert_eq!(kept.len(), 1);
     assert!((kept[0].1.x).abs() < 1e-9, "{:?}", &*kept);
     assert!(kept_by_all(&cuts, Vec3::new(1.0, 0.0, 1.0), Vec3::new(5.0, 0.0, 5.0)).is_empty());
-    // And with no cut, a line is what it was.
+    // With no cut, a line is unchanged.
     assert_eq!(kept_by_all(&[], Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)).len(), 1);
 }

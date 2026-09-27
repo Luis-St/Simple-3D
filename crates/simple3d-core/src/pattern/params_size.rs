@@ -1,23 +1,14 @@
-//! Fitting a new pattern to the shape it was made from, migrating an older
-//! one, and hiding the parameters a kind does not use.
+//! Fitting a new pattern to its shape, migrating older ones, and hiding unused parameters.
 
 use super::*;
 use crate::primitive::{ParamSpec, ParamValue, Params, ParamsExt};
 use simple3d_geom::Vec3;
 
-/// A fresh pattern's parameters, with every distance scaled to the shapes the
-/// pattern is being wrapped around (issue 67).
-///
-/// A fixed default cannot be right for both a 2 mm pin and a 200 mm plate: the
-/// stock 20 mm step is exactly the width of the default box, which lays the
-/// copies down face to face -- one welded, non-manifold lump rather than three
-/// boxes. Deriving the numbers from what is actually being repeated puts a
-/// visible gap between the copies whatever their size, and gives a ring or a
-/// helix a radius its own contents fit around.
+/// A fresh pattern's parameters, with distances scaled to the repeated shapes (issue 67). A fixed
+/// 20 mm step equals the default box's width, laying copies face to face into a non-manifold lump.
 pub fn params_for_size(size: Vec3) -> Params {
     let mut params = default_params();
-    // Half the shape again, so a copy clears the one before it by half its own
-    // width -- the spacing someone laying parts out by eye tends to reach for.
+    // 1.5x the extent, so each copy clears the previous one by half its width.
     let step = |extent: f64| ParamValue::Length(if extent > 1e-9 { extent * 1.5 } else { 20.0 });
     let across = size.x.max(size.y);
     let radius = if across > 1e-9 { across * 1.5 } else { 20.0 };
@@ -31,8 +22,7 @@ pub fn params_for_size(size: Vec3) -> Params {
         ("helix_rise", step(size.z)),
         ("spiral_radius", ParamValue::Length(radius)),
         ("spiral_growth", step(size.x)),
-        // The custom stages get the same treatment: a rule built by hand starts
-        // from numbers that suit what it is repeating, not from a stock 20 mm.
+        // Custom stages also start from numbers suited to the shape.
         ("stage1_step_x", step(size.x)),
         ("stage2_step_y", step(size.y)),
         ("stage3_step_z", step(size.z)),
@@ -43,8 +33,7 @@ pub fn params_for_size(size: Vec3) -> Params {
     params
 }
 
-/// Fill in anything a stored map is missing and drop anything it does not know,
-/// so a pattern from an older file migrates the way a primitive does.
+/// Fill in missing keys and drop unknown ones, migrating an older pattern like a primitive.
 pub fn migrate_params(stored: &Params) -> Params {
     let mut out: Params = PARAMS
         .iter()
@@ -62,37 +51,23 @@ pub fn migrate_params(stored: &Params) -> Params {
     out
 }
 
-/// Bring an older rule's stages up to date: what each one does, and what it
-/// varies its copies by.
-///
-/// Reads `stored` and writes `out` -- so it works both for a project's
-/// parameters and for a saved kind on the shelf, which are filled in from
-/// different defaults.
+/// Update an older rule's stages: their modes and variations. Reads `stored` and writes `out`,
+/// so it serves both project parameters and saved kinds with their different defaults.
 pub fn migrate_stages(stored: &Params, out: &mut Params) {
     migrate_stage_modes(stored, out);
     migrate_stage_variations(stored, out);
 }
 
-/// Carry each stage's variations over from `stored`, however it wrote them.
-///
-/// A stage has three ways of having said what varies its copies, and each is
-/// brought into the list the stage holds now:
-///
-/// * the list itself, whose parameters are named for their slot rather than
-///   tabled, so they are copied across here -- checked against what each one
-///   is, as the tabled ones are -- rather than by the table;
-/// * four fixed slots, each a shift vector, a spin, a size and a gap on a cycle
-///   that always left the original alone (see [`slot_variations`]);
-/// * one of each kind under a single "Vary" heading (see [`legacy_variations`]).
+/// Carry each stage's variations over from `stored`, whichever of three formats it used: the
+/// current slot-named list (copied here, type-checked), four fixed slots ([`slot_variations`]),
+/// or one of each kind under "Vary" ([`legacy_variations`]).
 fn migrate_stage_variations(stored: &Params, out: &mut Params) {
     for (index, k) in STAGES.iter().enumerate() {
         let list = if stored.contains_key(k.variations) {
             let used = stored.get(k.variations).map_or(0, |v| v.as_u32()).min(MAX_VARIATIONS) as usize;
             clear_variations_from(out, index, 0);
             for key in variation_keys(index, used) {
-                // Only what is there, checked against what it is: a number a
-                // variation's kind does not read is not written for it, and a
-                // missing one reads as its default anyway.
+                // Only present keys, type-checked; a missing one reads as its default anyway.
                 let Some(spec) = param_spec(&key) else { continue };
                 let kept = stored
                     .get(&key)
@@ -116,12 +91,8 @@ fn migrate_stage_variations(stored: &Params, out: &mut Params) {
     }
 }
 
-/// What a stage's four fixed variation slots come to as a list (issue 79).
-///
-/// Each slot was a kind, a way of stepping, a cycle, and the numbers of all
-/// four kinds -- a shift as a vector, a spin about an axis, a size in percent
-/// and a gap. A shift along more than one axis is a variation along each, and a
-/// cycle is what [`from_cycle`] makes of it, so every copy lands where it did.
+/// A stage's four old fixed variation slots as a list (issue 79). Multi-axis shifts become one
+/// variation per axis, and cycles go through [`from_cycle`], so every copy lands where it did.
 fn slot_variations(stored: &Params, index: usize) -> Vec<Variation> {
     let k = &STAGES[index];
     let used = stored.get(k.legacy_varied).map_or(0, |v| v.as_u32()).min(4) as usize;
@@ -150,16 +121,8 @@ fn slot_variations(stored: &Params, index: usize) -> Vec<Variation> {
     list
 }
 
-/// Work out what each stage of an older rule was doing, and say so (issue 79).
-///
-/// A stage used to be nine numbers with a mirror flag on the front and no word
-/// for what it was for; it is now a choice of three and the numbers that choice
-/// needs. A rule saved before the choice existed still has to lay its copies
-/// down in the same places, so the choice is *derived* from what the old numbers
-/// said: a flag set is a mirror, a turn or a radius is a turn, and anything else
-/// is a run. A turning stage's rise used to be its step along its own axis,
-/// which is where the rise comes from.
-///
+/// Derive each old stage's mode from its numbers (issue 79): a mirror flag is a mirror, a turn or
+/// radius is a turn, anything else a run. A turning stage's rise was its step along its own axis.
 fn migrate_stage_modes(stored: &Params, out: &mut Params) {
     for k in &STAGES {
         if stored.contains_key(k.mode) {
@@ -182,17 +145,8 @@ fn migrate_stage_modes(stored: &Params, out: &mut Params) {
     }
 }
 
-/// Turn what an older stage varied its copies by into variations of its own
-/// (issue 79).
-///
-/// A stage used to carry one of each -- a gap that grew, a shift on a cycle, a
-/// spin and a size that built up copy by copy -- under a single "Vary"
-/// heading. Each of those that was set becomes an entry of the list, stepping
-/// the way it always did. They are listed in the order the old stage applied
-/// them -- the gap places the copy, and it is then shifted, spun and resized
-/// where it stands -- so a rule saved before lays its copies down where it
-/// always did. A mirror never varied anything, and a turn never had gaps, so
-/// neither is given what it did not use.
+/// An old stage's single "Vary" set as variations (issue 79), listed in the order the old stage
+/// applied them (gap, shift, spin, size) so copies land where they did.
 fn legacy_variations(stored: &Params, out: &Params, index: usize) -> Vec<Variation> {
     let k = &STAGES[index];
     let old = &k.legacy;
@@ -218,11 +172,8 @@ fn legacy_variations(stored: &Params, out: &Params, index: usize) -> Vec<Variati
     list
 }
 
-/// Whether a parameter should be shown, given the kind currently chosen. The
-/// same rule a primitive's choice-gated parameters follow, plus the one thing a
-/// primitive never needs: a custom rule's stages are gated on *how many* stages
-/// there are and on what each one does, which is more than the equality
-/// `shown_when` says.
+/// Whether a parameter is shown for the current values. Like primitives' choice gating, plus
+/// custom stages gated on stage count and mode.
 pub fn param_visible(spec: &ParamSpec, values: &Params) -> bool {
     let gated = match spec.shown_when {
         None => true,
@@ -231,10 +182,7 @@ pub fn param_visible(spec: &ParamSpec, values: &Params) -> bool {
     gated && stage_param_visible(spec.key, values)
 }
 
-/// Whether a stage's parameter applies: the stage has to be one of the ones in
-/// use, and then it has to be one of the numbers the stage's own mode needs --
-/// a run has no radius, and a mirror is a plane and two copies that nothing
-/// varies.
+/// Whether a stage parameter applies: the stage must be in use and its mode must need it.
 pub(crate) fn stage_param_visible(key: &str, values: &Params) -> bool {
     let Some(stage) = stage_of(key) else { return true };
     if stage >= stage_count(values) {
@@ -245,9 +193,8 @@ pub(crate) fn stage_param_visible(key: &str, values: &Params) -> bool {
         return true;
     }
     let mode = StageMode::from_index(values.int(k.mode));
-    // A variation's numbers (issue 79): only while the variation is one the
-    // stage has and one its mode has a use for, then only the numbers its own
-    // kind reads.
+    // A variation's numbers (issue 79): only while the stage has it and its mode uses it, and only
+    // those its kind reads.
     if let Some((_, slot, field)) = parse_vary_key(key) {
         let what = Vary::from_index(values.int(&vary_key(stage, slot, VaryField::What)));
         if slot >= variation_count(values, stage) || !what.fits(mode) {

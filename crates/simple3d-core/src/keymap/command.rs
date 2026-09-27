@@ -1,10 +1,8 @@
-//! Every command a key can be bound to, and the part of the interface each
-//! belongs to.
+//! Every bindable command, and its interface area.
 
 use serde::{Deserialize, Serialize};
 
-/// Everything the user can bind. Adding a command here is all it takes for it to
-/// appear in the keymap editor, grouped by its area.
+/// Everything bindable; adding one here puts it in the keymap editor under its area.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Command {
@@ -76,7 +74,7 @@ pub enum Command {
     NudgeToward,
 }
 
-/// The keymap editor lists commands grouped by area.
+/// The keymap editor's command groups.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Area {
     File,

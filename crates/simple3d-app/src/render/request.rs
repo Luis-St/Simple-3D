@@ -13,13 +13,10 @@ pub struct Grid {
     pub visible: bool,
     /// Spacing in millimetres.
     pub spacing: f64,
-    /// Which of the three origin axes to draw, X, Y, Z. The axes are laid out on
-    /// the grid's spacing, which is why they are described here with it.
+    /// Which origin axes to draw (X, Y, Z); laid out on the grid spacing, hence here.
     pub axes: [bool; 3],
     pub style: AxisStyle,
-    /// Whether to mark, on a solid's own surface, where a principal plane cuts
-    /// through it. Each plane is named by the axis it is perpendicular to and
-    /// follows that axis's switch, so the ground plane's mark is the Z one.
+    /// Whether to mark where each principal plane cuts solids; each follows its axis's switch.
     pub plane_marks: bool,
 }
 
@@ -33,59 +30,40 @@ pub struct Item<'a> {
 pub enum Style {
     /// The evaluated scene.
     Solid,
-    /// The selected node's own geometry, drawn over the top so it is visible
-    /// even where a boolean consumed it.
+    /// The selected node's own geometry, drawn on top so it shows even where a boolean consumed it.
     Selected,
-    /// A hidden node, so a subtracted tool body can be seen while it is being
-    /// positioned.
+    /// A hidden node, so a subtracted tool body can be seen while positioning it.
     Ghost,
-    /// Outlined like a selection *and* filled with a glow that whatever is in
-    /// front of it does not hide: a body that has to be found inside another
-    /// one, which is what a piece of a split usually is (issue 82). An outline
-    /// alone cannot say where a piece is when the piece is buried -- there is
-    /// nothing of it on screen to outline.
+    /// Outlined and filled with a glow nothing in front hides: a buried body such as a split piece
+    /// (issue 82).
     Glow,
 }
 
-/// A body being dragged, drawn where the drag has got to rather than where
-/// the last evaluation put it.
-///
-/// Moving, turning or scaling a body changes none of its geometry, only where
-/// it stands, and that is a transform the card can apply for nothing. So while
-/// a body is dragged the viewport does not wait for the scene to be evaluated
-/// again: the body's stretch of the scene is left out, and the body's own
-/// renderable is drawn in its place, moved by how far it has gone. Each is
-/// named by its renderable's id.
+/// A body being dragged, drawn where the drag has taken it. Only its placement changes, so its
+/// scene range is hidden and its own renderable drawn moved instead of re-evaluating. Keyed by
+/// renderable id.
 #[derive(Clone, Default)]
 pub struct Live<'a> {
-    /// Welded vertices of a renderable to leave out, with every triangle and
-    /// edge that uses them: the dragged body's part of the scene.
+    /// Welded vertex ranges to hide, with their triangles and edges: the dragged body's part.
     pub hidden: Vec<(u64, Range<u32>)>,
-    /// Renderables to draw moved: each world position is put through the
-    /// transform first.
+    /// Renderables to draw moved by the transform.
     pub placed: Vec<(u64, Xform)>,
-    /// A boolean drawn per pixel from the shapes that go into it, where the
-    /// part of the scene it stands for has been left out (`hidden`): what a
-    /// drag of one of its operands shows. See `App::live_csg`.
+    /// A per-pixel boolean standing in for the hidden part, when a drag moves an operand
+    /// (`App::live_csg`).
     pub csg: Option<CsgPreview<'a>>,
-    /// The shapes such a boolean would be drawn from if the selection were
-    /// dragged, to be put on the card ahead of it and kept there without
-    /// being drawn, so the drag's first frame has nothing to upload. See
-    /// `App::csg_ready`.
+    /// Shapes to upload ahead of a possible drag without drawing them (`App::csg_ready`).
     pub ready: Vec<&'a Renderable>,
 }
 
-/// A boolean the GPU works out per pixel -- see [`Live::csg`].
+/// A boolean the GPU computes per pixel (see [`Live::csg`]).
 #[derive(Clone)]
 pub struct CsgPreview<'a> {
-    /// The shapes, in world space, each moved or not.
+    /// The shapes in world space, each optionally moved.
     pub leaves: Vec<(&'a Renderable, Option<Xform>)>,
-    /// The expression over them, in postfix: a leaf by its index, or one of
-    /// `CSG_UNION`, `CSG_DIFFERENCE`, `CSG_INTERSECTION` applied to the two
-    /// values before it.
+    /// The postfix expression: a leaf index, or `CSG_UNION`, `CSG_DIFFERENCE` or `CSG_INTERSECTION`
+    /// on the two values before it.
     pub program: Vec<i32>,
-    /// The body tag the result is drawn with, so an origin axis treats it as
-    /// the body it stands for.
+    /// The body tag the result is drawn with, so an origin axis treats it as that body.
     pub tag: u16,
 }
 
@@ -106,42 +84,22 @@ pub struct Request<'a> {
     pub palette: Palette,
     pub grid: Grid,
     pub items: Vec<Item<'a>>,
-    /// A tool's preview, in world space: closed loops drawn over the model in
-    /// the accent colour once everything else is down (issue 82).
-    ///
-    /// It is drawn here rather than with the 2D painter over the finished
-    /// picture so that it meets the depth buffer: a cut on the far side of the
-    /// shape is behind it, and a grid that shows through the solid it lies on
-    /// reads as floating in front of it. It writes no depth of its own -- one
-    /// loop must not hide the next where they cross -- and it is biased towards
-    /// the eye, because the loops at the ends of a run lie exactly on the
-    /// surface they are drawn on and would otherwise lose the tie to it.
+    /// A tool's preview loops in world space, drawn in the accent over the model (issue 82). Drawn
+    /// by the renderer so they are depth-tested; they write no depth and are biased towards the eye,
+    /// since loops on the surface would otherwise lose the tie.
     pub preview: Vec<Vec<Vec3>>,
-    /// What a drag has moved since the renderables were made, drawn where it
-    /// has got to. Only the GPU renderer is ever handed any: see [`Live`].
+    /// What a drag has moved since the renderables were made; GPU renderer only (see [`Live`]).
     pub live: Live<'a>,
-    /// The plane the model is cut with, or `None` for the whole of it
-    /// (issue 71). Everything drawn from the model goes through it -- faces,
-    /// edges, outlines, ghosts, marks, the stretches of an axis that run
-    /// through material -- and the opening it leaves is closed with a cap, so
-    /// that a wall reads as a wall rather than as a shell seen from inside.
+    /// The section planes (issue 71). Everything drawn from the model is cut by them, and the opening
+    /// is capped so walls read as solid.
     pub section: Vec<Plane>,
 }
 
-/// How many rows a band must have, on average, before splitting the frame
-/// again is worth the thread it costs. Below this the whole frame goes to one
-/// band: a small viewport rasterizes in well under a millisecond, and spawning
-/// eight threads to share that out costs more than it saves.
-///
-/// It used to be 96, which on a frame a thousand pixels tall allowed ten bands
-/// whatever the machine had: a dense mesh costs per triangle rather than per
-/// pixel, and ten threads were all it ever got. The bands are cut by work now
-/// (`balanced_ranges`), so a band this short across the model is as busy as a
-/// tall one across the sky.
+/// The fewest rows per band before splitting further is worth a thread. Bands are cut by work
+/// (`balanced_ranges`), so this can be low.
 pub(crate) const MIN_BAND_ROWS: usize = 24;
 
-/// How many bands to cut the frame into: one per core, but never so many that
-/// they stop being worth starting.
+/// How many bands to split the frame into: one per core, but not too small to be worth it.
 pub(crate) fn band_count(height: usize) -> usize {
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     (height / MIN_BAND_ROWS).clamp(1, cores)

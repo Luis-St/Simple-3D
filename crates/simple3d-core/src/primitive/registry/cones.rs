@@ -18,7 +18,7 @@ pub(super) const CONE: PrimitiveSpec = PrimitiveSpec {
         gen::cone_sector_mesh(p.num("bottom_diameter"), p.num("top_diameter"), p.num("height"), seg, p.num("sweep"))
     },
     axes: |p| {
-        // Whichever end is wider sets the X/Y extent.
+        // The wider end sets the X/Y extent.
         let wider = if p.num("top_diameter") > p.num("bottom_diameter") { "top_diameter" } else { "bottom_diameter" };
         let [x, y] = round_axes(p, wider, wider);
         [x, y, Some(AxisDriver::direct("height"))]

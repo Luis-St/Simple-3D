@@ -7,9 +7,7 @@ use simple3d_geom::Vec3;
 
 // -- the view cube ------------------------------------------------------------
 
-/// Where the cube's front face is drawn *right now*, from the cube's own
-/// projection -- the same function the drawing uses, so a test clicks what is
-/// on screen rather than where it assumes it to be.
+/// Where the cube's front face is drawn now, from the cube's own projection.
 #[track_caller]
 pub(crate) fn front_face(harness: &Harness<'_, App>) -> egui::Pos2 {
     let camera = harness.state().scene.camera;
@@ -36,8 +34,7 @@ pub(crate) fn clicking_a_face_of_the_view_cube_asks_for_the_view_that_face_shows
     press(&mut harness, at);
     release(&mut harness, at);
 
-    // The turn is animated over 200 ms, so what a click produces is a request:
-    // where it ends up is what this asserts, without waiting for wall clock.
+    // The turn is animated, so assert the requested end rather than waiting on the clock.
     let asked = harness.state().camera_move.expect("clicking a face asked for nothing");
     let (yaw, pitch) = preset.angles();
     assert!(
@@ -51,11 +48,8 @@ pub(crate) fn clicking_a_face_of_the_view_cube_asks_for_the_view_that_face_shows
 
 #[test]
 pub(crate) fn the_cube_takes_the_pointer_so_a_click_on_it_does_nothing_to_the_scene_behind_it() {
-    // The cube sits inside the viewport, and the viewport does two things with a
-    // press of its own: it orbits, and -- on a click that grabs no handle -- it
-    // selects whatever is under the pointer, or clears the selection when that
-    // is nothing. Under the cube there is nothing. So a click on a face must be
-    // a click on the cube only.
+    // The viewport orbits on a press and clears the selection on an empty click; a click on the cube
+    // must reach only the cube.
     let mut harness = harness("cube-orbit");
     let before = harness.state().scene.camera;
     let selected = harness.state().selection.clone();
@@ -63,8 +57,7 @@ pub(crate) fn the_cube_takes_the_pointer_so_a_click_on_it_does_nothing_to_the_sc
     let at = front_face(&harness);
 
     press(&mut harness, at);
-    // A real click is never perfectly still; a pixel is well under egui's drag
-    // threshold and must stay a click.
+    // A real click is never still; one pixel is under egui's drag threshold.
     move_to(&mut harness, at + egui::vec2(1.0, 1.0));
     release(&mut harness, at + egui::vec2(1.0, 1.0));
 

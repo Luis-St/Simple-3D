@@ -4,9 +4,7 @@ use super::*;
 
 #[test]
 pub(crate) fn only_a_subtree_that_carries_a_colour_has_one_to_clear() {
-    // What decides whether the Clear control is offered: a shape that
-    // merely inherits a group's colour has nothing of its own to take
-    // away, and a control that cannot do anything should not be live.
+    // Decides whether Clear is offered: an inherited colour has nothing of its own to clear.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
@@ -21,8 +19,7 @@ pub(crate) fn only_a_subtree_that_carries_a_colour_has_one_to_clear() {
 
     scene.paint_subtree(child, Some(Colour([9, 9, 9])));
     assert!(scene.subtree_is_painted(child));
-    // And clearing the group takes the child's own colour with it, which is
-    // what makes painting a group mean the whole group.
+    // Clearing the group clears the child's own colour too.
     scene.paint_subtree(group, None);
     assert!(!scene.subtree_is_painted(group));
     assert_eq!(scene.effective_colour(child), None);

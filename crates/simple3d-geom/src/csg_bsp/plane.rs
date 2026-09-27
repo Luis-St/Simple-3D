@@ -1,5 +1,4 @@
-//! The dividing plane of a BSP node, and the keys that decide when two of
-//! them are the same plane.
+//! A BSP node's dividing plane, and the keys that decide when two planes are the same.
 
 use crate::vec3::Vec3;
 
@@ -24,8 +23,7 @@ impl Plane {
     }
 }
 
-/// A plane's identity, sign-independent: two faces of a solid that lie in the
-/// same plane belong at the same BSP node whichever way they face.
+/// A sign-independent plane key: coplanar faces share a BSP node whichever way they face.
 pub(crate) fn unoriented_plane_key(p: &Plane) -> (i64, i64, i64, i64) {
     let flip = if p.normal.x.abs() > 1e-9 {
         p.normal.x < 0.0

@@ -5,21 +5,13 @@ use crate::app::App;
 use crate::shell::{OtherWindow, WindowRequest};
 use crate::theme::{self, metric, token};
 
-/// The row of open documents: the top of the workspace, between the docks and
-/// over the viewport, so a tab sits above the model it holds.
+/// The row of open documents above the viewport. Hand-drawn so the active tab joins the workspace.
 ///
-/// Drawn by hand rather than out of widgets so a tab can be a shape -- the
-/// active one lit along its top edge and joined to the workspace below it --
-/// which is what makes the row readable at a glance.
-///
-/// The row is also where a document leaves the window: a tab dragged off it
-/// opens in a window of its own, a tab dropped on another window's row moves
-/// there, and the empty space beside the tabs carries the whole window the same
-/// way (issue 107). What the drag does is resolved in [`super::drag`] once the
-/// row has drawn; nothing here changes a window, it only says what was asked.
+/// Also where documents leave the window: dragged off, onto another window's row, or the whole
+/// window via the empty space (issue 107). Drags are resolved in [`super::drag`]; this only
+/// reports what was asked.
 pub fn show(app: &mut App, ctx: &egui::Context) {
-    // Everything the row draws is read off the application here, so the menus
-    // below can be written without borrowing it a second time.
+    // Read up front so the menus below need no second borrow of the app.
     let summaries: Vec<(String, bool)> = (0..app.tab_count()).map(|index| app.tab_summary(index)).collect();
     let others = app.other_windows.clone();
     let active = app.active;
@@ -46,24 +38,18 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if plus(ui, "New document") {
                 asked = Some(Ask::New);
             }
-            // Whatever is left of the row after the tabs. Dragging it carries
-            // the whole window to another window's row, which is the gesture
-            // that merges two windows; right-clicking it offers the same move
-            // without a drag.
+            // The rest of the row: dragging it carries the whole window, right-click offers the same.
             rest_of_the_row(ui, active, &others, &mut asked);
         });
     });
-    // Where the row is, for a drag to be measured against and for another
-    // window to drop a tab onto.
+    // The row's rect, for drag measurement and as a drop target for other windows.
     app.strip_rect = panel.response.rect;
     app.window_rect = ctx.input(|i| i.viewport().inner_rect);
-    // And whether the pointer is on it, for a tab another window is holding out
-    // to be claimed by this one (issue 107).
+    // Whether the pointer is on it, to claim a tab another window holds out (issue 107).
     app.pointer_on_strip = ctx.input(|i| i.pointer.latest_pos()).is_some_and(|pos| app.strip_rect.contains(pos));
 
     match asked {
-        // After the row, so closing a tab cannot renumber the ones still being
-        // drawn.
+        // After drawing, so closing a tab cannot renumber ones still being drawn.
         Some(Ask::Pick(index)) => app.activate_tab(index),
         Some(Ask::Close(index)) => app.close_tab(index),
         Some(Ask::New) => app.run(simple3d_core::keymap::Command::New),
@@ -75,7 +61,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
 }
 
-/// What the row was asked to do, carried out after it has finished drawing.
+/// What the row was asked to do, carried out after drawing.
 enum Ask {
     Pick(usize),
     Close(usize),
@@ -86,19 +72,17 @@ enum Ask {
     MoveAll(u64),
 }
 
-/// The grip a tab is: named rather than taken from where the tab happens to sit,
-/// so a test can find the tab it means to drag.
+/// A tab's id, stable so tests can find it.
 pub(crate) fn tab_id(index: usize) -> egui::Id {
     egui::Id::new(("tab", index))
 }
 
-/// The grip the empty part of the row is.
+/// The id of the row's empty part.
 pub(crate) fn rest_id() -> egui::Id {
     egui::Id::new("tab-strip-rest")
 }
 
-/// One tab. Returns its own response -- the menu hangs off it -- and what was
-/// done to it, if anything.
+/// One tab: its response (for the menu) and what was done to it.
 fn tab(
     ui: &mut egui::Ui,
     index: usize,
@@ -117,8 +101,7 @@ fn tab(
     let width = (text_width + CLOSE + 24.0).clamp(MIN, MAX.min(ui.available_width().max(MIN)));
     let height = ui.available_height();
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    // Click *and* drag: a tab is picked with one and moved between windows with
-    // the other, and egui tells the two apart by how far the pointer travelled.
+    // Click to pick, drag to move between windows; egui tells them apart by travel.
     let response = ui.interact(rect, tab_id(index), egui::Sense::click_and_drag());
 
     let fill = if carried {
@@ -132,8 +115,7 @@ fn tab(
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     if active {
-        // The lit top edge, and no rule along the bottom: the active tab is the
-        // workspace's own top, not a button sitting above it.
+        // Lit top edge and no bottom rule: the active tab is part of the workspace.
         ui.painter().hline(rect.x_range(), rect.top() + 1.0, egui::Stroke::new(2.0_f32, token::ACCENT));
     } else {
         ui.painter().hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, token::SURFACE_3));
@@ -171,9 +153,8 @@ fn tab(
     (response, hit)
 }
 
-/// The tab's own menu: where a document is sent to another window on a desktop
-/// that will not let a drag find one (see [`super::drag`]), and where the move
-/// is spelled out for anyone who would never think to drag a tab at all.
+/// The tab's menu: sending a document to another window where drags cannot find it
+/// (see [`super::drag`]), and for those who would not drag.
 fn tab_menu(
     response: &egui::Response,
     index: usize,
@@ -231,8 +212,7 @@ fn rest_of_the_row(ui: &mut egui::Ui, active: usize, others: &[OtherWindow], ask
     });
 }
 
-/// The button at the end of the row: another document, or on the row of
-/// components another component.
+/// The plus at the end of the row: a new document, or a new component on the component row.
 pub(crate) fn plus(ui: &mut egui::Ui, hover: &str) -> bool {
     let size = egui::vec2(28.0, ui.available_height());
     let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
@@ -247,8 +227,7 @@ pub(crate) fn plus(ui: &mut egui::Ui, hover: &str) -> bool {
     response.on_hover_text(hover).clicked()
 }
 
-/// The close cross, drawn rather than typed: a glyph would depend on the font
-/// having it, and would sit off centre in most that do.
+/// The close cross, painted so it does not depend on the font and sits centred.
 pub(crate) fn cross(painter: &egui::Painter, centre: egui::Pos2, colour: egui::Color32) {
     let r = 3.5;
     let stroke = egui::Stroke::new(1.3_f32, colour);

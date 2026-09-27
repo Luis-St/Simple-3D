@@ -59,7 +59,7 @@ impl Fixture {
     }
 }
 
-/// Drag a handle from where it sits to where the given world point projects.
+/// Drag a handle to where the world point projects.
 fn drag_to(f: &mut Fixture, handle: Handle, target: Vec3, mods: Mods, snap: f64) -> Drag {
     let mode = match handle {
         Handle::MoveAxis(_) | Handle::MovePlane(_) => Mode::Move,
@@ -69,8 +69,7 @@ fn drag_to(f: &mut Fixture, handle: Handle, target: Vec3, mods: Mods, snap: f64)
     drag_in(f, mode, handle, target, mods, snap)
 }
 
-/// The same, in a mode the handle does not imply: a face handle is a resize
-/// in one mode and a scale in the other.
+/// The same in an explicit mode: a face handle resizes in one and scales in the other.
 fn drag_in(f: &mut Fixture, mode: Mode, handle: Handle, target: Vec3, mods: Mods, snap: f64) -> Drag {
     let gizmo = f.gizmo(mode);
     let from = f.view.project(gizmo.handle_point(handle, &f.view)).unwrap().0;

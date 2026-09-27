@@ -1,14 +1,12 @@
-//! What can stop an export, in the words the dialog shows.
+//! What can stop an export, in the dialog's words.
 
 use std::fmt;
 
-/// Why an export did not happen. Every variant carries the specific reason, so
-/// the dialog never has to show a generic message.
+/// Why an export failed, always with the specific reason.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportError {
     Empty,
-    /// Verification found problems. Each string names what is wrong; the caller
-    /// prefixes the node responsible.
+    /// Verification problems; the caller prefixes the responsible node.
     Invalid(Vec<String>),
     Cancelled,
     Io(String),

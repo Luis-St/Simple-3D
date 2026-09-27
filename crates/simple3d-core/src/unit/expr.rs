@@ -2,11 +2,8 @@
 
 use super::*;
 
-/// The expression reader. Deliberately small: four operators, parentheses, one
-/// leading sign per factor, and a unit suffix on any number.
-///
-/// `unit` is the document's display unit, and `None` means suffixes convert to
-/// nothing -- an angle or a count has no length to be expressed in.
+/// The expression reader: four operators, parentheses, one sign per factor, and unit suffixes.
+/// `unit` is the display unit; `None` means suffixes convert nothing (angles, counts).
 pub(crate) fn evaluate(text: &str, unit: Option<Unit>) -> Option<f64> {
     let tokens = tokenize(text)?;
     let mut parser = Parser { tokens: &tokens, at: 0, unit };
@@ -25,9 +22,8 @@ pub(crate) enum Token {
     Op(char),
 }
 
-/// Suffixes a number may carry. `deg` and the degree sign are lengths of
-/// nothing: they are accepted so that copying a value back out of an angle
-/// field parses, and they convert nothing.
+/// Suffixes a number may carry. `deg` and the degree sign convert nothing; they let values copied
+/// from angle fields parse.
 pub(crate) fn suffix_mm_per(name: &str) -> Option<Option<f64>> {
     match name {
         "mm" => Some(Some(1.0)),
@@ -52,9 +48,7 @@ pub(crate) fn tokenize(text: &str) -> Option<Vec<Token>> {
             let start = i;
             let mut separators = 0;
             while i < chars.len() && (chars[i].is_ascii_digit() || chars[i] == '.' || chars[i] == ',') {
-                // Both `1.8` and `1,8` mean the same thing; a second separator
-                // in one number is a mistake, and a thousands separator is not
-                // supported, which makes it one too.
+                // `1.8` and `1,8` mean the same; a second separator (or thousands separator) is an error.
                 if chars[i] == '.' || chars[i] == ',' {
                     separators += 1;
                     if separators > 1 {
@@ -73,8 +67,7 @@ pub(crate) fn tokenize(text: &str) -> Option<Vec<Token>> {
                 i += 1;
             }
             let name: String = chars[start..i].iter().collect();
-            // Reject an unknown word here rather than at the parser, so `12mmm`
-            // fails as one mistake instead of as a trailing token.
+            // An unknown word fails here, so `12mmm` is one mistake rather than a trailing token.
             suffix_mm_per(&name)?;
             tokens.push(Token::Suffix(match name.as_str() {
                 "mm" => "mm",
@@ -125,8 +118,7 @@ impl Parser<'_> {
             self.at += 1;
             let rhs = self.factor()?;
             if op == '/' {
-                // Division by zero gives infinity, which `evaluate` rejects: a
-                // field must never end up holding a value that cannot be drawn.
+                // Division by zero gives infinity, which `evaluate` rejects.
                 value /= rhs;
             } else {
                 value *= rhs;
@@ -135,8 +127,7 @@ impl Parser<'_> {
         Some(value)
     }
 
-    /// One optional sign, then a primary. Stacking signs (`--4`) is a typing
-    /// mistake far more often than it is arithmetic, so it is refused.
+    /// One optional sign, then a primary; stacked signs (`--4`) are refused as typos.
     pub(super) fn factor(&mut self) -> Option<f64> {
         match self.peek_op() {
             Some('-') => {
@@ -159,8 +150,7 @@ impl Parser<'_> {
                 if let Some(Token::Suffix(name)) = self.tokens.get(self.at) {
                     let mm_per = suffix_mm_per(name)?;
                     self.at += 1;
-                    // `4 cm` in a millimetre document is 40 of what the field
-                    // shows; in a metre document it is 0.04 of it.
+                    // `4 cm` is 40 in a millimetre document and 0.04 in a metre one.
                     if let (Some(mm_per), Some(unit)) = (mm_per, self.unit) {
                         value = value * mm_per / unit.mm_per();
                     }

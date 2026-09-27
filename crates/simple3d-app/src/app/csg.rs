@@ -7,23 +7,18 @@ use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
 use std::sync::Arc;
 
-/// A drag the GPU draws as the boolean it changes: the group whose result is
-/// in the scene as it came, as an expression over the shapes that go into it,
-/// with the dragged one where the drag has got to. See `gpu/csg.rs`.
+/// A drag the GPU draws as the boolean it changes: the affected group as an expression over its
+/// shapes, with the dragged one moved. See `gpu/csg.rs`.
 pub(crate) struct LiveCsg {
-    /// The group's stretch of the scene's vertices, left out while it is
-    /// drawn this way.
+    /// The group's vertex range in the scene, hidden while drawn this way.
     pub range: std::ops::Range<u32>,
-    /// The shapes, each as the last evaluation made it, in world space, with
-    /// the move that puts it where it is drawn: the drag's for the dragged
-    /// one, a pattern copy's for a shape inside a pattern, both for the
-    /// dragged one in a copy.
+    /// The shapes from the last evaluation, in world space, each with its move (the drag's, a
+    /// pattern copy's, or both).
     pub leaves: Vec<(Arc<Renderable>, Option<Xform>)>,
     /// Which node is dragged, and how far it has moved.
     pub carried: NodeId,
     pub xform: Xform,
-    /// The expression, in postfix: a leaf by its index, or one of the
-    /// operators below applied to the two values before it.
+    /// The expression in postfix: a leaf index, or an operator on the two values before it.
     pub program: Vec<i32>,
 }
 
@@ -31,12 +26,11 @@ pub(crate) const CSG_UNION: i32 = -1;
 pub(crate) const CSG_DIFFERENCE: i32 = -2;
 pub(crate) const CSG_INTERSECTION: i32 = -3;
 
-/// How many shapes an expression may have: one bit of a mask each, with one
-/// kept back for the section plane. See `gpu::csg::MAX_SHAPES`.
+/// Most shapes an expression may have: one mask bit each, one reserved for the section.
+/// See `gpu::csg::MAX_SHAPES`.
 pub(crate) const CSG_LEAVES: usize = 127;
 
-/// How deep the resolve pass's stack goes, and how long an expression it
-/// holds -- the section's intersection counted in.
+/// The resolve pass's stack depth and maximum expression length, including the section.
 const CSG_STACK: usize = 32;
 const CSG_PROGRAM: usize = 256;
 
@@ -44,26 +38,21 @@ const CSG_PROGRAM: usize = 256;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PlannedLeaf {
     pub shape: Shape,
-    /// The pattern copies it is in, as one move in world space; `None`
-    /// outside any pattern.
+    /// The pattern copy it is in, as one world-space move; `None` outside any pattern.
     pub copy: Option<Xform>,
-    /// Whether it moves with the drag.
     pub carried: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shape {
-    /// A node's shape, as the last evaluation made it.
+    /// A node's shape from the last evaluation.
     Node(NodeId),
-    /// A hull with the dragged body among what it is stretched over, made
-    /// again for where the drag has got to (see [`App::csg_hull`]).
+    /// A hull stretched over the dragged body, rebuilt per frame (see [`App::csg_hull`]).
     Hull(NodeId),
 }
 
-/// A hull the dragged body is inside of, worked out once per drag down to
-/// the few points that decide it: the hull of everything that stays where it
-/// is, and of the dragged body itself. Each frame only takes the hull of those
-/// two together, with the one moved.
+/// A hull containing the dragged body, reduced once per drag to the hull points of the static
+/// part and of the dragged body; each frame hulls those together.
 pub(crate) struct HullCache {
     generation: u64,
     carried: NodeId,
@@ -74,15 +63,11 @@ pub(crate) struct HullCache {
 }
 
 impl App {
-    /// The boolean a drag changes, when the GPU can draw it without the
-    /// scene being evaluated (see [`LiveCsg`]).
+    /// The boolean a drag changes, when the GPU can draw it without evaluation (see [`LiveCsg`]).
     ///
-    /// For a body that is not a stretch of the scene of its own -- one inside
-    /// a union it meets, a cutter, a difference's base -- and only while every
-    /// group from it up to the nearest one that is such a stretch is one the
-    /// card can draw: a union, a difference, an intersection or an assembly
-    /// per pixel, a pattern as its copies, and a hull as a shape made again
-    /// on each frame. A split of it still waits for the evaluation.
+    /// Only for a body that is not its own scene range, and only while every group up to the
+    /// nearest one that is can be drawn on the card (union, difference, intersection, assembly,
+    /// pattern, hull). A split still waits for evaluation.
     pub(crate) fn live_csg(&self) -> Option<LiveCsg> {
         self.gpu.as_ref()?;
         let carried = match &self.drag {
@@ -112,15 +97,8 @@ impl App {
         Some(LiveCsg { range: self.scene_renderable.parts.get(&group)?.clone(), leaves, carried, xform, program })
     }
 
-    /// The shapes [`App::live_csg`] would draw a drag of the selection
-    /// from, made ahead of the drag while nothing is being dragged.
-    ///
-    /// Making them, and putting them on the card, used to be the first frame
-    /// of the drag's work -- every shape of the boolean at once, and on a
-    /// large model a frame that visibly hung. Made when the body is selected
-    /// instead, and kept on the card for as long as it is, the drag starts
-    /// with all of it already there. The same shapes, since they are kept per
-    /// evaluation, so the drag finds them rather than making them again.
+    /// The shapes [`App::live_csg`] would draw for the selection, prepared before any drag starts,
+    /// so the first drag frame does not hang building and uploading them.
     pub(crate) fn csg_ready(&self) -> Vec<Arc<Renderable>> {
         if self.gpu.is_none() || self.drag.is_some() || self.settling.is_some() {
             return Vec::new();
@@ -141,12 +119,9 @@ impl App {
         shapes
     }
 
-    /// The boolean a drag of `carried` changes: the group whose result is a
-    /// stretch of the scene of its own, the shapes of the expression below it
-    /// -- `carried` among them -- and the expression over them. `None` when
-    /// `carried` is a stretch of its own (a plain live drag moves it), when a
-    /// group on the way up cannot be drawn this way, or when there are more
-    /// shapes than the masks hold.
+    /// The boolean a drag of `carried` changes: the group that is its own scene range, its leaves
+    /// and the expression. `None` if `carried` is its own range, a group cannot be drawn this way,
+    /// or there are too many shapes.
     pub(crate) fn csg_plan(&self, carried: NodeId) -> Option<(NodeId, Vec<PlannedLeaf>, Vec<i32>)> {
         let parts = &self.scene_renderable.parts;
         if parts.contains_key(&carried) {
@@ -161,10 +136,8 @@ impl App {
             path.push(parent);
         };
         path.push(group);
-        // A hull is made from the points of what is under it, which are the
-        // points of its operands only while nothing between it and the dragged
-        // body takes material away or repeats it; and one hull is as many as
-        // one shape made again per frame should stand for.
+        // A hull is built from its operands' points only while nothing between it and the dragged body
+        // removes or repeats material; and at most one hull is rebuilt per frame.
         let mut hulls = 0;
         for (index, &id) in path[1..].iter().enumerate() {
             match &self.scene.node(id).body {
@@ -189,15 +162,13 @@ impl App {
         fits.then_some((group, leaves, program))
     }
 
-    /// `node` as an expression: opened up into its children when it is the
-    /// group or a group on the way down to the carried body, a leaf otherwise.
-    /// `copy` is the pattern copy it is being laid out for.
+    /// `node` as an expression: expanded if it is the group or on the path to the carried body,
+    /// otherwise a leaf. `copy` is the pattern copy being laid out.
     fn csg_expression(&self, node: NodeId, copy: Option<Xform>, plan: &mut Plan<'_>) -> Option<()> {
         if plan.leaves.len() > CSG_LEAVES {
             return None;
         }
-        // `path` runs from the carried body up to the group, so a node on it
-        // other than the body itself is a group it is inside of.
+        // `path` runs from the carried body up to the group, so any other node on it is an enclosing group.
         if node == plan.carried || !plan.path.contains(&node) {
             plan.program.push(plan.leaves.len() as i32);
             plan.leaves.push(PlannedLeaf { shape: Shape::Node(node), copy, carried: node == plan.carried });
@@ -218,11 +189,8 @@ impl App {
                 };
                 self.csg_children(node, op, copy, plan)
             }
-            // The copies side by side, which the evaluation unions: each the
-            // pattern's children, moved the way the copy moves them. They are
-            // laid out in the pattern's own frame -- where its children are
-            // placed -- so a copy's move in world space is that frame, the
-            // copy, and the frame undone again.
+            // Copies side by side, unioned like the evaluation does. Each copy's world move is the pattern's
+            // frame, the copy, and the frame undone.
             Body::Pattern { params } => {
                 let first = self.scene.node(node).children.first()?;
                 let frame = *self.evaluated.node_frames.get(first)?;
@@ -243,7 +211,7 @@ impl App {
         }
     }
 
-    /// A group's shown children with `op` between each two of them.
+    /// A group's shown children with `op` between each pair.
     fn csg_children(&self, node: NodeId, op: i32, copy: Option<Xform>, plan: &mut Plan<'_>) -> Option<()> {
         let mut first = true;
         for &child in &self.scene.node(node).children {
@@ -258,15 +226,12 @@ impl App {
             }
             first = false;
         }
-        // A group with nothing in it is nothing, which no expression here can
-        // say; such a group waits for the evaluation.
+        // An empty group cannot be expressed here, so it waits for evaluation.
         (!first).then_some(())
     }
 
-    /// A shape as the last evaluation made it, kept for as long as that
-    /// evaluation is on screen -- with its feature edges when the display
-    /// mode draws the model's lines, which the boolean drawn from it then
-    /// keeps while it is dragged (`Gpu::draw_csg_edges`).
+    /// A shape from the last evaluation, cached while it is on screen, with feature edges when the
+    /// display mode draws lines (`Gpu::draw_csg_edges`).
     pub(crate) fn csg_leaf(&self, id: NodeId) -> Option<Arc<Renderable>> {
         let generation = self.evaluation_generation;
         let edged = self.settings.display_mode == simple3d_core::config::DisplayMode::ShadedWithEdges;
@@ -286,12 +251,8 @@ impl App {
 
     /// The hull `id` makes with `carried` moved by `moved`, in world space.
     ///
-    /// No pixel can say whether it is inside a hull without the hull, so this
-    /// one is made on the processor -- but not from the operands' meshes: a
-    /// hull of points is the hull of their hulls, so the operands that stay
-    /// put and the dragged body are each boiled down to their own hull once,
-    /// when the drag first asks, and each frame takes the hull of those few
-    /// points together.
+    /// Built on the CPU, since a pixel cannot test hull membership. The hull of points is the hull of
+    /// their hulls, so the operands are reduced to their hulls once per drag.
     pub(crate) fn csg_hull(&self, id: NodeId, carried: NodeId, moved: Xform) -> Option<Arc<Renderable>> {
         let generation = self.evaluation_generation;
         let mut hulls = self.csg_hulls.borrow_mut();
@@ -313,17 +274,14 @@ impl App {
         Some(shape)
     }
 
-    /// What [`App::csg_hull`] makes each frame's hull from: the points of
-    /// `carried`, and of everything else under `id`, each boiled down to its
-    /// hull.
+    /// The reduced hull points [`App::csg_hull`] builds from: `carried`'s and everything else's
+    /// under `id`.
     fn hull_cache(&self, id: NodeId, carried: NodeId) -> Option<HullCache> {
         let shown = |node: NodeId| {
             let node = self.scene.node(node);
             node.children.iter().copied().filter(|&child| self.scene.node(child).visible).collect::<Vec<_>>()
         };
-        // Everything beside the way down from the hull to the carried body:
-        // what `csg_plan` allows below a hull is unions, so those are the
-        // hull's operands as much as the dragged body is.
+        // Only unions are allowed below a hull (`csg_plan`), so siblings off the path are operands too.
         let mut still = Vec::new();
         let mut at = carried;
         while at != id {
@@ -359,7 +317,7 @@ struct Plan<'a> {
     program: Vec<i32>,
 }
 
-/// How deep a postfix expression's stack gets while it is worked out.
+/// The maximum stack depth while evaluating a postfix expression.
 fn stack_depth(program: &[i32]) -> usize {
     let (mut depth, mut deepest) = (0usize, 0usize);
     for &op in program {

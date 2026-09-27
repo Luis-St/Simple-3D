@@ -8,8 +8,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn baking_a_node_captures_what_it_evaluates_to_without_moving_it() {
-    // Issue 80's whole correctness condition: converting must not shift the
-    // shape, whatever the node's transform and anchor happen to be.
+    // Issue 80: converting must not shift the shape, whatever the transform and anchor.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -40,15 +39,8 @@ pub(crate) fn baking_a_node_captures_what_it_evaluates_to_without_moving_it() {
 
 #[test]
 pub(crate) fn the_baked_placement_puts_the_geometry_back_exactly_where_the_node_stands() {
-    // What a tool's preview is drawn through (issue 82). The tool works in
-    // the node's own frame; if the way back out is off by an anchor, a
-    // scale or an ancestor, the cells are drawn floating beside the shape
-    // they are cutting rather than on it -- and the split still comes out
-    // right, so nothing but the eye would catch it.
-    //
-    // Every one of those is turned on at once, and the answer is checked
-    // against the evaluation's own world mesh rather than against a repeat
-    // of the arithmetic.
+    // The preview placement (issue 82) must put baked geometry back exactly; an anchor, scale or
+    // ancestor error would float the cells beside the shape. Checked against the evaluation's own mesh.
     let mut scene = Scene::new();
     let root = scene.root();
     let outer = scene.add_group(GroupOp::Union, root, 0);
@@ -74,22 +66,20 @@ pub(crate) fn the_baked_placement_puts_the_geometry_back_exactly_where_the_node_
     let (baked, placement) = baked_mesh_in_place(&scene, group, parent);
     assert!(baked.triangle_count() > 0);
 
-    // Every baked point, put back, must land on the world mesh the
-    // evaluation drew -- so the two boxes agree to the last micron.
+    // Every baked point put back lands on the evaluated world mesh.
     let placed = bounds_of(baked.positions.iter().map(|&p| placement.point(p))).expect("the baked mesh has points");
     let world = bounds_of(out.mesh.positions.iter().copied()).expect("the scene has points");
     assert!((placed.0 - world.0).length() < 1e-6, "the placement is off: {placed:?} against {world:?}");
     assert!((placed.1 - world.1).length() < 1e-6, "the placement is off: {placed:?} against {world:?}");
 
-    // And the mesh itself is unchanged by asking for the placement with it.
+    // Asking for the placement leaves the mesh unchanged.
     let alone = baked_mesh(&scene, group);
     assert_eq!(alone.positions, baked.positions, "asking for the placement changed the geometry");
 }
 
 #[test]
 pub(crate) fn a_centre_anchored_node_is_placed_without_an_anchor_shift() {
-    // The other half of the same sum: an offset applied where there is none
-    // to apply would push the preview off the shape by half its height.
+    // A centre anchor gets no shift, or the preview would be off by half the height.
     let mut scene = Scene::new();
     let root = scene.root();
     let id = plate(&mut scene, root);

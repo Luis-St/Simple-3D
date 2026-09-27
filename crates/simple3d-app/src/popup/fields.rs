@@ -1,34 +1,17 @@
-//! The rows an in-place popup's settings are made of: a name that carries what
-//! it means, and a number that is dragged or typed.
-//!
-//! Here rather than in each tool because every tool's numbers have to answer
-//! the pointer the way the properties panel's do -- the same drag, the same
-//! grip, the same buffers, the same message when what is typed is not a number.
-//! Three tools each with their own copy of that is three places for one of them
-//! to drift.
+//! A popup's setting rows: a labelled name and a drag-or-type number, shared by every tool so they
+//! behave like the properties panel.
 
 use crate::app::{App, Status};
 use crate::ui;
 use simple3d_core::primitive::ParamKind;
 
-/// A row's name, carrying what the number beside it means.
-///
-/// The hover is on the label rather than on the field, exactly as the
-/// properties panel puts it: the field is dragged and typed into, and a tooltip
-/// that appears under the pointer halfway through a drag is a tooltip in the
-/// way of the thing it is describing.
+/// A row's name; its hover sits on the label, since a tooltip on the field would get in a drag's way.
 pub(crate) fn label(ui: &mut egui::Ui, name: &str, hover: &str) {
     ui.label(name).on_hover_text(hover);
 }
 
-/// A number that is dragged to change it and clicked to type into it -- the
-/// same control the properties panel's rows are, through the same buffers, so
-/// the two answer the pointer identically.
-///
-/// What it edits is not a document parameter, so there is no undo step to take
-/// and nothing to mark for re-evaluation: the value goes into the plan the
-/// window holds, and the tool picks it up. `scope` separates one tool's fields
-/// from another's, and `name` one field from the next within it.
+/// A drag-or-type number, through the properties panel's buffers. Not a document parameter, so no
+/// undo or re-evaluation: the value goes into the tool's plan. `scope` and `name` separate fields.
 pub(crate) fn number(
     app: &mut App,
     ui: &mut egui::Ui,
@@ -41,14 +24,12 @@ pub(crate) fn number(
     let shown = match kind {
         ParamKind::Length { .. } => simple3d_core::unit::format_length(*value, unit),
         ParamKind::Angle { .. } => simple3d_core::unit::format_angle(*value),
-        // A percentage and a count are whole numbers, and a percentage written
-        // "50.0" invites a decimal the field would only round away.
+        // Percentages and counts are whole numbers.
         _ => format!("{}", value.round() as i64),
     };
     let id = egui::Id::new((scope, name));
     let step = ui::scrub_increment(kind, unit);
-    // The scrub state is lifted out and put back so the field can borrow the
-    // buffers mutably without borrowing the whole application twice.
+    // The scrub state is lifted out so the field can borrow the buffers without borrowing the app twice.
     let mut scrub = app.scrub;
     let outcome = ui
         .scope(|ui| {
@@ -78,12 +59,8 @@ pub(crate) fn number(
     }
 }
 
-/// A field that only means anything while its checkbox is ticked, drawn beside
-/// it and greyed out until it is.
-///
-/// Greyed rather than gone: a row that appears and disappears moves everything
-/// under it, and the number is worth reading -- and worth having kept -- while
-/// the limit it belongs to is switched off.
+/// A field meaningful only while its checkbox is ticked, greyed rather than hidden so the layout
+/// stays put and the value stays visible.
 pub(crate) fn optional(
     app: &mut App,
     ui: &mut egui::Ui,

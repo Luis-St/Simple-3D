@@ -27,7 +27,7 @@ pub(crate) fn converting_to_a_mesh_keeps_the_node_and_loses_the_recipe() {
     assert!(app.scene.node(group).mesh().unwrap().triangle_count() > 0);
     assert_eq!(app.selection, vec![group], "the converted node should stay selected");
 
-    // And it is one undo step that puts the whole thing back.
+    // One undo step puts it all back.
     app.run(Command::Undo);
     assert!(app.scene.node(group).is_group());
     assert_eq!(app.scene.node(group).children.len(), 2);
@@ -46,9 +46,7 @@ pub(crate) fn converting_something_that_is_already_a_mesh_says_so_rather_than_wo
 
 #[test]
 pub(crate) fn joining_the_pieces_back_together_brings_the_original_object_back() {
-    // The other half of issue 82: a split is reversible, and what comes back
-    // is the recipe -- the difference with both its operands and their
-    // parameters -- not the triangles the pieces are.
+    // Issue 82: joining brings back the recipe (difference, operands, parameters), not the pieces' triangles.
     let mut app = headless_app();
     let root = app.scene.root();
     let group = app.scene.add_group(GroupOp::Difference, root, 0);
@@ -87,8 +85,7 @@ pub(crate) fn joining_the_pieces_back_together_brings_the_original_object_back()
 
 #[test]
 pub(crate) fn the_pieces_can_be_moved_as_one_and_joined_back_where_they_now_stand() {
-    // Moving the split moves the object that comes out of it: the transform
-    // belongs to the node standing in the tree, not to the recipe it holds.
+    // The transform belongs to the split node, so moving it moves what comes out.
     let mut app = headless_app();
     let root = app.scene.root();
     let group = app.scene.add_group(GroupOp::Union, root, 0);

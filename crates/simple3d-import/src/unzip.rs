@@ -1,14 +1,8 @@
-//! Reading a ZIP archive, which is what a 3MF file is (an OPC package).
+//! Reading a ZIP archive, which a 3MF (an OPC package) is.
 //!
-//! Enough of the format to find a named part and hand back its bytes: the
-//! central directory, stored and deflated entries, and nothing else. Written
-//! here for the reason the export crate's writer is -- one self-contained
-//! binary, no dependency tree -- and paired with [`crate::inflate`], since a
-//! 3MF written by any other program is deflated.
-//!
-//! Only the central directory is trusted for an entry's sizes. A local header
-//! is allowed to say nothing at all (the streaming case, where the sizes follow
-//! the data), and a reader that believes it instead reads zeroes.
+//! Just enough to find a named part: the central directory, stored and deflated entries. Hand-written
+//! like the export crate's writer, paired with [`crate::inflate`]. Sizes come from the central
+//! directory only, since streaming local headers may hold zeroes.
 
 use crate::inflate::inflate;
 
@@ -18,20 +12,18 @@ struct Entry {
     stored: bool,
     compressed_size: usize,
     uncompressed_size: usize,
-    /// Where the entry's *local* header starts.
+    /// Where the entry's local header starts.
     offset: usize,
 }
 
-/// The parts of `data`, in the order the central directory lists them.
+/// The parts of `data`, in central directory order.
 pub struct Archive<'a> {
     data: &'a [u8],
     entries: Vec<Entry>,
 }
 
 impl<'a> Archive<'a> {
-    /// Read the central directory. Nothing is decompressed yet: a 3MF holds
-    /// parts an importer never looks at -- thumbnails, print settings, a
-    /// slicer's own metadata -- and the one it wants is found by name.
+    /// Read the central directory without decompressing anything; the wanted part is found by name.
     pub fn open(data: &'a [u8]) -> Result<Archive<'a>, String> {
         let directory = end_of_central_directory(data)?;
         let count = u16::from_le_bytes([data[directory + 10], data[directory + 11]]) as usize;
@@ -73,13 +65,12 @@ impl<'a> Archive<'a> {
         Ok(Archive { data, entries })
     }
 
-    /// Every part's name, for saying what an archive holds when the one being
-    /// looked for is not in it.
+    /// Every part's name, for reporting what an archive holds.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.entries.iter().map(|entry| entry.name.as_str())
     }
 
-    /// The bytes of the first part whose name satisfies `wanted`, decompressed.
+    /// The decompressed bytes of the first part whose name satisfies `wanted`.
     pub fn read_by(&self, wanted: impl Fn(&str) -> bool) -> Option<Result<Vec<u8>, String>> {
         let entry = self.entries.iter().find(|entry| wanted(&entry.name))?;
         Some(self.read(entry))
@@ -108,9 +99,7 @@ impl<'a> Archive<'a> {
     }
 }
 
-/// Find the end-of-central-directory record, which is at the end of the file
-/// unless the archive carries a comment -- so it is searched for backwards,
-/// over as much as a comment can be.
+/// Find the end-of-central-directory record, searching backwards over a possible comment.
 fn end_of_central_directory(data: &[u8]) -> Result<usize, String> {
     const SIGNATURE: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
     if data.len() < 22 {

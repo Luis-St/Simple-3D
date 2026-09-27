@@ -15,8 +15,7 @@ pub(crate) fn counts_and_durations_read_naturally() {
     assert_eq!(describe_counts(1, 1), "1 node  1 triangle");
     assert_eq!(describe_counts(3, 240), "3 nodes  240 triangles");
     assert_eq!(describe_elapsed(std::time::Duration::from_millis(12)), "12 ms");
-    // Issue 38: the readout used to say "0 ms" for every evaluation that
-    // took less than half a millisecond, which is most of them.
+    // Issue 38: sub-half-millisecond evaluations, most of them, read "0 ms".
     assert_eq!(describe_elapsed(std::time::Duration::from_micros(240)), "0.24 ms");
     assert_eq!(describe_elapsed(std::time::Duration::from_millis(2500)), "2.5 s");
 }

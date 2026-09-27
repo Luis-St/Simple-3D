@@ -1,5 +1,4 @@
-//! The footer: what is selected, what it measures, and what the
-//! application is doing.
+//! The footer: selection, its measurements, and what the application is doing.
 
 use super::*;
 use crate::app::{App, Status};
@@ -20,14 +19,11 @@ impl App {
             ui.horizontal_centered(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 0.0);
 
-                // Left to right: what is selected, how big it is, what the
-                // numbers snap to, and what unit they are in.
                 ui.add(egui::Label::new(theme::value(self.selection_summary())).selectable(false));
                 dot(ui);
                 ui.add(egui::Label::new(theme::numeric(self.selection_size_text())).selectable(false));
                 dot(ui);
-                // The step and the grid are two different numbers, and both are
-                // on the bar: "why did it jump 10" is answered here.
+                // Step and grid are different numbers, both shown, so a jump of 10 can be explained.
                 let unit = self.unit();
                 let step = simple3d_core::unit::format_length(self.move_snap(), unit);
                 let grid = simple3d_core::unit::format_length(self.scene.settings.grid_spacing, unit);
@@ -38,16 +34,14 @@ impl App {
                     .on_hover_text("Ground grid spacing; set it in the Document panel");
                 dot(ui);
 
-                // The unit is a click, not a trip to a settings window: it is
-                // the one piece of document state read on every single field.
+                // The unit is a click away, since every field reads it.
                 let unit = self.unit();
                 egui::ComboBox::from_id_salt("status-unit")
                     .selected_text(theme::numeric(unit.suffix()))
                     .width(52.0)
                     .show_ui(ui, |ui| {
                         for option in Unit::ALL {
-                            // Switching never rescales the model: the unit only
-                            // changes what the fields read (spec section 4).
+                            // Switching never rescales the model, only what the fields read (spec section 4).
                             if ui.selectable_label(unit == option, option.suffix()).clicked() {
                                 self.scene.settings.unit = option;
                                 self.fields.clear();
@@ -57,11 +51,7 @@ impl App {
 
                 dot(ui);
 
-                // Which renderer draws the viewport. A dropup rather than a
-                // trip to a settings window, and here beside the frame time it
-                // changes: the two are read together or not at all. egui opens
-                // the list upwards on its own, this near the bottom of the
-                // screen.
+                // Renderer choice as a dropup beside the frame time it affects.
                 let engine = self.settings.render_engine;
                 let mut chosen = engine;
                 egui::ComboBox::from_id_salt("status-engine")
@@ -77,16 +67,13 @@ impl App {
                     });
                 if chosen != engine {
                     self.settings.render_engine = chosen;
-                    // Asking again clears the last refusal, so a driver that
-                    // failed once can be tried again after the user has done
-                    // something about it.
+                    // Clear the last refusal so a failed driver can be retried.
                     self.gpu_error = None;
                     if chosen == RenderEngine::Cpu {
                         self.gpu = None;
                         self.gpu_texture = None;
                     }
-                    // The viewport is cached on this key; the engine is not part
-                    // of it, so the switch has to say the picture is stale.
+                    // The engine is not part of the viewport cache key, so invalidate it.
                     self.image_key = u64::MAX;
                     self.persist();
                 }
@@ -102,11 +89,8 @@ impl App {
 
                 dot(ui);
 
-                // The message area, and progress for whatever is in flight.
                 if let Some(job) = &self.split_job {
-                    // Honest progress, unlike an evaluation's: the cells are
-                    // counted before any of them is cut, so the bar knows how
-                    // much of the job is left.
+                    // Real progress: cells are counted before cutting starts.
                     ui.add(egui::ProgressBar::new(job.fraction()).desired_width(110.0).show_percentage());
                     ui.add(
                         egui::Label::new(theme::value(format!(
@@ -139,10 +123,7 @@ impl App {
                         job.cancel();
                     }
                 } else if let Some(job) = &self.import_job {
-                    // A file is read at a rate it can report honestly -- the
-                    // triangles are counted in the header of every format but
-                    // OBJ -- so the bar means the same thing here as it does
-                    // for an export.
+                    // Real progress: every format but OBJ declares its triangle count up front.
                     ui.add(egui::ProgressBar::new(job.fraction()).desired_width(110.0).show_percentage());
                     ui.add(
                         egui::Label::new(theme::value(format!(
@@ -161,11 +142,8 @@ impl App {
                         job.cancel();
                     }
                 } else if let Some(prompt) = &self.file_prompt {
-                    // The dialog is a window of the desktop's, not ours, and on
-                    // Linux it is the portal's -- which can be slow, or absent,
-                    // or simply never answer. It waits on its own thread now, so
-                    // this line is here to say what the application is waiting
-                    // for rather than to apologise for being frozen.
+                    // The desktop's file dialog (a portal on Linux) may be slow or never answer; it waits on its
+                    // own thread, and this says what the app is waiting for.
                     ui.add(egui::Spinner::new().size(12.0));
                     ui.add(
                         egui::Label::new(theme::value(format!(
@@ -183,13 +161,7 @@ impl App {
                         self.stop_waiting_for_file();
                     }
                 } else if self.worker.is_busy() {
-                    // A spinner and the word "Evaluating..." was the whole of
-                    // what this said, with no way out of a run that had decided
-                    // to take minutes -- while an export in the same bar gets
-                    // its elapsed seconds and a Cancel button. There is no
-                    // honest progress to show for a boolean, which does not know
-                    // how much of itself is left, but how long the user has been
-                    // waiting is always knowable and Stop always available.
+                    // A boolean has no real progress, but elapsed time and Stop are always available.
                     ui.add(egui::Spinner::new().size(12.0));
                     let waited = self.worker.waiting_for().unwrap_or_default();
                     let text = if waited.as_secs() >= 1 {
@@ -214,18 +186,11 @@ impl App {
                         Status::Warning(_) => theme::token::ACCENT,
                         _ => theme::token::TEXT_LO,
                     };
-                    // A message fades out once it has had time to be read, so
-                    // the bar stops reporting something that finished minutes
-                    // ago as though it had just happened.
+                    // Messages fade once read, so old results do not look current.
                     let opacity = crate::app::status_opacity(&self.status, self.status_at.elapsed());
                     if opacity > 0.0 {
-                        // The message is the one thing on this bar whose length
-                        // is not ours to choose: a message that names a file
-                        // names its whole path. It gets what is left once the
-                        // readout at the right end has had its room, and is
-                        // elided into that -- running underneath the readout,
-                        // which is what an unbounded label does, leaves both
-                        // unreadable.
+                        // The message (possibly a full path) gets what is left after the right readout and is elided,
+                        // rather than running underneath it.
                         let text = self.status_text();
                         let room = (ui.available_width() - theme::metric::STATUS_READOUT).max(0.0);
                         ui.scope(|ui| {
@@ -245,9 +210,7 @@ impl App {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // The scene itself is not a node the document holds: it is
-                    // the tree's root, it is always there, and counting it made
-                    // an empty document report one node.
+                    // The root is not a document node; counting it made an empty document report one.
                     let nodes = self.scene.len().saturating_sub(1);
                     ui.add(
                         egui::Label::new(theme::numeric(ui::describe_counts(

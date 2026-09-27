@@ -2,8 +2,7 @@
 
 use super::*;
 use simple3d_core::config::DisplayMode;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
+// The tests use these modules' internals, not only the renderer's re-exports.
 use simple3d_geom::primitives;
 
 #[test]
@@ -11,9 +10,7 @@ pub(crate) fn a_box_has_twelve_feature_edges_and_a_cylinder_keeps_only_its_rims(
     let box_edges = feature_edges(&primitives::box_mesh(20.0, 20.0, 20.0).weld(), 20.0);
     assert_eq!(box_edges.len(), 12, "a box has twelve real edges, got {}", box_edges.len());
 
-    // A 32-segment cylinder's curved surface is smooth, so only the two rims
-    // and the vertical seams between wall and cap survive -- never the fan
-    // triangulation inside the caps.
+    // A smooth 32-segment cylinder keeps only rims and wall-cap seams, never the cap fan triangulation.
     let cylinder = primitives::cylinder_mesh(20.0, 20.0, 20.0, 32).weld();
     let edges = feature_edges(&cylinder, 20.0);
     assert!(edges.len() >= 64, "both rims should be kept, got {}", edges.len());
@@ -57,8 +54,7 @@ pub(crate) fn wireframe_paints_less_than_shaded_and_shaded_with_edges_paints_mor
         })
         .collect();
     assert!(counts[0] < counts[1], "wireframe {} should paint less than shaded {}", counts[0], counts[1]);
-    // Edges overwrite pixels the fill already covered, so the count is close;
-    // what matters is that dark edge pixels appeared.
+    // Edges overwrite filled pixels, so what matters is that dark edge pixels appeared.
     let req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
     let frame = render(&req);
     let edge_pixels = frame.color.chunks_exact(4).filter(|p| *p == req.palette.edge).count();
@@ -70,13 +66,11 @@ pub(crate) fn wireframe_paints_less_than_shaded_and_shaded_with_edges_paints_mor
 pub(crate) fn a_ghost_is_translucent_over_the_background() {
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Ghost }], DisplayMode::Shaded);
-    // No axes: a ghost hides nothing, so all three are drawn across it at
-    // full strength, and `AXIS_X` is the same red as `DANGER` -- they would
-    // answer the question this test is asking.
+    // No axes: they draw across a ghost at full strength, and `AXIS_X` is the same red as `DANGER`.
     req.grid.axes = [false; 3];
     let frame = render(&req);
     let painted = count_non_background(&frame, &req.palette);
     assert!(painted > 500, "the ghost did not draw");
-    // Nothing fully opaque in the ghost's colour: everything is blended.
+    // Nothing fully opaque in the ghost colour: all blended.
     assert!(!frame.color.chunks_exact(4).any(|p| p[..3] == req.palette.ghost[..3]), "the ghost drew opaquely");
 }

@@ -1,11 +1,5 @@
-//! Clicking geometry in the viewport selects the corresponding node in the
-//! outliner (spec section 6.1, acceptance criterion 12).
-//!
-//! The ray is cast against each node's *own* world-space mesh rather than
-//! against the evaluated result, because the evaluated result is one merged mesh
-//! with no memory of where its triangles came from. A consequence worth knowing:
-//! clicking the wall of a drilled hole selects the cylinder that cut it, which is
-//! the node you would want to adjust.
+//! Clicking geometry selects its node (spec section 6.1, criterion 12). Rays test each node's own mesh,
+//! since the merged result forgets its sources; so a drilled hole's wall selects its cutter.
 
 mod bvh;
 mod ray;

@@ -2,11 +2,10 @@
 
 use super::*;
 
-/// A build item's transform is where the object stands. An importer that
-/// ignores it puts every part of an assembly on top of the others.
+/// A build item's transform places the object; ignoring it stacks every part.
 #[test]
 pub(crate) fn a_build_items_transform_places_the_object() {
-    // Identity rotation, moved 100mm along X and 5mm up.
+    // Identity rotation, moved 100 mm along X and 5 mm up.
     let placed = " transform=\"1 0 0 0 1 0 0 0 1 100 0 5\"";
     let model = read_all(&package(&tetrahedron_model("millimeter", "", placed)), None).unwrap();
     let (lo, hi) = model.merged().bounds().unwrap();
@@ -14,9 +13,7 @@ pub(crate) fn a_build_items_transform_places_the_object() {
     assert_eq!((hi.x, hi.y, hi.z), (110.0, 10.0, 15.0));
 }
 
-/// An object may be an assembly of other objects, each with its own transform,
-/// and the file's build places the assembly. Both transforms have to apply, in
-/// that order, or the pieces end up somewhere the file does not say.
+/// An assembly's component transforms and the build's transform both apply, in that order.
 #[test]
 pub(crate) fn an_assembly_of_components_is_flattened_with_both_transforms_applied() {
     let document = "<?xml version=\"1.0\"?>\n\
@@ -44,24 +41,20 @@ pub(crate) fn an_assembly_of_components_is_flattened_with_both_transforms_applie
     assert_eq!((hi.x, hi.z), (12.0, 102.0), "the component's transform was not applied");
 }
 
-/// A mirroring transform turns the triangles inside out, so the winding is put
-/// back -- otherwise the part arrives as a surface facing inwards, which every
-/// check downstream reports as broken.
+/// A mirroring transform flips the winding back, so the part does not arrive inside out.
 #[test]
 pub(crate) fn a_mirrored_placement_has_its_winding_corrected() {
     let mirrored = " transform=\"-1 0 0 0 1 0 0 0 1 0 0 0\"";
     let model = read_all(&package(&tetrahedron_model("millimeter", "", mirrored)), None).unwrap();
     let mesh = model.merged();
     let plain = read_all(&package(&tetrahedron_model("millimeter", "", "")), None).unwrap().merged();
-    // Both solids enclose a volume of the same sign: the mirrored one is not
-    // inside out.
+    // Both enclose volume of the same sign: the mirrored one is not inside out.
     let volume = simple3d_export::signed_volume(&mesh.weld());
     let reference = simple3d_export::signed_volume(&plain.weld());
     assert!(volume * reference > 0.0, "the mirrored part came in inside out: {volume} against {reference}");
 }
 
-/// An object that is assembled out of itself would recurse until the stack
-/// runs out. It is a broken file, and is reported as one.
+/// An object assembled out of itself would recurse forever; it is reported as a broken file.
 #[test]
 pub(crate) fn an_object_that_contains_itself_is_refused_rather_than_recursed_into() {
     let document = "<model unit=\"millimeter\"><resources>\
@@ -75,8 +68,7 @@ pub(crate) fn an_object_that_contains_itself_is_refused_rather_than_recursed_int
     }
 }
 
-/// A build that places an object the file never declared, and a triangle
-/// naming a vertex that is not there: both are refused with the reason.
+/// An undeclared build object and an out-of-range vertex index are both refused with the reason.
 #[test]
 pub(crate) fn a_model_that_does_not_hold_together_is_refused_with_the_reason() {
     let missing = "<model unit=\"millimeter\"><resources></resources>\
@@ -97,7 +89,7 @@ pub(crate) fn a_model_that_does_not_hold_together_is_refused_with_the_reason() {
     }
 }
 
-/// A package with no model part in it, and a file that is not a package at all.
+/// A package with no model part, and a file that is not a package at all.
 #[test]
 pub(crate) fn a_package_without_a_model_part_says_what_it_holds_instead() {
     let bytes = deflated_zip(&[("Metadata/thumbnail.png", b"not a model")]);
@@ -108,16 +100,12 @@ pub(crate) fn a_package_without_a_model_part_says_what_it_holds_instead() {
         other => panic!("{other:?}"),
     }
 
-    // A zip of something else entirely: recognised as a package, refused as a
-    // model.
+    // A zip of something else: a package, but not a model.
     let bytes = deflated_zip(&[("notes.txt", b"nothing to do with 3D")]);
     assert!(matches!(read_all(&bytes, None).unwrap_err(), ImportError::Malformed(_)));
 }
 
-/// The model part may be deflated -- it is in every 3MF this application did
-/// not write -- so the package reader has to decompress it. This test is the
-/// one that proves the DEFLATE path is reached at all: the exporter stores its
-/// entries, so nothing else here exercises it.
+/// A deflated model part, as in every 3MF from other programs, exercises the DEFLATE path.
 #[test]
 pub(crate) fn a_deflated_model_part_is_decompressed() {
     let model = read_all(&package(&tetrahedron_model("millimeter", "", "")), None).unwrap();
@@ -125,8 +113,7 @@ pub(crate) fn a_deflated_model_part_is_decompressed() {
     assert_eq!(model.format, Format::ThreeMf);
 }
 
-/// Base materials, which is how a slicer writes colours rather than a colour
-/// group. The same triangles, painted the same way, out of a different element.
+/// Base materials, as slicers write colours: the same painted triangles from a different element.
 #[test]
 pub(crate) fn a_colour_from_base_materials_is_read_as_well_as_from_a_colour_group() {
     let document = "<model unit=\"millimeter\"><resources>\
@@ -149,10 +136,7 @@ pub(crate) fn a_colour_from_base_materials_is_read_as_well_as_from_a_colour_grou
     );
 }
 
-/// The namespace prefix a program writes its extension elements under is not
-/// part of what they mean: `<m:color>`, `<ns2:color>` and `<color>` are the
-/// same element, and a reader that matches on the whole name reads colours out
-/// of only one of the three.
+/// Namespace prefixes do not matter: `<m:color>`, `<ns2:color>` and `<color>` are the same element.
 #[test]
 pub(crate) fn a_namespace_prefix_does_not_change_which_element_something_is() {
     let document = "<model unit=\"millimeter\"><resources>\
@@ -169,8 +153,7 @@ pub(crate) fn a_namespace_prefix_does_not_change_which_element_something_is() {
     assert_eq!(simple3d_geom::tag_colour(mesh.tag(0)), Some([0x20, 0x40, 0x80]));
 }
 
-/// An XML-escaped name comes back as the name the user typed, since that is
-/// what the exporter escaped on the way out.
+/// An XML-escaped name comes back as typed.
 #[test]
 pub(crate) fn an_escaped_object_name_is_read_back_unescaped() {
     let named = " name=\"Bracket &amp; base &lt;2&gt;\"";
@@ -178,9 +161,8 @@ pub(crate) fn an_escaped_object_name_is_read_back_unescaped() {
     assert_eq!(model.parts[0].name, "Bracket & base <2>");
 }
 
-/// Bambu Studio and OrcaSlicer keep every mesh in a model part of its own and
-/// reach it with the Production extension's `p:path`. The ids in that part are
-/// its own, so one may repeat an id the main part uses for something else.
+/// Bambu Studio and OrcaSlicer put meshes in separate model parts reached via `p:path`, whose ids
+/// may repeat the main part's.
 #[test]
 pub(crate) fn a_component_in_another_model_part_is_read_from_that_part() {
     let root = "<?xml version=\"1.0\"?>\n\

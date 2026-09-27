@@ -5,8 +5,7 @@ use crate::view::View;
 use simple3d_core::unit::{format_length, Unit};
 use simple3d_geom::Vec3;
 
-/// The cursor's angle around a ring, in degrees, measured from the ring's first
-/// in-plane axis.
+/// The cursor's angle around a ring in degrees, from the ring's first in-plane axis.
 pub(crate) fn ring_angle(gizmo: &Gizmo, axis: usize, view: &View, cursor: egui::Pos2) -> Option<f64> {
     let point = view.ray_plane(cursor, gizmo.origin, gizmo.axes[axis])?;
     let d = point - gizmo.origin;
@@ -22,7 +21,7 @@ pub fn axis_name(axis: usize) -> &'static str {
     ["X", "Y", "Z"][axis]
 }
 
-/// Axis colours, matching the origin axes so a handle's meaning is obvious.
+/// Axis colours, matching the origin axes.
 pub fn axis_colour(axis: usize) -> egui::Color32 {
     match axis {
         0 => egui::Color32::from_rgb(226, 92, 92),
@@ -37,10 +36,7 @@ pub(crate) fn signed_length(mm: f64, unit: Unit) -> String {
     format!("{sign}{text}{}", unit.suffix())
 }
 
-/// Nudging with the keyboard (spec section 6.2): the arrow keys act along the two
-/// axes most closely aligned with the screen, and a further pair handles the
-/// third. Returns the handle-frame axis index for screen-right, screen-up and
-/// the remaining axis.
+/// Keyboard nudging (spec section 6.2): the handle-frame axes for screen-right, screen-up and the rest.
 pub fn screen_aligned_axes(gizmo: &Gizmo, view: &View) -> [usize; 3] {
     let (right, up) = view.basis();
     let mut remaining: Vec<usize> = vec![0, 1, 2];
@@ -61,8 +57,7 @@ pub fn screen_aligned_axes(gizmo: &Gizmo, view: &View) -> [usize; 3] {
     [horizontal, vertical, remaining[0]]
 }
 
-/// Whether the given handle-frame axis points right/up on screen, so a nudge
-/// "left" really goes left.
+/// Whether an axis points right/up on screen, so a nudge "left" goes left.
 pub fn axis_screen_sign(gizmo: &Gizmo, view: &View, axis: usize, vertical: bool) -> f64 {
     let (right, up) = view.basis();
     let direction = if vertical { up } else { right };
@@ -73,6 +68,5 @@ pub fn axis_screen_sign(gizmo: &Gizmo, view: &View, axis: usize, vertical: bool)
     }
 }
 
-/// The smallest extent a resize nudge will leave behind, so a shape cannot be
-/// nudged to zero or inside out.
+/// Smallest extent a resize leaves, so a shape cannot reach zero or invert.
 pub(crate) const MIN_EXTENT: f64 = 1e-3;

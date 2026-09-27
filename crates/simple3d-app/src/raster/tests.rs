@@ -61,8 +61,7 @@ fn a_translucent_pass_blends_without_writing_depth() {
     frame.triangle(quad, [255, 255, 255, 128], false);
     let blended = frame.pixel(1, 1);
     assert!(blended[0] > 100 && blended[0] < 160, "expected a half blend, got {blended:?}");
-    // Depth was not written, so a second translucent pass blends again
-    // rather than being rejected at equal depth.
+    // Depth was not written, so a second translucent pass blends again instead of failing at equal depth.
     frame.triangle(quad, [255, 255, 255, 128], false);
     assert!(frame.pixel(1, 1)[0] > blended[0]);
 }
@@ -73,7 +72,6 @@ fn geometry_outside_the_frame_is_clipped_not_wrapped() {
     let mut frame = Frame::new(&mut store, 16, 16);
     frame.clear(BG);
     frame.triangle([vertex(-100.0, -100.0, 1.0), vertex(200.0, -50.0, 1.0), vertex(-50.0, 200.0, 1.0)], RED, true);
-    // No panic, and the covered part is filled.
     assert_eq!(frame.pixel(1, 1), RED);
 }
 
@@ -110,7 +108,7 @@ fn an_edge_biased_towards_the_eye_draws_over_its_own_face() {
 
 #[test]
 fn a_line_biased_away_from_the_eye_loses_a_depth_tie() {
-    // How the ground grid gets out of the way of geometry it is coplanar with.
+    // How the ground grid yields to coplanar geometry.
     let mut store = vec![0u8; 16 * 16 * 4];
     let mut frame = Frame::new(&mut store, 16, 16);
     frame.clear(BG);
@@ -121,9 +119,8 @@ fn a_line_biased_away_from_the_eye_loses_a_depth_tie() {
 
 #[test]
 fn a_long_line_running_far_outside_the_frame_still_draws() {
-    // The origin axes are thousands of units long; clipping has to happen
-    // before stepping, or they cost thousands of rejected samples -- and an
-    // earlier length cap made them vanish altogether.
+    // The origin axes are thousands of units long: clip before stepping, or they cost thousands of
+    // rejected samples (an earlier length cap made them vanish).
     let mut store = vec![0u8; 32 * 32 * 4];
     let mut frame = Frame::new(&mut store, 32, 32);
     frame.clear(BG);
@@ -141,7 +138,7 @@ fn clearing_resets_both_colour_and_depth() {
     frame.triangle([vertex(0.0, 0.0, 5.0), vertex(8.0, 0.0, 5.0), vertex(0.0, 8.0, 5.0)], BLUE, true);
     frame.clear(BG);
     assert_eq!(frame.pixel(1, 1), BG);
-    // A far triangle now draws, which it would not if depth had survived.
+    // A far triangle draws, which it would not if depth had survived.
     frame.triangle([vertex(0.0, 0.0, 0.1), vertex(8.0, 0.0, 0.1), vertex(0.0, 8.0, 0.1)], RED, true);
     assert_eq!(frame.pixel(1, 1), RED);
 }

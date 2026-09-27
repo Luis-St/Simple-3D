@@ -1,46 +1,20 @@
 //! The viewport drawn through OpenGL, as an alternative to `raster.rs`.
 //!
-//! It draws the *same* scene by the same rules, but everything that comes off
-//! a mesh is worked out on the card: the meshes are kept there (`resident.rs`)
-//! and projected, culled and shaded by the shaders, and the selection's
-//! silhouette, the plane marks, the section's cap and the line round the cut
-//! are found there too, from the mesh as it was uploaded. A frame hands the
-//! card a camera and nothing per triangle. The grid, the axes with their rule
-//! and a tool's preview are drawn by shaders as well (`ground.rs`), so nothing
-//! of the frame is prepared on the CPU: `render.rs`'s steps are the software
-//! renderer's alone. That renderer is the fallback for a machine without a
-//! usable GPU, and this one is not held back to share its code paths; the two
-//! share the rules -- where an axis stands, which grid levels show, what an
-//! outline is -- and not the work.
+//! The same scene by the same rules, but everything derived from meshes is computed on the card:
+//! meshes stay resident (`resident.rs`), and outlines, plane marks, caps and cut edges are found
+//! there; grid, axes and previews are shaders too (`ground.rs`). A frame uploads only a camera.
+//! The two renderers share rules, not code; the software one is the fallback without a GPU.
 //!
-//! A body being dragged is moved on the card as well: its stretch of the
-//! scene is left out and its own renderable is drawn with the drag's
-//! transform (`render::Live`), so a drag that only moves, turns or scales a
-//! body draws every frame without the scene being evaluated, and evaluates it
-//! once when the body is let go. A body that goes into a boolean -- a cutter,
-//! a part of a union it meets -- is drawn with the boolean worked out per
-//! pixel from the shapes that go into it (`csg.rs`), for the same reason.
+//! Dragged bodies are moved on the card (`render::Live`), and booleans affected by a drag are
+//! computed per pixel (`csg.rs`), so drags do not re-evaluate. Visibility queries are answered
+//! from the drawn depth (`depth.rs`).
 //!
-//! The interface's questions about the picture -- can this point be seen,
-//! what surface is under the pointer -- are answered from the depth the card
-//! drew (`depth.rs`), not by ray casts through the scene.
+//! The pictures are alike, not identical: GPU line rasterisation and batching differ slightly,
+//! but depth test, bias and the axis see-through rule are reproduced. Sections through open
+//! meshes differ: the CPU leaves unchainable cuts uncapped, the GPU's winding count caps them.
 //!
-//! The two pictures are alike, not identical, and deliberately so. A GPU draws
-//! a line by rasterizing it, where `raster.rs` walks it pixel by pixel, so a
-//! one-pixel line lands slightly differently; and primitives are batched by
-//! kind rather than issued one at a time, which reorders the few draws that
-//! depth does not already separate. Everything that decides *what* is visible
-//! -- the depth test, the bias, and the rule that lets an origin axis be seen
-//! through the solid it is arriving at -- is reproduced. The one place the
-//! rules differ is a section through a mesh that does not close: the CPU
-//! leaves a cut it cannot chain into outlines uncapped, where the card, which
-//! counts windings instead of chaining, caps whatever the open surface winds
-//! round.
-//!
-//! There is no shader to fail to compile on the CPU path, so this one is
-//! allowed to fail: every entry point returns a `Result`, and the viewport
-//! falls back to the software renderer with the driver's own message rather
-//! than showing nothing (spec section 2.7, acceptance criterion 19).
+//! This path may fail: every entry point returns a `Result`, and the viewport falls back to the
+//! software renderer with the driver's message (spec section 2.7, acceptance criterion 19).
 
 mod shader;
 pub(crate) use shader::*;
@@ -62,10 +36,8 @@ pub(crate) use buffers::*;
 use eframe::glow;
 use std::sync::Arc;
 
-/// The depth range the scene is mapped into, as a fraction of its own extent
-/// left free at each end. The depth *bias* a line gets is added to its key
-/// before the mapping, so the margin has to be wide enough that a biased line
-/// at the very front or back of the scene still lands inside the buffer.
+/// The fraction of the scene's depth extent left free at each end, so a biased line at the very
+/// front or back still lands in the buffer.
 const DEPTH_MARGIN: f32 = 0.05;
 
 pub struct Gpu {
@@ -74,45 +46,38 @@ pub struct Gpu {
     axis: Program,
     grid: Program,
     background: Program,
-    /// A resident mesh's faces and its lines -- see `resident.rs`.
+    /// A resident mesh's faces and lines (see `resident.rs`).
     faces: Program,
     lines: Program,
     /// A selected body's outline, and where planes cross a mesh.
     outline: Program,
     crossing: Program,
-    /// A boolean drawn per pixel while a drag changes it -- see `csg.rs`.
+    /// A boolean drawn per pixel while a drag changes it (see `csg.rs`).
     csg_peel: Program,
     csg_count: Program,
     csg_pack: Program,
     csg_resolve: Program,
     csg_edges: Program,
     csg_targets: Option<csg::CsgTargets>,
-    /// Each section as a shape for it, with the operation that cuts with it,
-    /// and the hash of what they were made from.
+    /// Each section as a shape with its cutting operation, and the hash they were made from.
     csg_half: Option<(u64, Vec<(crate::render::Renderable, i32)>)>,
-    /// How many texels wide the tables a geometry stage reads a mesh's
-    /// topology from are laid out -- see `resident::table`.
+    /// The texel width of the mesh topology tables (see `resident::table`).
     table_width: usize,
     /// The meshes kept on the card, by `Renderable::id`.
     resident: std::collections::HashMap<u64, resident::Resident>,
-    /// A tool's preview loops as lines, with the hash of the loops they were
-    /// made from -- see `ground::refresh_preview`.
+    /// A tool's preview loops as lines, with their source hash (see `ground::refresh_preview`).
     preview: Option<(u64, crate::render::Renderable)>,
-    /// The offscreen target, remade whenever the viewport's size changes.
+    /// The offscreen target, remade when the viewport size changes.
     target: Option<Target>,
-    /// The texture the finished frame lands in. Made once and reallocated on a
-    /// resize rather than replaced, because egui is told its id exactly once
-    /// and a new texture every frame would leak one every frame.
+    /// The texture the finished frame lands in, reallocated on resize rather than replaced, since
+    /// egui is told its id only once.
     colour: Option<glow::Texture>,
     /// The vertex buffer everything is drawn from, reused between frames.
     buffer: Buffers,
-    /// What the grid's quad and the axes' arms are drawn from.
+    /// What the grid quad and the axis arms are drawn from.
     ground: GroundBuffers,
-    /// The faces' depth, read back for the questions asked about the
-    /// picture -- see `depth.rs`.
+    /// The faces' depth, read back for queries about the picture (see `depth.rs`).
     depth: depth::DepthReadback,
-    /// What egui knows the colour texture as. Registered once: the texture
-    /// object is kept and redrawn into, so the id stays good for the life of
-    /// the application and no texture is leaked per frame.
+    /// egui's id for the colour texture, registered once and valid for the application's life.
     pub texture_id: Option<egui::TextureId>,
 }

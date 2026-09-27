@@ -10,9 +10,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_scale_drag_writes_a_factor_and_leaves_the_dimension_alone() {
-    // The difference between the two sizing tools, in one assertion: resize
-    // rewrites the number the shape is defined by, scale multiplies what is
-    // there and leaves that number where it was.
+    // Resize rewrites the defining number; scale multiplies and leaves it.
     let mut f = Fixture::new("box");
     let width = f.param("width");
     let (lo, hi) = f.world_bounds();
@@ -30,15 +28,13 @@ pub(crate) fn a_scale_drag_writes_a_factor_and_leaves_the_dimension_alone() {
 
     let (nlo, nhi) = f.world_bounds();
     assert!((nhi.x - nlo.x - (hi.x - lo.x) * 2.0).abs() < 0.2, "it is not twice as wide on screen");
-    // The face that was not dragged did not move.
+    // The opposite face did not move.
     assert!((nlo.x - lo.x).abs() < 0.05, "the opposite face moved: {nlo:?} vs {lo:?}");
 }
 
 #[test]
 pub(crate) fn a_group_can_be_scaled_although_it_cannot_be_resized() {
-    // Resize refuses a group -- scaling one truthfully would mean rewriting
-    // every descendant. A factor needs none of that, and it is the only way
-    // to make an assembly a proportion of what it was.
+    // A group cannot be resized, but a factor needs nothing from its descendants.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(simple3d_core::scene::GroupOp::Union, root, 0);
@@ -71,9 +67,7 @@ pub(crate) fn a_group_can_be_scaled_although_it_cannot_be_resized() {
 
 #[test]
 pub(crate) fn a_resize_on_a_scaled_node_still_lands_on_the_dimension_that_was_dragged_to() {
-    // A drag is measured on screen, and the screen shows the node *after*
-    // its scale. Writing the on-screen distance straight into the dimension
-    // would resize by the factor again.
+    // Screen drags see the node after its scale, so writing them straight into a dimension would scale twice.
     let mut f = Fixture::new("box");
     f.scene.get_mut(f.node).unwrap().scale = Vec3::new(2.0, 1.0, 1.0);
     f.reevaluate();
@@ -82,7 +76,7 @@ pub(crate) fn a_resize_on_a_scaled_node_still_lands_on_the_dimension_that_was_dr
     let face = gizmo.handle_point(handle, &f.view);
     let width = f.param("width");
 
-    // Ten world millimetres out is five of the node's own, at a factor of 2.
+    // Ten world millimetres is five of the node's own at factor 2.
     drag_in(
         &mut f,
         Mode::Resize,
@@ -129,7 +123,7 @@ pub(crate) fn escape_puts_a_scale_back_where_a_drag_found_it() {
 
 #[test]
 pub(crate) fn resizing_never_writes_a_scale_factor_into_the_project() {
-    // The other half of criterion 24: the saved file has no scale anywhere.
+    // Criterion 24: the saved file has no scale anywhere.
     let mut f = Fixture::new("box");
     let gizmo = f.gizmo(Mode::Resize);
     let handle = Handle::ResizeFace(2, true);

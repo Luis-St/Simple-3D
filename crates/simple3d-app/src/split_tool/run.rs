@@ -5,16 +5,13 @@ use crate::app::{App, Status};
 use crate::worker::SplitJob;
 
 impl App {
-    /// Start cutting, and put the window away. The document is not touched until
-    /// the pieces arrive.
+    /// Start cutting and close the window; the document is untouched until the pieces arrive.
     pub fn start_split(&mut self) {
         let Some(tool) = self.split_tool.take() else { return };
         if tool.plan.refusal(tool.bounds).is_some() || !self.scene.contains(tool.target) {
             return;
         }
-        // The shape as it is now, to be compared against the shape as it is when
-        // the pieces land: a split applied to something that was edited while it
-        // was being cut would be pieces of a shape that no longer exists.
+        // Snapshot to compare when the pieces land; pieces of an edited shape would be of a shape that is gone.
         let Some(before) = self.scene.export_subtree(tool.target) else { return };
         let name = self.scene.node(tool.target).name.clone();
         self.settings.last_split = tool.plan.clone();
@@ -24,12 +21,8 @@ impl App {
         self.split_job = Some(job);
     }
 
-    /// Take the pieces once they are cut, and stand a split where the shape was.
-    ///
-    /// Everything that could have changed while the cutting ran is checked here
-    /// rather than assumed: the document may have been switched, the shape may
-    /// have been deleted or edited, and none of those is a reason to change
-    /// anything -- the split is dropped and says so.
+    /// Take the cut pieces and stand a split where the shape was. A switched document or a deleted or
+    /// edited shape drops the split, with a message.
     pub fn poll_split(&mut self) {
         let Some(job) = &self.split_job else { return };
         let Some(outcome) = job.poll() else { return };

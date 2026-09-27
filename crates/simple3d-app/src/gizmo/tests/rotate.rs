@@ -19,11 +19,8 @@ pub(crate) fn a_rotate_drag_snaps_to_fifteen_degrees_by_default() {
     assert!(drag.readout.contains("deg"), "{}", drag.readout);
 }
 
-/// Issue 84: the ring counts turns without end -- that is what makes a drag
-/// across the seam keep going the way it was going -- but neither the model
-/// nor the readout beside the pointer is a count of turns. Dragged twice
-/// round, the rotation used to read 725 in the property panel and "Z 725deg"
-/// at the cursor.
+/// Issue 84: the ring counts turns endlessly, but the model and the readout show a direction; two
+/// turns used to read 725.
 #[test]
 pub(crate) fn a_rotate_drag_of_more_than_a_turn_leaves_a_rotation_inside_one() {
     let mut f = Fixture::new("box");
@@ -31,7 +28,7 @@ pub(crate) fn a_rotate_drag_of_more_than_a_turn_leaves_a_rotation_inside_one() {
     let ring = gizmo.ring_points(2, &f.view, 72);
     let from = f.view.project(ring[0]).expect("the ring is off screen").0;
     let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
-    // Twice round the ring, and fifteen degrees more: 735 degrees of turn.
+    // Twice round plus fifteen degrees: 735 degrees of turn.
     for step in 1..=(72 * 2 + 3) {
         let to = f.view.project(ring[step % 72]).expect("the ring is off screen").0;
         drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
@@ -41,7 +38,7 @@ pub(crate) fn a_rotate_drag_of_more_than_a_turn_leaves_a_rotation_inside_one() {
     assert!((0.0..360.0).contains(&z), "a drag of more than a turn left the rotation at {z}");
     assert!((z - 15.0).abs() < 1e-6, "735 degrees of turn is 15 degrees of rotation, not {z}");
 
-    // And the readout says how far the ring went, through the same wrap.
+    // The readout goes through the same wrap.
     let turned: f64 = drag
         .readout
         .trim_start_matches("Z ")
@@ -52,9 +49,7 @@ pub(crate) fn a_rotate_drag_of_more_than_a_turn_leaves_a_rotation_inside_one() {
     assert!((turned - 15.0).abs() < 1e-6, "{}", drag.readout);
 }
 
-/// The readout and the rotation field have to say the same kind of number.
-/// The field cannot show a negative -- a rotation is a direction, and a
-/// direction is written as one turn from zero -- so neither does this.
+/// The readout matches the rotation field, which cannot show negatives.
 #[test]
 pub(crate) fn a_rotate_drag_backwards_reads_the_way_the_rotation_field_does() {
     let mut f = Fixture::new("box");
@@ -62,7 +57,7 @@ pub(crate) fn a_rotate_drag_backwards_reads_the_way_the_rotation_field_does() {
     let ring = gizmo.ring_points(2, &f.view, 72);
     let from = f.view.project(ring[0]).expect("the ring is off screen").0;
     let mut drag = Drag::begin(&f.scene, &gizmo, f.node, Handle::RotateRing(2), &f.view, from).unwrap();
-    // Three points the other way round the ring: fifteen degrees back.
+    // Three points back round the ring: fifteen degrees back.
     for step in [71, 70, 69] {
         let to = f.view.project(ring[step]).expect("the ring is off screen").0;
         drag.update(&mut f.scene, &f.view, to, Mods::default(), 10.0, 15.0, Unit::Millimetre);
@@ -87,10 +82,7 @@ pub(crate) fn a_free_rotate_drag_is_not_snapped() {
     assert!((z % 15.0).abs() > 1e-6, "a free drag snapped anyway: {z}");
 }
 
-/// Issue 90: a group's origin is wherever the group was made, which can be
-/// nowhere near what it holds. The handle stands in the middle of the
-/// children instead, and a turn of the ring turns the group about that middle
-/// rather than swinging it round an origin off to one side.
+/// Issue 90: a group's handle stands at its children's middle, and the ring turns it about that.
 #[test]
 pub(crate) fn a_group_is_handled_and_turned_about_the_middle_of_what_it_holds() {
     let mut scene = Scene::new();

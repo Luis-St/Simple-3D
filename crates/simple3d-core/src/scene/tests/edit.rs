@@ -17,7 +17,7 @@ pub(crate) fn add_targets_the_selected_group_or_follows_a_leaf() {
 
 #[test]
 pub(crate) fn duplicate_is_a_deep_copy_with_distinct_identity() {
-    // Spec acceptance criterion 20/21.
+    // Spec acceptance criteria 20 and 21.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -37,7 +37,6 @@ pub(crate) fn duplicate_is_a_deep_copy_with_distinct_identity() {
     assert_eq!(scene.node(copied_child).segments, Some(64));
     assert!(!scene.node(copied_child).visible);
 
-    // Editing the copy leaves the original untouched.
     scene.get_mut(copied_child).unwrap().position = Vec3::new(99.0, 0.0, 0.0);
     assert_eq!(scene.node(child).position, Vec3::new(5.0, 0.0, 0.0));
 }

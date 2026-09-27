@@ -37,21 +37,18 @@ pub(crate) fn projecting_and_unprojecting_agree() {
     for world in [Vec3::new(10.0, 5.0, 3.0), Vec3::new(-30.0, 12.0, -8.0), Vec3::new(0.0, 0.0, 0.0)] {
         let (screen, _) = v.project(world).unwrap();
         let (origin, dir) = v.ray(screen);
-        // The world point must lie on the ray through its own projection.
+        // The world point lies on the ray through its own projection.
         let along = (world - origin).dot(dir);
         let closest = origin + dir * along;
-        // Screen coordinates are f32, so a round trip through them is
-        // good to a fraction of a micrometre, not to the last bit.
+        // Screen coordinates are f32, so the round trip is good to a fraction of a micrometre.
         assert!((closest - world).length() < 1e-3, "{world:?} -> {screen:?} -> off by {}", (closest - world).length());
     }
 }
 
 #[test]
 pub(crate) fn a_point_behind_the_eye_still_projects_where_it_belongs() {
-    // There is no near plane to fall behind: the projection is parallel, so
-    // a point the camera has passed lands at its true screen position and
-    // is simply behind everything else. Nothing has to be clipped, which is
-    // what stops geometry disappearing when the camera is inside the model.
+    // No near plane: a point behind the eye projects correctly and sits behind everything, so geometry
+    // never vanishes with the camera inside the model.
     let v = view();
     let behind = Vec3::new(0.0, -200.0, 0.0);
     let (screen, depth) = v.project(behind).unwrap();
@@ -98,11 +95,8 @@ pub(crate) fn looking_straight_down_still_yields_a_usable_basis() {
 
 #[test]
 pub(crate) fn the_top_and_bottom_views_look_straight_down_and_straight_up() {
-    // The camera's pitch used to stop at 89 degrees, whatever the preset asked
-    // for, so "View: top" looked a degree off vertical: a 25 mm tall block showed
-    // a sliver of its front face, and a hole drilled through it showed its wall.
-    // In a view whose job is to show dimensions, a vertical edge has to project
-    // onto a single point.
+    // Regression: pitch stopped at 89 degrees, so top view showed sliver faces; a vertical edge must
+    // project to one point.
     for (preset, down) in [(ViewPreset::Top, -1.0), (ViewPreset::Bottom, 1.0)] {
         let (yaw, pitch) = preset.angles();
         let camera = Camera { yaw, pitch, distance: 100.0, ..Camera::default() };
@@ -111,8 +105,7 @@ pub(crate) fn the_top_and_bottom_views_look_straight_down_and_straight_up() {
         let (low, _) = view.project(Vec3::new(10.0, -10.0, -12.5)).expect("in front");
         let (high, _) = view.project(Vec3::new(10.0, -10.0, 12.5)).expect("in front");
         assert!((low - high).length() < 1e-3, "{preset:?} shows a vertical edge {} px long", (low - high).length());
-        // Still the right way round: X to the right, and Y up the screen
-        // from above and down it from below.
+        // The right way round: X right, Y up from above and down from below.
         let (origin, _) = view.project(Vec3::ZERO).expect("in front");
         let (x, _) = view.project(Vec3::new(10.0, 0.0, 0.0)).expect("in front");
         let (y, _) = view.project(Vec3::new(0.0, 10.0, 0.0)).expect("in front");

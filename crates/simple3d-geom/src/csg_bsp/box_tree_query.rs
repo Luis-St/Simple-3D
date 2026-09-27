@@ -4,11 +4,8 @@ use super::*;
 use crate::vec3::Vec3;
 
 impl BoxTree {
-    /// Does any polygon's box come within `EPSILON` of `query`?
-    ///
-    /// `stack` is the caller's, reused across calls: this is asked once per
-    /// polygon per node of the tree being descended, and a fresh allocation
-    /// for each was showing up as a share of the whole boolean.
+    /// Whether any polygon's box comes within `EPSILON` of `query`. `stack` is reused, since this runs
+    /// per polygon per node and allocation showed up in profiles.
     pub(super) fn meets(&self, query: (Vec3, Vec3), stack: &mut Vec<u32>) -> bool {
         stack.clear();
         stack.push(0);
@@ -34,24 +31,11 @@ impl BoxTree {
         false
     }
 
-    /// Every polygon whose box comes within `EPSILON` of `query`, by index into
-    /// the polygons the tree was built from.
-    ///
-    /// `meets` answers whether the list would be empty; this is what a convex
-    /// clip needs instead, because the faces in it are the only ones whose
-    /// planes can cut the query polygon anywhere the body's surface actually
-    /// is. `stack` is the caller's, for the same reason as in `meets`.
-    /// Every polygon whose box the ray from `origin` along `dir` could enter,
-    /// in no particular order. The slab test, with the divisions done once per
-    /// query rather than once per node.
-    ///
-    /// An infinite ray rather than a segment: a parity count has to see every
-    /// face ahead of the point, however far away.
+    /// Every polygon whose box the ray from `origin` along `dir` could enter, in no order: the slab test
+    /// with divisions done once. An infinite ray, since parity must see every face ahead.
     pub(super) fn along_ray(&self, origin: Vec3, dir: Vec3, out: &mut Vec<u32>, stack: &mut Vec<u32>) {
         let inv = Vec3::new(1.0 / dir.x, 1.0 / dir.y, 1.0 / dir.z);
-        // Generous by `EPSILON`, like every other box test here: the point of
-        // one is to prove a face *cannot* be crossed, and a box the ray only
-        // just misses proves nothing.
+        // Generous by `EPSILON`, since it must prove a face cannot be crossed.
         let hits = |lo: Vec3, hi: Vec3| -> bool {
             let mut near = f64::NEG_INFINITY;
             let mut far = f64::INFINITY;
@@ -64,10 +48,8 @@ impl BoxTree {
                 if t0 > t1 {
                     std::mem::swap(&mut t0, &mut t1);
                 }
-                // A direction with a zero component gives infinities here, and
-                // they compare the right way round: the slab is missed entirely
-                // only when the origin is outside it, which makes both bounds
-                // the same infinity.
+                // Zero direction components give infinities that compare correctly: the slab is missed only when
+                // the origin is outside it.
                 near = near.max(t0);
                 far = far.min(t1);
             }
@@ -99,7 +81,7 @@ impl BoxTree {
     }
 }
 
-/// How far in front of `plane` the furthest corner of the box lies.
+/// How far in front of `plane` the box's furthest corner lies.
 pub(crate) fn furthest_corner(plane: &Plane, lo: Vec3, hi: Vec3) -> f64 {
     let n = plane.normal;
     let pick = |a: f64, l: f64, h: f64| if a >= 0.0 { h } else { l };

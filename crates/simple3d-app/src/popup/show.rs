@@ -3,15 +3,9 @@
 use super::*;
 use crate::theme::{self, token};
 
-/// Draw one in-place popup over `bounds`, and return whatever the user did to
-/// the window itself.
-///
-/// `bounds` is the rectangle the window may be dragged around in -- the
-/// viewport. `contents` is given the room inside the frame, already padded and
-/// already the right width, and draws the whole of what is in the window: the
-/// body, and then [`action_row`] for the buttons along its foot. One closure
-/// rather than two, because both halves want the tool they belong to and a
-/// second closure holding it as well is a second borrow of it.
+/// Draw one in-place popup within `bounds` (the viewport) and return what was done to its window.
+/// `contents` gets the padded inner room and draws the body and then [`action_row`]; one closure,
+/// since both halves borrow the same tool.
 pub fn show(
     ctx: &egui::Context,
     bounds: egui::Rect,
@@ -23,10 +17,8 @@ pub fn show(
     placement.pos = Some(pos);
 
     let mut event = PopupEvent::Nothing;
-    // No `constrain_to`: the clamp above is the constraint, and two of them
-    // disagree by a frame. egui's would move the area without writing the move
-    // back into the placement, which is exactly the disagreement that made a
-    // rolled-up window jump.
+    // No `constrain_to`: the clamp above is the constraint, and egui's would move the area without
+    // updating the placement, which made rolled-up windows jump.
     let area = egui::Area::new(egui::Id::new(("in-place-popup", spec.key)))
         .order(egui::Order::Foreground)
         .movable(false)
@@ -63,11 +55,11 @@ pub fn show(
                 });
         });
     });
-    // What it actually came out at, for the next frame's clamp.
+    // The actual height, for the next frame's clamp.
     if !placement.collapsed {
         let height = response.response.rect.height();
         placement.height = height;
-        // And how much of that was not the body, for the next frame's room.
+        // And how much of it was not the body, for the next frame's room.
         let layer = response.response.layer_id.id;
         if let Some(body) = ctx.data(|d| d.get_temp::<f32>(layer.with(BODY_HEIGHT))) {
             ctx.data_mut(|d| d.insert_temp(layer.with(CHROME_HEIGHT), height - body));
@@ -76,38 +68,21 @@ pub fn show(
     event
 }
 
-/// Where [`scrolling_body`] leaves the height it came out at, and where
-/// [`show`] leaves the height of everything else in the window, both under the
-/// popup's own layer.
+/// Where [`scrolling_body`] and [`show`] store the body and chrome heights, under the popup's layer.
 const BODY_HEIGHT: &str = "popup-body-height";
 const CHROME_HEIGHT: &str = "popup-chrome-height";
 
-/// How tall a popup's body may be before it has to scroll: the room in
-/// `bounds` -- the viewport -- less the window's own chrome, which is the title
-/// bar, the padding, the rule and the action row along the foot, and the
-/// spacing between all of them.
-///
-/// A popup is as tall as what is in it, which is the right answer until what is
-/// in it is taller than the viewport: then the foot of the window goes off the
-/// bottom of the screen, and the buttons that finish the job go with it. The
-/// body scrolls instead, and the buttons stay where they are.
-///
-/// The chrome is measured, not added up: a sum of the constants left out the
-/// spacing egui puts between them and the rule's own height, and the window
-/// came out a dozen pixels taller than the viewport, over the status bar. The
-/// sum stands in only for the first frame, before there is a measurement.
+/// How tall a popup's body may be before scrolling: the viewport height less the measured chrome,
+/// so the action buttons never go off screen. A constant sum is used only on the first frame,
+/// since it missed egui's spacing.
 fn body_room(ui: &egui::Ui, bounds: egui::Rect) -> f32 {
     let estimate = TITLE_BAR + PAD * 3.0 + theme::metric::DIALOG_BUTTON + theme::metric::GAP * 2.0;
     let chrome = ui.ctx().data(|d| d.get_temp::<f32>(ui.layer_id().id.with(CHROME_HEIGHT))).unwrap_or(estimate);
     (bounds.height() - chrome).max(120.0)
 }
 
-/// A popup's body, scrolling once it is taller than [`body_room`].
-///
-/// The bar goes in the window's right padding rather than inside the column:
-/// taken out of the column, it squeezed every row the moment it appeared, and
-/// three fields side by side lost what they had to spare. The content keeps the
-/// width it has either way.
+/// A popup's body, scrolling once taller than [`body_room`]. The scrollbar sits in the window's
+/// right padding so it does not squeeze the rows.
 pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&mut egui::Ui)) {
     let width = ui.available_width();
     let max_height = body_room(ui, bounds);
@@ -115,39 +90,31 @@ pub fn scrolling_body(ui: &mut egui::Ui, bounds: egui::Rect, body: impl FnOnce(&
     room.max.x += PAD;
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(room));
     let (area, restore) = theme::list_scroll_area(&mut child);
-    // Gap, bar and margin together fill the padding exactly, so the bar sits
-    // clear of both the fields and the window's border.
+    // Gap, bar and margin exactly fill the padding.
     let scroll = &mut child.style_mut().spacing.scroll;
     scroll.bar_inner_margin = 2.0;
     scroll.bar_width = PAD - 4.0;
     scroll.bar_outer_margin = 2.0;
     area.auto_shrink([false, true]).max_height(max_height).show(&mut child, |ui| {
         ui.set_style(restore);
-        // Never wider than it is given: while the bar slides in, the room is
-        // briefly less than the column.
+        // Never wider than given, since the room briefly shrinks while the bar slides in.
         ui.set_max_width(ui.available_width().min(width));
         body(ui);
     });
-    // Only the column is taken from the window: the padding the bar sits in is
-    // the window's already, and claiming it would widen the window by that much.
+    // Only the column is claimed; the bar's padding already belongs to the window.
     let used = child.min_rect();
     ui.ctx().data_mut(|d| d.insert_temp(ui.layer_id().id.with(BODY_HEIGHT), used.height()));
     ui.advance_cursor_after_rect(egui::Rect::from_min_size(used.min, egui::vec2(width, used.height())));
 }
 
-/// The buttons along the foot of a popup, under a rule: right-aligned and laid
-/// out right to left, so the closure names the rightmost -- the one that goes
-/// through with the command -- first. The same shape as a dialog's row, because
-/// it is the same row.
+/// The popup's footer buttons under a rule, right to left so the closure names the confirming
+/// button first; the same row as a dialog's.
 pub fn action_row(ui: &mut egui::Ui, contents: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(PAD - 4.0);
     ui.separator();
     ui.add_space(2.0);
-    // The room is measured out rather than left to the layout. A popup lives in
-    // an `Area`, whose height is the screen below it until something says
-    // otherwise, and a right-to-left layout handed that much took all of it:
-    // the window came out the full height of the viewport with its buttons
-    // pinned to the bottom of the screen and half a page of nothing above them.
+    // The room is measured explicitly: an `Area` is as tall as the screen below it, and a
+    // right-to-left layout took all of it.
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), theme::metric::DIALOG_BUTTON),
         egui::Layout::right_to_left(egui::Align::Center),

@@ -11,34 +11,19 @@ pub struct AppSettings {
     pub window_maximized: bool,
     pub outliner_width: f32,
     pub properties_width: f32,
-    /// Which panel is in which dock, and what is rolled up. Kept here beside the
-    /// dock widths rather than in the project file: it is how one person likes
-    /// their window, not a property of the model, and putting it in the document
-    /// would mean opening someone else's file rearranged your workspace.
+    /// Which panel is in which dock, and what is rolled up. A user preference, not project data.
     pub layout: Layout,
-    /// Suppress the view cube's camera transition and anything else that moves
-    /// on its own.
+    /// Suppress the view cube's camera transition and other self-moving animation.
     pub reduce_motion: bool,
-    /// Draw the dialogs inside the main window rather than as windows of the
-    /// window system's own.
+    /// Draw dialogs inside the main window rather than as real windows (issue 53). Off by default.
     ///
-    /// Off by default: a dialog is a real window (issue 53), which is what
-    /// gives it the desktop's own frame, its place in the window list and the
-    /// keyboard handling that goes with those. The switch exists for the one
-    /// configuration where a real window is a hazard. eframe renders every
-    /// viewport on the winit thread -- `glow_integration` spawns none -- so a
-    /// dialog surface whose `eglSwapBuffers` blocks takes the whole application
-    /// with it, and on NVIDIA's Wayland EGL a swap waits for a frame callback
-    /// the compositor may never send for a second toplevel. Turning this on
-    /// means there is no second surface to block on, which is a stronger
-    /// guarantee than swap interval 0 and the only one that does not depend on
-    /// the driver honouring anything. Newer than the settings file, so an older
-    /// one reads as off.
+    /// eframe renders every viewport on the winit thread, and on NVIDIA's Wayland EGL a second
+    /// surface's swap can block forever, freezing the app; this avoids a second surface entirely.
+    /// Older settings files read as off.
     #[serde(default)]
     pub embed_dialogs: bool,
     pub display_mode: DisplayMode,
-    /// Which renderer draws the viewport. Newer than the settings file, so an
-    /// older one is read as the CPU renderer -- which is what it was using.
+    /// Which renderer draws the viewport; older settings files read as the CPU renderer.
     #[serde(default)]
     pub render_engine: RenderEngine,
     pub show_grid: bool,
@@ -46,73 +31,41 @@ pub struct AppSettings {
     /// Where a new shape lands.
     #[serde(default)]
     pub placement: Placement,
-    /// When a drag snaps to the geometry of other bodies (issue 68). Newer than
-    /// the settings file, so an older one reads as "while a key is held".
+    /// When a drag snaps to other bodies' geometry (issue 68); older files read as "while a key is held".
     #[serde(default)]
     pub geometry_snap: SnapMode,
-    /// Pin what the camera looks at. Pan and the wheel's zoom-about-the-pointer
-    /// both move that point, and a view that is being orbited about one place
-    /// should not drift off it; locked, the fields that show it are read-only
-    /// and the gestures that would move it leave it alone. Newer than the
-    /// settings file, so an older one reads as unlocked.
+    /// Pin what the camera looks at, so pan and pointer zoom leave it alone. Older files read as unlocked.
     #[serde(default)]
     pub lock_view_centre: bool,
-    /// Where a model opened while the application is already running goes
-    /// (issue 107): a tab in the window it was opened from, or a window of its
-    /// own. Newer than the settings file, so an older one reads as a tab --
-    /// which is what the application did before there were windows to choose
-    /// between.
+    /// Where a model opened while running goes (issue 107): a tab or its own window. Older files read
+    /// as a tab.
     #[serde(default)]
     pub open_target: OpenTarget,
-    /// Rotation snap in degrees. The move and resize step is `SceneSettings`'s
-    /// `snap_step`, a project setting rather than a user one.
+    /// Rotation snap in degrees; the move step is the project's `SceneSettings::snap_step`.
     pub rotate_snap_deg: f64,
-    /// The colours most recently applied, most recent first. Offered beside the
-    /// fixed palette wherever a colour can be chosen: the colour a project is
-    /// actually painted in is nearly always one already used somewhere else in
-    /// it, and finding it again in a picker is a worse job than it looks.
+    /// Recently applied colours, most recent first, offered beside the fixed palette.
     #[serde(default)]
     pub recent_colours: Vec<[u8; 3]>,
     pub last_export_dir: Option<PathBuf>,
-    /// Where the last import was read from, so the dialog opens where the
-    /// models are rather than where the last project was saved. Its own
-    /// setting rather than the export's: a model that is brought in comes from
-    /// somebody else's folder, and what is written goes to one's own. Newer
-    /// than the settings file, so an older one reads as unset -- and the
-    /// dialog then starts beside the open project.
+    /// Where the last import was read from, separate from the export directory. Older files read as
+    /// unset, and the dialog starts beside the open project.
     #[serde(default)]
     pub last_import_dir: Option<PathBuf>,
     pub last_export_format: String,
     pub last_export_scale: f64,
-    /// Whether a 3MF is written compressed (issue 105). Newer than the
-    /// settings file, and a missing field is filled from the default below --
-    /// which is on, so an older settings file does not quietly keep writing the
-    /// uncompressed packages this option exists to stop writing.
+    /// Whether a 3MF is written compressed (issue 105). Missing fields default to on, so older
+    /// settings files do not keep writing uncompressed packages.
     pub last_export_compress: bool,
-    /// How the last export decided its bodies, by `BodyMode::id`. Newer than
-    /// the settings file, so absent means the single merged body an export
-    /// always used to write.
+    /// The last export's body mode, by `BodyMode::id`; absent means a single merged body.
     #[serde(default)]
     pub last_export_bodies: String,
-    /// How a shape was last cut into pieces (issue 82), so the tool opens on
-    /// the pattern the user is working in rather than on the default every
-    /// time. Beside the export's own last-used settings, and here rather than
-    /// in the project for the same reason: it is how one person is working, not
-    /// a property of any one model. Newer than the settings file, so an older
-    /// one reads as the default tiling -- and a settings file from before a
-    /// split could be cut more than once reads as the one cut it holds.
+    /// The last split plan (issue 82), so the tool opens on it; older files read as the default tiling.
     #[serde(default)]
     pub last_split: simple3d_geom::tiling::SplitPlan,
-    /// How much detail a mesh was last simplified by (issue 106), for the same
-    /// reason as the split above it: the tool opens on the numbers the user is
-    /// working in. Newer than the settings file, so an older one reads as the
-    /// default.
+    /// The last simplify settings (issue 106); older files read as the default.
     #[serde(default)]
     pub last_simplify: simple3d_geom::simplify::Simplify,
-    /// How a mesh was last taken back apart into objects (issue 108), for the
-    /// same reason as the two above it: the tool opens on the numbers the user
-    /// is working in. Newer than the settings file, so an older one reads as
-    /// the default.
+    /// The last reassembly settings (issue 108); older files read as the default.
     #[serde(default)]
     pub last_reassemble: simple3d_geom::reassemble::Reassemble,
     pub recent_files: Vec<PathBuf>,
@@ -161,12 +114,7 @@ impl AppSettings {
         self.recent_files.truncate(MAX_RECENT);
     }
 
-    /// Remember a colour that was just applied, most recent first and without
-    /// duplicates, so the row of recent swatches stays short enough to scan.
-    ///
-    /// A shade of one already on the row counts as that one: the row is eight
-    /// colours to click, and two swatches nobody can tell apart are one choice
-    /// and a wasted slot (issue 85).
+    /// Remember a just-applied colour, most recent first and without near-duplicates (issue 85).
     pub fn remember_colour(&mut self, colour: [u8; 3]) {
         self.recent_colours.retain(|c| !indistinguishable(*c, colour));
         self.recent_colours.insert(0, colour);
@@ -178,16 +126,11 @@ impl AppSettings {
     }
 }
 
-/// Whether two colours are the same colour to look at, and so the same entry on
-/// a row of recent swatches (issue 85).
-///
-/// Ten of 255 on every channel: a twenty-fifth of the range, which is a shade of
-/// a colour rather than another colour. The point is not exactness -- it is that
-/// a row offering eight swatches nobody can tell apart offers one thing eight
-/// times.
+/// Whether two colours look the same (within 10 of 255 per channel), so they share a swatch
+/// (issue 85).
 pub fn indistinguishable(a: [u8; 3], b: [u8; 3]) -> bool {
     a.iter().zip(b.iter()).all(|(x, y)| x.abs_diff(*y) <= COLOUR_TOLERANCE)
 }
 
-/// How far apart two colours have to be to be worth two swatches.
+/// How far apart two colours must be to get two swatches.
 pub(crate) const COLOUR_TOLERANCE: u8 = 10;

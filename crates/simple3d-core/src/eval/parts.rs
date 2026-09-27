@@ -6,14 +6,8 @@ use crate::xform::Xform;
 use simple3d_geom::Mesh;
 use std::collections::BTreeMap;
 
-/// One evaluated body per node, rather than the single union [`selection_mesh`]
-/// makes of them -- what an export that writes each object as its own component
-/// needs (issue 58).
-///
-/// The bodies are the ones the nodes stand for: a boolean group is the shape it
-/// evaluates to, not its operands, exactly as in [`selection_mesh`]. Nodes that
-/// are hidden, missing, or evaluate to nothing are left out, so the caller never
-/// has to write an empty object.
+/// One evaluated body per node rather than [`selection_mesh`]'s single union, for per-object
+/// exports (issue 58). Booleans are their results; hidden, missing or empty nodes are skipped.
 pub struct Part {
     pub id: NodeId,
     pub name: String,
@@ -37,30 +31,20 @@ pub fn part_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xfor
     parts
 }
 
-/// The bodies a user-chosen export writes: one per [`Part`], each already
-/// unioned into a single solid (issue 58).
+/// The bodies a chosen-bodies export writes, one unioned solid per [`Part`] (issue 58).
 ///
-/// The marks are read one node at a time, and every one of them is local:
+/// * No mark (or an unusable one): a body of that node alone, so unmarked projects match `part_meshes`.
+/// * [`ExportBody::Split`] on a separable group: its children are considered instead.
+/// * [`ExportBody::Shared`]: every node with the same number merges into one solid.
 ///
-/// * no mark, or a mark this walk cannot honour, is a body of that node alone
-///   -- so a project nobody has marked comes out exactly as `part_meshes`
-///   would, and adding a shape later needs no decision made about it;
-/// * [`ExportBody::Split`] on a separable group is not a body at all: its
-///   children are considered in its place, which is how an export reaches
-///   inside a group;
-/// * [`ExportBody::Shared`] merges, into one solid, every node carrying the
-///   same number, wherever in the tree they are.
-///
-/// Bodies come out in the order the tree reaches them, and a merged one is
-/// named for the shapes in it, because that name is all a slicer will show.
+/// Bodies come out in tree order; a merged one is named for its shapes, as slicers show only names.
 pub fn body_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xform>) -> Vec<Part> {
     let mut roots: Vec<(NodeId, Option<u32>)> = Vec::new();
     for &id in ids {
         collect_bodies(scene, id, &mut roots);
     }
 
-    // Grouped by number, in the order each number is first met, with every
-    // unnumbered node a body of its own.
+    // Grouped by number in first-seen order; unnumbered nodes are bodies of their own.
     let mut bodies: Vec<(Option<u32>, Vec<NodeId>)> = Vec::new();
     for (id, key) in roots {
         match key.and_then(|k| bodies.iter_mut().find(|(other, _)| *other == Some(k))) {
@@ -87,10 +71,7 @@ pub(crate) fn collect_bodies(scene: &Scene, id: NodeId, out: &mut Vec<(NodeId, O
         return;
     }
     match scene.node(id).export_body {
-        // Only where the group really can be taken apart. A mark that says
-        // otherwise is one the tree has changed under -- a group turned into a
-        // difference since it was made -- and the honest reading of it is the
-        // one this export can carry out.
+        // Only where the group really can be split; a stale mark is read as what this export can do.
         Some(ExportBody::Split) if scene.can_split_for_export(id) => {
             for &child in &scene.node(id).children {
                 collect_bodies(scene, child, out);
@@ -101,8 +82,7 @@ pub(crate) fn collect_bodies(scene: &Scene, id: NodeId, out: &mut Vec<(NodeId, O
     }
 }
 
-/// What a body is called in the file. One shape lends its own name; several
-/// are named for what is in them, because "Body 2" tells a slicer nothing.
+/// A body's name in the file: its shape's own, or its shapes' names joined, since "Body 2" says nothing.
 pub(crate) fn body_name(scene: &Scene, members: &[NodeId]) -> String {
     let names: Vec<&str> =
         members.iter().filter(|id| scene.contains(**id)).map(|id| scene.node(*id).name.as_str()).collect();
@@ -111,8 +91,7 @@ pub(crate) fn body_name(scene: &Scene, members: &[NodeId]) -> String {
         1 => names[0].to_string(),
         _ => {
             let joined = names.join(" + ");
-            // Long enough to name two or three shapes, short enough to read in
-            // a slicer's object list.
+            // Long enough for two or three names, short enough for a slicer's list.
             if joined.chars().count() <= 64 {
                 joined
             } else {

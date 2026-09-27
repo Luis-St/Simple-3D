@@ -4,30 +4,24 @@ use super::*;
 
 #[test]
 pub(crate) fn rebinding_onto_a_used_combination_names_the_holder() {
-    // Spec section 8.2: "warns, names the command currently holding it, and
-    // offers to reassign or cancel. Silently overwriting is not acceptable."
+    // Spec section 8.2: a conflict names the holder and offers reassign or cancel, never overwriting silently.
     let mut map = Keymap::default();
     let save = map.binding(Command::Save).unwrap().clone();
     let holder = map.set(Command::Export, save.clone(), false).unwrap_err();
     assert_eq!(holder, Command::Save);
-    // Nothing changed while the user decides.
+    // Nothing changes while the user decides.
     assert_eq!(map.binding(Command::Save), Some(&save));
     assert_ne!(map.binding(Command::Export), Some(&save));
 
-    // Reassigning takes it away from the previous holder rather than leaving
-    // two commands on one chord.
+    // Reassigning takes it from the previous holder.
     map.set(Command::Export, save.clone(), true).unwrap();
     assert_eq!(map.binding(Command::Export), Some(&save));
     assert_eq!(map.binding(Command::Save), None);
     assert!(map.self_conflicts().is_empty());
 }
 
-/// Spec acceptance criterion 27 as one sequence: switch preset, *then* rebind
-/// onto a combination already in use, and the conflict is named.
-///
-/// The two halves are covered separately above, but the criterion asks for
-/// them in order, and a preset switch is exactly what could leave the map in
-/// a state where the conflict check looks at the wrong bindings.
+/// Spec acceptance criterion 27 in sequence: switch preset, then rebind onto a used chord, and the
+/// conflict is named against the new preset's bindings.
 #[test]
 pub(crate) fn a_conflict_is_named_after_switching_preset_too() {
     let mut map = Keymap::default();
@@ -35,19 +29,17 @@ pub(crate) fn a_conflict_is_named_after_switching_preset_too() {
     assert_eq!(map.preset, Preset::MeshEditor);
     assert!(map.self_conflicts().is_empty(), "the switch itself introduced a conflict");
 
-    // A chord this preset genuinely holds -- not one carried over from the
-    // preset we came from.
+    // A chord this preset really holds, not one carried over.
     let (holder, chord) = (Command::ModeMove, map.binding(Command::ModeMove).unwrap().clone());
     assert_eq!(chord, Chord::key("G"), "MeshEditor's ModeMove binding changed; pick another chord");
 
     let named = map.set(Command::Rename, chord.clone(), false).unwrap_err();
     assert_eq!(named, holder, "the conflict named the wrong command");
-    // Refused, not silently overwritten: both bindings are as they were.
+    // Refused, not overwritten: both bindings unchanged.
     assert_eq!(map.binding(Command::ModeMove), Some(&chord));
     assert_ne!(map.binding(Command::Rename), Some(&chord));
 
-    // Reassigning on confirmation takes it from the holder rather than
-    // leaving two commands on one chord.
+    // Reassigning on confirmation takes it from the holder.
     map.set(Command::Rename, chord.clone(), true).unwrap();
     assert_eq!(map.binding(Command::Rename), Some(&chord));
     assert_eq!(map.binding(Command::ModeMove), None);

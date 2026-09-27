@@ -28,28 +28,14 @@ impl EvalWorker {
         }
     }
 
-    /// Say which single nodes the viewport draws -- the selection, the ticked
-    /// pieces, the previewed object and the ghosts -- so every evaluation from
-    /// here on prepares them before it is handed over.
+    /// Declare which single nodes the viewport draws, so every evaluation prepares them first.
     pub fn want(&mut self, wanted: Vec<Wanted>) {
         self.wanted = wanted;
     }
 
-    /// Ask for a fresh evaluation of the document being edited.
-    ///
-    /// While a run is in flight the new scene *waits* for it rather than
-    /// killing it, and only the newest waiting scene is kept. Cancelling
-    /// instead is what froze the viewport during a drag: a drag marks the scene
-    /// dirty on every frame, so every run was cancelled by the next frame a few
-    /// milliseconds in, and on the frames where the boolean actually costs
-    /// something -- which is exactly when the shape being dragged meets another
-    /// one -- no evaluation ever finished. The user saw 139 frames in a row
-    /// with no preview at all, and then a jump when the drag stopped.
-    ///
-    /// Waiting costs the preview one evaluation of lag. Cancelling costs the
-    /// preview altogether, and throws the work away as well. A run that really
-    /// is taking too long is the user's to abandon, which the footer offers for
-    /// as long as one is going.
+    /// Request an evaluation of the edited document. During a run the new scene waits (only the newest
+    /// kept) rather than cancelling it: cancelling every frame during a drag meant no evaluation ever
+    /// finished when shapes met. Long runs can be stopped from the footer.
     pub fn submit(&mut self, scene: &Scene) {
         if self.outstanding.is_some() {
             self.pending = Some(scene.clone());
@@ -58,12 +44,8 @@ impl EvalWorker {
         self.start(scene.clone());
     }
 
-    /// Ask for an evaluation of a *different document* -- a tab shown, a file
-    /// opened -- which supersedes whatever is running.
-    ///
-    /// Nothing about the scene being left is worth waiting for, and its answer
-    /// must never be applied to the document now on screen; the generation bump
-    /// is what makes `poll` refuse it if it arrives anyway.
+    /// Request an evaluation of a different document, superseding the current run; the generation bump
+    /// makes `poll` refuse a stale answer.
     pub fn supersede(&mut self, scene: &Scene) {
         if let Some(cancel) = self.current.take() {
             cancel.cancel();
@@ -85,8 +67,7 @@ impl EvalWorker {
             wanted: self.wanted.clone(),
             renderables: self.renderables.clone(),
         };
-        // A send failure means the worker thread is gone, which we cannot
-        // recover from here; the interface stays usable with the last result.
+        // A send failure means the worker is gone; the interface keeps the last result.
         let _ = self.jobs.send(job);
     }
 }

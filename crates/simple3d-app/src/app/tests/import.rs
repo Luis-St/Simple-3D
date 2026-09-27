@@ -1,13 +1,11 @@
-//! Bringing a model file into the document (issue 105): what it lands as, what
-//! it says, and the cases where nothing is brought in at all.
+//! Importing a model file (issue 105): what it lands as, what it reports, and when nothing comes in.
 
 use super::*;
 use crate::worker::ImportJob;
 use simple3d_core::keymap::Command;
 use simple3d_geom::Vec3;
 
-/// Write `mesh` out in `format`, then import the file the application's own
-/// way: the job on its thread, and `poll_import` taking the answer.
+/// Write `mesh` in `format`, then import it the application's way: job thread plus `poll_import`.
 fn import_written(app: &mut App, mesh: &simple3d_geom::Mesh, format: simple3d_export::Format) {
     let path = temp_config_dir("import").join(format!("plate.{}", format.extension()));
     let options = simple3d_export::Options { format, ..Default::default() };
@@ -15,8 +13,7 @@ fn import_written(app: &mut App, mesh: &simple3d_geom::Mesh, format: simple3d_ex
     import_file(app, &path);
 }
 
-/// Read `path` through the real job, waiting for the thread the way the
-/// application's frame loop does.
+/// Read `path` through the real job, waiting as the frame loop does.
 fn import_file(app: &mut App, path: &std::path::Path) {
     app.import_job = Some(ImportJob::spawn(path.to_path_buf(), app.active, std::time::Duration::from_secs(30)));
     let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
@@ -27,9 +24,7 @@ fn import_file(app: &mut App, path: &std::path::Path) {
     }
 }
 
-/// The issue itself, at the level the user meets it: a file the application
-/// exported comes back as a body in the document, selected and ready to be
-/// moved -- for every format the export dialog offers.
+/// An exported file comes back as a selected body, for every export format.
 #[test]
 pub(crate) fn every_exported_format_comes_back_as_a_body_in_the_document() {
     for format in simple3d_export::Format::ALL {
@@ -54,8 +49,7 @@ pub(crate) fn every_exported_format_comes_back_as_a_body_in_the_document() {
     }
 }
 
-/// An import is one undo step, and undoing it leaves the document exactly as
-/// it was -- the same guarantee every other edit gives.
+/// An import is one undo step, and undoing it restores the document exactly.
 #[test]
 pub(crate) fn an_import_is_one_undo_step() {
     let mut app = headless_app();
@@ -70,9 +64,7 @@ pub(crate) fn an_import_is_one_undo_step() {
     assert_eq!(app.scene.node(app.scene.root()).children.len(), before, "undo did not take the import back out");
 }
 
-/// A 3MF written as several named bodies comes back as those bodies, under a
-/// group named after the file: the rows that were exported are the rows that
-/// come back, rather than one merged bag of triangles.
+/// A 3MF of several named bodies comes back as those bodies under a group named after the file.
 #[test]
 pub(crate) fn a_file_of_several_bodies_comes_back_as_a_group_of_them() {
     let mut app = app_in(temp_config_dir("import-bodies"));
@@ -98,16 +90,14 @@ pub(crate) fn a_file_of_several_bodies_comes_back_as_a_group_of_them() {
     assert!(app.scene.node(group).children.iter().all(|&id| app.scene.node(id).is_mesh()));
     assert_eq!(app.selection, vec![group], "the group should be what is selected");
 
-    // And they came back where they stood, not on top of one another.
+    // They came back where they stood, not stacked.
     app.reevaluate_for_test();
     let (lo, hi) = app.evaluated.mesh.bounds().expect("the import evaluated to nothing");
     assert!((hi.x - lo.x - 120.0).abs() < 1e-6, "the two boxes span {} rather than 120", hi.x - lo.x);
 }
 
-/// Bodies that meet along a whole face -- a model's colours written as
-/// separate objects -- arrive as an assembly and are never run through the
-/// boolean kernel: each keeps every one of its triangles, and nothing is
-/// reported against the group.
+/// Face-sharing bodies (colours as separate objects) arrive as an assembly, never through the
+/// kernel: every triangle kept and no group error.
 #[test]
 pub(crate) fn bodies_sharing_a_face_arrive_side_by_side() {
     let mut app = app_in(temp_config_dir("import-touching"));
@@ -133,8 +123,7 @@ pub(crate) fn bodies_sharing_a_face_arrive_side_by_side() {
     assert_eq!(app.evaluated.mesh.triangle_count(), apart, "the halves were combined");
 }
 
-/// A file that is not a model changes nothing: the error says what is wrong,
-/// and the document is left alone rather than gaining an empty row.
+/// A non-model file changes nothing and the error says why.
 #[test]
 pub(crate) fn a_file_that_cannot_be_read_changes_nothing() {
     let mut app = headless_app();
@@ -150,9 +139,7 @@ pub(crate) fn a_file_that_cannot_be_read_changes_nothing() {
     assert!(app.error_detail.contains("notes.stl"), "the message does not name the file: {}", app.error_detail);
 }
 
-/// A model read for one document is never dropped into another. The file is
-/// chosen and read over several frames, and the user may switch tabs in the
-/// meantime -- the import belongs to the document that asked for it.
+/// A model read for one document never lands in another, even after a tab switch mid-read.
 #[test]
 pub(crate) fn an_import_read_for_another_document_is_dropped() {
     let mut app = headless_app();
@@ -174,14 +161,11 @@ pub(crate) fn an_import_read_for_another_document_is_dropped() {
     assert!(app.status_text().contains("dropped"), "{}", app.status_text());
 }
 
-/// What the footer says. A model in another unit says what it was converted
-/// from, and one that is not a closed solid says so -- an import cannot refuse
-/// a mesh somebody else wrote, but exporting it again will be refused, and that
-/// is worth knowing when it arrives rather than then.
+/// The footer reports the source unit and an open mesh, since exporting it again will be refused.
 #[test]
 pub(crate) fn the_footer_says_what_arrived_and_what_is_wrong_with_it() {
     let mut app = app_in(temp_config_dir("import-summary"));
-    // One triangle: geometry, and nowhere near a closed surface.
+    // One triangle: geometry, but not a closed surface.
     let mut open = simple3d_geom::Mesh::new();
     open.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
     let model = simple3d_import::Model {
@@ -207,13 +191,8 @@ pub(crate) fn the_footer_says_what_arrived_and_what_is_wrong_with_it() {
     assert!(app.status_text().contains("converted from inches"), "{}", app.status_text());
 }
 
-/// The command is bound, so the menu entry and the shortcut both reach the
-/// import.
-///
-/// Nothing here runs `Command::Import` itself, and no test may: the dispatch
-/// puts a *real* file dialog up through the desktop's portal, on the screen of
-/// whoever is running the tests. `file_dialog.rs` drives the answer side by
-/// building a `FilePrompt` with a channel of its own, for the same reason.
+/// The command is bound. No test runs `Command::Import` itself, since that opens a real portal
+/// dialog on the tester's screen; `file_dialog.rs` drives the answer side with its own channel.
 #[test]
 pub(crate) fn the_import_command_is_bound_in_every_preset() {
     use simple3d_core::keymap::{Keymap, Preset};

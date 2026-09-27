@@ -1,23 +1,9 @@
-//! The measure tool's window: the span it is holding, as numbers (issue 86).
+//! The measure tool's window: its span as numbers (issue 86).
 //!
-//! The tool itself is the pointer -- clicks in the viewport catch corners,
-//! edges, face centres and axis crossings, and [`crate::app::Measure`] holds the
-//! two ends they place. This is the other half of it: both ends as fields that
-//! can be typed into, and what the span between them comes to.
-//!
-//! It lives in an [in-place popup](crate::popup) rather than in a section of the
-//! properties panel, where it used to be. The panel describes *the selection*,
-//! and a measurement has nothing to do with what happens to be selected: the
-//! section appeared above the object being edited, pushed the rest of the panel
-//! down, and went away again when the tool did. A tool with a state of its own
-//! belongs in a window of its own, beside the split tool's -- floating over the
-//! viewport, dragged where it is not in the way, rolled up when the model
-//! underneath it matters more than the numbers, and closed by the cross that
-//! closes every other one.
-//!
-//! Non-modal, like every popup here: the span is meant to be left on screen and
-//! read while the model is orbited, which is the whole reason the numbers are
-//! not in a dialog.
+//! The pointer places the two ends in the viewport ([`crate::app::Measure`]); this window shows
+//! them as editable fields with the span's measurements. A non-modal
+//! [in-place popup](crate::popup) rather than a properties section, since a measurement is
+//! unrelated to the selection and is meant to stay readable while orbiting.
 
 use crate::app::{App, Status};
 use crate::panel_properties::{component, field_row, named, point_fields, scalar_field, set_component, Scalar, POINT};
@@ -27,54 +13,41 @@ use crate::ui;
 use simple3d_core::unit::{format_angle, format_length};
 use simple3d_geom::Vec3;
 
-/// Identifies the popup, and is what remembers where it was dragged to.
+/// The popup's key, which also remembers where it was dragged.
 const KEY: &str = "measure-tool";
 
-/// How wide the window is: three point fields across it and their axis chips,
-/// and no wider. A popup lives over the model, so every pixel of it is a pixel
-/// of the thing being measured that cannot be seen.
+/// The window width: three point fields and their chips, no wider, since it covers the model.
 const WIDTH: f32 = 330.0;
 
-/// The tool's window, drawn over the viewport once a frame while the tool is
-/// out (issue 86).
+/// The tool's window over the viewport, while the tool is out (issue 86).
 pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     if !app.measure.active {
         return;
     }
     let bounds = app.viewport_rect;
-    // Taken out of the map for the duration, so the popup may hold it mutably
-    // while its contents hold the application.
+    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
     let mut placement = app.popups.remove(KEY).unwrap_or_default();
     let event =
         popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: "Measure", width: WIDTH }, |ui| {
-            // Two point rows, three readings and a hint is a short window until the
-            // rows stack on a narrow one, and a viewport can be short: the body
-            // scrolls rather than pushing the buttons off the bottom of the screen.
+            // Scrolls on short viewports so the buttons stay reachable.
             popup::scrolling_body(ui, bounds, |ui| body(app, ui));
             popup::action_row(ui, |ui| actions(app, ui));
         });
     app.popups.insert(KEY, placement);
-    // The cross means the same thing the button in the row means: the tool is
-    // put away, and the span with it.
+    // The cross puts the tool and its span away, like the row's button.
     if event == PopupEvent::Closed && app.measure.active {
         app.toggle_measure();
     }
 }
 
-/// The span as numbers: both ends as editable fields, and the distance, per-axis
-/// delta and angles between them (issues 69, 78).
-///
-/// The ends are editable because a measurement is often *between* named places
-/// rather than between two things there is geometry to point at -- and because
-/// having clicked one end approximately, correcting it by a tenth of a
-/// millimetre should not mean clicking again and hoping.
+/// The span as numbers: both ends as editable fields, plus distance, per-axis delta and angles
+/// (issues 69, 78). Editable so an end can be typed or corrected precisely.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
     let placed = app.measure.points.len();
     for (index, label) in [(0_usize, "Start"), (1, "End")] {
         let point = app.measure.points.get(index).copied();
-        // An end can be typed only once the start is down; before that it would
-        // be a point with nothing to measure to.
+        // The end is editable only once the start is placed.
         let enabled = index <= placed;
         let at = point.map_or(Vec3::ZERO, |p| p.at);
         let step = unit.from_mm(app.move_snap()).max(1e-6);
@@ -91,8 +64,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
                     ui.disable();
                 }
                 let field = Scalar { grip: &grip, id: field_id, kind: POINT, current: component(at, axis), step };
-                // No undo step: the span belongs to the tool, not to the scene,
-                // so there is no snapshot for one to restore.
+                // No undo step: the span belongs to the tool, not the scene.
                 scalar_field(app, ui, field, |app, mm, _| {
                     let mut p = app.measure.points.get(index).map_or(Vec3::ZERO, |p| p.at);
                     set_component(&mut p, axis, mm);
@@ -125,10 +97,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
                     .wrap(),
                 );
             });
-            // A row each, where the panel put both on one. Two angles and their
-            // names are wider than a popup, and a value that wraps under its own
-            // label reads as a row that has gone wrong rather than as one number
-            // followed by another.
+            // One row per angle, since two on one line are wider than the popup.
             for (label, hover, angle) in [
                 ("Incline", "Above the ground plane", m.inclination_deg),
                 ("Bearing", "Around the ground plane, from +X towards +Y", m.bearing_deg),
@@ -155,18 +124,14 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// The buttons along the foot: put the tool away, or keep it out and start the
-/// span again.
+/// Footer buttons: put the tool away, or clear the span.
 pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     if ui::dialog_button(ui, "Done", true).clicked() {
         app.toggle_measure();
     }
-    // Clearing is at the other end of the row, the way a split's Cancel is: the
-    // button that throws away what has been placed is as far as the window is
-    // wide from the one that is pressed to finish.
+    // Clearing sits at the other end of the row from finishing, like a split's Cancel.
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-        // Named for what it clears: "Clear" beside a set of numbers is a
-        // question about which of them.
+        // Named for what it clears.
         if ui.add_enabled(!app.measure.points.is_empty(), egui::Button::new("Clear the span")).clicked() {
             app.measure.clear();
             app.status = Status::Info("Measurement cleared".into());

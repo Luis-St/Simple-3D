@@ -1,5 +1,4 @@
-//! Shared interface pieces, with the decision-making parts kept as pure
-//! functions so they can be tested without an egui context.
+//! Shared interface pieces; the decision logic is pure functions, testable without egui.
 
 mod commit;
 pub use commit::{
@@ -22,10 +21,8 @@ pub use describe::{describe_counts, describe_elapsed, describe_point, describe_s
 #[cfg(test)]
 mod tests;
 
-/// The em dash a field shows when the nodes it covers do not agree. Typing over
-/// it applies to all of them; leaving it alone leaves each as it was.
+/// Shown when covered nodes disagree; typing applies to all, leaving it keeps each.
 pub const MIXED: &str = "\u{2014}";
 
-/// Pixels of drag per one step of the value. Slow enough that a value can be
-/// landed on, fast enough that a field can be crossed.
+/// Drag pixels per value step: slow enough to land on a value, fast enough to cross a field.
 pub const PIXELS_PER_STEP: f64 = 6.0;

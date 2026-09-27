@@ -12,8 +12,7 @@ fn a_mesh_survives_the_file_it_is_written_to() {
     assert_eq!(back.mesh.tags, data.mesh.tags);
     assert_eq!(back.mesh.positions.len(), data.mesh.positions.len());
     for (a, b) in back.mesh.positions.iter().zip(&data.mesh.positions) {
-        // Stored as f32: exact to the last place a millimetre-scale model
-        // has, which is what the doc comment claims.
+        // Stored as f32, exact to a millimetre-scale model's last place.
         assert!((*a - *b).length() < 1e-3, "{a:?} came back as {b:?}");
     }
 }
@@ -35,7 +34,7 @@ fn several_colours_survive_as_runs() {
 
 #[test]
 fn an_unpainted_mesh_writes_no_tags_at_all() {
-    // So a mesh body diffs as its geometry and nothing else.
+    // So a mesh body diffs as its geometry only.
     let blob = MeshData::new(primitives::box_mesh(5.0, 5.0, 5.0)).to_blob();
     assert!(blob.tags.is_empty());
     assert_eq!(MeshData::from_blob(&blob).unwrap().mesh.tags.len(), blob.triangles);
@@ -50,7 +49,7 @@ fn a_damaged_blob_is_refused_rather_than_half_read() {
     assert!(MeshData::from_blob(&truncated).is_none(), "a truncated vertex array was accepted");
 
     let mut wrong = good.clone();
-    // An index array of a length that is not a whole number of triangles.
+    // An index array that is not whole triangles.
     wrong.indices.truncate(4);
     assert!(MeshData::from_blob(&wrong).is_none());
 
@@ -69,7 +68,7 @@ fn base64_round_trips_every_length() {
         let bytes: Vec<u8> = (0..len).map(|i| (i * 37 % 251) as u8).collect();
         assert_eq!(decode(&encode(&bytes)).unwrap(), bytes, "length {len}");
     }
-    // And it is the standard encoding, not a private one.
+    // The standard encoding, not a private one.
     assert_eq!(encode(b"Man"), "TWFu");
     assert_eq!(encode(b"Ma"), "TWE=");
     assert_eq!(encode(b"M"), "TQ==");
@@ -77,8 +76,7 @@ fn base64_round_trips_every_length() {
 
 #[test]
 fn a_stored_mesh_is_written_on_a_handful_of_lines() {
-    // The reason for the encoding: a converted tile must not turn the
-    // project file into something no editor will open.
+    // The reason for the encoding: a converted tile must not make the file unopenable in an editor.
     let mesh = primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 64);
     assert!(mesh.triangle_count() > 4000, "the test needs a big mesh");
     let text = serde_json::to_string_pretty(&MeshData::new(mesh).to_blob()).unwrap();

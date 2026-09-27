@@ -1,17 +1,13 @@
-//! The DEFLATE encoder, and the compressed package it is there for.
+//! The DEFLATE encoder, and the compressed package it is for.
 //!
-//! Every test here decodes with [`simple3d_import::inflate`] rather than with
-//! anything of this crate's: an encoder checked against its own decoder proves
-//! only that the two agree, and the whole point is that a file this program
-//! writes opens in a slicer.
+//! Decoded with [`simple3d_import::inflate`], not this crate's own code, since agreeing with itself
+//! would prove nothing about slicers.
 
 use super::*;
 use simple3d_import::inflate::inflate;
 
-/// The kinds of input an encoder gets wrong in different ways: nothing at all,
-/// a single byte, a long run, text that is all back-references, data with no
-/// structure to find, and data that is all one byte repeated -- the case where
-/// a match overlaps itself.
+/// Inputs encoders get wrong: empty, one byte, a long run, all back-references, structureless
+/// data, and one repeated byte (a self-overlapping match).
 #[test]
 pub(crate) fn every_shape_of_input_comes_back_exactly() {
     let mut cases: Vec<Vec<u8>> = vec![
@@ -22,8 +18,7 @@ pub(crate) fn every_shape_of_input_comes_back_exactly() {
         b"<vertex x=\"1\" y=\"2\" z=\"3\"/>\n".repeat(500),
         (0..=255u8).cycle().take(9000).collect(),
     ];
-    // Something with no structure to find, from a generator of this test's own
-    // so the case is the same on every run.
+    // Structureless data from a fixed-seed generator, so every run is the same.
     let mut state = 0x2545_F491_4F6C_DD1Du64;
     let mut noise = Vec::with_capacity(20000);
     for _ in 0..20000 {
@@ -33,7 +28,7 @@ pub(crate) fn every_shape_of_input_comes_back_exactly() {
         noise.push(state as u8);
     }
     cases.push(noise);
-    // And a model part, which is what this is all for.
+    // And a model part, which is what this is for.
     cases.push(model_part(2000));
 
     for case in &cases {
@@ -44,9 +39,8 @@ pub(crate) fn every_shape_of_input_comes_back_exactly() {
     }
 }
 
-/// Data with structure in it gets smaller, and data without it does not get
-/// bigger: a block that cannot be compressed is written stored, so the worst
-/// case is the few bytes of a block header rather than an inflated file.
+/// Structured data shrinks and structureless data does not grow beyond block headers, since
+/// incompressible blocks are stored.
 #[test]
 pub(crate) fn compression_helps_where_it_can_and_never_hurts_much() {
     let model = model_part(8000);
@@ -73,8 +67,7 @@ pub(crate) fn compression_helps_where_it_can_and_never_hurts_much() {
     assert_eq!(inflate(&compressed, noise.len()).unwrap(), noise);
 }
 
-/// The option, end to end: a compressed package is smaller, says it is
-/// deflated, and holds the same model as a stored one.
+/// End to end: a compressed package is smaller, marked deflated, and holds the same model.
 #[test]
 pub(crate) fn a_three_mf_is_compressed_unless_the_option_says_otherwise() {
     let mesh = many_triangles();
@@ -91,7 +84,7 @@ pub(crate) fn a_three_mf_is_compressed_unless_the_option_says_otherwise() {
     assert_eq!(method_of(&compressed, "3D/3dmodel.model"), Some(8), "the model part was not deflated");
     assert_eq!(method_of(&stored, "3D/3dmodel.model"), Some(0), "the option did not turn compression off");
 
-    // Both are the same model, read back through the importer.
+    // Both read back as the same model through the importer.
     let from_compressed = simple3d_import::read_bytes(&compressed, None, &mut no_progress()).unwrap();
     let from_stored = simple3d_import::read_bytes(&stored, None, &mut no_progress()).unwrap();
     assert_eq!(from_compressed.triangle_count(), mesh.weld().triangle_count());
@@ -101,9 +94,7 @@ pub(crate) fn a_three_mf_is_compressed_unless_the_option_says_otherwise() {
     assert!((lo - was_lo).length() < 1e-9 && (hi - was_hi).length() < 1e-9);
 }
 
-/// Exporting the same scene twice produces the same bytes, compressed as well
-/// as stored -- the guarantee the fixed timestamp in the zip header exists for,
-/// and one an encoder with any randomness in it would break.
+/// Exporting the same scene twice gives identical bytes, compressed or stored.
 #[test]
 pub(crate) fn a_compressed_export_is_byte_identical_every_time() {
     let mesh = many_triangles();
@@ -115,20 +106,17 @@ pub(crate) fn a_compressed_export_is_byte_identical_every_time() {
     assert_eq!(std::fs::read(&first).unwrap(), std::fs::read(&second).unwrap());
 }
 
-/// A mesh with enough surface to make a model part worth compressing.
+/// A mesh with enough surface to be worth compressing.
 fn many_triangles() -> Mesh {
     primitives::ellipsoid_mesh(40.0, 40.0, 40.0, 48)
 }
 
-/// XML shaped exactly like the model part of a 3MF, which is the data this
-/// encoder exists for. Written here rather than exported and unzipped, so the
-/// encoder can be measured on a known number of vertices without a zip reader
-/// in the middle.
+/// XML shaped like a 3MF model part, generated directly so the encoder is measured on a known size.
 fn model_part(vertices: usize) -> Vec<u8> {
     let mut out = String::with_capacity(vertices * 90);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<model unit=\"millimeter\">\n <resources>\n");
     out.push_str("  <object id=\"1\" type=\"model\">\n   <mesh>\n    <vertices>\n");
-    // A generator of this test's own, so the case is the same on every run.
+    // A fixed-seed generator, so every run is the same.
     let mut state = 0x1234_5678_9ABC_DEF0u64;
     let mut next = || {
         state ^= state << 13;
@@ -177,9 +165,8 @@ fn method_of(archive: &[u8], name: &str) -> Option<u16> {
     None
 }
 
-/// How long a big model part takes to compress. An export has two minutes
-/// before it gives up, and the compression must be a small part of that: this
-/// is the check that the encoder is quick enough to be on by default.
+/// Compressing a big model part must be a small share of an export's two-minute budget, to be on
+/// by default.
 #[test]
 #[ignore = "a timing check, run with --ignored when the encoder is changed"]
 pub(crate) fn a_large_model_part_compresses_quickly() {

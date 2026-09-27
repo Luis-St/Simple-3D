@@ -2,21 +2,9 @@
 
 use super::*;
 
-/// Gather the parts that touch into groups, as indices into `parts`.
-///
-/// Touching is read off the boxes rather than off the triangles, and
-/// deliberately: what the grouping is for is saying that a pin and the plate it
-/// stands in were modelled as one thing, and a box is the scale that question
-/// is asked at. Measuring real contact would be a boolean per pair -- hundreds
-/// of them, each of them the slowest thing in the crate -- to answer a question
-/// about intent that the extra precision would not answer any better.
-///
-/// Parts that touch a common third part end up in one group, because they do
-/// stand together even where they do not touch each other: a shaft through two
-/// brackets is one assembly.
-///
-/// With `together` off every part is a group of its own, which is to say no
-/// groups at all.
+/// Gather touching parts into groups, as indices into `parts`. Contact is read off boxes, the scale
+/// of the question (was this modelled as one thing?), rather than a boolean per pair. Touching is
+/// transitive, so a shaft through two brackets is one group. With `together` off, each part stands alone.
 pub(super) fn gather(parts: &[Part], together: bool) -> Vec<Vec<usize>> {
     if !together {
         return (0..parts.len()).map(|i| vec![i]).collect();
@@ -40,8 +28,7 @@ pub(super) fn gather(parts: &[Part], together: bool) -> Vec<Vec<usize>> {
             }
         }
     }
-    // Kept in the order the parts are in, so the groups come out biggest first
-    // exactly as the parts do.
+    // In part order, so groups come out biggest first like the parts.
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut place: Vec<Option<usize>> = vec![None; parts.len()];
     for i in 0..parts.len() {
@@ -55,9 +42,7 @@ pub(super) fn gather(parts: &[Part], together: bool) -> Vec<Vec<usize>> {
     groups
 }
 
-/// Whether two boxes meet, with enough slack that solids merely resting against
-/// each other count -- which is the ordinary way an assembly is modelled, and
-/// the case the grouping is entirely for.
+/// Whether two boxes meet, with slack so resting solids count.
 fn touching(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
     let ((alo, ahi), (blo, bhi)) = (a, b);
     alo.x - SLACK <= bhi.x
@@ -68,8 +53,6 @@ fn touching(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
         && blo.z - SLACK <= ahi.z
 }
 
-/// How far apart, in millimetres, two bodies may stand and still be called
-/// touching. A hundredth of a millimetre: under the resolution of every file
-/// format this reads, so surfaces that were meant to be in contact still are
-/// after the round trip, and far under any gap anybody models on purpose.
+/// How far apart touching bodies may be: 0.01 mm, under every format's resolution and any
+/// intentional gap.
 const SLACK: f64 = 0.01;

@@ -1,4 +1,4 @@
-//! The boolean a drag of one of its operands is drawn from on the card.
+//! The boolean a dragged operand is drawn from on the card.
 
 use super::*;
 use crate::app::{PlannedLeaf, Shape, CSG_DIFFERENCE, CSG_UNION};
@@ -22,7 +22,7 @@ fn plate(app: &mut App, parent: NodeId) -> NodeId {
     app.scene.add_primitive("plate", parent, index).unwrap()
 }
 
-/// The nodes an expression's shapes are, for a plan with no hull in it.
+/// The nodes of an expression's shapes, for a plan without a hull.
 fn nodes(leaves: &[PlannedLeaf]) -> Vec<NodeId> {
     leaves
         .iter()
@@ -87,10 +87,10 @@ pub(crate) fn a_hull_on_the_way_up_is_one_shape_made_again_for_the_drag() {
     let shapes: Vec<Shape> = leaves.iter().map(|leaf| leaf.shape).collect();
     assert_eq!(shapes, vec![Shape::Node(base), Shape::Hull(hull)]);
     assert_eq!(program, vec![0, 1, CSG_DIFFERENCE]);
-    // The hull as a whole is a shape of the difference, and moving it is.
+    // The hull as a whole is a shape of the difference, and moving it is supported.
     assert!(app.csg_plan(hull).is_some());
 
-    // Stretched over where the dragged body has got to.
+    // Stretched over the dragged body's new place.
     let still = app.csg_hull(hull, inside, simple3d_core::xform::Xform::IDENTITY).unwrap();
     let moved = app.csg_hull(hull, inside, simple3d_core::xform::Xform::from_translation(Vec3::new(20.0, 0.0, 0.0)));
     let (_, still_hi) = still.mesh.bounds().unwrap();

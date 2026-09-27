@@ -5,8 +5,7 @@ use simple3d_core::scene::{NodeId, Visibility};
 use std::hash::{Hash, Hasher};
 
 impl App {
-    /// The nodes drawn as ghosts: hidden, and asked to be seen anyway. A group
-    /// set to ghost carries its children with it, the way hiding it does.
+    /// The nodes drawn as ghosts: hidden but asked to be seen; a ghost group carries its children.
     pub(crate) fn ghosts(&self) -> Vec<NodeId> {
         self.scene
             .depth_first()
@@ -15,12 +14,8 @@ impl App {
             .collect()
     }
 
-    /// A cheap summary of which nodes are ghosts, for the cache key: the
-    /// renderables have to be rebuilt when one is turned on or off.
-    ///
-    /// Asked on every frame, so it reads the nodes in the order the scene
-    /// keeps them rather than walking the tree into a list the way [`ghosts`]
-    /// does: which nodes are ghosts is all the key needs, not their order.
+    /// A cheap summary of which nodes are ghosts, for the cache key. Read in scene order every frame,
+    /// since only membership matters, not [`ghosts`]' tree order.
     ///
     /// [`ghosts`]: App::ghosts
     pub(super) fn ghost_generation(&self) -> u64 {
@@ -31,8 +26,8 @@ impl App {
         hasher.finish()
     }
 
-    /// Rebuild the per-node meshes the viewport needs -- the selection outline and
-    /// the ghosts -- when either the evaluation or what is selected has changed.
+    /// Rebuild the per-node meshes for the selection outline and ghosts when the evaluation or
+    /// selection changed.
     pub(crate) fn refresh_node_renderables(&mut self) {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.evaluation_generation.hash(&mut hasher);
@@ -50,9 +45,7 @@ impl App {
         let cache = self.worker.renderables.clone();
         let mut fresh = std::collections::BTreeMap::new();
         for &(id, outlined) in &wanted {
-            // The evaluation thread has usually made these already; what is
-            // left -- a node selected since the last evaluation -- is made
-            // here, once, and kept for as long as its mesh is.
+            // Usually made by the evaluation thread already; a newly selected node is made here once.
             if let std::collections::btree_map::Entry::Vacant(slot) = fresh.entry(id) {
                 if let Some(renderable) = cache.get(&self.evaluated, (id, outlined)) {
                     slot.insert(renderable);
@@ -64,30 +57,18 @@ impl App {
         self.invalidate_image();
     }
 
-    /// Every single node the viewport draws, with whether it needs the
-    /// outline's edge adjacency, in the order it has first claim on a node.
+    /// Every node the viewport draws singly, with whether it needs outline adjacency, in claim order.
     pub(crate) fn wanted_renderables(&self) -> Vec<crate::render::Wanted> {
         let mut wanted: Vec<crate::render::Wanted> = Vec::new();
-        // The selection is drawn as *what each selected node evaluates to*,
-        // and not one row further down. Descending to the children outlined
-        // shapes the result does not contain: a difference's cutter as two
-        // rims hanging in mid-air, an intersection's whole uncut box as a cage
-        // round the small lens it leaves, a pattern's source child standing
-        // where no copy of it does.
+        // Each selected node as what it evaluates to, not its children, which would show cutters and
+        // uncut boxes the result does not contain.
         wanted.extend(self.top_level_selection().into_iter().map(|id| (id, true)));
-        // A ticked piece is outlined the same way, so pointing at one in the
-        // viewport is how a piece is found among thousands (issue 82).
+        // Ticked pieces are outlined too, to find them among thousands (issue 82).
         wanted.extend(self.piece_ticks.iter().map(|&id| (id, true)));
-        // What a tool is previewing, kept ready whether or not it is selected:
-        // "only what is previewed" draws that object *as* the model, and the
-        // selection can move on to something else while the tool is open
-        // (issue 82).
+        // The previewed object, kept ready since "only what is previewed" draws it as the model (issue 82).
         wanted.extend(self.preview_subject().map(|id| (id, true)));
-        // Every node the user asked to keep as a ghost, so a subtracted tool
-        // body can be seen while it is being positioned (spec section 6.1). A
-        // ghost group is drawn as its children, one translucent body each,
-        // because that is the assembly the user is placing. Only a node with a
-        // mesh of its own is drawn that way; a group is drawn through them.
+        // Every ghost node, so a tool body can be positioned (spec section 6.1); a ghost group is drawn
+        // as its children with meshes.
         let mut ghosts: Vec<NodeId> = Vec::new();
         for id in self.ghosts() {
             ghosts.extend(std::iter::once(id).chain(self.scene.descendants(id)));
@@ -95,8 +76,7 @@ impl App {
         ghosts.sort_unstable();
         ghosts.dedup();
         for id in ghosts {
-            // A node both ghosted and selected keeps the outlined one it was
-            // claimed with above, as it always has.
+            // A node both ghosted and selected keeps its outlined claim from above.
             if self.evaluated.node_meshes.contains_key(&id) && !wanted.iter().any(|&(w, _)| w == id) {
                 wanted.push((id, false));
             }

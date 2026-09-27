@@ -1,12 +1,8 @@
-//! The shape one cell of a tiling is, and what each kind implies about how
-//! the cells pack.
+//! The shape of one tiling cell.
 
 use serde::{Deserialize, Serialize};
 
-/// The shape one cell of the tiling is.
-///
-/// Every one of them tiles the plane exactly -- no gaps and no overlaps -- which
-/// is what makes the pieces add back up to the shape they were cut from.
+/// The shape of one cell. Each tiles the plane exactly, so the pieces add back up to the original.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CellKind {
@@ -39,14 +35,12 @@ impl CellKind {
         }
     }
 
-    /// Whether the second side length means anything for this kind. Only a
-    /// rectangle has two; the others are defined by one number, and offering a
-    /// field that changes nothing is worse than not offering it.
+    /// Whether the second side length applies; only rectangles have two.
     pub fn has_depth(self) -> bool {
         self == CellKind::Rectangles
     }
 
-    /// What the one size number means for this kind, for a tooltip.
+    /// What the size number means for this kind, for a tooltip.
     pub fn size_meaning(self) -> &'static str {
         match self {
             CellKind::Squares => "The side of one square.",

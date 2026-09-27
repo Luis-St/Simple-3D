@@ -1,9 +1,5 @@
-//! The declarative primitive registry (spec section 3.2, "Extensibility").
-//!
-//! Adding a primitive means adding one `PrimitiveSpec` to `REGISTRY` and
-//! nothing else. The Add menu, the property editor, the project file format,
-//! the clipboard and undo all derive themselves from these declarations -- there
-//! is deliberately no per-primitive user-interface code anywhere in the app.
+//! The declarative primitive registry (spec section 3.2). A primitive is one `PrimitiveSpec` in
+//! `REGISTRY`; menus, editor, file format, clipboard and undo derive from it, with no per-primitive UI code.
 
 mod param;
 mod registry;

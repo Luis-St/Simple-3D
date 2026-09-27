@@ -6,12 +6,7 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
-    /// Every lay-out grip the pattern `id` offers, in world space (issue 67).
-    ///
-    /// Empty for anything that is not a pattern, and for a mirror, which has no
-    /// distance and no count to lay out. The pattern's own frame is what places
-    /// them: a grip marks a copy the pattern actually makes, and those turn
-    /// with the node.
+    /// Every lay-out grip of pattern `id`, in world space (issue 67); none for non-patterns or mirrors.
     pub fn pattern_grips(&self, id: NodeId) -> Vec<PatternGrip> {
         let Some(node) = self.scene.get(id) else { return Vec::new() };
         if !node.is_pattern() {
@@ -52,9 +47,7 @@ impl App {
             .collect()
     }
 
-    /// Where the middle of what the pattern `id` repeats sits, in the
-    /// pattern's own frame: read off the last evaluation, which placed the
-    /// children once, where they stand, before any copy was made of them.
+    /// The middle of what pattern `id` repeats, in the pattern's frame, from the last evaluation.
     fn pattern_content_centre(&self, id: NodeId, own: &simple3d_core::xform::Xform) -> Vec3 {
         let mut bounds: Option<(Vec3, Vec3)> = None;
         for child in &self.scene.node(id).children {
@@ -64,12 +57,8 @@ impl App {
         bounds.map_or(Vec3::ZERO, |(lo, hi)| own.inverse().point((lo + hi) * 0.5))
     }
 
-    /// What the pointer is asking a grip for: a distance along its line, or --
-    /// for a span grip -- the angle it has been carried round to.
-    ///
-    /// Both come back in the pattern's own units, which is what its parameters
-    /// are written in, so a scaled pattern is read back at its own numbers
-    /// rather than the world's.
+    /// What the pointer asks a grip for: a distance along its line or a span's angle, in the
+    /// pattern's own units.
     pub fn pattern_grip_value(&self, grip: &PatternGrip, view: &crate::view::View, cursor: egui::Pos2) -> Option<f64> {
         match grip.turn {
             Some((axis, zero, _)) => {
@@ -77,22 +66,15 @@ impl App {
                 let radial = at - grip.from;
                 let tangent = axis.cross(zero);
                 let degrees = radial.dot(tangent).atan2(radial.dot(zero)).to_degrees();
-                // Round the back of the circle a span reads as the whole turn
-                // rather than as nothing: dragging past 359 degrees means "all
-                // the way", which is the number a full ring wants.
+                // Past the back of the circle a span reads as a full turn rather than zero.
                 Some(if degrees < 0.0 { degrees + 360.0 } else { degrees })
             }
             None => Some(view.ray_axis(cursor, grip.from, grip.dir)? / grip.scale),
         }
     }
 
-    /// Write what a grip was dragged to, coalesced into one undo step so the
-    /// whole drag is a single edit.
-    ///
-    /// The value is rounded the way every other viewport drag is -- to the
-    /// document's move step for a distance, to the rotation snap for a span --
-    /// because a handle that alone produced "7.0359 mm" under a 1 mm step was
-    /// the odd one out. A count rounds to whole copies on its own.
+    /// Write a dragged grip value as one coalesced undo step, rounded to the move step or rotation
+    /// snap like every other viewport drag; counts round to whole copies.
     pub fn set_pattern_grip(&mut self, id: NodeId, label: &str, value: f64, mods: gizmo::Mods) {
         let Some(params) = self.scene.get(id).and_then(|n| n.params()) else { return };
         let Some(grip) = simple3d_core::pattern::grip(params, label) else { return };
@@ -108,25 +90,11 @@ impl App {
         self.touch();
     }
 
-    /// Size a fresh pattern's spacing to what it holds, the moment it first
-    /// holds something (issue 67).
+    /// Size a fresh pattern's spacing to its contents the first time it has any (issue 67), so shapes
+    /// dropped into an empty pattern are not repeated at exactly their own width.
     ///
-    /// The pattern *tool* measures the shapes it wraps, so making a pattern of a
-    /// 20 mm box gives a 30 mm step. A pattern made with nothing selected has
-    /// nothing to measure yet and keeps the stock numbers, so a 20 mm shape
-    /// dropped into it afterwards was repeated at exactly its own width and the
-    /// copies came out as one welded bar instead of three boxes standing clear.
-    ///
-    /// Only while the numbers are still untouched -- exactly the defaults a bare
-    /// pattern is born with -- so nothing typed into the property editor, and
-    /// nothing laid out with a grip, is ever overwritten under the user. The
-    /// kind is not one of those numbers: a pattern made for the custom tool is
-    /// born saying Custom, and its stage step wants fitting to what it holds
-    /// exactly as a linear one's does.
-    ///
-    /// The children are measured, not the pattern: asking the pattern measures
-    /// the repetition rather than the thing being repeated, and the spacing
-    /// derived from that comes out a whole run too large.
+    /// Only while the numbers are still the defaults, so nothing the user set is overwritten. The
+    /// children are measured, not the pattern, which would measure the repetition.
     pub(crate) fn size_fresh_patterns(&mut self) {
         let defaults = simple3d_core::pattern::default_params();
         let fresh: Vec<NodeId> = self
@@ -156,13 +124,8 @@ impl App {
         }
     }
 
-    /// How big what the pattern `id` repeats is, across: the bounds of its
-    /// children together. `None` for a pattern with nothing in it yet.
-    ///
-    /// The children are measured, not the pattern: asking the pattern measures
-    /// the repetition rather than the thing being repeated. Whatever is sized
-    /// to "the shape" -- a fresh pattern's step, a new stage, a ready-made
-    /// layout, the scatter's warning that copies may meet -- is sized by this.
+    /// The combined size of pattern `id`'s children, or `None` if empty. Children rather than the
+    /// pattern, which would measure the repetition; everything sized to "the shape" uses this.
     pub(crate) fn pattern_content_size(&self, id: NodeId) -> Option<Vec3> {
         let mut bounds: Option<(Vec3, Vec3)> = None;
         for child in &self.scene.get(id)?.children {
@@ -175,31 +138,23 @@ impl App {
         bounds.map(|(lo, hi)| hi - lo)
     }
 
-    /// The pattern creation tool (issue 67): wrap the selection in a pattern
-    /// node that repeats it, or -- with nothing selected -- drop an empty pattern
-    /// at the insertion point for shapes to be put under. Either way the pattern
-    /// is selected, so the property editor is right there to lay it out.
+    /// The pattern tool (issue 67): wrap the selection in a pattern, or drop an empty one at the
+    /// insertion point. The pattern ends up selected.
     pub(crate) fn make_pattern(&mut self) {
         self.edit("Pattern", None);
         let created = if self.selection.is_empty() {
             let (parent, index) = self.scene.insertion_point(self.primary());
             Some(self.scene.add_pattern(parent, index))
         } else {
-            // Reuse the grouping logic to gather the top-level selection under one
-            // new node, then make that node a pattern rather than a union.
+            // Gather the top-level selection under a new node, then make it a pattern rather than a union.
             let group = self.scene.group_selection(&self.selection.clone());
             if let Some(group) = group {
-                // Measured *before* the node becomes a pattern. Asking afterwards
-                // measures the repetition rather than the thing being repeated --
-                // three 20 mm boxes 20 mm apart read as 60 mm wide, and the
-                // spacing derived from that came out three times too large.
+                // Measured before the node becomes a pattern, which would measure the repetition.
                 let size = simple3d_core::eval::subtree_bounds(&self.scene, group)
                     .map(|(lo, hi)| hi - lo)
                     .unwrap_or(Vec3::ZERO);
                 if let Some(node) = self.scene.get_mut(group) {
-                    // The stock 20 mm step is exactly the width of the stock box,
-                    // so a pattern made from one laid its copies down touching --
-                    // see `pattern::params_for_size`.
+                    // The stock step equals the stock box's width, so copies would touch (`pattern::params_for_size`).
                     node.body =
                         simple3d_core::scene::Body::Pattern { params: simple3d_core::pattern::params_for_size(size) };
                     node.name = "Pattern".to_string();
@@ -217,17 +172,9 @@ impl App {
     }
 }
 
-/// A grip moved out to the copies it lays out.
-///
-/// The pattern's numbers are measured from its own origin, and each copy is the
-/// children moved by them -- so children standing 21 mm off the origin are
-/// repeated 21 mm further out than the numbers say. The grips were drawn at
-/// the numbers, and a ring of radius 30 put its radius grip 30 mm out while the
-/// copies went round at 51. Carried by where the children are, a sliding grip
-/// sits on the copy it moves and reads back the same number, since it is
-/// measured along its line from the point it was carried to. A span grip turns
-/// about the pattern's own axis, which the children do not move: it only rides
-/// on a ring that much wider, so it stays outside the copies.
+/// A grip moved out to the copies it lays out. Copies are the children moved by the numbers, so
+/// children off the origin repeat that much further out; carrying the grip by the children's
+/// centre keeps it on its copy while reading back the same number.
 fn on_the_copies(mut grip: simple3d_core::pattern::Grip, centre: Vec3) -> simple3d_core::pattern::Grip {
     match grip.drive {
         simple3d_core::pattern::Drive::Angle { .. } => {

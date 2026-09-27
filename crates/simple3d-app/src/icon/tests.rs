@@ -4,9 +4,7 @@ use crate::theme::token;
 
 #[test]
 fn the_window_icon_is_the_box_in_the_accent_colour_on_a_rounded_tile() {
-    // Issue 18: the window wore eframe's egui logo, because nothing set an
-    // icon. What matters is that this produces one at all, and that it is
-    // the drawing the packaged icon files carry rather than a blank square.
+    // Issue 18: the window wore egui's logo because nothing set an icon; this must be the packaged drawing.
     let icon = app_icon(64);
     assert_eq!((icon.width, icon.height), (64, 64));
     assert_eq!(icon.rgba.len(), 64 * 64 * 4);
@@ -15,7 +13,7 @@ fn the_window_icon_is_the_box_in_the_accent_colour_on_a_rounded_tile() {
         let o = (y * 64 + x) * 4;
         (icon.rgba[o], icon.rgba[o + 1], icon.rgba[o + 2], icon.rgba[o + 3])
     };
-    // The corners are rounded, so they are transparent; the middle is not.
+    // Rounded corners are transparent; the middle is not.
     assert_eq!(pixel(0, 0).3, 0, "the tile's corner is not rounded");
     assert_eq!(pixel(32, 32).3, 255, "the middle of the tile is not opaque");
 
@@ -32,9 +30,7 @@ fn the_window_icon_is_the_box_in_the_accent_colour_on_a_rounded_tile() {
 
 #[test]
 fn the_icon_is_the_same_drawing_at_every_size() {
-    // The same shape, scaled: the proportion of it that is ink cannot move
-    // much between one size and the next, or the strokes are not scaling
-    // with the tile.
+    // The inked proportion must barely change between sizes, or strokes are not scaling.
     let inked = |size: usize| {
         let icon = app_icon(size);
         let accent = token::ACCENT;
@@ -52,8 +48,7 @@ use simple3d_core::primitive;
 
 #[test]
 fn every_primitive_in_the_registry_has_a_silhouette() {
-    // A tile with no glyph would be an unclickable blank in the palette, so
-    // check the mapping covers the registry rather than falling back.
+    // A tile without a glyph would be a blank; the mapping must cover the registry.
     for spec in primitive::REGISTRY {
         let glyph = Glyph::for_primitive(spec.type_id);
         if spec.type_id != "box" {

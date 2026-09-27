@@ -7,8 +7,7 @@ use super::*;
 use crate::raster::{Image, Rgba};
 use simple3d_core::config::DisplayMode;
 
-/// The convex hull of a set of screen points, counter-clockwise in
-/// screen coordinates. Andrew's monotone chain.
+/// Convex hull of screen points, counter-clockwise (Andrew's monotone chain).
 pub(crate) fn hull(mut points: Vec<egui::Pos2>) -> Vec<egui::Pos2> {
     points.sort_by(|a, b| (a.x, a.y).partial_cmp(&(b.x, b.y)).unwrap());
     points.dedup();
@@ -29,10 +28,7 @@ pub(crate) fn hull(mut points: Vec<egui::Pos2>) -> Vec<egui::Pos2> {
     out
 }
 
-/// Pixels that lie at least `margin` inside the hull but were never painted.
-/// For a convex solid the painted silhouette *is* the hull of its projected
-/// vertices, so any such pixel means a face that faces the viewer was not
-/// drawn.
+/// Unpainted pixels at least `margin` inside the hull; for a convex solid any means a missing front face.
 pub(crate) fn unpainted_inside(hull: &[egui::Pos2], frame: &Image, empty: &Image, margin: f32) -> usize {
     let mut missing = 0;
     for row in 0..frame.height {
@@ -53,12 +49,8 @@ pub(crate) fn unpainted_inside(hull: &[egui::Pos2], frame: &Image, empty: &Image
     missing
 }
 
-/// Where the selection colour was painted when `item` is drawn selected
-/// over itself: how many pixels in all, and how many in the middle of the
-/// frame.
-///
-/// The middle is the discriminator. An outline touches the shape's rim and
-/// leaves the inside alone; a set of creases scribbles across it.
+/// Selection-colour pixels when `item` is drawn selected: total, and in the frame's middle. An
+/// outline leaves the middle alone; creases scribble across it.
 pub(crate) fn selection_coverage_of(item: &Renderable) -> (usize, usize) {
     let req = request(
         vec![Item { renderable: item, style: Style::Solid }, Item { renderable: item, style: Style::Selected }],

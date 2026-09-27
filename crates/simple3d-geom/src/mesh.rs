@@ -1,14 +1,10 @@
 use crate::vec3::Vec3;
 
-/// An indexed triangle mesh. `indices` holds flat triangle triples into `positions`.
-/// A `Mesh` returned by a primitive generator or a boolean op is expected to be
-/// watertight, manifold, correctly wound (CCW seen from outside) with outward normals.
+/// An indexed triangle mesh; `indices` holds triangles into `positions`. Generated and boolean
+/// results are expected to be watertight, manifold and wound CCW from outside.
 ///
-/// `tags` runs parallel to `indices`: one number per triangle, saying which
-/// body the surface came from. Nothing in this crate interprets it -- it is
-/// carried through booleans, welding and healing so that a caller which paints
-/// bodies (see the scene's per-node colour) can still tell, on the far side of
-/// a difference, which of the operands each surviving face belonged to.
+/// `tags` holds one number per triangle naming the body it came from. This crate only carries it
+/// through booleans, welding and healing, so callers can still colour faces by their operand.
 #[derive(Clone, Debug, Default)]
 pub struct Mesh {
     pub positions: Vec<Vec3>,
@@ -16,16 +12,13 @@ pub struct Mesh {
     pub tags: Vec<u32>,
 }
 
-/// The tag that stands for "this surface is painted this colour", and the
-/// reading of one. The encoding lives here, next to the field it goes in, so
-/// the scene that writes tags and the exporter that reads them cannot drift:
-/// the top byte separates a painted surface from tag 0, which every generator
-/// produces and which means "unpainted".
+/// The tag for a surface painted `rgb`. The top byte separates painted tags from 0, which means
+/// unpainted; defined here so the scene and the exporter agree.
 pub fn colour_tag(rgb: [u8; 3]) -> u32 {
     0x0100_0000 | (u32::from(rgb[0]) << 16) | (u32::from(rgb[1]) << 8) | u32::from(rgb[2])
 }
 
-/// The colour a tag stands for, or `None` for a surface nobody painted.
+/// The colour a tag stands for, or `None` for an unpainted surface.
 pub fn tag_colour(tag: u32) -> Option<[u8; 3]> {
     (tag & 0xFF00_0000 != 0).then_some([(tag >> 16) as u8, (tag >> 8) as u8, tag as u8])
 }
@@ -52,14 +45,12 @@ impl Mesh {
         self.tags.push(tag);
     }
 
-    /// The tag of one triangle. Zero for a mesh built before tags mattered,
-    /// which is what every generator produces until a caller says otherwise.
+    /// One triangle's tag; zero unless a caller set it.
     pub fn tag(&self, triangle: usize) -> u32 {
         self.tags.get(triangle).copied().unwrap_or(0)
     }
 
-    /// Mark every triangle as belonging to one body. Called once per primitive
-    /// as evaluation collects it, before anything is combined.
+    /// Mark every triangle as one body, once per primitive before combining.
     pub fn set_tag(&mut self, tag: u32) {
         self.tags.clear();
         self.tags.resize(self.indices.len(), tag);
@@ -78,9 +69,7 @@ impl Mesh {
         Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
     }
 
-    /// Componentwise scale about the mesh's own origin. A factor of zero or
-    /// less on any axis would collapse or invert the solid, so callers clamp
-    /// before they get here; this does the arithmetic and nothing else.
+    /// Componentwise scale about the mesh's origin. Callers clamp non-positive factors first.
     pub fn scaled(&self, factor: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.scaled_by(factor)).collect();
         Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
@@ -110,9 +99,8 @@ impl Mesh {
         Some((lo, hi))
     }
 
-    /// Translate so the anchor sits at the origin: for `Base`, the mesh's
-    /// minimum Z moves to Z=0 while X/Y stay centred on the shape's own centre.
-    /// Shapes are generated centred on the origin already, so `Centre` is a no-op.
+    /// Move a `Base` anchor to the origin: minimum Z to Z=0, X and Y centred. Shapes are generated
+    /// centred, so `Centre` is a no-op.
     pub fn apply_base_anchor(&mut self) {
         if let Some((lo, _hi)) = self.bounds() {
             let offset = Vec3::new(0.0, 0.0, -lo.z);
@@ -128,28 +116,21 @@ impl Mesh {
         }
     }
 
-    /// Merge vertices that sit within ~1e-6mm of each other. Primitive
-    /// generators push each triangle's own fresh vertices rather than
-    /// sharing indices between adjacent triangles (simpler to write, and
-    /// harmless for boolean evaluation and STL/OBJ export, which only care
-    /// about positions) -- welding recovers a topologically connected mesh
-    /// for the manifold check and for smaller PLY/3MF/OBJ output.
+    /// Merge vertices within ~1e-6 mm. Generators emit unshared vertices per triangle; welding
+    /// recovers a connected mesh for the manifold check and smaller output.
     pub fn weld(&self) -> Mesh {
         self.weld_with_remap().0
     }
 
-    /// The same, with where each of this mesh's vertices went: the index of
-    /// the welded vertex it was merged into. Welded vertices are numbered in
-    /// the order their first copy appears here.
+    /// The same, with each original vertex's welded index; welded vertices are numbered by first
+    /// appearance.
     pub fn weld_with_remap(&self) -> (Mesh, Vec<u32>) {
         let key = |p: Vec3| -> (i64, i64, i64) {
             let s = 1_000_000.0; // 1e-6 mm buckets
             ((p.x * s).round() as i64, (p.y * s).round() as i64, (p.z * s).round() as i64)
         };
-        // Keyed by a cheap multiplicative hash rather than the standard SipHash:
-        // the keys are coordinates of the model, not input from an adversary,
-        // and on a mesh of millions of vertices the hashing alone was most of
-        // what welding cost.
+        // A cheap multiplicative hash rather than SipHash: keys are not adversarial, and hashing
+        // dominated welding on large meshes.
         let mut map: FastMap<(i64, i64, i64), u32> = FastMap::default();
         let mut positions = Vec::new();
         let mut remap = vec![0u32; self.positions.len()];
@@ -173,19 +154,9 @@ impl Mesh {
         (Mesh { positions, indices, tags }, remap)
     }
 
-    /// Closedness check on the welded mesh: every directed edge must be
-    /// answered by the same number of edges running the other way, so the
-    /// surface has no boundary and every face is backed by its neighbour.
-    /// Returns a description of the first problem found, if any.
-    ///
-    /// It used to insist on *exactly one* of each directed edge, which is the
-    /// rule for a single closed surface -- and a mesh here is not always one.
-    /// A scene holds several bodies, and two bodies may touch: four cells of a
-    /// split meet along one line, so that line's welded edge is used four times
-    /// each way and the mesh was called broken for being exactly what a split
-    /// is. What the rule is really for is finding a surface with a hole in it,
-    /// a face left in twice the same way round, or three faces meeting at one
-    /// edge, and each of those still shows up as a count that does not balance.
+    /// Closedness check on the welded mesh: every directed edge must be balanced by as many reverse
+    /// edges. Returns the first problem, if any. Balanced rather than exactly one each way, since
+    /// touching bodies (split cells) legitimately share edges.
     pub fn manifold_issue(&self) -> Option<String> {
         let welded = self.weld();
         let mut directed: FastMap<(u32, u32), u32> = FastMap::default();
@@ -206,15 +177,11 @@ impl Mesh {
     }
 }
 
-/// A map keyed by integers -- coordinates, vertex and edge numbers -- with
-/// [`CoordHasher`] in place of the standard SipHash. The repair passes after a
-/// boolean key maps like this by every edge of a mesh of a million triangles,
-/// several times over, and with SipHash the hashing was a third of their time.
+/// A map with integer keys using [`CoordHasher`] instead of SipHash, which was a third of the
+/// repair passes' time.
 pub(crate) type FastMap<K, V> = std::collections::HashMap<K, V, std::hash::BuildHasherDefault<CoordHasher>>;
 
-/// A hasher for integer keys: each word is folded in with a multiply and a
-/// rotate, the way `rustc`'s own FxHash does. See [`Mesh::weld`] for why it is
-/// not the standard one.
+/// An FxHash-style hasher for integer keys (see [`Mesh::weld`]).
 #[derive(Default)]
 pub(crate) struct CoordHasher(u64);
 

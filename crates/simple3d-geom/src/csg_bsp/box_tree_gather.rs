@@ -4,6 +4,8 @@ use super::*;
 use crate::vec3::Vec3;
 
 impl BoxTree {
+    /// Every polygon whose box comes within `EPSILON` of `query`, by index: the faces whose planes
+    /// can cut the query anywhere the surface is. `stack` is reused, as in `meets`.
     pub(super) fn gather(&self, query: (Vec3, Vec3), out: &mut Vec<u32>, stack: &mut Vec<u32>) {
         out.clear();
         stack.clear();

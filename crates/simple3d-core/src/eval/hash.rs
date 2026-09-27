@@ -1,5 +1,4 @@
-//! The key a subtree is cached under: everything that can change its mesh,
-//! and nothing that cannot.
+//! The key a subtree is cached under: everything that can change its mesh, and nothing else.
 
 use super::*;
 use crate::primitive::ParamValue;
@@ -9,19 +8,14 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 impl Evaluator {
-    /// Content hash of a subtree, including everything that affects geometry
-    /// and nothing that does not -- a node's name is not in here, so renaming
-    /// costs no re-evaluation.
+    /// Content hash of a subtree, covering exactly what affects geometry; names are excluded.
     pub(super) fn subtree_key(&self, scene: &Scene, id: NodeId) -> u64 {
         let mut hasher = Hasher64::new();
         self.hash_subtree(scene, id, &mut hasher);
         hasher.finish()
     }
 
-    /// Content hash of what a node makes before it is placed: its body and
-    /// everything under it, but not its own position, rotation, scale or
-    /// anchor. What a group's boolean is cached under, so moving the group
-    /// moves the result rather than working it out again.
+    /// Content hash of what a node makes before placement, so moving a group reuses its boolean.
     pub(super) fn content_key(&self, scene: &Scene, id: NodeId) -> u64 {
         let mut hasher = Hasher64::new();
         self.hash_content(scene, id, &mut hasher);
@@ -43,8 +37,7 @@ impl Evaluator {
             Body::Primitive { type_id, params } => {
                 type_id.hash(&mut hasher.0);
                 hash_params(hasher, params);
-                // The colour rides on the mesh as a per-triangle tag, so a
-                // repaint has to miss the cache the way a resize does.
+                // Colour rides on the mesh as a tag, so a repaint must miss the cache.
                 crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
                 let spec = crate::primitive::lookup(type_id);
                 if spec.map_or(false, |s| s.segmented) {
@@ -59,8 +52,7 @@ impl Evaluator {
                         self.hash_subtree(scene, child, hasher);
                     }
                 }
-                // Length of the visible child list, so hiding the last child of
-                // a union is not confused with having one fewer child.
+                // The visible child count, so hiding the last child is distinguishable.
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
             Body::Pattern { params } => {
@@ -73,10 +65,7 @@ impl Evaluator {
                 }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
-            // Neither the recipe a split carries nor the tiling that made its
-            // pieces is geometry -- nothing evaluates either until the pieces
-            // are joined back together -- so both stay out of the key, and two
-            // splits holding the same pieces share one result.
+            // A split's recipe and tiling are not geometry until joined, so they stay out of the key.
             Body::Split { .. } => {
                 "split".hash(&mut hasher.0);
                 for &child in &node.children {
@@ -86,9 +75,7 @@ impl Evaluator {
                 }
                 node.children.iter().filter(|c| scene.node(**c).visible).count().hash(&mut hasher.0);
             }
-            // An integration is whatever its component is, so the component's
-            // whole tree is in its key: an edit made in the component's own tab
-            // misses the cache here the way an edit made in place would.
+            // An integration's key includes the component's whole tree, so edits in its tab miss the cache.
             Body::Component { component, op } => {
                 "component".hash(&mut hasher.0);
                 op.map(|op| op as u8).hash(&mut hasher.0);
@@ -100,11 +87,8 @@ impl Evaluator {
             }
             Body::Mesh { mesh } => {
                 "mesh".hash(&mut hasher.0);
-                // The geometry itself never changes -- a stored mesh is
-                // immutable, and an edit to one replaces it -- so its identity
-                // is the allocation it lives in plus how big it is. Hashing a
-                // hundred thousand vertices on every keystroke would cost more
-                // than rebuilding the shapes the cache exists to avoid.
+                // Stored meshes are immutable, so their allocation and size identify them; hashing every vertex
+                // per keystroke would cost too much.
                 (Arc::as_ptr(mesh) as usize).hash(&mut hasher.0);
                 mesh.triangle_count().hash(&mut hasher.0);
                 crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
@@ -113,9 +97,7 @@ impl Evaluator {
     }
 }
 
-/// `DefaultHasher::new` uses fixed keys (unlike `RandomState`), so the same
-/// input hashes the same in every process -- which is what lets the cache key be
-/// compared across runs and keeps evaluation reproducible.
+/// `DefaultHasher::new` uses fixed keys, so hashes match across processes and evaluation is reproducible.
 pub(crate) struct Hasher64(pub(super) std::collections::hash_map::DefaultHasher);
 
 impl Hasher64 {
@@ -129,8 +111,7 @@ impl Hasher64 {
 }
 
 pub(crate) fn hash_f64(hasher: &mut Hasher64, v: f64) {
-    // Normalise -0.0 to 0.0 and NaN to a single pattern so equal values always
-    // hash equal.
+    // Normalise -0.0 and NaN so equal values hash equal.
     let v = if v == 0.0 { 0.0 } else { v };
     if v.is_nan() { u64::MAX } else { v.to_bits() }.hash(&mut hasher.0);
 }

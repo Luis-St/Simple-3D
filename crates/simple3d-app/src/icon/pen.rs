@@ -3,9 +3,7 @@
 use super::*;
 use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
 
-/// Draw `glyph` centred in `rect`, in `colour`. The glyph is drawn inside the
-/// largest square that fits, so a rectangle wider than it is tall still gets a
-/// centred, undistorted icon.
+/// Draw `glyph` centred in `rect` in the largest square that fits, undistorted.
 pub fn draw(painter: &Painter, rect: Rect, glyph: Glyph, colour: Color32) {
     let side = rect.width().min(rect.height());
     let square = Rect::from_center_size(rect.center(), Vec2::splat(side));
@@ -22,9 +20,7 @@ pub(crate) struct Pen<'a> {
 }
 
 impl Pen<'_> {
-    /// Unit coordinates: (0,0) is the top-left of the glyph's square, (1,1) the
-    /// bottom-right. Every glyph below is written in this space, which is what
-    /// makes them all agree on weight and margin.
+    /// Unit coordinates, (0,0) top-left to (1,1) bottom-right, so all glyphs share weight and margin.
     pub(super) fn at(&self, x: f32, y: f32) -> Pos2 {
         self.square.lerp_inside(egui::vec2(x, y))
     }
@@ -52,8 +48,7 @@ impl Pen<'_> {
         self.painter.circle_filled(self.at(cx, cy), r * self.square.width(), colour);
     }
 
-    /// An ellipse, as a polyline -- the shape that says "this solid is round"
-    /// when it is seen at an angle.
+    /// An ellipse as a polyline, for round solids seen at an angle.
     pub(super) fn ellipse(&self, cx: f32, cy: f32, rx: f32, ry: f32, from: f32, to: f32) {
         let steps = 28;
         let points: Vec<(f32, f32)> = (0..=steps)

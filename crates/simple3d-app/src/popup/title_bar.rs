@@ -3,13 +3,8 @@
 use super::*;
 use crate::theme::{self, token};
 
-/// The bar along the top: the chevron that rolls the window up, the title, and
-/// the cross that closes it. Returns how far it was dragged this frame.
-///
-/// The two buttons are identified by the popup's `key` rather than by its
-/// title, because a title may name what the tool is working on and so change
-/// under the pointer -- and a widget whose id changes is one that loses the
-/// press it is halfway through.
+/// The top bar: roll-up chevron, title and close cross; returns this frame's drag. Buttons are keyed
+/// by the popup's `key`, since a title naming the target can change mid-press.
 pub(crate) fn title_bar(
     ui: &mut egui::Ui,
     key: &str,
@@ -20,23 +15,19 @@ pub(crate) fn title_bar(
     let width = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(width, TITLE_BAR), egui::Sense::drag());
     let painter = ui.painter_at(rect);
-    // Only the top corners are rounded: the bar is the top of the window, not a
-    // widget sitting inside it.
+    // Only the top corners are rounded: the bar is the window's top.
     painter.rect_filled(
         rect,
         egui::CornerRadius { nw: 5, ne: 5, sw: 0, se: 0 },
         if response.dragged() { token::SURFACE_3 } else { token::SURFACE_2 },
     );
     painter.hline(rect.x_range(), rect.bottom() - 0.5, egui::Stroke::new(1.0_f32, token::SURFACE_3));
-    // The ordinary pointer over the bar, and the hand only while it is held and
-    // moving the window (issue 104): a hand at rest read as the bar being
-    // something to click rather than a place to take hold of.
+    // The grab hand only while dragging (issue 104); at rest it read as a clickable bar.
     if response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
 
-    // The chevron rolls the window up, which is what a popup that is in the way
-    // needs rather than being put away: what is typed into it survives.
+    // The chevron rolls the window up, keeping what was typed.
     let chevron = egui::Rect::from_min_size(egui::pos2(rect.left() + 5.0, rect.top() + 6.0), egui::Vec2::splat(14.0));
     let roll = ui.interact(chevron, ui.id().with((key, "roll")), egui::Sense::click());
     theme::twisty(
@@ -74,8 +65,7 @@ pub(crate) fn title_bar(
     ));
     text.galley(egui::pos2(chevron.right() + 5.0, rect.center().y - galley.size().y / 2.0), galley, token::TEXT_HI);
 
-    // Double-clicking the bar rolls it up too, which is the gesture every title
-    // bar has had for thirty years.
+    // Double-clicking the bar rolls it up too, as title bars always have.
     if response.double_clicked() {
         *collapsed = !*collapsed;
     }

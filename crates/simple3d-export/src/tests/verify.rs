@@ -52,9 +52,7 @@ pub(crate) fn export_anyway_is_possible_once_the_user_has_been_told() {
 
 #[test]
 pub(crate) fn a_drilled_plate_exports_as_a_watertight_solid() {
-    // Spec acceptance criterion 4, read back out of the written file rather
-    // than trusted from the mesh that went in: the hole must still be round,
-    // in the right place, and the surface closed.
+    // Spec acceptance criterion 4, read back from the written file: the hole round, placed right, closed.
     use simple3d_geom::{evaluate_boolean, BooleanOp};
     let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 32).translated(Vec3::new(-12.0, 0.0, 0.0));
     let mesh = evaluate_boolean(BooleanOp::Difference, &[plate(), hole]);
@@ -66,8 +64,7 @@ pub(crate) fn a_drilled_plate_exports_as_a_watertight_solid() {
     assert!(std::fs::metadata(&path).unwrap().len() > 500);
     std::fs::remove_file(&path).unwrap();
 
-    // OBJ for the geometry assertions, because it is the one format this
-    // crate writes that can be read back without a zip reader.
+    // OBJ, the one format here readable without a zip reader.
     let path = temp_dir().join("drilled.obj");
     write(&path, &mesh, &Options { format: Format::Obj, ..Default::default() }, &mut cb).unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
@@ -87,16 +84,14 @@ pub(crate) fn a_drilled_plate_exports_as_a_watertight_solid() {
             hi[a] = hi[a].max(v[a]);
         }
     }
-    // The plate's own dimensions are untouched by the cut.
     assert_eq!((hi[0] - lo[0], hi[2] - lo[2]), (40.0, 4.0));
-    // The bore is open: a 32-segment circumscribed hole's nearest surface is
-    // its flats, at radius 3 * cos(pi/32).
+    // The bore is open: a 32-segment hole's flats sit at radius 3 * cos(pi/32).
     let flat_radius = 3.0 * (std::f64::consts::PI / 32.0).cos();
     for v in &vertices {
         let r = ((v[0] + 12.0).powi(2) + v[1].powi(2)).sqrt();
         assert!(r > flat_radius - 1e-6, "a vertex at {v:?} landed inside the bore");
     }
-    // And 12mm from the left edge, measured on the hole's own vertices.
+    // 12mm from the left edge, measured on the hole's vertices.
     let bore: Vec<&[f64; 3]> =
         vertices.iter().filter(|v| ((v[0] + 12.0).powi(2) + v[1].powi(2)).sqrt() < 3.5).collect();
     assert!(!bore.is_empty(), "no bore vertices found");
@@ -107,7 +102,7 @@ pub(crate) fn a_drilled_plate_exports_as_a_watertight_solid() {
         lo[0]
     );
 
-    // Watertight in the file: every undirected edge shared by exactly two faces.
+    // Watertight: every undirected edge shared by exactly two faces.
     let mut edges: std::collections::HashMap<(usize, usize), u32> = std::collections::HashMap::new();
     for line in text.lines().filter(|l| l.starts_with("f ")) {
         let face: Vec<usize> =

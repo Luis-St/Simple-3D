@@ -8,24 +8,16 @@ use simple3d_geom::Vec3;
 pub(crate) fn push_grid(steps: &mut Vec<Step>, view: &View, grid: &Grid, palette: &Palette) {
     let (fine, coarse, strength) = grid_levels(view, grid.spacing);
     let radius = grid_radius(view);
-    // Both levels cover the same ground. Drawing the fine one over a shorter
-    // reach made the grid detailed around the origin and coarse everywhere
-    // else, so the ground read as a patch of detail sitting on a plainer one
-    // rather than as a single grid -- and which one you were looking at
-    // depended on where the origin happened to be in the frame. Detail is a
-    // question about the zoom, and `grid_levels` already answers it: the fine
-    // level fades in and out across the whole ground at once.
+    // Both levels cover the same ground; a shorter fine reach looked like a detail patch around the
+    // origin. `grid_levels` fades the fine level across the whole ground.
     if strength > 0.03 {
         push_grid_level(steps, view, fine, radius, strength, false, palette);
     }
     push_grid_level(steps, view, coarse, radius, 1.0, true, palette);
 }
 
-/// One decade of the ground grid, centred on the camera target so panning never
-/// runs off the end of it. The centre is snapped to the level's own spacing, so
-/// every line sits at a whole multiple of it -- which is what keeps the line
-/// through zero *on* zero, and the X and Y axes lying along the grid rather
-/// than across it.
+/// One grid decade centred on the camera target, snapped to its spacing so lines sit on whole
+/// multiples and the axes lie along the grid.
 pub(crate) fn push_grid_level(
     steps: &mut Vec<Step>,
     view: &View,
@@ -39,9 +31,7 @@ pub(crate) fn push_grid_level(
     let half = spacing * lines as f64;
     let cx = (view.camera().target.x / spacing).round() * spacing;
     let cy = (view.camera().target.y / spacing).round() * spacing;
-    // A major line every ten, counted in whole multiples of the spacing from
-    // the world origin rather than from the centre, so which lines are major
-    // stays put while the camera pans over them.
+    // Every tenth line is major, counted from the world origin so majors stay put while panning.
     let shade = |world: f64| {
         let index = (world / spacing).round() as i64;
         let colour = if majors && index.rem_euclid(10) == 0 { palette.grid_major } else { palette.grid };
@@ -68,24 +58,12 @@ pub(crate) fn push_grid_level(
     }
 }
 
-/// How many pieces a grid line is cut into to fade it. Enough that the steps
-/// between one piece's alpha and the next are invisible, few enough that the
-/// whole grid is still one pass of cheap segment drawing.
+/// How many pieces a grid line is cut into to fade it: invisible steps, still cheap.
 pub(crate) const FADE_STEPS: usize = 24;
 
-/// Draw one grid line as a run of short segments whose alpha falls off with
-/// distance from the grid's centre. A grid that simply stops leaves a hard
-/// square edge in mid-air, and the eye reads that edge as part of the model.
-/// The stretch of a world segment, as a parameter range inside `[0, 1]`, whose
-/// projection lands in the frame -- `None` when none of it does.
-///
-/// The grid's lines run far outside the viewport, and at a shallow angle the
-/// ground reaches several times the width of the frame. Subdividing the whole
-/// segment would spend the fade's steps on the part nobody sees and leave two
-/// or three of them for the part they do, which shows as banding across the
-/// frame; finding the visible stretch first spends them all where they are
-/// seen, and drops a line that misses the frame entirely before it costs
-/// anything.
+/// The parameter range in `[0, 1]` of a world segment whose projection lands in the frame, or
+/// `None`. Fade steps are spent only on the visible stretch, avoiding banding, and missed lines
+/// cost nothing.
 pub(crate) fn visible_span(view: &View, from: Vec3, to: Vec3) -> Option<(f64, f64)> {
     let a = view.view_to_screen(view.to_view(from)).0;
     let b = view.view_to_screen(view.to_view(to)).0;
@@ -123,6 +101,8 @@ pub(crate) fn visible_span(view: &View, from: Vec3, to: Vec3) -> Option<(f64, f6
     (t1 > t0).then_some((t0, t1))
 }
 
+/// One grid line as short segments fading with distance from the centre, since a hard edge in
+/// mid-air reads as part of the model.
 pub(crate) fn push_faded_line(steps: &mut Vec<Step>, view: &View, from: Vec3, to: Vec3, colour: Rgba, bias: f32) {
     let Some((visible_from, visible_to)) = visible_span(view, from, to) else { return };
     let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
@@ -133,24 +113,17 @@ pub(crate) fn push_faded_line(steps: &mut Vec<Step>, view: &View, from: Vec3, to
         let a = from + (to - from) * t0;
         let b = from + (to - from) * t1;
         let mid = (a + b) * 0.5;
-        // Measured on the screen, not in the world. In the world it is a circle
-        // about the origin, which the tilt of the ground turns into an ellipse
-        // on the screen -- so the grid faded out before the top and bottom of
-        // the viewport at every angle but straight down, however far it
-        // reached. On the screen the falloff is the same in every direction and
-        // the ground covers the frame at any tilt.
+        // Measured on screen, not in the world, where tilt turns the circular falloff into an ellipse
+        // that faded out before the viewport's top and bottom.
         let screen = view.view_to_screen(view.to_view(mid)).0;
         let distance = ((screen.x - view.centre.x) as f64).hypot((screen.y - view.centre.y) as f64);
-        // Squared falloff: full strength in the middle of the frame, and gone
-        // just past the corners rather than at them.
+        // Squared falloff: full strength mid-frame, gone just past the corners.
         let fade = 1.0 - (distance / (half_diagonal * 1.08)).min(1.0).powi(2);
         if fade <= 0.03 {
             continue;
         }
         let faded = [colour[0], colour[1], colour[2], (colour[3] as f64 * fade).round() as u8];
-        // Never writes depth: the grid and the axes are drawn before the model
-        // and must lose every tie with it, including the exact ties a ground
-        // plane makes with a plate whose side walls it cuts.
+        // Never writes depth: grid and axes must lose every tie with the model, including exact ones.
         steps.push(line_step(view, a, b, faded, bias, 0, false));
     }
 }

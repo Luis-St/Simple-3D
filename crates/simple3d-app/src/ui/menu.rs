@@ -2,9 +2,8 @@
 
 use simple3d_core::keymap::{Command, Keymap};
 
-/// The label to put on a menu entry: the command's name plus its *current*
-/// binding, never a hardcoded one (spec section 8.2). The two halves are kept
-/// apart by a tab, and `menu_entry` is what draws them.
+/// A menu entry's label: the command's name and its current binding (spec section 8.2), separated
+/// by a tab that `menu_entry` splits on.
 pub fn menu_label(keymap: &Keymap, command: Command) -> String {
     match keymap.binding(command) {
         Some(chord) => format!("{}\t{}", command.label(), chord),
@@ -20,15 +19,8 @@ pub fn split_menu_label(label: &str) -> (&str, &str) {
     }
 }
 
-/// One menu entry: the action on the left, its key binding boxed at the right
-/// edge of the menu.
-///
-/// A tab between the two put them one word apart, wherever that happened to
-/// land, so a column of entries had its bindings scattered down the middle and
-/// nothing said which text was a key and which was the name of the command.
-/// The binding is now pushed to the right by a growing spacer -- so every
-/// entry's binding lines up with every other's -- and drawn inside a keycap
-/// outline, so it reads as a key rather than as more of the sentence.
+/// One menu entry: the action on the left and its binding right-aligned in a keycap outline, so
+/// bindings line up and read as keys.
 pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     let (action, shortcut) = split_menu_label(label);
     let font = egui::FontId::monospace(crate::theme::font::SMALL);
@@ -38,8 +30,7 @@ pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Respon
     }
     let response = ui.add_enabled(enabled, button);
     if !shortcut.is_empty() {
-        // The outline is painted after the button, so it can only ever be a
-        // stroke: a filled box here would cover the text already drawn under it.
+        // Painted after the button, so it can only be a stroke; a fill would cover the text.
         let width = ui.fonts(|fonts| fonts.layout_no_wrap(shortcut.to_string(), font, egui::Color32::WHITE).size().x);
         let right = response.rect.right() - ui.spacing().button_padding.x;
         let box_rect = egui::Rect::from_center_size(
@@ -53,18 +44,14 @@ pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Respon
     response
 }
 
-/// Translate an egui key press into the chord form the keymap stores. Uses
-/// egui's own key names, so there is no translation table to drift out of date.
-/// A button in a dialog's action row: every one the same size, so a row of them
-/// is a row and not a ragged line (issue 63).
+/// A dialog action-row button, all the same size so the row is even (issue 63).
 pub fn dialog_button(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     let size = egui::vec2(crate::theme::metric::DIALOG_BUTTON_WIDTH, crate::theme::metric::DIALOG_BUTTON);
     ui.add_enabled(enabled, egui::Button::new(label).min_size(size))
 }
 
-/// The toolkit key a name stands for, the inverse of `Key::name`. Used to ask
-/// whether a bound key is being held right now -- for the snap-while-held mode
-/// (issue 68), where a binding is a key to hold rather than a press to react to.
+/// The toolkit key a name stands for (inverse of `Key::name`), for checking held keys in the
+/// snap-while-held mode (issue 68).
 pub fn key_from_name(name: &str) -> Option<egui::Key> {
     egui::Key::ALL.iter().copied().find(|k| k.name() == name)
 }

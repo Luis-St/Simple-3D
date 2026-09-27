@@ -6,16 +6,9 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
-    /// Snap the dragged node so one of its own features lands on the nearest
-    /// feature of another body under the pointer (issue 68). Returns the world
-    /// point it snapped onto, or `None` when nothing was in reach, in which case
-    /// the grid drag stands.
-    ///
-    /// `handle` is what the drag is being steered by, and the snap stays inside
-    /// it: an axis handle only ever moves along its axis and a plane handle only
-    /// within its plane. Writing the full three-dimensional correction turned an
-    /// X-axis drag into a free move -- the body jumped in Y and Z as well, which
-    /// is the one thing choosing an axis handle says it must not do.
+    /// Snap the dragged node so one of its features lands on another body's feature under the pointer
+    /// (issue 68). Returns the snapped point, or `None` to keep the grid drag. The snap stays within
+    /// what `handle` allows, so an axis drag never moves off its axis.
     pub(super) fn apply_geometry_snap(
         &mut self,
         id: NodeId,
@@ -27,9 +20,7 @@ impl App {
         let frame = *self.evaluated.node_frames.get(&id)?;
         let world_origin = frame.point(self.scene.node(id).position);
         let exclude = self.drag_subtree(id);
-        // Only the components the handle actually governs survive, measured in
-        // the handle's own frame rather than the world's so a rotated body's
-        // local axes are respected the same way the drag itself respects them.
+        // Keep only the components the handle governs, in the handle's frame so rotated axes are respected.
         let constrain = |wanted: Vec3| {
             let mut correction = Vec3::ZERO;
             for axis in handle.axes() {
@@ -38,14 +29,12 @@ impl App {
             }
             correction
         };
-        // Where every feature the carried body offers currently is.
+        // Where every feature of the carried body currently is.
         let sources: Vec<Vec3> = std::iter::once(Vec3::ZERO)
             .chain(self.drag_feature_offsets().iter().copied())
             .map(|o| world_origin + o)
             .collect();
-        // Brought alongside first, aimed at second: the drag catches on whatever
-        // the body has come near, and only when it has come near nothing does the
-        // feature the pointer is over get its say.
+        // Alongside first; only when the body is near nothing does the feature under the pointer count.
         let (correction, target) = self
             .snap_alongside(view, &sources, &exclude, &constrain)
             .or_else(|| self.snap_at_pointer(view, cursor, &sources, &exclude, &constrain))?;
@@ -57,23 +46,11 @@ impl App {
         Some(target)
     }
 
-    /// The snap a drag catches by bringing the body alongside another (issue 68):
-    /// the least the body can be moved, within what the handle allows, to put one
-    /// of its own features onto a feature of a body it is not carrying.
+    /// The snap caught by bringing the body alongside another (issue 68): the least constrained move
+    /// putting one of its features on another body's feature.
     ///
-    /// This is what makes snapping reachable at all. Taking the target from
-    /// whatever the *pointer* is over cannot place two bodies against each other:
-    /// the handle is grabbed some seventy pixels out from the body, so by the time
-    /// the pointer reaches the corner to meet, the body has already been dragged
-    /// on top of it -- two 20 mm boxes could be snapped into the same 20 mm of
-    /// space and into nothing else. What a person is actually judging as they drag
-    /// is whether the thing they are carrying has come alongside the thing they
-    /// want it against, which is the question asked here.
-    ///
-    /// Nearness is judged on screen, where the judgement is being made, so a snap
-    /// takes the same aim whatever the zoom. Candidates are bucketed by screen
-    /// cell rather than compared all against all: a body of any size offers a
-    /// feature per corner and per edge, and a drag asks this on every frame.
+    /// Needed because the handle sits far out from the body, so pointer-based targets would overlap
+    /// the bodies. Nearness is judged on screen, zoom-independently, with candidates bucketed by cell.
     pub(super) fn snap_alongside(
         &self,
         view: &crate::view::View,
@@ -91,11 +68,7 @@ impl App {
             }
             screens.push(screen);
         }
-        // Every pair near enough on screen to be meant, cheapest move first. The
-        // whole list rather than the single best, because the winner still has to
-        // be a feature the picture shows -- and that question costs a ray cast, so
-        // it is asked of the pairs in the order they would be taken rather than of
-        // all of them.
+        // All near pairs, cheapest first, since the winner must also be visible, which costs a ray cast.
         let mut pairs: Vec<(f64, Vec3, crate::snap::Feature, NodeId)> = Vec::new();
         for (&node, mesh) in &self.evaluated.node_meshes {
             if !self.scene.is_shown(node) || exclude.contains(&node) {
@@ -128,14 +101,9 @@ impl App {
             .map(|(_, correction, feature, _)| (correction, feature.point))
     }
 
-    /// The snap a drag catches by being aimed: the feature under the pointer, and
-    /// whichever of the carried body's own features the handle lets reach it.
-    ///
-    /// The fallback to [`App::snap_alongside`], and the one that can cross a gap:
-    /// nothing has to have come near anything, so this is how a body is thrown
-    /// onto a corner some way off. An empty group offers no features of its own,
-    /// and then it is the origin that lands on the target, which still beats
-    /// refusing to snap at all.
+    /// The snap caught by aiming: the feature under the pointer and whichever carried feature the
+    /// handle lets reach it. The fallback to [`App::snap_alongside`], able to cross gaps; an empty
+    /// group snaps its origin.
     pub(super) fn snap_at_pointer(
         &self,
         view: &crate::view::View,
@@ -148,15 +116,9 @@ impl App {
         let mut best: Option<(Vec3, f64, f64)> = None;
         for source in sources {
             let correction = constrain(target.point - *source);
-            // How far the feature still misses the target after the constrained
-            // move: exactly zero when it can reach, and the shortest achievable
-            // gap when the handle will not let it all the way there.
+            // The remaining miss after the constrained move: zero when reachable.
             let miss = (*source + correction - target.point).length();
-            // Several features often reach equally well -- on an X drag towards a
-            // corner, the box's left face can meet it just as exactly as its
-            // right, by flying the whole body past the target and landing on top
-            // of it. Between equals, the one that moves the body least is the one
-            // that was meant.
+            // Among equally good features, prefer the least travel, not flying the body past the target.
             let travel = correction.length();
             const TIE: f64 = 1e-6;
             let better = match best {

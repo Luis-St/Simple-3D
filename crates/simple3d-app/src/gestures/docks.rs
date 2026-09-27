@@ -12,8 +12,7 @@ pub(crate) fn dragging_a_panel_header_into_the_other_dock_moves_the_panel_there(
 
     let header = rect_of(&harness, crate::dock::header_id(Panel::Primitives));
     let properties = rect_of(&harness, crate::dock::header_id(Panel::Properties));
-    // Above the Properties header, which is the top of the right dock: the drop
-    // index has to come out as nought.
+    // Above the Properties header at the right dock's top: drop index zero.
     let target = egui::pos2(properties.center().x, properties.top() + 2.0);
 
     press(&mut harness, header.center());
@@ -38,9 +37,7 @@ pub(crate) fn dragging_a_panel_header_into_the_other_dock_moves_the_panel_there(
     assert!(harness.state().dock_drag.panel.is_none(), "the drag was left running after the button came up");
     assert!(!layout.is_collapsed(Panel::Primitives), "a drag also rolled the panel up");
 
-    // And the panel is really in the other dock now: its header is drawn on the
-    // right. The layout changed while the frame was being drawn, so the frame
-    // that shows it is the next one.
+    // The panel is in the other dock now, drawn there on the next frame.
     harness.step();
     let moved = rect_of(&harness, crate::dock::header_id(Panel::Primitives));
     assert!(moved.center().x > 1400.0 / 2.0, "the panel is in the layout but is not drawn on the right");
@@ -48,8 +45,7 @@ pub(crate) fn dragging_a_panel_header_into_the_other_dock_moves_the_panel_there(
 
 #[test]
 pub(crate) fn clicking_a_panel_header_rolls_it_up_without_moving_it() {
-    // The same widget carries both gestures, so the one thing that can go wrong
-    // is that it cannot tell them apart.
+    // One widget carries click and drag, so they must be told apart.
     let mut harness = harness("dock-click");
     let header = rect_of(&harness, crate::dock::header_id(Panel::Outliner));
     let before = harness.state().settings.layout.clone();
@@ -62,7 +58,7 @@ pub(crate) fn clicking_a_panel_header_rolls_it_up_without_moving_it() {
     assert_eq!(layout.left, before.left, "a click moved the panel as well");
     assert_eq!(layout.right, before.right);
 
-    // Clicking it again unrolls it: the header is the whole of the interface.
+    // Clicking again unrolls it.
     let header = rect_of(&harness, crate::dock::header_id(Panel::Outliner));
     press(&mut harness, header.center());
     release(&mut harness, header.center());
@@ -71,11 +67,8 @@ pub(crate) fn clicking_a_panel_header_rolls_it_up_without_moving_it() {
 
 #[test]
 pub(crate) fn tab_pressed_again_brings_the_docks_back() {
-    // Tab is bound to hiding the docks, and egui also walks the keyboard focus
-    // with it: the first press hid the docks *and* put the focus on the File
-    // menu, a focused button counts as wanting the keyboard, and so every Tab
-    // after that only walked the menu bar -- the docks never came back, and
-    // Ctrl+W and the rest went nowhere either.
+    // Regression: egui also moves focus with Tab, and a focused menu button swallowed later Tabs, so
+    // the docks never came back.
     let mut harness = harness("docks-tab");
     key(&mut harness, egui::Key::Tab);
     assert!(harness.state().settings.layout.docks_hidden, "Tab did not hide the docks");

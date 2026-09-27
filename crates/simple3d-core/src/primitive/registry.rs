@@ -1,7 +1,4 @@
-//! Every shape the palette offers, as one table.
-//!
-//! The definitions themselves are grouped by kind in the modules below;
-//! this is the order they are offered in.
+//! Every palette shape, in offer order; definitions live in the modules below by kind.
 
 mod boxes;
 mod cones;

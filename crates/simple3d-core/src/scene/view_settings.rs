@@ -1,23 +1,16 @@
-//! How the scene is looked at: the origin axes, the preview viewport, and
-//! the section plane.
+//! How the scene is viewed: origin axes, preview viewport, and section plane.
 
 use serde::{Deserialize, Serialize};
 use simple3d_geom::Vec3;
 
-/// How the origin axes are drawn. Two readings of the same three lines, kept
-/// as a setting rather than a decision, because which one helps depends on
-/// whether the axes are being used to place something or to read the ground.
+/// How the origin axes are drawn; a setting because either reading can be the useful one.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AxisStyle {
-    /// The way most 3D software draws them: X and Y *are* the coloured grid
-    /// lines through zero. They run the width of the grid and travel with it as
-    /// the view pans, so the ground always says which way is which.
+    /// X and Y are the coloured grid lines through zero, running the grid's width.
     #[default]
     Grid,
-    /// A fixed cross pinned at the origin, fading out at its own length. It
-    /// says where the origin is rather than which way the ground runs, and it
-    /// leaves the view once the origin is panned off screen.
+    /// A fixed cross at the origin that fades at its own length.
     Origin,
 }
 
@@ -32,35 +25,22 @@ impl AxisStyle {
     }
 }
 
-/// What the viewport does while a tool draws a preview over it (issue 82).
-///
-/// An in-place popup exists so that one rectangle can be the modelling area and
-/// the preview area at once. That only works if the preview can be seen, and
-/// what is in the way depends on what is being previewed: a tiling drawn flat
-/// on a plate competes with the grid it lies parallel to, a cut through a tall
-/// shape competes with the axes running through it, and a preview of one object
-/// in a crowded scene competes with the scene. Which of those is the nuisance
-/// is not something the application can know, so it is a document setting.
-///
-/// It applies only while a preview is actually being drawn, and puts everything
-/// back the moment the tool closes: this is not a way to turn the grid off.
+/// What the viewport hides while a tool draws a preview over it (issue 82). A document setting,
+/// since which element gets in the way depends on the preview; everything returns when the tool
+/// closes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewViewport {
-    /// The viewport carries on as it is, and the preview is drawn over it.
+    /// The viewport is unchanged and the preview drawn over it.
     #[default]
     NoChange,
-    /// Drop the origin axes while the preview is up.
+    /// Hide the origin axes during the preview.
     HideAxes,
-    /// Drop the ground grid while the preview is up.
+    /// Hide the ground grid during the preview.
     HideGrid,
-    /// Drop both: the ground the tiling lies parallel to and the axes running
-    /// through the shape are the same nuisance twice, and a tiling drawn flat
-    /// on a plate meets both at once.
+    /// Hide both grid and axes.
     HideGridAndAxes,
-    /// Nothing but the object being previewed: every other body goes, and so do
-    /// the grid and the axes. The strongest answer, for reading a fine pattern
-    /// against one shape.
+    /// Show only the previewed object: other bodies, grid and axes are hidden.
     PreviewOnly,
 }
 
@@ -83,74 +63,50 @@ impl PreviewViewport {
         }
     }
 
-    /// Whether the grid is drawn under a preview in this mode.
     pub fn keeps_grid(self) -> bool {
         matches!(self, PreviewViewport::NoChange | PreviewViewport::HideAxes)
     }
 
-    /// Whether the origin axes are drawn under a preview in this mode.
     pub fn keeps_axes(self) -> bool {
         matches!(self, PreviewViewport::NoChange | PreviewViewport::HideGrid)
     }
 
-    /// Whether everything but the previewed object is drawn.
     pub fn keeps_other_bodies(self) -> bool {
         self != PreviewViewport::PreviewOnly
     }
 }
 
-/// A plane that cuts the model on screen so its inside can be seen and a wall
-/// can be measured by eye (issue 71).
+/// A plane cutting the model on screen to see inside (issue 71).
 ///
-/// It belongs to the document rather than to the application: the offset is a
-/// place in the model, and "40mm along X" means nothing in the next project.
-/// Nothing about it reaches the geometry -- the model, what is exported and
-/// what is picked are what they were, and only the picture changes -- so
-/// moving the plane is not an edit and there is nothing to undo.
-///
-/// Which side of it goes is [`SectionKeep`]: by default the side the camera is
-/// on (issue 109), or a fixed one when the cut should stay put while the view
-/// goes round it.
+/// A document setting, since its offset is a place in the model. It affects only the picture,
+/// never geometry, export or picking, so moving it is not an undoable edit. Which side is kept
+/// is [`SectionKeep`] (issue 109).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SectionView {
     pub enabled: bool,
-    /// Which axis the plane stands perpendicular to before it is turned: 0 for
-    /// X, 1 for Y, 2 for Z.
+    /// The axis the untilted plane is perpendicular to: 0 X, 1 Y, 2 Z.
     #[serde(default)]
     pub axis: usize,
-    /// Where along that axis it sits, in millimetres. Once it is turned, it is
-    /// how far it has been slid along its own normal, counted so that an
-    /// untilted plane reads as the coordinate it stands at.
+    /// Position along that axis in millimetres; when tilted, the slide along its own normal.
     #[serde(default)]
     pub offset: f64,
-    /// How far the plane is turned about X, then Y, then Z, in degrees, about
-    /// the middle of the model (issue 109) -- the order a node's rotation uses.
+    /// Rotation about X, then Y, then Z in degrees, about the model's middle (issue 109).
     #[serde(default, skip_serializing_if = "is_untilted")]
     pub tilt: [f64; 3],
     /// Which side of the plane stays in the picture.
     #[serde(default, skip_serializing_if = "SectionKeep::is_auto")]
     pub keep: SectionKeep,
-    /// Whether the plane was last slid along its normal rather than against
-    /// it, which is what [`SectionKeep::Motion`] decides the side by.
+    /// Whether the plane was last slid along its normal, for [`SectionKeep::Motion`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub swept_up: bool,
-    /// Whether the plane is cut down to [`SectionView::size`] rather than
-    /// running through the whole model. Only the material straight behind the
-    /// rectangle goes then, so a pocket can be opened in one place and the
-    /// rest of the part stays whole round it.
+    /// Whether the plane is limited to [`SectionView::size`], cutting only behind the rectangle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub custom_size: bool,
-    /// The rectangle's width and height, in millimetres, along the two
-    /// directions the plane spans (see [`SectionView::basis`]). Kept while the
-    /// size is automatic, so switching back to custom finds it where it was.
+    /// The rectangle's size in millimetres along [`SectionView::basis`]; kept while automatic.
     #[serde(default, skip_serializing_if = "is_unsized")]
     pub size: [f64; 2],
-    /// Where in the model the plane is turned about and its rectangle centred,
-    /// fixed when the plane is placed. Without it, both followed the middle of
-    /// the model, so moving any body at all swung a turned plane or slid the
-    /// rectangle off what it was cutting. `None` in a file written before it
-    /// was kept, and until there is a model to take the middle of -- the
-    /// middle of the model stands in for it then.
+    /// The pivot and rectangle centre, fixed when the plane is placed, so moving bodies does not
+    /// swing or slide the cut. `None` in older files or with no model; the model's middle is used then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub centre: Option<Vec3>,
 }
@@ -161,17 +117,9 @@ fn is_unsized(size: &[f64; 2]) -> bool {
 
 /// Which side of the section plane is kept.
 ///
-/// `Auto` keeps the side away from the camera, so the cut always faces whoever
-/// is looking and orbiting round shows the other half (issue 109). The fixed
-/// two are named by the coordinate rather than by the camera -- below is the
-/// side the plane's axis points away from, turned with the plane when it is
-/// tilted -- and stay put however the model is orbited, which is what a cut
-/// being compared from several angles wants.
-///
-/// `Motion` goes by the way the plane was last slid: what it has passed over
-/// goes and what lies ahead of it stays, so pushing it from the front of a part
-/// to the back peels the part away in front of it, and pulling it back brings
-/// that half back and takes the other.
+/// `Auto` keeps the side away from the camera, so the cut always faces the viewer (issue 109).
+/// The fixed sides are named by coordinate and stay put while orbiting. `Motion` removes what
+/// the plane was last slid over.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SectionKeep {
@@ -193,13 +141,12 @@ fn is_untilted(tilt: &[f64; 3]) -> bool {
 }
 
 impl SectionView {
-    /// The axis it stands on, clamped: a file naming a fourth axis reads as Z
-    /// rather than as a panic.
+    /// The axis, clamped so an invalid file reads as Z rather than panicking.
     pub fn axis(&self) -> usize {
         self.axis.min(2)
     }
 
-    /// The way the plane faces and slides: its axis, turned by the tilt.
+    /// The plane's normal: its axis turned by the tilt.
     pub fn normal(&self) -> Vec3 {
         let mut axis = Vec3::ZERO;
         match self.axis() {
@@ -210,52 +157,39 @@ impl SectionView {
         axis.rotate_xyz_deg(Vec3::new(self.tilt[0], self.tilt[1], self.tilt[2])).normalized()
     }
 
-    /// The middle of the model, or the origin with nothing in the scene.
+    /// The middle of the model, or the origin for an empty scene.
     pub fn pivot(bounds: Option<(Vec3, Vec3)>) -> Vec3 {
         bounds.map_or(Vec3::ZERO, |(lo, hi)| (lo + hi) * 0.5)
     }
 
-    /// The point the plane is turned about: its own [`SectionView::centre`],
-    /// or the middle of the model while it has none.
+    /// The point the plane turns about: [`SectionView::centre`], or the model's middle.
     pub fn turned_about(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
         self.centre.unwrap_or_else(|| Self::pivot(bounds))
     }
 
-    /// Fix the point the plane turns about at the middle of the model, if it
-    /// is not fixed yet and there is a model to take the middle of.
+    /// Fix the pivot at the model's middle, if unset and there is a model.
     pub fn pin_centre(&mut self, bounds: Option<(Vec3, Vec3)>) {
         if self.centre.is_none() && bounds.is_some() {
             self.centre = Some(Self::pivot(bounds));
         }
     }
 
-    /// A point the plane passes through.
-    ///
-    /// The untilted plane through the centre, slid to `offset` along its axis,
-    /// then turned about the centre: without the tilt that is exactly the plane
-    /// at `offset`, and with it the plane swings about the middle of the shape
-    /// rather than about the origin -- which for a part standing 300 mm out
-    /// would swing it clean off the model.
+    /// A point on the plane: the untilted plane at `offset` through the centre, turned about the
+    /// centre rather than the origin, which would swing it off a distant model.
     pub fn anchor(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
         let pivot = self.turned_about(bounds);
         let along = [pivot.x, pivot.y, pivot.z][self.axis()];
         pivot + self.normal() * (self.offset - along)
     }
 
-    /// Where the frame of a plane running through the whole model is drawn:
-    /// the middle of the model, brought onto the plane. It follows the model,
-    /// since it is only there to show where the plane crosses it; a rectangle
-    /// of the plane's own size is what cuts, and that stands at
-    /// [`SectionView::anchor`].
+    /// Where a full plane's frame is drawn: the model's middle projected onto the plane.
     pub fn frame_middle(&self, bounds: Option<(Vec3, Vec3)>) -> Vec3 {
         let normal = self.normal();
         let middle = Self::pivot(bounds);
         middle - normal * normal.dot(middle - self.anchor(bounds))
     }
 
-    /// The two directions the plane spans, turned with it: the axes after its
-    /// own, with the second one upright wherever the plane is upright, so a
-    /// standing plane's height is its height.
+    /// The two directions the plane spans, turned with it; the second stays upright for an upright plane.
     pub fn basis(&self) -> (Vec3, Vec3) {
         let axis = self.axis();
         let (u, v) = match axis {
@@ -274,20 +208,14 @@ impl SectionView {
         (unit(u), unit(v))
     }
 
-    /// The half-space the renderer cuts with, or `None` while the section is
-    /// off -- which is the one question every drawing path asks.
-    ///
-    /// `forward` is the way the camera looks, which [`SectionKeep::Auto`] cuts
-    /// away the near side by, so the cut is always seen face on. A plane seen
-    /// exactly edge-on takes the side its normal points to, which is as good as
-    /// either.
+    /// The half-space the renderer cuts with, or `None` while off. `forward` decides the side for
+    /// [`SectionKeep::Auto`]; exactly edge-on takes the normal's side.
     pub fn plane(&self, bounds: Option<(Vec3, Vec3)>, forward: Vec3) -> Option<simple3d_geom::section::Plane> {
         self.enabled.then(|| self.cut(bounds, forward))
     }
 
-    /// The half-space this section cuts with, whether or not it is on: what
-    /// [`SceneSettings::section_planes`](super::SceneSettings::section_planes)
-    /// asks of every section once the tool as a whole is.
+    /// The half-space this section cuts with, on or not, for
+    /// [`SceneSettings::section_planes`](super::SceneSettings::section_planes).
     pub fn cut(&self, bounds: Option<(Vec3, Vec3)>, forward: Vec3) -> simple3d_geom::section::Plane {
         let normal = self.normal();
         let at = normal.dot(self.anchor(bounds));
@@ -313,7 +241,7 @@ impl SectionView {
         }
     }
 
-    /// Whether the plane is turned off its axis at all.
+    /// Whether the plane is tilted at all.
     pub fn tilted(&self) -> bool {
         !is_untilted(&self.tilt)
     }

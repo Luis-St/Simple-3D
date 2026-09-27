@@ -13,8 +13,7 @@ use simple3d_core::primitive::ParamsExt;
 use simple3d_core::scene::NodeId;
 use simple3d_core::scene::Scene;
 
-/// An `App` on a headless context, pointed at a throwaway config directory
-/// so a test cannot read or write the developer's own.
+/// An `App` on a headless context with a throwaway config directory.
 fn headless_app() -> App {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-props-test-{}-{:?}",
@@ -26,7 +25,6 @@ fn headless_app() -> App {
     App::with_config_dir(&egui::Context::default(), None, dir)
 }
 
-/// Two plates of different widths, selected together.
 fn two_plates(app: &mut App) -> (NodeId, NodeId) {
     let root = app.scene.root();
     let a = app.scene.add_primitive("plate", root, 0).unwrap();
@@ -45,8 +43,7 @@ fn width_spec() -> &'static primitive::ParamSpec {
     primitive::lookup("plate").unwrap().params.iter().find(|p| p.key == "width").unwrap()
 }
 
-/// The same rule as `is_locked`, against a bare scene so it can be tested
-/// without an `App`.
+/// `is_locked`'s rule on a bare scene, testable without an `App`.
 fn locked_in(scene: &Scene, id: NodeId, group: u8) -> bool {
     let spec = scene.node(id).spec().unwrap();
     let params = scene.node(id).params().unwrap();

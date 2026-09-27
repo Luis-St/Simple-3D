@@ -1,40 +1,13 @@
 //! The custom pattern kind creation tool (issue 67).
 //!
-//! The six kinds a pattern ships with are the ones worth having a name for.
-//! This is where a user makes their own: a rule built out of *stages*, each one
-//! repeating whatever the stages before it made, named and kept on a shelf for
-//! any other project.
+//! Builds rules from stages, each repeating what the earlier stages made, and saves them as named
+//! kinds. It edits the pattern node directly, so every number is an ordinary parameter edit (undo,
+//! files and clipboard need nothing extra). The shelf stores only the rule; nodes keep their own
+//! numbers.
 //!
-//! It edits the pattern node itself rather than a draft of one. A rule is only
-//! ever judged by what it lays out, so every number typed here moves the copies
-//! in the viewport at once, and every one of them is an ordinary parameter
-//! edit -- which is why undo, the project file and the clipboard needed nothing
-//! added for any of this.
-//!
-//! What is saved to the shelf is the *rule*, not the pattern: the stage numbers
-//! and nothing else. A node still stores those numbers itself, so a project
-//! opened on a machine that has never seen the kind still lays out correctly.
-//!
-//! It is an [in-place popup](crate::popup) rather than a dialog (issue 96). It
-//! used to be a window most of the screen wide, half of it a second viewport
-//! rendering the very same scene from a camera of its own -- a picture of the
-//! pattern, in front of the picture of the pattern. What the tool is for is
-//! seeing a rule take shape on the model, and the model is already on screen:
-//! the window now floats over it, is dragged out of the way by its title bar,
-//! rolls up to its bar alone, and leaves the viewport underneath free to be
-//! orbited and zoomed while the numbers stay up. The preview is the viewport.
-//!
-//! Two of the things a rule needed most are here as well (issue 79): any of the
-//! six fixed kinds can be used as the template a rule starts from, rather than
-//! the tool throwing the layout away on the way in, and a stage says what it
-//! *does* before it says its numbers, so a run offers a run's few fields
-//! instead of all nine.
-//!
-//! And it is laid out as a builder rather than a form (issue 79). Each stage is
-//! a card, each variation on a stage a card inside it, and the scatter the last
-//! card of all; a stage, a variation and a part of the scatter are each *added*
-//! as the thing they are, from a row of chips, and taken off by their own
-//! cross. What is on screen is what the rule does, and nothing else.
+//! A non-modal [in-place popup](crate::popup) over the viewport, which is the preview (issue 96).
+//! Fixed kinds serve as templates, stages pick a mode before their numbers, and the layout is a
+//! builder of cards added from chips and removed by their crosses (issue 79).
 
 mod body;
 mod kinds;
@@ -53,30 +26,22 @@ pub(crate) use describe::*;
 mod actions;
 pub(crate) use actions::*;
 
-/// Identifies the popup, and is what remembers where it was dragged to.
+/// The popup's key, which also remembers where it was dragged.
 const KEY: &str = "pattern-tool";
 
-/// How wide the window is: an X, Y and Z field side by side inside a card
-/// inside another, each still wide enough to read, and no wider. A popup lives
-/// over the model, so every pixel of it is a pixel of the pattern being laid out
-/// that cannot be seen.
+/// The window width: X, Y and Z fields side by side in nested cards, still readable, no wider.
 const WIDTH: f32 = 430.0;
 
-/// The cross that drops a stage: twice the height egui's small button comes out
-/// at, and square, because it is a mark rather than a word and a wide one reads
-/// as a button with its label missing.
+/// The stage-dropping cross: square and twice egui's small button height, being a mark.
 const DROP_STAGE: f32 = 28.0;
 
-/// The cross that takes a variation or a part of the scatter off: smaller than
-/// a stage's, which throws away more.
+/// The cross removing a variation or scatter part, smaller than a stage's.
 const CARD_CROSS: f32 = 22.0;
 
 /// How round a card's corners are.
 const CARD_ROUNDING: f32 = 4.0;
 
-/// The frame a card of the builder is drawn in: a stage, a variation on it, a
-/// part of the scatter. Each nests in the one it belongs to, filled a shade
-/// apart so the nesting reads without a heading having to say it.
+/// A builder card's frame (stage, variation or scatter part), each nested card a shade apart.
 pub(crate) fn card(fill: egui::Color32) -> egui::Frame {
     egui::Frame::NONE
         .fill(fill)

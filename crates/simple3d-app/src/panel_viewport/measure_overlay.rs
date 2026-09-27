@@ -5,16 +5,13 @@ use crate::theme::token;
 use crate::view::View;
 use simple3d_geom::Vec3;
 
-/// The measure tool's marks: the placed points, the span between them once both
-/// are down, its numbers, and -- while one end is placed -- a live line to the
-/// feature under the pointer (issue 69). All in the measure colour, because it
-/// reads distances and never touches the model.
+/// The measure marks (issue 69): placed points, the span and its numbers, and a live line to the
+/// hovered feature, all in the measure colour.
 pub(crate) fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
     let colour = token::MEASURE;
     let mark = |at: Vec3, snapped: bool| {
         if let Some((screen, _)) = view.project(at) {
-            // A snapped point gets a hollow square, an on-surface one a small
-            // cross, so a glance says whether it caught a feature.
+            // Snapped points get a hollow square, surface points a small cross.
             if snapped {
                 painter.rect_stroke(
                     egui::Rect::from_center_size(screen, egui::Vec2::splat(9.0)),
@@ -40,22 +37,14 @@ pub(crate) fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, vi
         mark(point.at, point.kind.is_some());
     }
 
-    // Where the *next* click would land, marked and named before it is made.
-    //
-    // This used to be drawn only once one end was down, which is exactly
-    // backwards: the first point is the one placed with nothing else on screen
-    // to judge it against, and it was placed blind (issue 78). The hover point is
-    // resolved by the same call a click makes, so what is shown is what would be
-    // taken -- including a point part-way along an edge, or where an axis crosses
-    // a body.
+    // Mark where the next click would land, resolved by the click's own call, so even the first point
+    // is placed with feedback (issue 78).
     if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
-        // Only over the viewport itself: the pointer out over a dock is not
-        // aiming at anything in the scene.
+        // Only over the viewport itself.
         if painter.clip_rect().contains(cursor) {
             if let Some(hover) = app.measure_point_at(view, cursor) {
                 mark(hover.at, hover.kind.is_some());
-                // Name the feature the pointer has caught, so a snap is legible
-                // rather than a guess.
+                // Name the caught feature, so a snap is legible.
                 if let (Some(kind), Some((screen, _))) = (hover.kind, view.project(hover.at)) {
                     painter.text(
                         screen + egui::vec2(11.0, -11.0),
@@ -65,8 +54,7 @@ pub(crate) fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, vi
                         colour,
                     );
                 }
-                // A live line from the first point, so the second click can be
-                // aimed.
+                // A live line from the first point, to aim the second.
                 if app.measure.points.len() == 1 {
                     let ends = (view.project(app.measure.points[0].at), view.project(hover.at));
                     if let (Some((a, _)), Some((b, _))) = ends {
@@ -81,8 +69,7 @@ pub(crate) fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, vi
     let (Some((sa, _)), Some((sb, _))) = (view.project(a.at), view.project(b.at)) else { return };
     painter.line_segment([sa, sb], egui::Stroke::new(2.0_f32, colour));
 
-    // The numbers, in a small panel by the middle of the span, kept there until
-    // the tool is dismissed.
+    // The numbers in a small panel mid-span, kept until the tool is dismissed.
     let m = Measurement::between(a.at, b.at);
     let unit = app.unit();
     let suffix = unit.suffix();

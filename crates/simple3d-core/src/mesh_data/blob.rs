@@ -1,24 +1,20 @@
-//! The stored form of a mesh, and the colour tags packed alongside it.
+//! The stored form of a mesh, with its colour tags.
 
 use serde::{Deserialize, Serialize};
 
-/// The stored form. `triangles` and `vertices` are for the person reading the
-/// file; the loader trusts the arrays and checks them against each other.
+/// The stored form. `triangles` and `vertices` are for human readers; the loader cross-checks the arrays.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MeshBlob {
     pub triangles: usize,
     pub vertices: usize,
     pub positions: String,
     pub indices: String,
-    /// Run-length encoded, and absent entirely from a mesh nobody painted --
-    /// which is most of them.
+    /// Run-length encoded, and absent from unpainted meshes.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tags: String,
 }
 
-/// Per-triangle colour tags as runs of `count:tag`, which for a converted solid
-/// is a handful of pairs rather than one number per triangle. An empty string
-/// means every triangle is untagged.
+/// Per-triangle tags as `count:tag` runs; empty means all untagged.
 pub(crate) fn encode_tags(tags: &[u32], triangles: usize) -> String {
     if tags.iter().all(|&t| t == 0) {
         return String::new();
@@ -56,7 +52,7 @@ pub(crate) fn decode_tags(text: &str, triangles: usize) -> Option<Vec<u32>> {
         }
         out.extend(std::iter::repeat_n(tag, count));
     }
-    // A short run list is not an error: it means the rest is untagged.
+    // A short run list means the rest is untagged.
     out.resize(triangles, 0);
     Some(out)
 }

@@ -1,8 +1,4 @@
-//! Everything the running application holds, in one place.
-//!
-//! The methods that act on it are in the modules beside this one, grouped by
-//! what they are for; the fields are here so the whole of the state can be
-//! read at once.
+//! All application state in one place; the methods acting on it live in the sibling modules.
 
 use super::*;
 use crate::gizmo::{Drag, Handle, Mode};
@@ -26,103 +22,66 @@ use std::time::Instant;
 pub struct App {
     pub scene: Scene,
     pub history: History,
-    /// Every open document, one per tab (issue 61). The entry at `active` is a
-    /// stand-in: the live state of the document on screen is the one held
-    /// directly on this struct, and is only written back into the vector when
-    /// another tab is picked. `crate::tabs` owns the swapping.
+    /// Every open document, one per tab (issue 61). The entry at `active` is a stand-in: the live
+    /// document is held on this struct and written back on tab switch (`crate::tabs`).
     pub tabs: Vec<crate::tabs::Document>,
     pub active: usize,
-    /// The rest of the project on screen: its other components, and which of
-    /// them are open (issue 113). `crate::components` owns it.
+    /// The project's other components and which are open (issue 113); see `crate::components`.
     pub project: crate::components::Project,
-    /// The component question waiting on its dialog: an undo that would take a
-    /// component away with it, or a component about to be deleted.
+    /// A pending component question: an undo that would remove a component, or a deletion.
     pub(crate) component_ask: Option<crate::components::ComponentAsk>,
-    /// Which window this is (issue 107). The shell hands out the id, never
-    /// reuses one, and never changes the one a window is wearing -- so the
-    /// viewport a window is drawn in can never be a window that has closed.
+    /// This window's id (issue 107), assigned by the shell and never reused.
     pub window_id: u64,
-    /// Whether this is the window drawn in the root viewport. The window's
-    /// geometry and the settings file are that one window's to record and to
-    /// write: every window holds the same settings, and two of them writing
-    /// would be two answers to how big the window was left.
+    /// Whether this is the root viewport's window, the only one that records geometry and writes
+    /// settings.
     pub(crate) root_window: bool,
-    /// What this window is asking the shell to do once the frame is over --
-    /// open a window, move a tab into one, close itself. A window never acts on
-    /// another window itself; see [`crate::shell`].
+    /// What this window asks the shell to do after the frame; windows never act on each other
+    /// directly (see [`crate::shell`]).
     pub(crate) window_request: Option<crate::shell::WindowRequest>,
-    /// The other windows, as the shell last saw them: what the tab menu offers
-    /// a document to be sent to, and where a dragged tab can be dropped.
+    /// The other windows as the shell last saw them, as tab send and drop targets.
     pub(crate) other_windows: Vec<crate::shell::OtherWindow>,
-    /// Whether any *other* window holds unsaved changes, so the question asked
-    /// before quitting is about the application rather than about this window.
+    /// Whether any other window has unsaved changes, so the quit question covers the application.
     pub(crate) unsaved_elsewhere: bool,
-    /// Where this window's contents are on the desktop, as the window system
-    /// last said. `None` on Wayland, which never tells a client where it is --
-    /// and a tab can only be dropped onto a window whose place is known.
+    /// This window's desktop rect; `None` on Wayland, where tabs cannot be dropped onto it.
     pub(crate) window_rect: Option<egui::Rect>,
-    /// Where the row of tabs is in this window, so a tab dragged along the row
-    /// can be told from one pulled off it.
+    /// The tab row's rect, to tell a tab dragged along it from one pulled off.
     pub(crate) strip_rect: egui::Rect,
-    /// The tab being dragged, if one is (issue 107).
+    /// The tab being dragged, if any (issue 107).
     pub tab_drag: Option<crate::tabs::TabDrag>,
-    /// Whether the pointer is on this window's row of tabs, as of the frame it
-    /// last drew. How a window claims a tab another window has let go over it,
-    /// on a desktop where no window knows where it is; see `crate::shell`.
+    /// Whether the pointer was on the tab row last frame; how a window claims a tab dropped
+    /// over it (see `crate::shell`).
     pub(crate) pointer_on_strip: bool,
     pub settings: AppSettings,
-    /// The settings as they are on disk, so a change to them can be noticed and
-    /// written without every place that makes one having to remember to.
+    /// The settings as on disk, so changes can be detected and written.
     pub(super) persisted_settings: AppSettings,
-    /// When they were last written, so a scrubbed number -- which changes on
-    /// every frame of the drag -- costs one write a moment rather than one a
-    /// frame.
+    /// When settings were last written, throttling writes during a scrub.
     pub(super) settings_written: Option<Instant>,
     pub keymap: Keymap,
 
-    /// The current selection, in click order. The last entry is the primary one
-    /// the property editor and the manipulator act on.
+    /// The selection in click order; the last entry is the primary one.
     pub selection: Vec<NodeId>,
-    /// Which of a collection's pieces are ticked in its panel (issue 82).
-    ///
-    /// Not part of `selection`, and deliberately: a piece is reached *through*
-    /// the collection, so selecting one the ordinary way would swap the panel
-    /// away from the very list it was ticked in. These are marked in the
-    /// viewport like a selection and are what Extract acts on, and they are
-    /// dropped the moment the selection moves off the collection they belong to.
+    /// Collection pieces ticked in its panel (issue 82). Kept out of `selection` deliberately:
+    /// selecting a piece would swap the panel away from the list. Cleared when the selection leaves
+    /// the collection.
     pub(crate) piece_ticks: std::collections::BTreeSet<NodeId>,
-    /// The row a Shift+click measures its range from: the last outliner row
-    /// clicked without Shift (issue 60).
+    /// The anchor for Shift+click range selection: the last row clicked without Shift (issue 60).
     pub(crate) selection_anchor: Option<NodeId>,
-    /// The row the last outliner click landed on, whatever modifiers it had.
-    ///
-    /// egui decides a double click from the delay between two clicks alone --
-    /// the second one does not have to be on the widget the first was -- so two
-    /// quick clicks on different rows used to open a rename on the second one
-    /// (issue 59). A rename asks this whether both clicks were on the same row.
+    /// The row the last outliner click landed on. egui detects double clicks by timing alone, so
+    /// a rename checks both clicks were on the same row (issue 59).
     pub(crate) outliner_last_click: Option<NodeId>,
     pub clipboard: Option<Clip>,
-    /// A line to hand the desktop's clipboard on the next frame.
-    ///
-    /// The nodes themselves stay in `clipboard`, which is the whole of what a
-    /// paste reads. This is for the *other* half of the problem: `egui-winit`
-    /// only reports a Ctrl+V at all when the system clipboard holds non-empty
-    /// text, so an application that never writes to it can never be pasted
-    /// into by keyboard. Writing a line saying what was copied also makes
-    /// Ctrl+C do what a desktop expects of it.
+    /// Text for the desktop clipboard on the next frame. `egui-winit` only reports Ctrl+V when the
+    /// system clipboard holds text, so copying must write something there.
     pub(crate) clipboard_text: Option<String>,
-    /// The file dialog in flight, if there is one. See [`FilePrompt`].
+    /// The file dialog in flight, if any. See [`FilePrompt`].
     pub(crate) file_prompt: Option<FilePrompt>,
 
     pub worker: EvalWorker,
     pub evaluated: Evaluated,
-    /// Bumped whenever a new evaluation lands, so cached images and renderables
-    /// know to rebuild.
+    /// Bumped per new evaluation, so caches know to rebuild.
     pub evaluation_generation: u64,
-    /// Set when the scene on screen has no viewpoint of its own worth keeping,
-    /// so the first evaluation that gives it bounds should frame it. A project
-    /// read from a file carries its own camera and must never set this: the
-    /// stored viewpoint is the one the user saved.
+    /// Frame the scene on the first evaluation with bounds. Never set for a loaded project, whose
+    /// saved camera must be kept.
     pub(crate) frame_when_evaluated: bool,
     pub(crate) dirty: bool,
 
@@ -132,279 +91,180 @@ pub struct App {
 
     pub mode: Mode,
     pub drag: Option<Drag>,
-    /// A body a drag the GPU drew for itself has let go of, still drawn where
-    /// it was dropped until the evaluation of it standing there comes back --
-    /// see `App::live_move`. Without it the body jumped back to where the
-    /// drag started for as long as the evaluation took.
+    /// A body released from a GPU-drawn drag, drawn at its drop position until its evaluation
+    /// arrives (`App::live_move`); otherwise it jumped back meanwhile.
     pub(crate) settling: Option<NodeId>,
     pub hover_handle: Option<Handle>,
-    /// The handle that was under the pointer when the button went down. What
-    /// starts a drag, rather than whatever the pointer has since slipped onto.
+    /// The handle under the pointer at button press, which is what starts a drag.
     pub grabbed: Option<Handle>,
     pub viewport_rect: egui::Rect,
     pub texture: Option<egui::TextureHandle>,
     pub image_key: u64,
-    /// The window's OpenGL context, when there is one. `None` under the test
-    /// harness, which has no window -- and that alone makes the GPU renderer
-    /// unavailable there, so the tests always exercise the software path.
+    /// The OpenGL context, if any. `None` under the test harness, so tests use the software path.
     pub(crate) gl: Option<std::sync::Arc<eframe::glow::Context>>,
-    /// The GPU renderer, built the first time it is asked for.
+    /// The GPU renderer, built on first use.
     pub(crate) gpu: Option<crate::gpu::Gpu>,
-    /// Why the GPU renderer is not in use, when it was asked for and could not
-    /// be had. Shown beside the engine picker, and the viewport falls back to
-    /// the CPU rather than showing nothing.
+    /// Why the GPU renderer is unavailable, shown beside the engine picker; the CPU is used instead.
     pub(crate) gpu_error: Option<String>,
-    /// What the GPU renderer drew this frame, when it is the engine in use.
+    /// What the GPU renderer drew this frame.
     pub(crate) gpu_texture: Option<egui::TextureId>,
 
     pub path: Option<PathBuf>,
     pub(crate) saved_revision: u64,
 
-    /// The colour the picker has reached while it is open, waiting for the
-    /// picker to be put away before it goes on the recent row (issue 85).
-    ///
-    /// A drag through the picker paints on every frame it moves, and every one
-    /// of those shades is somewhere the pointer passed through rather than a
-    /// colour anybody chose. One visit to the picker is one choice: the colour
-    /// it ends on.
+    /// The colour the open picker has reached, added to the recent row only once it closes
+    /// (issue 85), so a drag through the picker is one choice.
     pub(super) picker_colour: Option<[u8; 3]>,
 
     pub status: Status,
-    /// When the current message was set, so a message that has been read can
-    /// fade out instead of sitting there looking current.
+    /// When the current message was set, so it can fade.
     pub status_at: std::time::Instant,
     pub fields: FieldBuffers,
-    /// Which field label is being dragged, if any. Held on the app rather than
-    /// in widget state so the gesture survives the panel being relaid out.
+    /// The field label being scrubbed, held here so it survives relayout.
     pub scrub: crate::ui::Scrub,
     pub rename: Option<(NodeId, String)>,
-    /// The groups whose children the outliner is not showing. Held here rather
-    /// than in widget state so it survives a relayout, and so selecting a node
-    /// from the viewport can open the groups above it.
+    /// Groups collapsed in the outliner, held here so it survives relayout and can be opened from
+    /// the viewport.
     pub collapsed: std::collections::HashSet<NodeId>,
     pub outliner_drag: Option<Carried>,
     pub drop_target: Option<DropTarget>,
 
-    /// The 3D cursor: where a new shape lands. `None` means the origin, which
-    /// is also where it goes back to.
+    /// The 3D cursor where new shapes land; `None` means the origin.
     pub cursor: Option<Vec3>,
-    /// The measure tool (issue 69): when it holds the pointer, clicks pick
-    /// features to measure between rather than selecting.
+    /// The measure tool (issue 69).
     pub measure: Measure,
-    /// Whether geometry snapping is being asked for this frame (issue 68), set by
-    /// the viewport from the snap-mode setting and the held key and read while a
-    /// move drag runs.
+    /// Whether snapping is requested this frame (issue 68).
     pub(crate) snap_requested: bool,
-    /// The geometry feature the current drag is snapped onto, for the viewport to
-    /// mark. `None` when nothing is snapped this frame.
+    /// The feature the current drag is snapped onto, for the viewport to mark.
     pub snap_indicator: Option<Vec3>,
-    /// How far the section plane stood from the point the pointer took hold of
-    /// it, for as long as its grip is being dragged (issue 71). `None` when the
-    /// plane is not being moved. The plane being moved is always the one the
-    /// window is showing: taking hold of one makes it so.
+    /// The plane's offset from the grab point while its grip is dragged (issue 71).
     pub section_grab: Option<f64>,
-    /// Which section, and which of its five grips, the pointer is on this
-    /// frame, so the frame can say that it can be taken hold of before it is --
-    /// and so the arrows that say which way it travels are drawn on that grip
-    /// alone (issue 72). `None` when the pointer is on none of them.
+    /// The section and grip under the pointer, for hover feedback and travel arrows (issue 72).
     pub section_hover: Option<(usize, usize)>,
-    /// Which of the sections the window is showing and editing.
+    /// The section the window is showing and editing.
     pub section_tab: usize,
-    /// Whether each section plane cuts the still part of the model, with the
-    /// key of the scene and the plane it was worked out for -- see
-    /// [`crate::section_tool::cut`]. Asked once per plane rather than once per
-    /// frame, since it walks every vertex of the scene.
+    /// Whether each section plane cuts the still part of the model, keyed by scene and plane (see
+    /// [`crate::section_tool::cut`]); cached since it walks every vertex.
     pub(crate) section_crossing: Vec<(u64, bool)>,
-    /// Every feature of the body the current drag is carrying, as offsets from
-    /// its origin; taken on `Begin` and found on the first frame that snaps.
-    /// See `App::drag_snap_sources`.
+    /// Snap features of the dragged body as offsets from its origin (`App::drag_snap_sources`).
     pub(super) snap_sources: Option<SnapSources>,
-    /// The shapes a boolean being dragged is drawn from, with the
-    /// evaluation each was taken from -- see `App::live_csg`.
-    /// With the evaluation each was made from, and whether it has its edges.
+    /// Shapes a dragged boolean is drawn from, with their evaluation and whether they have edges
+    /// (`App::live_csg`).
     #[allow(clippy::type_complexity)]
     pub(super) csg_leaves:
         std::cell::RefCell<std::collections::HashMap<NodeId, (u64, bool, std::sync::Arc<Renderable>)>>,
-    /// The hulls such a boolean has the dragged body inside of, boiled down
-    /// to what each frame's hull is made from -- see `App::csg_hull`.
+    /// Hull data for dragged booleans (`App::csg_hull`).
     pub(super) csg_hulls: std::cell::RefCell<std::collections::HashMap<NodeId, HullCache>>,
-    /// Each body's snap features, kept between frames and keyed on the identity
-    /// of the mesh they were found on. See `App::snaps_of`.
+    /// Each body's snap features, keyed by mesh identity. See `App::snaps_of`.
     pub(super) snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedSnaps>>,
-    /// Those being found for the meshes the last evaluation brought, off the
-    /// interface thread -- see `App::warm_snaps`.
+    /// Snap features being found off the interface thread (`App::warm_snaps`).
     pub(super) snap_warming: Option<SnapWarming>,
-    /// A deletion waiting on the outliner's confirmation strip: which nodes,
-    /// with the question of what happens to their children still open.
+    /// A deletion awaiting the outliner's confirmation.
     pub pending_delete: Option<Vec<NodeId>>,
-    /// A view change in flight. The camera is the scene's, so the move writes
-    /// into it every frame rather than holding a second copy of the truth.
+    /// A view change in flight, written into the scene's camera each frame.
     pub camera_move: Option<CameraMove>,
-    /// The orientation cube, turned by hand away from the camera it belongs to.
-    /// `None` -- the usual state -- means it shows exactly what the camera
-    /// shows.
+    /// The orientation cube turned by hand; `None` means it follows the camera.
     pub cube_spin: Option<CubeSpin>,
     /// Which panel header is being dragged between docks, and where to.
     pub dock_drag: crate::dock::DockDrag,
-    /// Header centres and the outer rectangle of each dock, collected while the
-    /// docks draw and consumed by the drag resolution after them.
+    /// Header centres and each dock's rect, collected while docks draw.
     pub dock_headers: Vec<(Side, Vec<f32>)>,
     pub dock_rects: Vec<(Side, egui::Rect)>,
 
     pub export_job: Option<ExportJob>,
-    /// The file being read in (issue 105). On its own thread, like the export,
-    /// and carrying the tab that asked for it so the model lands in the
-    /// document it was read for.
+    /// The file being imported on its own thread (issue 105), with the tab it is for.
     pub import_job: Option<ImportJob>,
-    /// The split tool's window while it is open, and the cutting it started
-    /// (issue 82). The tool holds the shape it is about to cut; the job holds
-    /// the thread cutting it, and nothing in the document changes until it
-    /// lands -- see [`crate::split_tool`].
+    /// The split tool's window and its cutting job (issue 82); see [`crate::split_tool`].
     pub split_tool: Option<crate::split_tool::SplitTool>,
     pub split_job: Option<SplitJob>,
-    /// The simplify tool's window while it is open (issue 106). Unlike the
-    /// split above it, the result of its work goes into the document as it is
-    /// computed rather than when it is accepted -- the preview *is* the
-    /// simplified mesh -- so the tool also holds the mesh that was there
-    /// before, which is what Cancel puts back. See [`crate::simplify_tool`].
+    /// The simplify tool's window (issue 106). Its result goes into the document live, so it keeps
+    /// the original mesh for Cancel. See [`crate::simplify_tool`].
     pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
-    /// The reassembly tool's window while it is open (issue 108). Unlike the
-    /// simplify tool above it, its work never goes into the document until it
-    /// is accepted -- what it produces is a subtree rather than a mesh, and a
-    /// subtree written and unwritten on every turn of a number would be the
-    /// outliner rebuilding itself under the pointer. See
-    /// [`crate::reassemble_tool`].
+    /// The reassembly tool's window (issue 108). Its subtree only enters the document on accept, to
+    /// avoid rebuilding the outliner live. See [`crate::reassemble_tool`].
     pub reassemble_tool: Option<crate::reassemble_tool::ReassembleTool>,
-    /// The saved pattern kind the "delete this" question is being asked about
-    /// (issue 67). Set only while [`Modal::ConfirmDeleteKind`] is up.
+    /// The saved pattern kind a delete confirmation is about (issue 67).
     pub(crate) confirm_delete_kind: Option<simple3d_core::pattern_library::Entry>,
-    /// The collection the "extract every piece" question is being asked about
-    /// (issue 82). Set only while [`Modal::ConfirmExtractAll`] is up.
+    /// The collection an extract-all confirmation is about (issue 82).
     pub(crate) confirm_extract: Option<NodeId>,
-    /// Where each in-place popup sits and whether it is rolled up (issue 82).
-    /// Keyed by the popup's own name, so a tool re-opened comes back where it
-    /// was last dragged to rather than back in the middle.
+    /// Position and roll-up state of each in-place popup, by name (issue 82).
     pub(crate) popups: std::collections::HashMap<&'static str, crate::popup::Placement>,
     pub export_format: Format,
     pub export_scale: String,
     pub export_selection_only: bool,
-    /// What the objects of an export are (issue 58). Only 3MF can hold more
-    /// than one, so the dialog offers the choice only there.
+    /// What the objects of an export are (issue 58); offered only for 3MF.
     pub export_bodies: simple3d_export::BodyMode,
-    /// Whether a 3MF package is compressed (issue 105). Only 3MF is a package;
-    /// the dialog says so rather than offering the choice on the formats that
-    /// are a single file.
+    /// Whether a 3MF package is compressed (issue 105).
     pub export_compress: bool,
-    /// What the export dialog last counted, and what it counted it for: the
-    /// contents choice, the selection and the evaluation it was measured
-    /// against. Counting a selection means evaluating it, which must not happen
-    /// on every frame the dialog is open, nor on the interface thread at all.
+    /// The export dialog's last count and what it was for, since counting evaluates off-thread.
     pub(crate) export_preview: ExportPreview,
 
     pub modal: Modal,
-    /// The dialog window that has already been placed over the middle of the
-    /// main window. A dialog is centred once, when it opens; after that it is
-    /// the window manager's and the user's to move.
+    /// The dialog already centred over the main window; it is centred only once.
     pub(crate) dialog_placed: Option<egui::ViewportId>,
-    /// The tab a close confirmation is about, while that dialog is open.
+    /// The tab a close confirmation is about.
     pub(crate) pending_close: Option<usize>,
     pub error_title: String,
     pub error_detail: String,
 
-    /// The subtree waiting to be saved to the library, and what to call it.
+    /// The subtree waiting to be saved to the library, and its name.
     pub primitive_clip: Option<Clip>,
     pub primitive_name: String,
-    /// The library, as it was last read off disk. Re-read when it changes rather
-    /// than on every frame -- the palette draws sixty times a second and the
-    /// library lives in a directory.
+    /// The library as last read from disk, re-read only on change.
     pub library: Vec<library::Entry>,
 
-    /// The pattern the custom-kind creation tool is building a rule for
-    /// (issue 67). The tool edits that node directly, so what it says and what
-    /// the viewport shows cannot disagree.
+    /// The pattern the custom-kind tool is editing directly (issue 67).
     pub pattern_tool: Option<NodeId>,
-    /// The name the rule would be saved under, and the one the last applied kind
-    /// came by.
+    /// The name the rule would be saved under.
     pub pattern_tool_name: String,
-    /// Whether the rule has been started yet (issue 79).
-    ///
-    /// The tool opens by asking what to start from -- one of the six fixed
-    /// layouts, or nothing -- and shows the stages only once that is answered.
-    /// A pattern that is already custom has a rule, so the question is already
-    /// answered and the stages are what the window opens on.
+    /// Whether the rule has been started (issue 79); until then the tool asks what to start from.
     pub(crate) pattern_tool_started: bool,
-    /// The saved kinds, read when the tool opens rather than every frame -- the
-    /// shelf is a directory and the dialog draws sixty times a second.
+    /// The saved kinds, read when the tool opens rather than every frame.
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
-    /// The pattern whose scatter is open in its own window (issue 79). One at a
-    /// time: the window says which pattern it is for in its title, and two of
-    /// them over the same viewport would be two sets of the same six fields.
+    /// The pattern whose scatter window is open (issue 79); one at a time.
     pub(crate) noise_popup: Option<NodeId>,
-    /// Which of the tool's stages are folded up to their heading (issue 79).
-    /// Four stages unfolded are taller than most viewports, and the one being
-    /// worked on is usually the only one whose numbers are wanted.
+    /// Which tool stages are folded (issue 79).
     pub(crate) pattern_tool_folded: [bool; simple3d_core::pattern::MAX_STAGES],
-    /// Which parts of a pattern's scatter the builder is showing although
-    /// they are still at nothing -- one just added, or typed back to zero -- so
-    /// a part does not vanish from under the field it is being typed into
-    /// (issue 79). For one pattern at a time; any other shows the parts it uses.
+    /// Scatter parts shown despite being zero, so a part does not vanish while being typed into
+    /// (issue 79). For one pattern at a time.
     pub(crate) noise_parts_open: (Option<NodeId>, [bool; crate::noise_popup::Part::COUNT]),
-    /// The stage the pointer is over in the tool, whose copies the viewport
-    /// marks: what the rule has made by the end of it.
+    /// The hovered stage, whose copies the viewport marks.
     pub(crate) pattern_tool_hover: Option<usize>,
-    /// Whether saving the rule keeps the pattern's scatter with it.
+    /// Whether saving the rule keeps the pattern's scatter.
     pub(crate) pattern_tool_keep_noise: bool,
-    /// Whether the start question was brought back over a rule that is still
-    /// on the pattern, so there is something to go back to without choosing.
+    /// Whether the start question was reopened over an existing rule that can be resumed.
     pub(crate) pattern_tool_resumable: bool,
 
     pub keymap_search: String,
     pub recording: Option<Command>,
     pub keymap_conflict: Option<(Command, Chord, Command)>,
-    /// A modifier held on its own is a binding of its own (issue 77), and the
-    /// toolkit reports no key event for one, so the hold is watched frame by
-    /// frame -- once for firing shortcuts, once for the keymap editor's
-    /// recorder, which never run at the same time but must not share a state.
+    /// Modifier-only hold tracking (issue 77), since the toolkit reports no key event for them.
+    /// Separate states for shortcuts and the keymap recorder.
     pub shortcut_mods: ui::ChordHold,
     pub record_mods: ui::ChordHold,
 
-    /// Where settings and the keymap are read from and written back to. Held
-    /// rather than looked up at each call site so a test can point an `App` at a
-    /// temp directory, and so a running application cannot start reading one
-    /// directory and writing another.
+    /// Where settings and the keymap are read and written; held so tests can use a temp directory.
     pub(super) config_dir: PathBuf,
 
-    /// The message the fade clock is running for, so any assignment to `status`
-    /// anywhere restarts it without having to remember to.
+    /// The message the fade clock runs for, so any change to `status` restarts it.
     pub(super) last_status: Status,
-    /// The title the window is already wearing. `Context::send_viewport_cmd`
-    /// requests a repaint for every command it is handed, so sending the title
-    /// unconditionally each frame asked for the next frame each frame and the
-    /// application never went idle. Only a title that changed is sent.
+    /// The current window title. Sent only on change, since every viewport command requests a
+    /// repaint and the app would never go idle.
     pub(super) last_title: String,
-    /// True while a run of held-down nudge keys is coalescing into one undo step.
+    /// True while held nudge keys coalesce into one undo step.
     pub(super) nudging: bool,
-    /// Set once a quit has been confirmed, so the event loop can end the run.
+    /// Set once a quit has been confirmed.
     pub(super) quit_now: bool,
-    /// Set once closing this window has been confirmed, so the shell can take it
-    /// out of the row of windows (issue 107).
+    /// Set once closing this window has been confirmed (issue 107).
     pub(super) close_now: bool,
-    /// Set once the shell has been told to end the run, so the close the window
-    /// system reports next is the one the application asked for and is let
-    /// through rather than questioned again. Without it the close a quit sends
-    /// is cancelled by the very handler that watches for the close button, and
-    /// the window can never be closed at all.
+    /// Set once the shell has been told to end the run, so the next close is let through. Without
+    /// it the close-button handler cancels the quit's own close.
     pub(crate) leaving: bool,
-    /// Whether the unsaved-changes question on screen is about closing this
-    /// window rather than about quitting. With one window open the two are the
-    /// same thing and the question says "quit"; with more than one, closing a
-    /// window leaves the others running and must not claim otherwise.
+    /// Whether the unsaved-changes question is about closing this window rather than quitting.
     pub(crate) closing_window: bool,
 }
 
-/// The orientation cube turned on its own, so a side the camera cannot see can
-/// still be picked. `camera` is the camera it was turned away from: the moment
-/// the scene moves, the spin is stale and the cube goes back to following it.
+/// The orientation cube turned on its own; stale once `camera` moves.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CubeSpin {
     pub yaw: f64,

@@ -4,26 +4,17 @@ use super::*;
 #[derive(Clone, Debug)]
 pub struct Options {
     pub format: Format,
-    /// Uniform scale applied at export time, for producing scaled prints without
-    /// touching the model. 1.0 leaves every dimension exactly as entered.
+    /// Uniform export scale, for scaled prints without touching the model; 1.0 changes nothing.
     pub scale: f64,
-    /// Written into the file for formats that record it. Everything upstream is
-    /// millimetres, so this is only ever anything else if a caller asks.
+    /// The unit written into formats that record one; everything upstream is millimetres.
     pub unit: Unit3mf,
-    /// Skip the manifold check. Only for a user who has read the warning and
-    /// chosen to write the file anyway.
+    /// Skip the manifold check, only after the user accepts the warning.
     pub allow_invalid: bool,
-    /// What the objects of the export are (issue 58). Only a caller that passes
-    /// more than one [`Part`] has anything to separate, and only a
-    /// [`Format::keeps_objects_separate`] format can hold it.
+    /// What the export's objects are (issue 58); only meaningful with several [`Part`]s and a
+    /// [`Format::keeps_objects_separate`] format.
     pub bodies: BodyMode,
-    /// Compress the parts of a 3MF package rather than storing them. On by
-    /// default: a model part is XML and compresses by about a factor of four,
-    /// and every program that reads 3MF reads a deflated one -- it is what they
-    /// all write. Off is for the rare case of wanting to read the XML out of
-    /// the package with something that cannot decompress it.
-    ///
-    /// Only 3MF is a package; the other formats are single files and ignore it.
+    /// Compress a 3MF's parts (about 4x for model XML); on by default, since every reader handles it.
+    /// Ignored by single-file formats.
     pub compress: bool,
 }
 

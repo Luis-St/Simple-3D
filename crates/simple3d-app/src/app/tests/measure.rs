@@ -6,20 +6,19 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_measurement_reads_distance_delta_and_the_direction_it_points() {
-    // A 3-4-0 span: five long, level, and running mostly along +Y from +X.
+    // A 3-4-0 span: five long, level, mostly along +Y.
     let m = Measurement::between(Vec3::ZERO, Vec3::new(3.0, 4.0, 0.0));
     assert!((m.distance - 5.0).abs() < 1e-9);
     assert_eq!(m.delta, Vec3::new(3.0, 4.0, 0.0));
     assert!(m.inclination_deg.abs() < 1e-9, "a level span should not be inclined: {}", m.inclination_deg);
     assert!((m.bearing_deg - 53.13010).abs() < 1e-3, "bearing was {}", m.bearing_deg);
 
-    // Straight up: ninety degrees of incline, and no bearing to speak of.
+    // Straight up: 90 degrees of incline, no meaningful bearing.
     let up = Measurement::between(Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0));
     assert!((up.inclination_deg - 90.0).abs() < 1e-9);
     assert_eq!(up.bearing_deg, 0.0);
 
-    // A zero-length span is level rather than undefined, so the readout never
-    // shows NaN while a second point is being aimed.
+    // A zero-length span reads as level, never NaN.
     let none = Measurement::between(Vec3::new(1.0, 2.0, 3.0), Vec3::new(1.0, 2.0, 3.0));
     assert_eq!(none.distance, 0.0);
     assert_eq!(none.inclination_deg, 0.0);
@@ -34,8 +33,7 @@ pub(crate) fn the_measure_tool_takes_two_points_and_the_third_begins_a_new_span(
     measure.add(MeasurePoint { at: Vec3::new(10.0, 0.0, 0.0), kind: Some(crate::snap::FeatureKind::Vertex) });
     assert!(measure.span().is_some(), "two points make a span");
 
-    // A third point starts fresh rather than piling up, so the tool flows
-    // from one measurement to the next.
+    // A third point starts a fresh measurement.
     measure.add(MeasurePoint { at: Vec3::new(5.0, 5.0, 0.0), kind: None });
     assert_eq!(measure.points.len(), 1);
     assert!(measure.span().is_none());
@@ -43,8 +41,7 @@ pub(crate) fn the_measure_tool_takes_two_points_and_the_third_begins_a_new_span(
 
 #[test]
 pub(crate) fn the_measure_tool_snaps_a_click_to_a_bodys_vertex() {
-    // The whole point of picking features rather than raw surface hits: a
-    // click near a box corner reports the corner exactly.
+    // A click near a box corner reports the corner exactly.
     let mut app = headless_app();
     let root = app.scene.root();
     let id = app.scene.add_primitive("box", root, 0).unwrap();
@@ -52,7 +49,7 @@ pub(crate) fn the_measure_tool_snaps_a_click_to_a_bodys_vertex() {
     app.reevaluate_for_test();
 
     let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
-    // A box is 20mm to a side by default; aim a hair off its +X +Y +Z corner.
+    // Aim a hair off the default 20 mm box's +X +Y +Z corner.
     let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
     let corner = Vec3::new(hi.x, hi.y, hi.z);
     let (screen, _) = view.project(corner).unwrap();
@@ -64,8 +61,7 @@ pub(crate) fn the_measure_tool_snaps_a_click_to_a_bodys_vertex() {
 
 #[test]
 pub(crate) fn a_measure_click_between_two_corners_catches_the_edge_itself() {
-    // Issue 78: aiming at the middle of nothing in particular, part-way along
-    // an edge, used to fall through to the surface hit under the pointer.
+    // Issue 78: aiming part-way along an edge used to fall through to the surface.
     let mut app = headless_app();
     let root = app.scene.root();
     let id = app.scene.add_primitive("box", root, 0).unwrap();
@@ -73,8 +69,7 @@ pub(crate) fn a_measure_click_between_two_corners_catches_the_edge_itself() {
 
     let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
     let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
-    // A third of the way along the top +Y edge: near no corner and not the
-    // midpoint either, so only the edge itself can answer.
+    // A third along the top +Y edge, near no corner or midpoint, so only the edge answers.
     let (a, b) = (Vec3::new(lo.x, hi.y, hi.z), Vec3::new(hi.x, hi.y, hi.z));
     let along = a + (b - a) * (1.0 / 3.0);
     let (screen, _) = view.project(along).unwrap();
@@ -82,8 +77,7 @@ pub(crate) fn a_measure_click_between_two_corners_catches_the_edge_itself() {
     assert_eq!(point.kind, Some(crate::snap::FeatureKind::Edge), "caught {:?}, not the edge", point.kind);
     assert!((point.at - along).length() < 0.2, "caught {:?}, a third along is {:?}", point.at, along);
 
-    // A corner still wins where one is in reach, so aiming at a corner never
-    // lands part-way along the edge beside it.
+    // A corner in reach still wins over the edge beside it.
     let (screen, _) = view.project(b).unwrap();
     let point = app.measure_point_at(&view, screen + egui::vec2(2.0, 2.0)).unwrap();
     assert_eq!(point.kind, Some(crate::snap::FeatureKind::Vertex));
@@ -91,10 +85,9 @@ pub(crate) fn a_measure_click_between_two_corners_catches_the_edge_itself() {
 
 #[test]
 pub(crate) fn either_end_of_a_span_can_be_typed_rather_than_clicked() {
-    // Issue 78: the property panel's start and end fields write here.
+    // Issue 78: the panel's start and end fields write here.
     let mut measure = Measure::default();
-    // Nothing is placed yet, so the end cannot be: it would be a point with
-    // nothing to measure to.
+    // The end cannot be placed before the start.
     measure.set_point(1, Vec3::new(5.0, 0.0, 0.0));
     assert!(measure.points.is_empty());
 
@@ -105,8 +98,7 @@ pub(crate) fn either_end_of_a_span_can_be_typed_rather_than_clicked() {
     assert_eq!(a.at, Vec3::new(1.0, 2.0, 3.0));
     assert_eq!(b.at, Vec3::new(4.0, 2.0, 3.0));
 
-    // Typing a coordinate over an end that had caught a feature makes it an
-    // exact point rather than leaving it claiming a feature it has left.
+    // A typed coordinate drops the feature an end had caught.
     measure.points[0].kind = Some(crate::snap::FeatureKind::Vertex);
     measure.set_point(0, Vec3::ZERO);
     assert_eq!(measure.points[0].kind, None);
@@ -116,8 +108,7 @@ pub(crate) fn either_end_of_a_span_can_be_typed_rather_than_clicked() {
 
 #[test]
 pub(crate) fn a_placed_end_can_be_taken_back_off_one_at_a_time() {
-    // A right-click in the viewport undoes the last placement, back to
-    // nothing placed at all.
+    // A viewport right-click removes the last placement, down to none.
     let mut app = headless_app();
     app.toggle_measure();
     app.measure_click(MeasurePoint { at: Vec3::ZERO, kind: None });
@@ -129,7 +120,7 @@ pub(crate) fn a_placed_end_can_be_taken_back_off_one_at_a_time() {
     assert!(app.measure.span().is_none());
     app.measure_unplace();
     assert!(app.measure.points.is_empty(), "the start did not come off");
-    // And with nothing placed it is harmless.
+    // With nothing placed it is harmless.
     app.measure_unplace();
     assert!(app.measure.points.is_empty());
     assert!(app.measure.active, "taking a point back also put the tool away");
@@ -142,7 +133,7 @@ pub(crate) fn the_measure_overlay_draws_a_placed_span_without_panicking() {
     app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: Some(crate::snap::FeatureKind::Vertex) });
     app.measure.add(MeasurePoint { at: Vec3::new(20.0, 8.0, 5.0), kind: Some(crate::snap::FeatureKind::FaceCentre) });
     draw_one_frame(&mut app);
-    // And with only one end down, where the live preview line is drawn.
+    // With only one end down, where the live preview line is drawn.
     app.measure.clear();
     app.measure.add(MeasurePoint { at: Vec3::ZERO, kind: None });
     draw_one_frame(&mut app);

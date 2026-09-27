@@ -4,14 +4,8 @@ use super::*;
 use crate::primitive::{ParamValue, Params};
 use simple3d_geom::Vec3;
 
-/// The numbers a stage that has just been added starts with, given the stages
-/// above it and the size of what the pattern repeats.
-///
-/// A new stage used to be whatever its slot happened to hold: stage 4's stock
-/// turn after a grid, one copy in place after a blank rule -- and in the second
-/// case adding a stage appeared to do nothing at all. It now starts as the next
-/// thing the rule is missing: a run along the first axis no run above it goes
-/// along yet, spaced to clear the shape, and once all three are taken, a ring.
+/// The numbers a newly added stage starts with: the next thing the rule lacks, a run along the
+/// first free axis clear of the shape, then a ring. Previously it kept its slot's old contents.
 pub fn fresh_stage(params: &Params, index: usize, size: Vec3) -> Stage {
     let mut taken = [false; 3];
     for above in (0..index.min(MAX_STAGES)).map(|i| stage(params, i)) {
@@ -26,14 +20,8 @@ pub fn fresh_stage(params: &Params, index: usize, size: Vec3) -> Stage {
     }
 }
 
-/// The numbers a stage that has just been added starts with when what it is to
-/// do was chosen with it -- the tool's "Add a stage" offers the three modes
-/// rather than one button (issue 79).
-///
-/// A run is what [`fresh_stage`] would make, along an axis nothing above it
-/// runs along yet, or along X once all three are taken; a turn is a ring round
-/// the shape; a mirror reflects across X, beside the copies the stages above
-/// it laid out along that axis rather than on top of them.
+/// A new stage's numbers when its mode was chosen with it (issue 79): a run as [`fresh_stage`], a
+/// ring round the shape, or a mirror across X beside the copies above.
 pub fn fresh_stage_doing(params: &Params, index: usize, size: Vec3, mode: StageMode) -> Stage {
     match mode {
         StageMode::Move => match fresh_stage(params, index, size) {
@@ -45,19 +33,10 @@ pub fn fresh_stage_doing(params: &Params, index: usize, size: Vec3, mode: StageM
     }
 }
 
-/// The variation a stage is given when one of `what` is added to it (issue
-/// 79): something visible, sized to the shape and to the stage it is on, so
-/// adding one shows what it does before any number is typed.
-///
-/// A shift staggers: every other copy moved on by half the step of the nearest
-/// run above -- the brick bond -- or, with no run above to stagger against, a
-/// zigzag across the stage's own run, half the shape wide. A spin builds up a
-/// fifteenth of a right angle a copy, a size a tenth smaller a copy, and a gap
-/// a quarter of the step wider a copy.
-///
-/// Where the stage already holds one just like it, the nearest one that is not
-/// -- another axis, or other copies -- so the chip adds a variation rather than
-/// a second copy of one. `None` where the stage has every one there is.
+/// A newly added variation of `what` (issue 79), visible and sized to the shape and stage: a shift
+/// staggers by half the nearest run's step (or zigzags), a spin builds 6 degrees a copy, a size
+/// shrinks a tenth, a gap widens a quarter step. If the stage has one just like it, the nearest
+/// different one; `None` if none is left.
 pub fn fresh_variation(params: &Params, index: usize, what: Vary, size: Vec3) -> Option<Variation> {
     let own = stage(params, index);
     let extents = [size.x, size.y, size.z];
@@ -97,9 +76,8 @@ pub fn fresh_variation(params: &Params, index: usize, what: Vary, size: Vec3) ->
     free_variation(&own, wanted)
 }
 
-/// Put `variation` on the end of stage `index`'s list. False, and nothing
-/// written, where the stage already holds one just like it (see
-/// [`Variation::combination`]).
+/// Append `variation` to stage `index`; false and unchanged if the stage has one just like it
+/// ([`Variation::combination`]).
 pub fn add_variation(params: &mut Params, index: usize, variation: Variation) -> bool {
     let stage = stage(params, index);
     if stage.variations().iter().any(|held| held.combination() == variation.combination()) {
@@ -109,8 +87,7 @@ pub fn add_variation(params: &mut Params, index: usize, variation: Variation) ->
     true
 }
 
-/// Take variation `slot` off stage `index`; the ones after it move up, and go
-/// on being applied in the order they were.
+/// Remove variation `slot` from stage `index`; the rest keep their order.
 pub fn remove_variation(params: &mut Params, index: usize, slot: usize) {
     let mut stage = stage(params, index);
     if slot >= stage.vary.len() {
@@ -120,14 +97,12 @@ pub fn remove_variation(params: &mut Params, index: usize, slot: usize) {
     set_stage(params, index, &stage);
 }
 
-/// A ring round the shape: four copies a right angle apart, far enough out to
-/// stand clear of each other.
+/// A ring round the shape: four copies a right angle apart, clear of each other.
 fn fresh_turn(size: Vec3) -> Stage {
     Stage::turning(4, 90.0, clear(size.x.max(size.y)) * 2.0, 0.0, 0.0, 2)
 }
 
-/// Half the shape again, the spacing `params_for_size` gives a new pattern: a
-/// visible gap whatever the size.
+/// 1.5x the extent, the spacing `params_for_size` uses: a visible gap at any size.
 fn clear(extent: f64) -> f64 {
     if extent > 1e-9 {
         extent * 1.5
@@ -147,12 +122,8 @@ fn along_axis(v: Vec3) -> usize {
     }
 }
 
-/// Take stage `index` out of the rule, and move every stage below it up one.
-///
-/// A stage below the one that goes then repeats what the stages above *it*
-/// still make -- which is well defined, and is exactly what dropping a stage
-/// from the middle of a stack means. The last one cannot go: a rule is at least
-/// one stage.
+/// Remove stage `index`, moving later stages up; they then repeat what remains above them. The
+/// last stage cannot be removed.
 pub fn remove_stage(params: &mut Params, index: usize) {
     let used = stage_count(params);
     if used <= 1 || index >= used {
@@ -165,9 +136,7 @@ pub fn remove_stage(params: &mut Params, index: usize) {
     params.insert("stages".to_string(), ParamValue::Count(used as u32 - 1));
 }
 
-/// Swap two stages. The order only matters where a stage turns or mirrors --
-/// two runs give the same copies either way round -- and there it is the whole
-/// difference between a ring of rows and a row of rings.
+/// Swap two stages; the order matters wherever a stage turns or mirrors.
 pub fn swap_stages(params: &mut Params, a: usize, b: usize) {
     let used = stage_count(params);
     if a >= used || b >= used || a == b {

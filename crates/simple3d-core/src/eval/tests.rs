@@ -35,7 +35,7 @@ fn size(mesh: &Mesh) -> Vec3 {
     hi - lo
 }
 
-/// Every colour a mesh's faces are painted, with how many faces each has.
+/// Face counts per paint colour.
 fn painted(mesh: &Mesh) -> std::collections::BTreeMap<Option<[u8; 3]>, usize> {
     let mut counts = std::collections::BTreeMap::new();
     for i in 0..mesh.indices.len() {

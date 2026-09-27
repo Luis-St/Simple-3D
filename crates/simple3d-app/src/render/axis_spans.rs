@@ -2,11 +2,8 @@
 
 use simple3d_geom::{Mesh, Vec3};
 
-/// `[a, b]` -- a stretch of an axis, given as the coordinate along it -- cut at
-/// every boundary of `spans`, each piece saying whether it lies inside one.
-///
-/// Either end may be the larger; the pieces come back in the order they were
-/// asked for, so a line keeps its direction and the fade along it.
+/// `[a, b]` along an axis, cut at every boundary of `spans`, each piece saying whether it is inside.
+/// Either end may be larger; pieces keep the asked direction so the fade stays put.
 pub(crate) fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64, bool)> {
     let (lo, hi) = (a.min(b), a.max(b));
     let mut cuts = vec![lo, hi];
@@ -34,29 +31,13 @@ pub(crate) fn clip_spans(a: f64, b: f64, spans: &[(f64, f64)]) -> Vec<(f64, f64,
     pieces
 }
 
-/// Where along `axis` one mesh's solids are, as spans of the coordinate along
-/// it, each with the body it runs through.
+/// Where along `axis` one mesh's solids are, as spans with their body.
 ///
-/// A closed surface is crossed an even number of times, so the crossings sorted
-/// and taken in pairs are the stretches inside it. They are paired *per body*,
-/// because the mesh handed to the renderer is the whole scene at once and two
-/// shapes on the same axis would otherwise pair across the gap between them --
-/// which would call the empty space between two boxes "material". An odd count
-/// means the line grazed an edge or the mesh is not closed; the odd one out is
-/// dropped rather than turned into a span that runs to infinity.
-///
-/// The answer depends on the mesh and on nothing else -- not on the camera, not
-/// on the section, not on where this item's tags start -- so it is worked out
-/// once, when the renderable is made, and the frame only reads it. Doing it per
-/// frame meant a Moller-Trumbore test against every triangle three times over
-/// for every turn of the camera, which on an imported assembly was two
-/// milliseconds of every frame spent re-deriving an answer that had not moved.
-/// What comes back is therefore the *body*, not the tag: the tag depends on the
-/// item's base, which is a property of the frame.
+/// Sorted crossings are paired per body, since the scene is one mesh and pairing across bodies
+/// would call the gap material; an odd one out is dropped. Depends only on the mesh, so it is
+/// computed once per renderable (per frame it cost milliseconds), returning bodies, not tags.
 pub(crate) fn axis_inside_spans(mesh: &Mesh, bodies: &[u16], axis: usize) -> Vec<((f64, f64), u16)> {
-    // The axis passes through the origin, so a solid that does not straddle zero
-    // on the other two coordinates cannot be on it -- which is most of them, and
-    // this is the whole mesh not looked at.
+    // A solid that does not straddle zero on the other two coordinates cannot be on the axis.
     let Some((lo, hi)) = mesh.bounds() else { return Vec::new() };
     if (0..3).any(|other| other != axis && (component(lo, other) > 0.0 || component(hi, other) < 0.0)) {
         return Vec::new();
@@ -71,15 +52,14 @@ pub(crate) fn axis_inside_spans(mesh: &Mesh, bodies: &[u16], axis: usize) -> Vec
     let mut spans = Vec::new();
     for (body, mut at) in crossings {
         at.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        // A crossing on a shared edge is found twice, once for each triangle.
+        // A crossing on a shared edge is found twice.
         at.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
         spans.extend(at.chunks_exact(2).map(|pair| ((pair[0], pair[1]), body)));
     }
     spans
 }
 
-/// The point on the axis at `value` along it. Every axis line passes through the
-/// origin, in both styles, so the other two coordinates are zero.
+/// The point at `value` along the axis; the other coordinates are zero.
 pub(crate) fn along(axis: usize, value: f64) -> Vec3 {
     match axis {
         0 => Vec3::new(value, 0.0, 0.0),
@@ -96,9 +76,8 @@ pub(crate) fn component(v: Vec3, axis: usize) -> f64 {
     }
 }
 
-/// Where the axis through the origin along `axis` pierces one triangle, as the
-/// coordinate along that axis. Moller-Trumbore against the line rather than a
-/// ray, so a crossing behind the origin is found as readily as one in front.
+/// Where the axis line pierces a triangle, as a coordinate along it: Moller-Trumbore against the
+/// line, so crossings behind the origin count.
 pub(crate) fn axis_crossing(world: [Vec3; 3], axis: usize) -> Option<f64> {
     let direction = along(axis, 1.0);
     let (edge1, edge2) = (world[1] - world[0], world[2] - world[0]);

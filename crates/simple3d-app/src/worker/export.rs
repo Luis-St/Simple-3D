@@ -8,8 +8,7 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-/// An export in flight. Progress is a permille count in an atomic so the UI can
-/// read it every frame without locking.
+/// An export in flight; progress is a permille atomic the UI reads without locking.
 pub struct ExportJob {
     pub path: PathBuf,
     pub format_label: String,
@@ -21,22 +20,15 @@ pub struct ExportJob {
 }
 
 impl ExportJob {
-    /// Each pair is one object of the export and the name it is written under;
-    /// a single-body export is one part with no name of its own. Whether
-    /// several of them become separate components or are merged into one body
-    /// is `options.bodies`, which the writer applies (issue 58).
-    ///
-    /// `limit` is the point at which the export gives up with a clear message
-    /// rather than hanging indefinitely (spec section 9).
+    /// Export `parts` (object, name); a single body is one unnamed part, and `options.bodies` decides
+    /// merging (issue 58). `limit` is when it gives up with a message rather than hanging (spec section 9).
     #[cfg(test)]
     pub fn spawn_parts(path: PathBuf, parts: Vec<(String, Arc<Mesh>)>, options: Options, limit: Duration) -> ExportJob {
         ExportJob::spawn_building(path, move || parts, options, limit)
     }
 
-    /// [`ExportJob::spawn_parts`], with the parts worked out on the export's
-    /// own thread first. Working them out means evaluating every body, its
-    /// booleans and the unions that make shared bodies one solid, which on a
-    /// large model froze the window for as long as it took (issue 111).
+    /// [`ExportJob::spawn_parts`], computing the parts on the export thread first, since evaluating
+    /// every body froze the window on large models (issue 111).
     pub fn spawn_building(
         path: PathBuf,
         build: impl FnOnce() -> Vec<(String, Arc<Mesh>)> + Send + 'static,
@@ -58,8 +50,7 @@ impl ExportJob {
                 let mut report = |fraction: f32| {
                     worker_progress.store((fraction.clamp(0.0, 1.0) * 1000.0) as u32, Ordering::Relaxed);
                     if Instant::now() > deadline {
-                        // Treated as a cancellation by the writer, so no partial
-                        // file survives; the message is corrected below.
+                        // Treated as a cancellation, so no partial file survives; the message is corrected below.
                         return false;
                     }
                     !worker_cancelled.load(Ordering::Relaxed)

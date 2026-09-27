@@ -1,4 +1,4 @@
-//! A chord as text: what is shown, what is stored, and reading it back.
+//! A chord as text: shown, stored and parsed.
 
 use super::*;
 use serde::de::Error as _;
@@ -8,9 +8,7 @@ use std::str::FromStr;
 
 impl fmt::Display for Chord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Joined rather than each modifier written with a trailing `+`, so a
-        // modifier-only chord reads as `Ctrl`, not as `Ctrl+` with nothing after
-        // it -- and still round-trips through `from_str`.
+        // Joined, so a modifier-only chord reads `Ctrl`, not `Ctrl+`, and still round-trips.
         let mut parts: Vec<&str> = Vec::new();
         if self.ctrl {
             parts.push("Ctrl");
@@ -40,8 +38,7 @@ impl FromStr for Chord {
                 key => chord.keys.push(key.to_string()),
             }
         }
-        // Modifiers alone are a binding of their own (issue 77); a chord with
-        // neither a key nor a modifier is not.
+        // Modifiers alone are a binding (issue 77); an empty chord is not.
         if chord.keys.is_empty() && !(chord.ctrl || chord.shift || chord.alt) {
             return Err(format!("no key in binding {text:?}"));
         }

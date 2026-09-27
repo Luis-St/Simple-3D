@@ -1,5 +1,4 @@
-//! The formats a model can be written in, what each can hold, and the unit
-//! 3MF states its numbers in.
+//! The export formats, what each can hold, and the unit 3MF states its numbers in.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
@@ -52,36 +51,29 @@ impl Format {
         Format::ALL.iter().copied().find(|f| f.id() == id)
     }
 
-    /// Whether the format records the unit its numbers are in. For the ones that
-    /// do not, the export dialog states the assumed unit instead.
+    /// Whether the format records its unit; otherwise the dialog states the assumed one.
     pub fn carries_units(self) -> bool {
         self == Format::ThreeMf
     }
 
-    /// Whether the format can hold several named objects rather than one body.
-    /// 3MF has `<object>` and `<build><item>`; STL is a bag of triangles, and
-    /// OBJ and PLY have no notion a slicer would read back as separate parts,
-    /// so for those an export is one mesh whatever the option says.
+    /// Whether the format holds several named objects a slicer reads back (3MF only); otherwise the
+    /// export is one mesh.
     pub fn keeps_objects_separate(self) -> bool {
         self == Format::ThreeMf
     }
 }
 
-/// How an export decides what its objects are (issue 58). Only a format that
-/// [`Format::keeps_objects_separate`] can act on anything but [`BodyMode::One`];
-/// for the rest an export is one mesh whatever this says.
-///
-/// The writer only ever sees the difference between "one body" and "the parts I
-/// was handed". Which parts those are is the caller's decision, and what the
-/// other two modes name.
+/// How an export decides its objects (issue 58); only formats that
+/// [`Format::keeps_objects_separate`] act on more than [`BodyMode::One`]. The writer only sees one
+/// body versus the parts it was given; which parts is the caller's choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum BodyMode {
-    /// Everything merged into a single solid, as an export always was.
+    /// Everything merged into a single solid.
     #[default]
     One,
     /// One object per top-level shape or group.
     TopLevel,
-    /// One object per body the user has grouped the scene into.
+    /// One object per body the user grouped the scene into.
     Selected,
 }
 
@@ -109,7 +101,7 @@ impl BodyMode {
         BodyMode::ALL.iter().copied().find(|mode| mode.id() == id)
     }
 
-    /// Whether this mode keeps the parts it was handed apart.
+    /// Whether this mode keeps the given parts apart.
     pub fn separates(self) -> bool {
         self != BodyMode::One
     }

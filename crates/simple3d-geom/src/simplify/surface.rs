@@ -5,38 +5,25 @@ use crate::mesh::Mesh;
 use crate::vec3::Vec3;
 use std::collections::HashMap;
 
-/// A mesh being simplified: triangles that can be struck out, vertices that can
-/// be moved, and, beside each vertex, everything the loop has to ask about it.
-///
-/// Triangles are never removed from the list, only marked dead, so an index
-/// into it stays an index for the whole run and the adjacency does not have to
-/// be renumbered on every collapse. The compacting happens once, at the end.
+/// A mesh being simplified, with per-vertex state. Triangles are only marked dead, never removed,
+/// so indices stay valid; compaction happens once at the end.
 pub(crate) struct Surface {
     pub(crate) positions: Vec<Vec3>,
     pub(crate) tris: Vec<[u32; 3]>,
     pub(crate) tags: Vec<u32>,
     pub(crate) alive: Vec<bool>,
-    /// The triangles that touch each vertex. Kept up to date through a
-    /// collapse, and allowed to hold dead ones -- they are skipped where they
-    /// are read, which is cheaper than hunting them down on every merge.
+    /// The triangles touching each vertex, possibly including dead ones, which readers skip.
     pub(crate) incident: Vec<Vec<u32>>,
     pub(crate) quadrics: Vec<Quadric>,
-    /// A vertex that may not move and may not be removed: it sits on something
-    /// the settings say to keep.
+    /// A vertex that may not move or be removed, because the settings keep what it sits on.
     pub(crate) locked: Vec<bool>,
-    /// The total area of the original triangles whose planes this vertex's
-    /// quadric now stands for.
-    ///
-    /// What turns a quadric's error -- an area-weighted sum of squared
-    /// distances, which grows as a vertex swallows its neighbours whether or
-    /// not the surface has moved -- into a distance in millimetres that means
-    /// the same thing at the start of a run and at the end of it. See
-    /// [`super::collapse::deviation_of`].
+    /// The original area this vertex's quadric stands for, turning its error into a scale-independent
+    /// distance ([`super::collapse::deviation_of`]).
     pub(crate) weight: Vec<f64>,
     pub(crate) live: usize,
 }
 
-/// How many triangles meet along one edge, and which they are.
+/// The triangles meeting along each edge.
 type Edges = HashMap<(u32, u32), Vec<u32>>;
 
 fn edge_key(a: u32, b: u32) -> (u32, u32) {
@@ -48,8 +35,7 @@ fn edge_key(a: u32, b: u32) -> (u32, u32) {
 }
 
 impl Surface {
-    /// Read a mesh in, work out what is fixed, and give every vertex its
-    /// quadric.
+    /// Read a mesh in, lock what is fixed, and give every vertex its quadric.
     pub(crate) fn build(mesh: &Mesh, plan: &Simplify) -> Surface {
         let welded = mesh.weld();
         let count = welded.positions.len();
@@ -75,7 +61,7 @@ impl Surface {
         surface
     }
 
-    /// Every triangle's plane, added to the three vertices that lie on it.
+    /// Add every triangle's plane to its three vertices' quadrics.
     fn accumulate_quadrics(&mut self) {
         for tri in &self.tris {
             let (a, b, c) =
@@ -93,16 +79,8 @@ impl Surface {
         }
     }
 
-    /// Which edges the settings say to keep, turned into vertices that may not
-    /// move.
-    ///
-    /// Keeping an *edge* by fixing both its ends is stricter than it has to be
-    /// -- a run of collinear crease vertices could in principle be thinned
-    /// along the crease without moving the crease -- and it is what the
-    /// checkboxes promise: a corner stays exactly where it was, to the last
-    /// bit, rather than staying within some tolerance of it. The cost is paid
-    /// where features are dense, and a mesh that is *all* feature is one that
-    /// has no detail to drop.
+    /// Lock the vertices of edges the settings keep. Fixing both ends is stricter than needed but is
+    /// what the settings promise: a kept corner stays exactly in place.
     fn lock_features(&mut self, plan: &Simplify) {
         let edges = self.edges();
         let sharp = plan.keep_sharp.then(|| plan.sharp_angle.to_radians().cos());
@@ -110,21 +88,14 @@ impl Surface {
         let mut fixed: Vec<(u32, u32)> = Vec::new();
         for (&(a, b), tris) in &edges {
             let keep = match tris.len() {
-                // An edge with one triangle is a hole's rim: the mesh is not
-                // closed there, and nothing on the far side holds the surface
-                // in place.
+                // One triangle: a hole's rim, held by nothing on the far side.
                 1 => plan.keep_boundaries,
                 2 => {
                     let (one, two) = (normals[tris[0] as usize], normals[tris[1] as usize]);
                     let seam = plan.keep_colours && self.tags[tris[0] as usize] != self.tags[tris[1] as usize];
                     seam || sharp.is_some_and(|limit| one.dot(two) < limit)
                 }
-                // Three or more is where two bodies of one mesh meet -- the
-                // seam between the cells of a split, where four faces share a
-                // line. There is no single surface through it to simplify and
-                // no way to tell what a collapse there would do to the other
-                // bodies, so it is left exactly as it is, whatever the settings
-                // say.
+                // Three or more: where bodies of one mesh meet (split seams). Always kept, whatever the settings.
                 _ => true,
             };
             if keep {
@@ -137,8 +108,7 @@ impl Surface {
         }
     }
 
-    /// Every edge with the triangles along it. Built once, for the locking;
-    /// the loop itself asks about one edge at a time, from the adjacency.
+    /// Every edge with its triangles, built once for locking.
     fn edges(&self) -> Edges {
         let mut edges: Edges = HashMap::with_capacity(self.tris.len() * 2);
         for (index, tri) in self.tris.iter().enumerate() {
@@ -155,15 +125,13 @@ impl Surface {
         (b - a).cross(c - a).normalized()
     }
 
-    /// The live triangles at a vertex, with the dead ones dropped from the list
-    /// as they are found.
+    /// Drop dead triangles from a vertex's incident list.
     pub(crate) fn tidy(&mut self, v: u32) {
         let alive = &self.alive;
         self.incident[v as usize].retain(|&t| alive[t as usize]);
     }
 
-    /// The triangles along an edge, which is how the loop asks whether an edge
-    /// is on the boundary without keeping a second index up to date.
+    /// The triangles along an edge, from the adjacency.
     pub(crate) fn along(&self, a: u32, b: u32) -> Vec<u32> {
         self.incident[a as usize]
             .iter()
@@ -188,8 +156,7 @@ impl Surface {
         out
     }
 
-    /// What is left, renumbered: the live triangles, the vertices they still
-    /// use, and the tag each triangle came in with.
+    /// The result, renumbered: live triangles, their vertices, and their original tags.
     pub(crate) fn finish(self) -> Mesh {
         let mut remap = vec![u32::MAX; self.positions.len()];
         let mut positions = Vec::new();

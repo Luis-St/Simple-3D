@@ -32,13 +32,11 @@ pub(crate) fn garbage_reverts_rather_than_raising_a_dialog() {
 
 #[test]
 pub(crate) fn a_rotation_comes_back_as_the_direction_it_faces_not_the_turn_that_got_there() {
-    // Issue 84: a field on a rotation reads [0, 360). Typing a whole turn
-    // past where the body already stands leaves it standing there.
+    // Issue 84: a rotation reads [0, 360).
     assert_eq!(commit_angle("400", 0.0), Some(40.0));
     assert_eq!(commit_angle("360", 0.0), Some(0.0));
     assert_eq!(commit_angle("-90", 0.0), Some(270.0));
-    // The relative forms are resolved first: a degree on from 359 is 0,
-    // which is the case the issue names.
+    // Relative forms resolve first: a degree on from 359 is 0, the issue's case.
     assert_eq!(commit_angle("+1", 359.0), Some(0.0));
     assert_eq!(commit_angle("- 1", 0.0), Some(359.0));
 }
@@ -64,15 +62,13 @@ pub(crate) fn a_count_is_rounded_and_clamped_to_its_range() {
 #[test]
 pub(crate) fn an_angle_is_clamped_to_its_range_and_stays_in_degrees() {
     let kind = ParamKind::Angle { min: 1.0, max: 360.0, wrap: false };
-    // Angles are always degrees regardless of the length unit.
+    // Angles are always degrees.
     assert_eq!(commit_param("90", kind, Unit::Metre, 45.0), Commit::Value(ParamValue::Angle(90.0)));
     assert_eq!(commit_param("999", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(360.0)));
     assert_eq!(commit_param("0", kind, Unit::Millimetre, 45.0), Commit::Value(ParamValue::Angle(1.0)));
 }
 
-/// An angle that is a direction is wrapped instead, the way the transform
-/// panel's rotation is: 400 is 40 and -90 is 270, so a field never reads its own
-/// limit back at every number past it.
+/// A direction angle wraps like the transform panel's rotation, instead of clamping to its limit.
 #[test]
 pub(crate) fn an_angle_that_wraps_comes_back_inside_one_turn() {
     let kind = ParamKind::Angle { min: 0.0, max: 360.0, wrap: true };
@@ -80,10 +76,9 @@ pub(crate) fn an_angle_that_wraps_comes_back_inside_one_turn() {
     assert_eq!(commit_param("400", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(40.0)));
     assert_eq!(commit_param("-90", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(270.0)));
     assert_eq!(commit_param("720", kind, Unit::Millimetre, 0.0), Commit::Value(ParamValue::Angle(0.0)));
-    // The relative forms resolve before the wrap, so a degree past 359 is none.
+    // Relative forms resolve before the wrap.
     assert_eq!(commit_param("+1", kind, Unit::Millimetre, 359.0), Commit::Value(ParamValue::Angle(0.0)));
-    // And the scrub gesture goes the same way, so a drag and a typed number
-    // cannot disagree about where the field lands.
+    // Scrubbing wraps the same way, so dragging and typing agree.
     assert_eq!(value_from_display(kind, Unit::Millimetre, -0.5), ParamValue::Angle(359.5));
 }
 

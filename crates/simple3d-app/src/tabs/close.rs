@@ -4,9 +4,8 @@ use super::*;
 use crate::app::{App, Modal, Status};
 
 impl App {
-    /// Close the tab at `index`, asking first if it has changes that would be
-    /// lost. The last tab does not close: it is emptied, so there is always a
-    /// document to work in.
+    /// Close the tab at `index`, asking first if changes would be lost. The last tab is emptied instead,
+    /// so there is always a document.
     pub fn close_tab(&mut self, index: usize) {
         if index >= self.tabs.len() {
             return;
@@ -20,8 +19,7 @@ impl App {
         self.close_tab_now(index);
     }
 
-    /// Close the tab at `index` whatever state it is in. What the confirmation
-    /// calls once the question has been answered.
+    /// Close the tab regardless; what the confirmation calls.
     pub fn close_tab_now(&mut self, index: usize) {
         if index >= self.tabs.len() {
             return;
@@ -34,8 +32,7 @@ impl App {
             return;
         }
         if index == self.active {
-            // Show the tab to the right, or the one to the left if this was the
-            // last: the neighbour, either way, rather than jumping to an end.
+            // Show the neighbour, right if there is one, else left.
             let next = if index + 1 < self.tabs.len() { index + 1 } else { index - 1 };
             let doc = std::mem::replace(&mut self.tabs[next], Document::empty());
             self.tabs.remove(index);
@@ -50,7 +47,7 @@ impl App {
         self.status = Status::Info(format!("Closed {name}"));
     }
 
-    /// Close the tab the confirmation was asked about, discarding its changes.
+    /// Close the asked-about tab, discarding its changes.
     pub fn confirm_close_tab(&mut self) {
         if let Some(index) = self.pending_close.take() {
             self.close_tab_now(index);
@@ -58,9 +55,8 @@ impl App {
         self.modal = Modal::None;
     }
 
-    /// Save the tab the confirmation was asked about, then close it if the save
-    /// went through. Only the active tab can be saved -- saving asks for a path
-    /// and writes what the editor is showing -- so it is shown first.
+    /// Save the asked-about tab, closing it if the save went through. Only the active tab can be saved,
+    /// so it is shown first.
     pub fn save_and_close_tab(&mut self) {
         let Some(index) = self.pending_close.take() else {
             self.modal = Modal::None;

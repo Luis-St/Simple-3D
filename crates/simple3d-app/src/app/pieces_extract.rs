@@ -4,12 +4,8 @@ use super::*;
 use simple3d_core::scene::NodeId;
 
 impl App {
-    /// Lift the ticked pieces out of the collection, giving each a row of its
-    /// own under it (issue 82).
-    ///
-    /// Extracting every last piece is a different thing and goes through
-    /// [`App::extract_all_pieces`]: with nothing left inside it a collection is
-    /// a union group, and turning it into one throws the recipe away.
+    /// Give the ticked pieces their own rows (issue 82). Extracting every piece goes through
+    /// [`App::extract_all_pieces`], which drops the recipe.
     pub fn extract_ticked_pieces(&mut self, collection: NodeId) {
         let ticked: Vec<NodeId> = self.piece_ticks.iter().copied().collect();
         if ticked.is_empty() {
@@ -19,8 +15,7 @@ impl App {
         let inside: Vec<NodeId> =
             self.scene.node(collection).children.iter().copied().filter(|c| !self.scene.node(*c).extracted).collect();
         if inside.iter().all(|id| ticked.contains(id)) {
-            // The last piece out empties the collection, which is the one case
-            // that has to ask before it acts.
+            // The last piece out empties the collection, which must ask first.
             self.ask_to_extract_all(collection);
             return;
         }
@@ -32,10 +27,7 @@ impl App {
             return;
         }
         self.collapsed.remove(&collection);
-        // The ticks stay. Extract and Put back are the two directions of one
-        // gesture, and clearing them left Put back greyed out the moment
-        // anything had been extracted -- the way back was to find the same
-        // pieces in the list and tick them again.
+        // The ticks stay, so Put back works at once.
         self.status = Status::Info(format!("Extracted {} {}", moved, if moved == 1 { "piece" } else { "pieces" }));
     }
 
@@ -53,14 +45,11 @@ impl App {
             self.status = Status::Info("Those pieces are already inside".into());
             return;
         }
-        // Still ticked, so they can go straight back out again -- and so the
-        // viewport keeps saying which pieces were just put away.
+        // Still ticked, so they can go straight back out and the viewport shows which moved.
         self.status = Status::Info(format!("Put {} {} back", moved, if moved == 1 { "piece" } else { "pieces" }));
     }
 
-    /// Ask before emptying a collection, because that is where the break stops
-    /// being reversible: with every piece extracted the collection is a union
-    /// group, and the object it was made from goes with it (issue 82).
+    /// Ask before emptying a collection, which turns it into a union group and drops its original (issue 82).
     pub fn ask_to_extract_all(&mut self, collection: NodeId) {
         if !self.scene.is_collection(collection) {
             return;
@@ -69,8 +58,7 @@ impl App {
         self.modal = Modal::ConfirmExtractAll;
     }
 
-    /// Extract every piece, which leaves the collection with nothing inside it
-    /// and so turns it into an ordinary union group (issue 82).
+    /// Extract every piece, turning the collection into an ordinary union group (issue 82).
     pub fn extract_all_pieces(&mut self, collection: NodeId) {
         if !self.scene.is_collection(collection) {
             return;
@@ -88,9 +76,7 @@ impl App {
         ));
     }
 
-    /// How to undo a split, in the words the status line ends with. Said in the
-    /// same breath as the split itself, because a split that cannot be seen to
-    /// be reversible is one nobody tries.
+    /// How to undo a split, for the status line, so the split is seen to be reversible.
     pub(crate) fn way_back(&self) -> String {
         let shortcut = self.keymap.shortcut_text(simple3d_core::keymap::Command::Rejoin);
         if shortcut.is_empty() {
@@ -100,14 +86,8 @@ impl App {
         }
     }
 
-    /// Put a shape that was cut into pieces back together (issue 82): the
-    /// object returns, with its parameters and its operands, and the pieces go.
-    ///
-    /// The split keeps its own transform through this, so pieces that were moved
-    /// about as one item come back where they now stand rather than where the
-    /// shape was when it was broken. What was done to the pieces themselves is
-    /// let go -- they are triangles, and what comes back is the recipe -- so
-    /// this is a step the history holds like any other.
+    /// Put a split shape back together (issue 82): the original returns and the pieces go. The split's
+    /// transform is kept; edits to individual pieces are not. An ordinary undoable step.
     pub fn rejoin_selection(&mut self) {
         let targets = self.top_level_selection();
         let Some(&id) = targets.first() else {

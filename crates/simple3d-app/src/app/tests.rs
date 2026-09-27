@@ -45,12 +45,8 @@ use super::*;
 use simple3d_core::eval::{Cancel, Evaluator};
 use std::path::PathBuf;
 
-/// An `App` on a headless `egui::Context`, which needs no window and no
-/// graphics -- so the command dispatch itself can be driven from a test.
-///
-/// `App::new` reads the *user's real* settings and keymap, so both are put
-/// back to their defaults here; a test must not change its answer because of
-/// what is in the developer's config directory.
+/// A temporary config directory with default settings and keymap, so tests do not depend on the
+/// developer's own config.
 fn temp_config_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-app-test-{name}-{}-{:?}",
@@ -62,9 +58,7 @@ fn temp_config_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// An app with one plate in it. The application itself now opens on an
-/// empty document, so the tests below -- which are about what happens *to*
-/// a shape -- put the shape there themselves.
+/// An app with one plate in it, since the application opens on an empty document.
 pub(crate) fn headless_app() -> App {
     let mut app = app_in(temp_config_dir("headless"));
     let root = app.scene.root();
@@ -79,22 +73,17 @@ pub(crate) fn headless_app() -> App {
 fn app_in(config_dir: PathBuf) -> App {
     let ctx = egui::Context::default();
     let mut app = App::with_config_dir(&ctx, None, config_dir);
-    // The gizmo needs a viewport to work out which axes face the screen, and
-    // an evaluation to know where the node is.
+    // The gizmo needs a viewport for screen-facing axes, and an evaluation for the node's place.
     app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
     app.reevaluate_for_test();
     app
 }
 
-/// Draw one entire frame of the interface into a headless context. A panel
-/// that panics, or a layout that divides by a width it does not have, fails
-/// here rather than in front of someone.
+/// Draw one whole frame headlessly, so panics and bad layouts fail here.
 pub(crate) fn draw_one_frame(app: &mut App) {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
-    // A real window size: the default raw input has an effectively infinite
-    // screen rect, and the viewport would ask for a texture larger than any
-    // GPU allows.
+    // A real window size, since the default screen rect is effectively infinite.
     let input = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 880.0))),
         ..Default::default()
@@ -102,9 +91,8 @@ pub(crate) fn draw_one_frame(app: &mut App) {
     let _ = ctx.run(input, |ctx| app.ui(ctx));
 }
 
-/// Draw one frame with a given modifier state and key events, so a binding
-/// that is nothing but a held modifier can be typed at the application the
-/// way a hand types it (issue 76).
+/// Draw one frame with given modifiers and key events, so modifier-only bindings can be typed
+/// (issue 76).
 fn draw_frame_with(app: &mut App, modifiers: egui::Modifiers, events: Vec<egui::Event>) {
     let ctx = egui::Context::default();
     crate::theme::apply(&ctx);
@@ -120,10 +108,7 @@ fn draw_frame_with(app: &mut App, modifiers: egui::Modifiers, events: Vec<egui::
 impl App {
     pub(crate) fn reevaluate_for_test(&mut self) {
         self.evaluated = Evaluator::new().evaluate(&self.scene, &Cancel::new());
-        // The generation moves on with the result, exactly as it does when
-        // the worker hands one back: everything that watches for "the model
-        // changed" watches this, so a helper that left it alone would be a
-        // helper nothing noticed.
+        // Bump the generation as the worker does, since change watchers key on it.
         self.evaluation_generation += 1;
     }
 }

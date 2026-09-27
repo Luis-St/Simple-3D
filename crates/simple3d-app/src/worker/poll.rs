@@ -7,8 +7,7 @@ use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
 impl EvalWorker {
-    /// The newest completed result, if one has arrived. Results from superseded
-    /// generations are discarded.
+    /// The newest completed result, if any; results from superseded generations are discarded.
     pub fn poll(&mut self) -> Option<(Evaluated, Renderable)> {
         let mut newest: Option<Finished> = None;
         loop {
@@ -23,15 +22,14 @@ impl EvalWorker {
         }
         let finished = newest?;
         if finished.generation < self.generation {
-            // Superseded while it was on its way back.
+            // Superseded on its way back.
             return None;
         }
         self.outstanding = None;
         self.current = None;
         self.started = None;
         self.last_elapsed = Some(finished.elapsed);
-        // The newest edit made while this one was running goes next, so a drag
-        // keeps producing pictures for as long as it lasts.
+        // The newest edit made meanwhile goes next, so a drag keeps producing pictures.
         if let Some(scene) = self.pending.take() {
             self.start(scene);
         }
@@ -42,26 +40,18 @@ impl EvalWorker {
         self.outstanding.is_some()
     }
 
-    /// How long the job in flight has been running.
+    /// How long the current job has been running.
     pub fn waiting_for(&self) -> Option<Duration> {
         self.started.map(|at| at.elapsed())
     }
 
-    /// Abandon the evaluation in flight and stop waiting for it.
-    ///
-    /// The way out of a run that is taking longer than the user is willing to
-    /// give it. The viewport keeps the last result it had -- which is a picture
-    /// of an older scene, and the status bar says so -- and the next edit
-    /// submits a fresh job. The worker drops the abandoned answer when it
-    /// notices the flag, so nothing stale can arrive later: `poll` would refuse
-    /// it on its generation anyway.
+    /// Abandon the evaluation in flight. The viewport keeps the last (stale, and labelled so) result,
+    /// and the next edit submits afresh; `poll` would refuse the abandoned answer anyway.
     pub fn abandon(&mut self) {
         if let Some(cancel) = self.current.take() {
             cancel.cancel();
         }
-        // Including whatever was waiting behind it: the user asked to stop
-        // waiting, and starting the next run on the spot is not that. The next
-        // edit submits again.
+        // The waiting scene is dropped too: the user asked to stop, not to start the next run.
         self.pending = None;
         self.outstanding = None;
         self.started = None;
@@ -71,8 +61,7 @@ impl EvalWorker {
 pub(super) fn evaluation_loop(jobs: Receiver<Job>, done: Sender<Finished>) {
     let mut evaluator = Evaluator::new();
     while let Ok(mut job) = jobs.recv() {
-        // Skip straight to the newest queued edit: finishing a superseded one
-        // would only delay the answer the user is actually waiting for.
+        // Skip to the newest queued edit, since superseded ones would only delay it.
         while let Ok(newer) = jobs.try_recv() {
             job.cancel.cancel();
             job = newer;

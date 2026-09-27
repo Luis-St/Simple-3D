@@ -8,15 +8,12 @@ pub(crate) struct Target {
     /// Which body owns each pixel's depth, the counterpart of `Frame::owner`.
     pub(super) tags: glow::Texture,
     pub(super) depth: glow::Texture,
-    /// Where a boolean preview has found its surface, so its later layers
-    /// leave those pixels alone (`csg.rs`). Attached to the model pass's
-    /// framebuffer and drawn to by nothing else.
+    /// Where a boolean preview has found its surface, so later layers skip those pixels (`csg.rs`).
     pub(super) done: glow::Texture,
     /// Colour, tags and depth: what the model is drawn into.
     pub(super) scene: glow::Framebuffer,
-    /// Colour alone, so the axis pass can *sample* the depth and tag textures
-    /// that the scene pass wrote. A texture cannot be read and written in one
-    /// pass, and the axis rule has to read both.
+    /// Colour alone, so the axis pass can sample the depth and tag textures, which cannot be read
+    /// while attached.
     pub(super) overlay: glow::Framebuffer,
 }
 
@@ -40,8 +37,7 @@ impl Target {
         };
         let (w, h) = (width as i32, height as i32);
 
-        // The tag buffer is exactly `Frame::owner`: one body number per pixel,
-        // written only by the passes that write depth.
+        // The tag buffer is `Frame::owner`: one body per pixel, written only by depth-writing passes.
         let tags = gl.create_texture()?;
         plain(tags);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
@@ -60,8 +56,7 @@ impl Target {
         let depth = gl.create_texture()?;
         plain(depth);
         gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
-        // With a stencil alongside: the section's cap is found by counting,
-        // per pixel, how often the cut surface winds round it (`draw_caps`).
+        // With a stencil, for the cap's winding count (`draw_caps`).
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -75,8 +70,7 @@ impl Target {
         );
         gl.bind_texture(glow::TEXTURE_2D, None);
 
-        // Which shape of a boolean preview a pixel's surface is, and that
-        // surface's normal, for its edges (`CSG_EDGE_FRAGMENT`).
+        // The boolean preview's shape and normal per pixel, for its edges (`CSG_EDGE_FRAGMENT`).
         let done = gl.create_texture()?;
         plain(done);
         gl.tex_image_2d(
@@ -104,8 +98,7 @@ impl Target {
             return Err(format!("the offscreen target is not usable (status {status:#x})"));
         }
 
-        // Colour only: the axis pass samples the depth and tag textures, and a
-        // texture attached to the framebuffer being drawn into cannot be read.
+        // Colour only, since an attached texture cannot be sampled.
         let overlay = gl.create_framebuffer()?;
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(overlay));
         gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(colour), 0);
@@ -124,8 +117,7 @@ impl Target {
         gl.delete_texture(self.tags);
         gl.delete_texture(self.depth);
         gl.delete_texture(self.done);
-        // The colour texture belongs to egui once it has been registered, so
-        // it is deliberately not deleted here -- see `render`, which keeps one
-        // texture for the life of the application and reallocates its storage.
+        // The colour texture belongs to egui once registered, so it is not deleted; it is reused and
+        // reallocated for the application's life.
     }
 }

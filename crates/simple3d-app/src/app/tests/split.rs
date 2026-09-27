@@ -5,10 +5,7 @@ use simple3d_core::keymap::Command;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 use std::time::{Duration, Instant};
 
-/// Run a split the way the application does: open the tool, choose a
-/// pattern, press Split and wait for the thread to hand its pieces back.
-/// The cutting is on a thread precisely so the interface does not wait for
-/// it, so a test has to.
+/// Run a split as the app does: open the tool, choose, press Split, and wait for the thread.
 pub(crate) fn split_with(app: &mut App, tiling: simple3d_geom::tiling::Tiling) {
     use simple3d_geom::tiling::SplitPlan;
     app.run(Command::SplitIntoPieces);
@@ -24,9 +21,7 @@ pub(crate) fn split_with(app: &mut App, tiling: simple3d_geom::tiling::Tiling) {
 
 #[test]
 pub(crate) fn splitting_a_shape_cuts_it_into_a_piece_per_cell() {
-    // The half of issue 82 that cuts rather than separates: the default
-    // plate is 40 x 20, so 10 mm squares through it are eight pieces, and
-    // the eight of them are the plate.
+    // Issue 82: the 40 x 20 plate cut into 10 mm squares is eight pieces making up the plate.
     let mut app = headless_app();
     let plate = app.primary().unwrap();
     app.scene.get_mut(plate).unwrap().name = "Deck".into();
@@ -43,12 +38,11 @@ pub(crate) fn splitting_a_shape_cuts_it_into_a_piece_per_cell() {
         assert!(app.scene.node(child).is_mesh());
         assert!(app.scene.node(child).mesh().unwrap().triangle_count() > 0);
     }
-    // The pattern is kept on the split, which is what lets the panel say
-    // what was done and the tool open again on it.
+    // The pattern is kept on the split, for the panel and reopening the tool.
     let tiling = app.scene.node(split).split_plan().expect("the pattern was not kept").first();
     assert_eq!(tiling.kind, simple3d_geom::tiling::CellKind::Squares);
     assert_eq!(tiling.size, 10.0);
-    // And the pieces are exactly where the shape was.
+    // The pieces are exactly where the shape was.
     app.reevaluate_for_test();
     let after = app.evaluated.mesh.bounds().unwrap();
     assert!((before.0 - after.0).length() < 1e-3, "the pieces moved: {before:?} -> {after:?}");
@@ -57,10 +51,7 @@ pub(crate) fn splitting_a_shape_cuts_it_into_a_piece_per_cell() {
 
 #[test]
 pub(crate) fn cutting_a_split_again_changes_the_pattern_rather_than_splitting_the_split() {
-    // Opening the tool on a split offers the pattern it was cut with, and
-    // cutting again replaces its pieces: the shape it was made from is
-    // still the shape it was made from, so one Join back together is still
-    // enough however many patterns have been tried.
+    // Cutting a split again replaces its pieces, keeping the original, so one Join always suffices.
     let mut app = headless_app();
     split_with(&mut app, simple3d_geom::tiling::Tiling { size: 10.0, ..Default::default() });
     let split = app.primary().unwrap();
@@ -99,9 +90,7 @@ pub(crate) fn a_cell_bigger_than_the_shape_leaves_the_document_alone() {
 
 #[test]
 pub(crate) fn a_split_dropped_because_the_shape_changed_under_it_leaves_the_document_alone() {
-    // The cutting runs on a thread, so the shape it was cutting can be
-    // edited before the pieces land. Pieces of a shape that no longer
-    // exists are not an edit anybody asked for.
+    // Pieces for a shape edited during cutting are dropped.
     let mut app = headless_app();
     let plate = app.primary().unwrap();
     app.run(Command::SplitIntoPieces);
@@ -142,15 +131,12 @@ pub(crate) fn the_pattern_a_split_was_cut_with_survives_saving_and_loading() {
     assert_eq!(tiling.layer, 2.0);
 }
 
-/// Two cuts at once, end to end and through the document: the pieces are
-/// what both grids leave, and the plan that made them is what the tool
-/// opens on again (issue 82).
+/// Two cuts end to end: pieces are what both grids leave, and the tool reopens on the plan (issue 82).
 #[test]
 pub(crate) fn a_shape_is_cut_by_every_cut_of_the_plan_and_the_plan_is_kept() {
     use simple3d_geom::tiling::{SplitPlan, Tiling};
     let mut app = headless_app();
-    // The starting plate is 40 x 20 x 4. Squares of 20 through Z are two
-    // columns; slabs of 10 through X cut each of those in two across.
+    // The 40 x 20 x 4 plate: 20 mm squares through Z make two columns; 10 mm slabs through X halve each.
     let plan = SplitPlan {
         passes: vec![
             Tiling { size: 20.0, axis: 2, ..Tiling::default() },
@@ -171,13 +157,13 @@ pub(crate) fn a_shape_is_cut_by_every_cut_of_the_plan_and_the_plan_is_kept() {
     assert_eq!(app.scene.node(split).children.len(), 4, "two cuts across each other are four pieces");
     assert_eq!(app.scene.node(split).split_plan(), Some(&plan), "the plan the pieces were cut by was not kept");
 
-    // Through the file, and back out again as the plan it was.
+    // Through the file and back as the same plan.
     let text = simple3d_core::project::to_string(&app.scene);
     let scene = simple3d_core::project::from_str(&text).expect("a scene cut by two cuts loads");
     let saved = scene.depth_first().into_iter().find(|&id| scene.node(id).is_split()).expect("the split is there");
     assert_eq!(scene.node(saved).split_plan(), Some(&plan));
 
-    // And the tool opens on both cuts rather than on the first of them.
+    // The tool reopens on both cuts.
     app.run(Command::SplitIntoPieces);
     assert_eq!(app.split_tool.as_ref().expect("the tool opened on the split").plan, plan);
 }

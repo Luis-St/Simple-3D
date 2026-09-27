@@ -27,8 +27,7 @@ impl App {
         self.clipboard_text = Some(format!("Simple 3D: {what}"));
         self.clipboard = Some(clip);
         if cut {
-            // Cut is an undoable step of its own, so it cannot lose work even if
-            // the user never pastes (spec section 8.1).
+            // Cut is its own undoable step, so nothing is lost without a paste (spec section 8.1).
             self.edit("Cut", None);
             let doomed: Vec<NodeId> = self.top_level_selection();
             for id in doomed {
@@ -46,16 +45,14 @@ impl App {
             self.status = Status::Info("The clipboard is empty".into());
             return;
         };
-        // A component cannot be pasted into itself, nor into one it holds
-        // (issue 113) -- that is a model inside itself.
+        // A component cannot be pasted into itself or one it holds (issue 113).
         if let Err(why) = self.clip_fits_here(&clip) {
             self.status = Status::Warning(why);
             return;
         }
         let (clip, made) = self.bring_in_components(&clip);
         self.edit("Paste", None);
-        // A paste from another project brings its components in as new ones,
-        // and undoing it takes them out again.
+        // Components brought in by a paste from elsewhere go again on undo.
         if !made.is_empty() {
             self.history.mark_created(&made);
         }
@@ -65,9 +62,9 @@ impl App {
             self.status = Status::Warning("Nothing could be pasted".into());
             return;
         }
-        // A pattern pasted into can now be measured (issue 67).
+        // A pattern pasted into can now be sized (issue 67).
         self.size_fresh_patterns();
-        // Left selected, so a nudge or a drag can follow immediately.
+        // Left selected, so a nudge or drag can follow.
         self.selection = created;
         self.on_selection_changed();
         self.status = Status::Info("Pasted".into());
@@ -79,8 +76,7 @@ impl App {
             self.status = Status::Info("Nothing to duplicate".into());
             return;
         }
-        // A separate action from copy and paste: it does not disturb the
-        // clipboard (spec section 8.1).
+        // Duplicate leaves the clipboard alone (spec section 8.1).
         self.edit("Duplicate", None);
         let mut created = Vec::new();
         for id in targets {
@@ -103,9 +99,7 @@ impl App {
             self.status = Status::Info("Nothing to delete".into());
             return;
         }
-        // Deleting a group is two different actions wearing one word: the
-        // children can go with it, or stay. Rather than guess, or open a dialog
-        // over the model, the outliner asks in place.
+        // Deleting a group may or may not take its children, so the outliner asks in place.
         let holds_children = |id: &NodeId| {
             (self.scene.node(*id).is_group() || self.scene.node(*id).is_split())
                 && !self.scene.node(*id).children.is_empty()
@@ -117,15 +111,13 @@ impl App {
         self.delete_now(&targets, false);
     }
 
-    /// How many nodes the pending deletion would take with it, if the children
-    /// go too.
+    /// How many nodes the pending deletion would remove if the children go too.
     pub fn pending_delete_count(&self) -> usize {
         let Some(targets) = &self.pending_delete else { return 0 };
         targets.iter().map(|id| 1 + self.scene.descendants(*id).len()).sum()
     }
 
-    /// Carry out the deletion the outliner asked about. `promote` keeps the
-    /// children by moving them up into the group's own place first.
+    /// Carry out the pending deletion; `promote` keeps the children by moving them into the group's place.
     pub fn confirm_delete(&mut self, promote: bool) {
         let Some(targets) = self.pending_delete.take() else { return };
         self.delete_now(&targets, promote);
@@ -142,8 +134,7 @@ impl App {
         let mut promoted = 0;
         for id in targets {
             if promote {
-                // Into the group's own slot, in order, so the tree reads the
-                // same afterwards minus one level of nesting.
+                // Into the group's slot in order, so the tree reads the same minus one level.
                 let node = self.scene.node(*id);
                 let children = node.children.clone();
                 if let Some(parent) = node.parent {

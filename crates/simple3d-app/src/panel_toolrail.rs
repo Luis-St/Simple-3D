@@ -1,9 +1,5 @@
-//! The tool rail: the far-left icon column.
-//!
-//! Everything here was previously a word in the menu bar's toolbar row. Moving
-//! it into a rail buys back the whole width of that row for the viewport, and
-//! makes the one question the row really answers -- "which tool am I holding?" --
-//! answerable without reading anything.
+//! The tool rail: the far-left icon column, freeing the old toolbar row for the viewport and
+//! showing the held tool at a glance.
 
 use crate::app::{App, Status};
 use crate::gizmo::Mode;
@@ -13,9 +9,7 @@ use simple3d_core::config::DisplayMode;
 use simple3d_core::keymap::Command;
 use simple3d_core::scene::GroupOp;
 
-/// The rail's entry for a transform tool: its glyph and the command that
-/// selects it. Driven from `Mode::ALL`, so adding a tool to the manipulator
-/// without giving it a button here does not compile.
+/// A transform tool's rail entry: glyph and command. Driven from `Mode::ALL`, so every tool needs one.
 pub fn tool(mode: Mode) -> (Glyph, Command) {
     match mode {
         Mode::Move => (Glyph::Move, Command::ModeMove),
@@ -25,8 +19,7 @@ pub fn tool(mode: Mode) -> (Glyph, Command) {
     }
 }
 
-/// Why a boolean button cannot be pressed right now, or `None` when it can.
-/// Split out so the rule can be stated once and shown in the tooltip verbatim.
+/// Why a boolean button is disabled now, or `None`; shown verbatim in the tooltip.
 pub fn combine_blocked(selection_len: usize) -> Option<&'static str> {
     match selection_len {
         0 => Some("Select two or more shapes to combine them"),
@@ -42,7 +35,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
         let size = metric::RAIL - 8.0;
 
-        // Transform tools. Exactly one is in force at any moment.
+        // Transform tools; exactly one is in force.
         for mode in Mode::ALL {
             let (glyph, command) = tool(mode);
             let active = app.mode == mode;
@@ -57,12 +50,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
         separator(ui);
 
-        // The section plane, in the slot the handle-frame toggle used to hold
-        // (issue 100). It sits with the tools rather than with the view state
-        // at the foot of the rail because it is used like one: a plane is put
-        // where the cut is wanted and then dragged, which is a gesture in the
-        // viewport and not a switch. It still only cuts the picture, never the
-        // model (issue 71).
+        // The section plane, in the old handle-frame slot (issue 100): used like a tool, placed and
+        // dragged in the viewport. It only cuts the picture (issue 71).
         let sectioned = app.scene.settings.section.enabled;
         let shortcut = app.keymap.shortcut_text(Command::ToggleSection);
         if icon::button(ui, Glyph::Section, size, sectioned, true)
@@ -72,8 +61,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.run(Command::ToggleSection);
         }
 
-        // The measure tool: a mode of its own, so it takes the active fill while
-        // it holds the pointer, and clicks read distances rather than selecting.
+        // The measure tool is a mode, so it takes the active fill while it holds the pointer.
         let measuring = app.measure.active;
         let shortcut = app.keymap.shortcut_text(Command::MeasureTool);
         if icon::button(ui, Glyph::Measure, size, measuring, true)
@@ -85,9 +73,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 
         separator(ui);
 
-        // Booleans are momentary actions, not modes, so they never take the
-        // active fill -- they dim instead when the selection cannot be
-        // combined, and say why.
+        // Booleans are actions, not modes: dimmed with a reason when the selection cannot be combined.
         let blocked = combine_blocked(app.selection.len());
         for (op, glyph) in [
             (GroupOp::Union, Glyph::Union),
@@ -113,8 +99,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         {
             app.run(Command::Group);
         }
-        // Patterns work with nothing selected too -- an empty one to drop shapes
-        // into -- so the button is always live.
+        // Patterns also work with nothing selected (an empty one), so the button is always live.
         if icon::button(ui, Glyph::Pattern, size, false, true)
             .on_hover_text(format!(
                 "{}  {}",
@@ -132,8 +117,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.run(Command::Delete);
         }
 
-        // View state sits at the foot of the rail, away from the tools: it
-        // changes what is drawn, never what is in the document.
+        // View state sits at the foot, away from the tools: it changes the drawing, not the document.
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 3.0);
             let grid = app.scene.settings.grid_visible;
@@ -161,8 +145,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     });
 }
 
-/// Group what is selected and give the group the operation the button names --
-/// one gesture for what was previously "group, then find the radio row".
+/// Group the selection with the operation the button names, in one gesture.
 fn combine(app: &mut App, op: GroupOp) {
     if let Some(why) = combine_blocked(app.selection.len()) {
         app.status = Status::Info(why.into());
@@ -206,8 +189,7 @@ mod tests {
 
     #[test]
     fn a_boolean_button_says_why_it_is_dimmed() {
-        // "Disabled with no explanation" is the failure this rule exists to
-        // prevent, so both blocked cases must carry a sentence.
+        // Both blocked cases must carry an explanation.
         assert!(combine_blocked(0).is_some());
         assert!(combine_blocked(1).is_some());
         assert_ne!(combine_blocked(0), combine_blocked(1), "both cases give the same unhelpful reason");

@@ -10,10 +10,8 @@ impl View {
         View { camera, centre, size, projection: Projection::of(camera, size) }
     }
 
-    /// The same rectangle seen from another camera. How a camera is changed,
-    /// since assigning to one would leave the projection behind -- see [`View`].
-    /// Only the tests move a camera without the application building the view
-    /// afresh from the scene's own, which is what every frame does.
+    /// The same rectangle from another camera, since assigning would leave the projection stale
+    /// (see [`View`]). Tests only.
     #[cfg(test)]
     pub fn with_camera(&self, camera: Camera) -> View {
         View { camera, centre: self.centre, size: self.size, projection: Projection::of(camera, self.size) }
@@ -23,9 +21,7 @@ impl View {
         self.camera
     }
 
-    /// Direction from the target towards the eye. The tests' way of putting a
-    /// shape between the camera and the origin; the renderer asks for
-    /// [`View::forward`] instead.
+    /// The direction from the target towards the eye, for tests; the renderer uses [`View::forward`].
     #[cfg(test)]
     pub fn offset_dir(&self) -> Vec3 {
         -self.projection.forward
@@ -44,9 +40,7 @@ impl View {
         (self.projection.right, self.projection.up)
     }
 
-    /// Pixels per world unit: the projection's whole scale, since it is
-    /// orthographic and one millimetre is the same number of pixels wherever it
-    /// sits in the frame.
+    /// Pixels per millimetre: the whole scale of an orthographic projection.
     pub fn pixels_per_mm(&self) -> f64 {
         self.projection.pixels_per_mm
     }
@@ -55,15 +49,11 @@ impl View {
 impl Projection {
     fn of(camera: Camera, size: egui::Vec2) -> Projection {
         let yaw = camera.yaw.to_radians();
-        // Straight up and straight down are reachable, so Top and Bottom are
-        // exact: at 89 degrees the side faces and the wall of a hole showed as
-        // a sliver, which is wrong in a view whose job is to show dimensions.
+        // Straight up and down are reachable, so Top and Bottom are exact rather than showing slivers.
         let pitch = camera.pitch.to_radians().clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
         let offset_dir = Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin());
         let forward = -offset_dir;
-        // Screen right comes from the yaw alone -- it is `forward x Z`
-        // normalised wherever that is defined, and it stays defined at the
-        // poles, where the yaw still says which way is up on the screen.
+        // Screen right from the yaw alone, which stays defined at the poles.
         let right = Vec3::new(-yaw.sin(), yaw.cos(), 0.0);
         let half_height = camera.distance * (camera.fov_deg.to_radians() / 2.0).tan();
         Projection {

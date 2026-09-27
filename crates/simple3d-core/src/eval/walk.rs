@@ -28,17 +28,15 @@ impl Evaluator {
 }
 
 impl Evaluator {
-    /// Walk the tree accumulating each node's world frame, its own mesh in world
-    /// space and its local bounding box. One pass, so the transforms the handles
-    /// use and the meshes picking uses can never disagree.
+    /// Walk the tree collecting each node's world frame, world mesh and local bounds in one pass, so
+    /// handles and picking can never disagree.
     pub(super) fn walk(&mut self, scene: &Scene, id: NodeId, parent: Xform, out: &mut Collected, cancel: &Cancel) {
         if cancel.is_cancelled() {
             return;
         }
         out.frames.insert(id, parent);
         let node = scene.node(id);
-        // The anchor shift happens in the node's own frame, before its rotation,
-        // so it composes on the right of the node's own transform.
+        // The anchor shift is in the node's own frame before rotation, so it composes on the right.
         let anchor_offset = match node.anchor {
             Anchor::Base => self.subtree(scene, id, cancel).anchor_offset,
             Anchor::Centre => Vec3::ZERO,
@@ -61,12 +59,7 @@ impl Evaluator {
                 }
                 out.meshes.insert(id, world);
             }
-            // A stored mesh: its own geometry in world space, so picking, the
-            // selection outline and the ghost display all reach it.
-            //
-            // An integration is one of those too (issue 113): a single node in
-            // this scene however much is inside it, picked, outlined and moved
-            // as one.
+            // A stored mesh or an integration (issue 113): its own world geometry, picked, outlined and moved as one.
             Body::Mesh { .. } | Body::Component { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 let inv =
@@ -82,19 +75,14 @@ impl Evaluator {
                 }
                 out.meshes.insert(id, world);
             }
-            // A split is walked as the group it behaves like: its pieces are
-            // its children, and the node itself outlines what they make.
+            // A split is walked like a group: its pieces are its children.
             Body::Group { .. } | Body::Split { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
-                // The group's own result, kept so the selection outline can draw
-                // the shape the group *is*. It stays in the parent's frame:
-                // `parent` is what `node_frames` records for this node, so the
-                // pair is enough to place it, and sharing the `Arc` with the
-                // subtree cache costs nothing.
+                // The group's result, kept for the selection outline, in the parent's frame (`node_frames`) and
+                // sharing the cache's `Arc`.
                 out.group_meshes.insert(id, subtree.mesh.clone());
                 if let Some((lo, hi)) = subtree.mesh.bounds() {
-                    // A group's mesh is already in its parent's frame, so undo
-                    // the node's own transform to get its local box.
+                    // The group's mesh is in its parent's frame, so undo the node's transform for its local box.
                     let inv = Xform::from_pos_rot_scale(
                         node.position,
                         node.rotation,
@@ -103,10 +91,8 @@ impl Evaluator {
                     .inverse();
                     let (a, b) = (inv.point(lo), inv.point(hi));
                     out.local_bounds.insert(id, (a.min(b), a.max(b)));
-                    // World bounds are measured over the transformed *points*,
-                    // not by transporting the box: rotating a box's corners and
-                    // taking their extent would report a group under an angled
-                    // ancestor as bigger than it is.
+                    // World bounds from the transformed points, not a transported box, which would overstate an
+                    // angled group's size.
                     if let Some(bounds) = bounds_of(subtree.mesh.positions.iter().map(|&p| parent.point(p))) {
                         out.world_bounds.insert(id, bounds);
                     }
@@ -131,10 +117,7 @@ impl Evaluator {
                         out.world_bounds.insert(id, bounds);
                     }
                 }
-                // The whole repeated mesh in world space, so a click on any copy
-                // -- not just the original the child sits at -- selects the
-                // pattern. The child meshes are still collected below, so the
-                // original copy also reaches the child that draws it.
+                // The whole repeated mesh is pickable, so clicking any copy selects the pattern.
                 let world = self.world_mesh(id, &subtree.mesh, parent, None);
                 out.meshes.insert(id, world);
                 for &child in &node.children {

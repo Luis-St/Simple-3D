@@ -1,4 +1,4 @@
-//! The nearest point on an edge, and when a drag is asking to snap at all.
+//! The nearest point on a line, and whether a drag is asking to snap.
 
 use super::*;
 use simple3d_core::config::SnapMode;
@@ -6,19 +6,9 @@ use simple3d_core::keymap::Command;
 use simple3d_geom::Vec3;
 
 impl App {
-    /// The point on the nearest *line* -- a body's edge, the mark a principal
-    /// plane leaves across it, or a world axis -- for a pointer that is near one
-    /// but not near any of the notable points on it (issue 78).
-    ///
-    /// Edges come from the same feature list, which carries each edge's two ends
-    /// beside its midpoint, so they need no second pass over the geometry. The
-    /// axes are lines in their own right: a point on one is as real a place to
-    /// measure from as a corner is, and offering only the handful of places
-    /// where an axis meets something left the rest of it -- most of it -- with
-    /// nothing to catch. The plane marks are the same argument on the surface:
-    /// where the axis itself runs through the material and is not drawn, the
-    /// mark is what the picture puts there, and it is what a pointer over the
-    /// body is aiming at.
+    /// The point on the nearest line (a body edge, a plane mark, or a world axis) for a pointer near
+    /// one but not near a notable point on it (issue 78). Edges come from the feature list; axes and
+    /// plane marks are measurable lines in their own right.
     pub fn nearest_line_point(
         &self,
         view: &crate::view::View,
@@ -42,42 +32,29 @@ impl App {
                     consider(a, b, crate::snap::FeatureKind::Edge);
                 }
             }
-            // The marks the principal planes leave on the surface. They are
-            // lines on the body, drawn in the colour of the axis whose plane
-            // made them, and a measurement along one -- how far along this face
-            // is the plane through zero -- is exactly what they are read for.
+            // The principal-plane marks on the surface, which are read for exactly this kind of measurement.
             for &(a, b) in &snaps.marks {
                 consider(a, b, crate::snap::FeatureKind::PlaneMark);
             }
         }
-        // As far as the axes are actually drawn, so nothing is caught out where
-        // there is no line to see.
+        // Only as far as the axes are drawn.
         let reach = crate::render::grid_radius(view);
         for (a, b) in crate::snap::axis_lines(self.scene.settings.axes_visible, reach) {
             consider(a, b, crate::snap::FeatureKind::Axis);
         }
-        // Nearest first, and the nearest one the picture actually shows wins.
-        //
-        // Every one of these is a line that stops where the drawing stops. An
-        // axis is cut out of the material it runs through and covered by whatever
-        // is in front of it; an edge on the far side of a solid, and a plane mark
-        // on the back of one, are behind that solid however near the pointer
-        // their projection lands. Catching them anyway is what made the tool jump
-        // to lines inside the object, which is the one thing no line on screen
-        // does.
+        // Nearest first, and the nearest visible one wins; hidden edges, marks and axis stretches once
+        // made the tool jump to lines inside the object.
         near.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
         near.into_iter().find(|&(at, kind, _)| match kind {
-            // The axis keeps its own question in every display mode: wireframe
-            // fills nothing and hides nothing, but the stretch inside a body is
-            // still cut out of the line there.
+            // Axes keep their own visibility test in every mode, since their stretch inside a body is cut
+            // out even in wireframe.
             crate::snap::FeatureKind::Axis => self.in_clear_view(view, at),
             _ => self.shows(view, at),
         })
     }
 
-    /// Whether geometry snapping is being asked for right now (issue 68): always,
-    /// never, or only while the snap key is held. `key_down` answers whether a
-    /// toolkit key is currently pressed, which only the viewport can see.
+    /// Whether geometry snapping is requested now (issue 68): always, never, or while the key is held.
+    /// `key_down` reports toolkit keys, which only the viewport can see.
     pub fn geometry_snap_wanted(&self, key_down: impl Fn(egui::Key) -> bool, mods: egui::Modifiers) -> bool {
         match self.settings.geometry_snap {
             SnapMode::Never => false,
@@ -86,11 +63,7 @@ impl App {
         }
     }
 
-    /// Whether holding Ctrl is how geometry snapping is asked for -- as it is
-    /// by default (issue 77). Ctrl also resizes a face about its centre, and a
-    /// face pulled onto another body with the snap key held then moved its
-    /// opposite face as well: one key meaning both at once. Where the two
-    /// collide the snap has it, since that is what the key was bound for.
+    /// Whether Ctrl is the snap key (the default, issue 77); then it wins over Ctrl's symmetric resize.
     pub fn snap_holds_ctrl(&self) -> bool {
         self.settings.geometry_snap == SnapMode::WhileHeld
             && self.keymap.binding(Command::SnapToGeometry).is_some_and(|chord| chord.ctrl)

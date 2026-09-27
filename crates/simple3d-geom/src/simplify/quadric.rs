@@ -1,34 +1,21 @@
 //! The quadric that says what a point costs.
 //!
-//! Garland and Heckbert's measure: every triangle of the original surface is a
-//! plane, and the error of putting a vertex at `v` is the sum of the squared
-//! distances from `v` to the planes of the triangles that met at the vertices
-//! it replaces. That sum is a quadratic form, so it can be *accumulated*: the
-//! cost of a vertex that has already swallowed two hundred triangles is still
-//! ten numbers, and the plane those triangles lay in is remembered long after
-//! the triangles themselves are gone. That is what separates this from
-//! collapsing the shortest edge -- a long edge across a flat face is free, and a
-//! short one across a corner is not.
-//!
-//! Symmetric, so ten of the sixteen entries are the whole matrix.
+//! Garland and Heckbert's measure: the cost of a vertex at `v` is the sum of squared distances to
+//! the original planes it stands for. It accumulates as a quadratic form, so the planes are
+//! remembered after their triangles are gone: a long edge across a flat face collapses free, a
+//! short one across a corner does not. Symmetric, so ten entries suffice.
 
 use crate::vec3::Vec3;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Quadric {
-    /// xx, xy, xz, xw, yy, yz, yw, zz, zw, ww -- the upper triangle, read
-    /// across.
+    /// xx, xy, xz, xw, yy, yz, yw, zz, zw, ww: the upper triangle, row by row.
     m: [f64; 10],
 }
 
 impl Quadric {
-    /// The quadric of the plane through `at` with normal `n`, weighted by the
-    /// area of the triangle it came from.
-    ///
-    /// Area-weighted because a mesh is not tessellated evenly: a face split
-    /// into a thousand slivers would otherwise outvote the big flat one beside
-    /// it a thousand times over, and the simplification would eat the flat face
-    /// to keep the slivers.
+    /// The quadric of the plane through `at` with normal `n`, weighted by triangle area so slivers do
+    /// not outvote large flat faces.
     pub(crate) fn plane(n: Vec3, at: Vec3, weight: f64) -> Quadric {
         let d = -n.dot(at);
         let (a, b, c) = (n.x, n.y, n.z);
@@ -54,10 +41,8 @@ impl Quadric {
         }
     }
 
-    /// What it costs to put a vertex here: never negative in exact arithmetic,
-    /// and clamped because in floating point a point exactly on every plane can
-    /// come out a hair below zero and a negative cost would sort before the
-    /// free collapses.
+    /// The cost of a vertex here, clamped at zero since rounding can go slightly negative and would
+    /// sort before free collapses.
     pub(crate) fn error(&self, v: Vec3) -> f64 {
         let [xx, xy, xz, xw, yy, yz, yw, zz, zw, ww] = self.m;
         let e = xx * v.x * v.x
@@ -73,20 +58,12 @@ impl Quadric {
         e.max(0.0)
     }
 
-    /// Where this quadric is smallest, when it has a single answer.
-    ///
-    /// `None` when the system is singular, which is the ordinary case rather
-    /// than a failure: a vertex in the middle of a flat face is equally good
-    /// anywhere on that plane, and one on a straight crease is equally good
-    /// anywhere along it. The caller then picks between the ends of the edge
-    /// and its middle, which are the three answers that cannot drift away from
-    /// the surface.
+    /// Where this quadric is smallest, if unique. `None` for a singular system is normal (on a flat
+    /// face or straight crease); the caller then picks among the edge's ends and middle.
     pub(crate) fn optimal(&self, scale: f64) -> Option<Vec3> {
         let [xx, xy, xz, xw, yy, yz, yw, zz, zw, _] = self.m;
         let det = xx * (yy * zz - yz * yz) - xy * (xy * zz - yz * xz) + xz * (xy * yz - yy * xz);
-        // Scaled against the size of the matrix's own entries: a determinant of
-        // 1e-9 is a well-conditioned system on a shape measured in microns and
-        // noise on one measured in metres.
+        // Judged against the entries' scale, so the threshold works for microns and metres alike.
         if det.abs() <= 1e-10 * scale {
             return None;
         }
@@ -97,7 +74,7 @@ impl Quadric {
         Some(Vec3::new(x / det, y / det, z / det))
     }
 
-    /// How big the entries are, for the determinant to be judged against.
+    /// The entries' magnitude, for judging the determinant.
     pub(crate) fn scale(&self) -> f64 {
         let [xx, _, _, _, yy, _, _, zz, _, _] = self.m;
         (xx + yy + zz).abs().max(1e-12)

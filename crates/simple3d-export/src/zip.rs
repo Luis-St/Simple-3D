@@ -1,12 +1,6 @@
-//! A minimal store-only ZIP writer, just enough for the OPC package a 3MF file
-//! is (spec section 9).
+//! A minimal ZIP writer for the OPC package a 3MF is (spec section 9), stored or deflated.
 //!
-//! Hand-written rather than pulled in as a dependency: the whole archive is
-//! three small XML parts, "stored" is a valid ZIP compression method that every
-//! reader supports, and the alternative is a compression crate and its
-//! transitive tree inside a binary that must stay self-contained. The 3MF
-//! specification permits stored entries; the resulting file is larger than a
-//! deflated one, which for three XML parts is not worth a dependency.
+//! Hand-written to keep the binary self-contained without a compression crate.
 
 /// CRC-32 (IEEE), computed with a table built on first use.
 fn crc32(data: &[u8]) -> u32 {
@@ -37,8 +31,7 @@ fn crc_table() -> &'static [u32; 256] {
 struct Entry {
     name: String,
     crc: u32,
-    /// The entry as it was handed in, and as it is in the archive. The two are
-    /// the same for a stored entry.
+    /// The entry's size as handed in and as stored; equal for a stored entry.
     size: u32,
     stored_size: u32,
     method: u16,
@@ -66,14 +59,10 @@ impl ZipWriter {
         self.write(name, data, None)
     }
 
-    /// Add an entry compressed (issue 105's other half). The checksum and the
-    /// uncompressed size are still of the *original* data, which is what a
-    /// reader checks the inflated bytes against.
+    /// Add an entry compressed (issue 105); the checksum and size are of the original data.
     pub fn add_deflated(&mut self, name: &str, data: &[u8]) {
         let compressed = crate::deflate::deflate(data);
-        // Never larger than storing it: a tiny part -- the relationships XML --
-        // can come out bigger compressed than it went in, and there is no
-        // reason to write the worse of the two.
+        // Never larger than storing: tiny parts can grow when compressed.
         if compressed.len() < data.len() {
             self.write(name, data, Some(&compressed));
         } else {
@@ -93,8 +82,7 @@ impl ZipWriter {
         self.buffer.extend_from_slice(&20u16.to_le_bytes()); // version needed
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // flags
         self.buffer.extend_from_slice(&method.to_le_bytes()); // 0 stored, 8 deflated
-                                                              // A fixed timestamp, so exporting the same scene twice produces
-                                                              // byte-identical files -- the same reason the evaluator is deterministic.
+                                                              // A fixed timestamp, so identical scenes export byte-identical files.
         self.buffer.extend_from_slice(&0u16.to_le_bytes()); // time
         self.buffer.extend_from_slice(&0x21u16.to_le_bytes()); // date: 1980-01-01
         self.buffer.extend_from_slice(&crc.to_le_bytes());
@@ -164,8 +152,7 @@ mod tests {
         let bytes = zip.finish();
 
         assert_eq!(&bytes[0..4], &0x0403_4b50u32.to_le_bytes());
-        // The end-of-central-directory record is the last 22 bytes when there is
-        // no archive comment, and a reader finds everything else from it.
+        // Without a comment, the end-of-central-directory record is the last 22 bytes.
         let eocd = &bytes[bytes.len() - 22..];
         assert_eq!(&eocd[0..4], &0x0605_4b50u32.to_le_bytes());
         assert_eq!(u16::from_le_bytes([eocd[10], eocd[11]]), 2, "entry count");

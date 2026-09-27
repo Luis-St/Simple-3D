@@ -7,8 +7,7 @@ impl Keymap {
         self.bindings.get(&command)
     }
 
-    /// The label to show wherever a shortcut appears -- menus, tooltips, help.
-    /// Always the *current* binding, never a hardcoded string.
+    /// The label for a shortcut anywhere it appears: always the current binding.
     pub fn shortcut_text(&self, command: Command) -> String {
         self.bindings.get(&command).map(|c| c.to_string()).unwrap_or_default()
     }
@@ -17,16 +16,9 @@ impl Keymap {
         self.bindings.iter().find(|(_, c)| *c == chord).map(|(k, _)| *k)
     }
 
-    /// What a key press fires, given everything held down at that moment.
-    ///
-    /// The longest chord fully satisfied wins, so with Q and W already down,
-    /// pressing E fires `Q+W+E` rather than whatever `E` alone is bound to. Only
-    /// a chord containing the key just pressed is considered: a combination
-    /// fires on the press that completes it, not again on every key afterwards.
-    ///
-    /// A key that is *part* of a longer combination still fires its own binding
-    /// on its own press -- nothing can know a longer one is coming -- so a
-    /// combination is worth building out of keys that are otherwise free.
+    /// What a key press fires given everything held: the longest satisfied chord containing the
+    /// pressed key, so Q+W then E fires `Q+W+E`. A key part of a longer combination still fires its own
+    /// binding on its own press, so combinations are best built from otherwise free keys.
     pub fn command_for_press(
         &self,
         pressed: &str,
@@ -43,14 +35,12 @@ impl Keymap {
             .map(|(command, _)| *command)
     }
 
-    /// Which command already holds `chord`, ignoring `command` itself. The
-    /// keymap editor names it rather than silently overwriting.
+    /// Which command already holds `chord`, besides `command`; the editor names it rather than overwriting.
     pub fn conflict(&self, command: Command, chord: &Chord) -> Option<Command> {
         self.bindings.iter().find(|(k, c)| **k != command && *c == chord).map(|(k, _)| *k)
     }
 
-    /// Assign a binding. Refuses and names the holder on a conflict; the caller
-    /// then offers to reassign (call again with `force`) or cancel.
+    /// Assign a binding, refusing on conflict with the holder's name; the caller may retry with `force`.
     pub fn set(&mut self, command: Command, chord: Chord, force: bool) -> Result<(), Command> {
         if let Some(holder) = self.conflict(command, &chord) {
             if !force {
@@ -71,8 +61,7 @@ impl Keymap {
         let preset = Keymap::from_preset(self.preset);
         match preset.bindings.get(&command) {
             Some(chord) => {
-                // Clear whoever holds it now, so the reset cannot introduce a
-                // conflict of its own.
+                // Clear the current holder, so the reset cannot create a conflict.
                 if let Some(holder) = self.conflict(command, chord) {
                     self.bindings.remove(&holder);
                 }
@@ -92,8 +81,7 @@ impl Keymap {
         *self = Keymap::from_preset(preset);
     }
 
-    /// Commands sharing a chord. Should always be empty; used by tests and as a
-    /// sanity check when importing a hand-edited keymap file.
+    /// Commands sharing a chord; should be empty. For tests and checking imported keymaps.
     pub fn self_conflicts(&self) -> Vec<(Command, Command)> {
         let mut out = Vec::new();
         let entries: Vec<(&Command, &Chord)> = self.bindings.iter().collect();

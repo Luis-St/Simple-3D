@@ -1,10 +1,8 @@
-//! The watertightness check that runs before anything is written, so a
-//! model a slicer would refuse is refused here first.
+//! The watertightness check before writing, so a model a slicer would refuse is refused here first.
 
 use simple3d_geom::Mesh;
 
-/// Check a mesh is fit to write: closed, edge-manifold, consistently wound, and
-/// with normals facing outward. Returns one description per problem found.
+/// Check a mesh is closed, edge-manifold, consistently and outward wound; one message per problem.
 pub fn verify(mesh: &Mesh) -> Vec<String> {
     let mut problems = Vec::new();
     if mesh.triangle_count() == 0 {
@@ -30,8 +28,7 @@ pub fn verify(mesh: &Mesh) -> Vec<String> {
     problems
 }
 
-/// Six times the signed volume is the sum of the triangles' scalar triple
-/// products; positive means the winding is outward for a closed mesh.
+/// Six times the signed volume; positive means outward winding for a closed mesh.
 pub fn signed_volume(mesh: &Mesh) -> f64 {
     let mut total = 0.0;
     for tri in &mesh.indices {

@@ -1,10 +1,5 @@
-//! The visual language: one palette, one set of metrics, applied once at
-//! startup so no widget has to name a colour of its own.
-//!
-//! The tokens below are the whole vocabulary. Amber is selection, cyan is
-//! measurement, red is destruction -- and none of the three collides with the
-//! X/Y/Z axis colours, which is the reason selection is not blue like every
-//! other modeller's.
+//! The visual language: one palette and one set of metrics applied at startup. Amber is selection, cyan
+//! measurement, red destruction; selection is not blue so it never collides with the axis colours.
 
 mod palette;
 pub use palette::{font, metric, token, PAINT_PRESETS};

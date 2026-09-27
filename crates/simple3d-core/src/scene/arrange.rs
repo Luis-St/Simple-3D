@@ -2,15 +2,9 @@
 
 use super::*;
 impl Scene {
-    /// Move several nodes under `new_parent`, starting at `index` and keeping
-    /// the order they are given in.
-    ///
-    /// Not a loop over `reparent` at the call site, because each single move
-    /// would shift the index the next one was measured against -- and because
-    /// the whole drag has to be refused as one when any part of it is illegal,
-    /// rather than half-applied and then rejected. A node whose own ancestor is
-    /// also being moved is left out: it travels inside it, and moving it as
-    /// well would tear it out of the parent that carries it.
+    /// Move several nodes under `new_parent` from `index`, in the given order. One call, since single
+    /// moves would shift each other's indices and an illegal drag must be refused whole. Nodes whose
+    /// ancestor also moves are skipped, travelling inside it.
     pub fn reparent_many(&mut self, ids: &[NodeId], new_parent: NodeId, index: usize) -> Result<(), &'static str> {
         if !self.nodes.contains_key(&new_parent) {
             return Err("no such node");
@@ -36,8 +30,7 @@ impl Scene {
                 moving.push(id);
             }
         }
-        // Index is interpreted against the target's child list *before* the
-        // move, so dragging within one parent lands where the indicator showed.
+        // The index refers to the target's children before the move, matching the indicator.
         let mut index = index;
         for &id in &moving {
             if self.nodes[&new_parent].children.iter().position(|&c| c == id).is_some_and(|old| old < index) {
@@ -47,11 +40,8 @@ impl Scene {
         for &id in &moving {
             self.unlink(id);
         }
-        // Something dropped into a collection arrives with a row, and something
-        // dragged out of one loses the mark it no longer means anything to: a
-        // collection hides its *pieces*, and a node the user carried in by hand
-        // is not one of them -- vanishing on release is not a move anybody aimed
-        // for (issue 82).
+        // Dropped into a collection gives a row; dragged out drops the mark, since a hand-carried node is
+        // not a hidden piece (issue 82).
         let into_collection = self.is_collection(new_parent);
         for (offset, &id) in moving.iter().enumerate() {
             self.link(id, new_parent, index + offset);
@@ -62,8 +52,7 @@ impl Scene {
         Ok(())
     }
 
-    /// Move a node up or down among its siblings. Order is semantic inside a
-    /// difference group, so this has to be user-controllable.
+    /// Move a node up or down among its siblings; order matters in a difference.
     pub fn reorder(&mut self, id: NodeId, delta: isize) -> bool {
         let Some(parent) = self.nodes.get(&id).and_then(|n| n.parent) else { return false };
         let children = &mut self.nodes.get_mut(&parent).unwrap().children;
@@ -78,13 +67,8 @@ impl Scene {
         true
     }
 
-    /// Wrap the selection in a new group, preserving relative positions and
-    /// order (spec section 7.2: "the single most-used structural operation").
-    ///
-    /// Only the topmost selected nodes are moved -- selecting a group and one of
-    /// its children groups the group, not both. The new group's own position
-    /// stays at the origin and children keep their coordinates, which is what
-    /// keeps relative positions exactly unchanged.
+    /// Wrap the selection in a new group, keeping relative positions and order (spec section 7.2).
+    /// Only topmost nodes move; the group stays at the origin so children keep their coordinates.
     pub fn group_selection(&mut self, selection: &[NodeId]) -> Option<NodeId> {
         let mut tops: Vec<NodeId> = selection
             .iter()
@@ -95,8 +79,7 @@ impl Scene {
         if tops.is_empty() {
             return None;
         }
-        // Group into the first selected node's parent, at its position, keeping
-        // the tree's own order rather than click order.
+        // Into the first selected node's parent at its position, in tree order.
         let parent = self.nodes[&tops[0]].parent?;
         let order = self.depth_first();
         tops.sort_by_key(|id| order.iter().position(|o| o == id).unwrap_or(usize::MAX));

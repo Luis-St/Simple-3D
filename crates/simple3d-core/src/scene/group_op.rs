@@ -3,8 +3,7 @@
 use serde::{Deserialize, Serialize};
 use simple3d_geom::BooleanOp;
 
-/// Where a node's origin sits (spec section 3.1). Changing it moves the origin,
-/// never the shape.
+/// Where a node's origin sits (spec section 3.1); changing it moves the origin, never the shape.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Anchor {
@@ -33,16 +32,8 @@ pub enum GroupOp {
     Difference,
     Intersection,
     Hull,
-    /// No boolean at all: the children side by side, each still a body of its
-    /// own -- what a split does with its pieces, for a group of shapes that
-    /// were never one.
-    ///
-    /// Made for a file of several objects. A 3MF holding a model's colours as
-    /// separate objects has them meeting along whole faces, and a union of two
-    /// bodies that share a face is the kernel's worst case: the parts of one
-    /// imported model took minutes to union, the union came out non-manifold
-    /// all the same, and the group fell back to showing them side by side with
-    /// an error on it -- which is where it should have started.
+    /// No boolean: children side by side, each its own body. Made for multi-object files whose parts
+    /// share faces, where a union is the kernel's slowest case and still fails.
     Assembly,
 }
 
@@ -60,22 +51,18 @@ impl GroupOp {
         }
     }
 
-    /// Difference is the only operation where child order carries meaning.
+    /// Difference is the only operation where child order matters.
     pub fn order_matters(self) -> bool {
         self == GroupOp::Difference
     }
 
-    /// Whether the result still contains its operands as pieces that can be
-    /// taken out of it. A union is its operands standing side by side, and an
-    /// assembly is nothing else; a difference, an intersection and a hull are
-    /// one new surface, and a child of one of those is not a solid that exists
-    /// in the result at all -- so it can never be a body of its own in an
-    /// export.
+    /// Whether the result still contains its operands as separable pieces: union and assembly yes;
+    /// difference, intersection and hull make one new surface, so their children cannot be export bodies.
     pub fn separable(self) -> bool {
         matches!(self, GroupOp::Union | GroupOp::Assembly)
     }
 
-    /// The kernel's operation, and `None` for the one group that runs none.
+    /// The kernel's operation, or `None` for the one group that runs none.
     pub fn to_geom(self) -> Option<BooleanOp> {
         match self {
             GroupOp::Union => Some(BooleanOp::Union),

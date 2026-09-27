@@ -7,9 +7,8 @@ use simple3d_core::scene::{Body, GroupOp};
 use simple3d_geom::reassemble::{Part, Shape};
 
 impl App {
-    /// Whether there is an answer on screen that is worth putting in the
-    /// document: one the numbers asked for, about a mesh that is still there,
-    /// and that is not simply the mesh over again.
+    /// Whether the on-screen answer is worth applying: current, about a mesh that still exists, and
+    /// not just the mesh again.
     pub(crate) fn reassemble_ready(&self) -> bool {
         let Some(tool) = self.reassemble_tool.as_ref() else { return false };
         let Some(found) = tool.found.as_ref() else { return false };
@@ -19,19 +18,9 @@ impl App {
             && found.assembly.objects() > 0
     }
 
-    /// Stand the objects that were found where the mesh stood (issue 108).
-    ///
-    /// The mesh's own node becomes the group holding them, rather than being
-    /// replaced by a fresh one: it keeps its name, its place in the tree, its
-    /// transform and its colour, so nothing that pointed at it has to be told
-    /// anything.
-    ///
-    /// A group even for a mesh that turned out to be one box. Folding the box
-    /// into the node itself would mean composing the fit's own frame into the
-    /// node's transform, and a node carries a scale: a rotated fit composed
-    /// with a scale that is not the same on every axis is not a position, a
-    /// rotation and a scale any more, and there would be nowhere to put the
-    /// difference. The group keeps the two apart, which is what a group is for.
+    /// Place the found objects where the mesh stood (issue 108). The mesh's node becomes their group,
+    /// keeping its name, place, transform and colour. Always a group, even for one box, since folding a
+    /// rotated fit into a non-uniformly scaled node's transform is not representable.
     pub fn apply_reassemble(&mut self) {
         if !self.reassemble_ready() {
             return;
@@ -49,9 +38,7 @@ impl App {
             self.status = Status::Warning(format!("{name} could not be taken apart"));
             return;
         }
-        // One group in the whole assembly with nothing left over *is* the node
-        // standing over it, and wrapping it in a second group would be a row of
-        // the outliner that holds one row and says nothing.
+        // One group and no leftover is the node itself; a second wrapping group would say nothing.
         let flat = assembly.groups.len() == 1 && assembly.rest.is_none();
         let mut at = 0;
         for group in &assembly.groups {
@@ -81,28 +68,21 @@ impl App {
         self.touch();
         self.settings.last_reassemble = tool.plan;
         self.persist();
-        // Not `way_back`, which names the command that joins a split's pieces
-        // back together: a reassembly leaves no split, and the way back from
-        // one is the undo step it has just taken.
+        // Not `way_back` (Join for splits): a reassembly's way back is the undo step.
         let undo = self.keymap.shortcut_text(simple3d_core::keymap::Command::Undo);
         let back =
             if undo.is_empty() { "undo puts the mesh back".to_string() } else { format!("{undo} puts the mesh back") };
         self.status = Status::Info(format!("Reassembled {name} into {} -- {back}", tally(assembly)));
     }
 
-    /// Put one body into the tree: the shape it was recognised as, or its
-    /// triangles where it was recognised as nothing.
+    /// Put one body into the tree: its recognised shape, or its triangles.
     fn place_part(&mut self, part: &Part, base: &str, parent: NodeId, index: usize) {
         let id = match recipe(part.shape) {
             Some((type_id, params)) => {
                 let Some(id) = self.scene.add_primitive(type_id, parent, index) else { return };
                 if let Some(node) = self.scene.get_mut(id) {
                     node.body = Body::Primitive { type_id: type_id.to_string(), params };
-                    // The count the body was tessellated with, not the
-                    // document's default: rebuilt at thirty-two segments a
-                    // twelve-segment cylinder is a wider solid than the
-                    // triangles described, and a part reassembled to be
-                    // measured would measure wrong.
+                    // The body's own segment count, not the default, or the rebuilt solid would differ.
                     node.segments = part.shape.segments();
                 }
                 id
@@ -118,7 +98,7 @@ impl App {
         }
     }
 
-    /// Put the tool away. Nothing to undo: the document was never written to.
+    /// Put the tool away; nothing to undo, since the document was never written.
     pub fn cancel_reassemble_tool(&mut self) {
         let Some(tool) = self.reassemble_tool.take() else { return };
         if let Some(job) = &tool.job {
@@ -127,12 +107,8 @@ impl App {
     }
 }
 
-/// The registry shape a recognised body is rebuilt as, and the parameters to
-/// build it from -- or nothing for a body that is staying a mesh.
-///
-/// Started from the shape's own defaults and written over, so a parameter the
-/// recognition has nothing to say about -- a sweep, a measuring convention --
-/// comes out as the shape would come out of the Add menu rather than as zero.
+/// The registry shape and parameters to rebuild a recognised body, or nothing for a mesh. Starts
+/// from the shape's defaults so unrecognised parameters match the Add menu rather than zero.
 fn recipe(shape: Shape) -> Option<(&'static str, Params)> {
     let length = ParamValue::Length;
     let (type_id, values): (&str, Vec<(&str, ParamValue)>) = match shape {
@@ -166,8 +142,7 @@ fn recipe(shape: Shape) -> Option<(&'static str, Params)> {
                 ("sides", ParamValue::Count(sides)),
                 ("diameter", length(diameter)),
                 ("height", length(height)),
-                // Across corners, which is the diameter the fit measured: the
-                // circle the ring of vertices sits on.
+                // Across corners, the diameter the fit measured.
                 ("measure", ParamValue::Choice(0)),
             ],
         ),

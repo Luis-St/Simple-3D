@@ -1,5 +1,4 @@
-//! The scatter's builder: a card for each part in use and the chips that add
-//! the rest (issue 79).
+//! The scatter's builder: a card per part in use and chips adding the rest (issue 79).
 
 use super::*;
 use crate::app::App;
@@ -12,7 +11,7 @@ use simple3d_core::pattern;
 use simple3d_core::primitive::Params;
 use simple3d_core::scene::NodeId;
 
-/// What one of the builder's controls asked for. Acted on after it is drawn.
+/// What a builder control asked for, acted on after drawing.
 #[derive(Clone, Copy)]
 enum Ask {
     Add(Part),
@@ -22,9 +21,8 @@ enum Ask {
     Shuffle,
 }
 
-/// The scatter, built part by part: a card for each part in use, the chips
-/// that add the rest, and -- once there is anything to scatter -- the seed,
-/// whether the original stays put, and whether the copies can meet.
+/// The scatter built part by part: cards, add chips, and once anything scatters, the seed, whether
+/// the original stays, and whether copies can meet.
 pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowStyle) {
     let Some(params) = app.scene.node(id).params().cloned() else { return };
     let unit = app.unit();
@@ -63,8 +61,7 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
             }
         });
     }
-    // What is left to add: the nudge and the size once each, and a turn while
-    // an axis is still without one.
+    // Left to add: the nudge and size once each, and a turn while an axis has none.
     let next_turn = TURN_ORDER.into_iter().map(Part::Turn).find(|turn| !shown.contains(turn));
     let addable: Vec<Part> = [Some(Part::Nudge), next_turn, Some(Part::Size)]
         .into_iter()
@@ -112,9 +109,7 @@ pub(crate) fn builder(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowSt
     }
 }
 
-/// The seed, and the button that steps it on: the same amounts, scattered
-/// another way. Typing numbers into a seed to find a scatter that looks right
-/// is clicking a button with extra steps.
+/// The seed and a button stepping it: the same amounts scattered another way.
 fn seed_row(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowStyle, ask: &mut Option<Ask>) {
     let Some(spec) = pattern::param_spec("noise_seed") else { return };
     let unit = app.unit();
@@ -144,22 +139,20 @@ fn seed_row(app: &mut App, ui: &mut egui::Ui, id: NodeId, style: RowStyle, ask: 
 /// How wide the Shuffle button is.
 const SHUFFLE: f32 = 64.0;
 
-/// One of the scatter's rows, under the name the builder gives it.
+/// One scatter row, under the builder's name for it.
 fn field(app: &mut App, ui: &mut egui::Ui, id: NodeId, key: &str, name: &str, style: RowStyle) {
     let Some(spec) = pattern::param_spec(key) else { return };
     let unit = app.unit();
     param_field_as(app, ui, &[id], id, spec, name, unit, style);
 }
 
-/// What a turn is about, as three chips. The axes that already have a turn of
-/// their own are greyed: a scatter holds one turn about each, and moving this
-/// one onto another's would be two turns about one axis.
+/// A turn's axis as three chips; axes with their own turn are greyed, one turn per axis.
 fn turn_axis_row(ui: &mut egui::Ui, scope: &str, axis: usize, shown: &[Part], ask: &mut Option<Ask>) {
     field_row(ui, "About", "", |ui| {
         for (other, name) in AXES.into_iter().enumerate() {
             let taken = other != axis && shown.contains(&Part::Turn(other));
             let chip = ui.add_enabled_ui(!taken, |ui| theme::choice(ui, other == axis, name)).inner;
-            // Named, so a test can find it. It senses nothing; the chip answers.
+            // Named for tests; the chip answers the pointer.
             ui.interact(chip.rect, turn_axis_id(scope, axis, other), egui::Sense::hover());
             if chip.clicked() && other != axis {
                 *ask = Some(Ask::Retarget(axis, other));
@@ -168,7 +161,7 @@ fn turn_axis_row(ui: &mut egui::Ui, scope: &str, axis: usize, shown: &[Part], as
     });
 }
 
-/// What one part currently comes to, in a few words.
+/// What one part comes to, in a few words.
 fn summary(part: Part, params: &Params, unit: simple3d_core::unit::Unit) -> String {
     use simple3d_core::unit::format_number;
     if !part.in_use(params) {
@@ -188,13 +181,8 @@ fn summary(part: Part, params: &Params, unit: simple3d_core::unit::Unit) -> Stri
     }
 }
 
-/// Whether the scatter can make two copies meet, said beside the numbers that
-/// did it.
-///
-/// Copies that meet are welded into one body -- a pattern unions them -- so a
-/// scatter that can close the gaps the rule leaves turns a deck of planks into
-/// a slab, and the only sign of it in the viewport is that the joints have
-/// gone.
+/// Warn beside the numbers when the scatter can make copies meet, which welds them and turns
+/// planks into a slab.
 fn crowding_note(app: &App, ui: &mut egui::Ui, id: NodeId, params: &Params) {
     let unit = app.unit();
     let Some(crowded) = app.pattern_content_size(id).and_then(|size| pattern::crowding(params, size)) else {

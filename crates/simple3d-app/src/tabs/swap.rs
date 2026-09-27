@@ -1,4 +1,4 @@
-//! Putting the document on screen away and bringing another out.
+//! Putting the on-screen document away and bringing another out.
 
 use super::*;
 use crate::app::App;
@@ -10,9 +10,7 @@ impl App {
         self.tabs.len()
     }
 
-    /// What the tab at `index` is called, and whether it has unsaved changes.
-    /// The active tab is answered from the live state on `App`, since the entry
-    /// in `tabs` is only a stand-in.
+    /// The tab's name and unsaved flag; the active tab is answered from `App`, since its entry is a stand-in.
     pub fn tab_summary(&self, index: usize) -> (String, bool) {
         if index == self.active {
             (document_name(self.path.as_deref()), self.unsaved())
@@ -22,20 +20,14 @@ impl App {
         }
     }
 
-    /// True when *any* open document has unsaved changes -- the question quit
-    /// has to ask, rather than only about the one on screen.
+    /// True when any open document has unsaved changes, as quitting must ask.
     pub fn any_unsaved(&self) -> bool {
         self.unsaved() || self.tabs.iter().enumerate().any(|(i, doc)| i != self.active && doc.unsaved())
     }
 
-    /// Lift the current document off `App`, leaving the fields that belong to a
-    /// document empty and the ones that belong to the window alone.
+    /// Lift the current document off `App`, clearing document fields and leaving window ones.
     pub(super) fn detach(&mut self) -> Document {
-        // The simplify tool writes its result straight into the document, so
-        // the document is put back as it was before it is stored away: a tab
-        // switched away from mid-preview would otherwise come back holding a
-        // simplification nobody accepted, with no undo step to take it off
-        // again (issue 106).
+        // Undo the simplify preview first, or the tab would return holding an unaccepted result (issue 106).
         self.cancel_simplify_tool();
         Document {
             scene: std::mem::replace(&mut self.scene, Scene::new()),
@@ -52,12 +44,7 @@ impl App {
         }
     }
 
-    /// Make `doc` the document the application is showing.
-    ///
-    /// Everything half-done belongs to the document that was on screen -- a
-    /// drag, a rename, a deletion waiting to be confirmed, a half-typed field --
-    /// so all of it is dropped rather than carried onto a model it was never
-    /// about.
+    /// Make `doc` the document on screen, dropping half-done interactions that belonged to the previous one.
     pub(super) fn attach(&mut self, doc: Document) {
         self.scene = doc.scene;
         self.history = doc.history;
@@ -74,9 +61,7 @@ impl App {
         self.after_switch();
     }
 
-    /// Put away everything that belonged to the model that was on screen, now
-    /// that another one is -- another document, or another component of the
-    /// same one (issue 113).
+    /// Clear everything tied to the previous model, after switching document or component (issue 113).
     pub(crate) fn after_switch(&mut self) {
         self.drag = None;
         self.grabbed = None;
@@ -88,26 +73,15 @@ impl App {
         self.pending_delete = None;
         self.camera_move = None;
         self.cube_spin = None;
-        // A measurement is about the model that was on screen, so it does not
-        // travel to the next one -- and neither does the tool holding the
-        // pointer. Clearing only the span left the crosshair armed over a
-        // document the user had just switched to, ready to eat their first
-        // click, which is not what putting the tool away means.
+        // The measure tool is put away too, or its crosshair would eat the first click in the new document.
         self.measure = crate::app::Measure::default();
         self.fields.clear();
         self.export_preview = Default::default();
-        // A split in flight is cutting the *other* document's shape and could
-        // never be applied to this one -- `poll_split` would refuse it on the
-        // tab it was started in -- so it is stopped here rather than left to
-        // finish work nothing will use. The window that starts one is modal, so
-        // there is never a tool open to put away as well.
+        // A split in flight is for the other document and could never apply here, so stop it.
         if let Some(job) = self.split_job.take() {
             job.cancel();
         }
-        // An import in flight was read *for* the document that was on screen,
-        // and `poll_import` would drop it on the tab it was started in -- so it
-        // is stopped here rather than left to finish reading a file nothing
-        // will use.
+        // An import in flight belongs to the other document, so stop it.
         if let Some(job) = self.import_job.take() {
             job.cancel();
         }
@@ -115,7 +89,7 @@ impl App {
         self.simplify_tool = None;
         self.reassemble_tool = None;
 
-        // Nothing cached about the model on screen survives a change of model.
+        // Nothing cached about the previous model survives.
         self.evaluation_generation += 1;
         self.scene_renderable = crate::render::Renderable::prepare_scene(&self.evaluated.mesh, &self.evaluated.ranges);
         self.node_renderables.clear();
@@ -123,9 +97,7 @@ impl App {
         self.renderable_key = u64::MAX;
         self.invalidate_image();
 
-        // Submit here rather than leaving `dirty` for the next frame, and as a
-        // supersede rather than an ordinary edit: an evaluation of the tab we
-        // just left would otherwise come back and be applied to this one.
+        // Submitted now as a supersede, or the left tab's evaluation would land on this one.
         self.worker.supersede(&self.scene);
         self.dirty = false;
     }

@@ -6,13 +6,8 @@ use crate::theme::token;
 use crate::view::View;
 use simple3d_geom::Vec3;
 
-/// The lay-out grips of the selected pattern, if it is one (issue 67).
-///
-/// Every kind offers its own: the spacing and the number of copies along each
-/// straight run, the radius and the span of a ring, the radius, rise and length
-/// of a helix, the radii of a spiral. A mirror offers none -- it has neither a
-/// distance nor a count -- and neither does a pattern whose numbers put every
-/// grip on its own origin, where the move manipulator already is.
+/// The selected pattern's lay-out grips (issue 67): spacing and counts, radii, spans, rises. None
+/// for a mirror or where every grip would sit on the origin.
 pub(crate) fn pattern_grips(app: &App) -> Vec<crate::app::PatternGrip> {
     match app.primary() {
         Some(id) => app.pattern_grips(id),
@@ -20,13 +15,8 @@ pub(crate) fn pattern_grips(app: &App) -> Vec<crate::app::PatternGrip> {
     }
 }
 
-/// Drag a pattern's grips to lay it out by eye. Returns whether the pointer is
-/// theirs this frame.
-///
-/// Each grip is its own widget, keyed by its label rather than its position in
-/// the list: dragging the "Copies" grip *adds* copies, which can add a "Spacing"
-/// grip beside it, and an index would shift out from under the drag that caused
-/// it.
+/// Drag a pattern's grips to lay it out by eye; returns whether the pointer is theirs. Keyed by
+/// label, since dragging "Copies" can add a "Spacing" grip and shift indices.
 pub(crate) fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
     let Some(id) = app.primary() else { return false };
     let mut owned = false;
@@ -38,13 +28,9 @@ pub(crate) fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &Vi
             .on_hover_text(grip.label);
         if response.hovered() || response.dragged() {
             ui.ctx().set_cursor_icon(match grip.turn {
-                // A turn is not a push or a pull, and there is no cursor for
-                // "round": the hand says the grip is held and the arc under it
-                // says which way it goes.
+                // No cursor means "round", so a turn shows the grabbing hand and its arc shows the direction.
                 Some(_) => egui::CursorIcon::Grabbing,
-                // Every other grip slides along a line, and the pointer says
-                // which line: an arrow across the screen for a run that lies
-                // across it, and up the screen for one that stands up.
+                // Other grips slide along a line, and the cursor follows that line's screen direction.
                 None => slide_cursor(screen_direction(view, grip.at, grip.dir)),
             });
         }
@@ -60,22 +46,16 @@ pub(crate) fn pattern_grips_interact(app: &mut App, ui: &mut egui::Ui, view: &Vi
     owned
 }
 
-/// Which way a world direction runs on screen, at `at`. A zero vector where the
-/// line does not project -- behind the eye, or edge on.
+/// A world direction's screen direction at `at`; zero where the line does not project.
 pub(crate) fn screen_direction(view: &View, at: Vec3, dir: Vec3) -> egui::Vec2 {
-    // A millimetre along the line is enough to take its bearing and short
-    // enough that the answer is about the line at `at` rather than about where
-    // it ends up.
+    // A millimetre along is enough for the bearing and local to `at`.
     match (view.project(at), view.project(at + dir)) {
         (Some((a, _)), Some((b, _))) => b - a,
         _ => egui::Vec2::ZERO,
     }
 }
 
-/// Draw the selected pattern's lay-out grips: a leader line from the centre out
-/// to each one, and a diamond on the grip itself. A span grip is drawn as an arc
-/// round the ring it sets instead, since what it measures is the turn and not a
-/// distance.
+/// Draw the pattern's grips: a leader line and diamond each, or an arc round the ring for a span.
 pub(crate) fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View) {
     for grip in pattern_grips(app) {
         let Some((at, _)) = view.project(grip.at) else { continue };
@@ -83,8 +63,7 @@ pub(crate) fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View
             Some((axis, zero, radius)) => {
                 let tangent = axis.cross(zero);
                 let mut arc: Vec<egui::Pos2> = Vec::new();
-                // The whole way round to the grip, in one-degree steps, so the
-                // arc shows the span the copies actually fill.
+                // The full span in one-degree steps, showing what the copies fill.
                 let end = grip.at - grip.from;
                 let span = end.dot(tangent).atan2(end.dot(zero)).to_degrees();
                 let span = if span <= 0.0 { span + 360.0 } else { span };
@@ -113,21 +92,10 @@ pub(crate) fn draw_pattern_grips(app: &App, painter: &egui::Painter, view: &View
     }
 }
 
-/// Orange dots where the rule would put a copy, while the creation tool is open
-/// on a pattern with nothing in it yet (issues 67, 96).
-///
-/// A pattern is *built* empty: the tool makes one out of the selection, and a
-/// selection of nothing makes a pattern with nothing in it. That pattern has no
-/// geometry, so there is nothing in the viewport to show what the rule is doing
-/// and the window reads as a set of numbers with no effect. The rule still has
-/// placements, and while the shape is missing they are the whole of what there
-/// is to show. The original is the one every other copy is a copy *of*, so it is
-/// the one drawn brightest.
+/// Dots where the rule would put copies while the tool is open on an empty pattern (issues 67, 96),
+/// since there is no geometry to show the rule; the original is brightest.
 pub(crate) fn draw_pattern_placements(app: &App, painter: &egui::Painter, view: &View) {
-    // The pointer over a stage in the tool: ring each copy the rule has made by
-    // the end of that stage (issue 79). Rings rather than dots, because the
-    // shapes themselves are drawn under them -- a dot on a copy is lost in it,
-    // and a ring round its origin reads as "this one" whatever the copy is.
+    // Hovering a stage rings each copy made by its end (issue 79); rings stay visible over the shapes.
     if let Some(stage) = app.pattern_tool_hover {
         for at in app.pattern_placements_through(stage) {
             let Some((screen, _)) = view.project(at) else { continue };
@@ -139,9 +107,7 @@ pub(crate) fn draw_pattern_placements(app: &App, painter: &egui::Painter, view: 
         return;
     }
     for (index, at) in app.pattern_placements().iter().enumerate() {
-        // Orthographic, so there is no behind-the-camera to test for: every
-        // placement lands somewhere, and the clip takes the ones off the
-        // picture.
+        // Orthographic, so every placement projects; the clip removes off-picture ones.
         let Some((screen, _)) = view.project(*at) else { continue };
         let (radius, colour) = if index == 0 {
             (5.0, crate::theme::token::ACCENT)

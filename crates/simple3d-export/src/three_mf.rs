@@ -3,8 +3,7 @@
 use super::*;
 use simple3d_geom::{tag_colour, Mesh};
 
-/// Trim a coordinate to a fixed number of decimals without floating-point
-/// noise, matching what the property editor shows the user.
+/// A coordinate trimmed to fixed decimals without float noise, as the property editor shows it.
 pub(crate) fn coord(v: f64) -> String {
     let mut s = format!("{v:.6}");
     if s.contains('.') {
@@ -21,18 +20,10 @@ pub(crate) fn coord(v: f64) -> String {
     s
 }
 
-/// The distinct colours the faces are painted, in the order they first appear,
-/// together with each triangle's index into that list -- one list per mesh, in
-/// the order the meshes were given. Index 0 is always the unpainted default, so
-/// an unpainted model yields a list of one and nothing downstream has to
-/// special-case it.
-///
-/// The table spans every mesh because the file has one colour group for the
-/// whole model: two objects painted the same colour name the same entry.
+/// The distinct face colours in first-seen order, and each triangle's index into them, per mesh.
+/// Index 0 is always the unpainted default. One table for all meshes, as the file has one colour group.
 pub(crate) fn colour_table(meshes: &[&Mesh]) -> (Vec<[u8; 3]>, Vec<Vec<usize>>) {
-    // The colour an unpainted surface is given in the file. 3MF has no "no
-    // colour" for a face inside a coloured object, so this is the neutral the
-    // viewport would have drawn.
+    // The colour unpainted faces get, since 3MF has no "no colour" inside a coloured object.
     const DEFAULT: [u8; 3] = [0x9A, 0xA4, 0xB2];
     let mut colours = vec![DEFAULT];
     let mut per_mesh = Vec::with_capacity(meshes.len());
@@ -53,7 +44,7 @@ pub(crate) fn colour_table(meshes: &[&Mesh]) -> (Vec<[u8; 3]>, Vec<Vec<usize>>) 
     (colours, per_mesh)
 }
 
-/// XML text escaping, for the one place a name the user typed reaches a file.
+/// XML text escaping, for user-typed names.
 pub(crate) fn escape_xml(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
@@ -63,8 +54,7 @@ pub(crate) fn escape_xml(text: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
-            // A control character is not valid XML 1.0 text at all; the file
-            // has to stay parseable whatever a node was called.
+            // Control characters are not valid XML 1.0 text, so they become spaces.
             c if (c as u32) < 0x20 && c != '\t' && c != '\n' && c != '\r' => out.push(' '),
             c => out.push(c),
         }
@@ -72,19 +62,13 @@ pub(crate) fn escape_xml(text: &str) -> String {
     out
 }
 
-/// The 3MF document for `parts`: one `<object>` each, one `<item>` each in the
-/// build, and one colour group for the model if anything in it is painted.
-///
-/// Object ids run 1..=n so a single-part model is written exactly as it always
-/// was, and the colour group takes the id after the last object -- it is
-/// emitted first all the same, because a resource has to be declared before the
-/// object that names it.
+/// The 3MF document for `parts`: one object and build item each, plus a colour group if painted.
+/// Object ids run 1..=n, the colour group takes the next id but is emitted first, as resources
+/// must precede their use.
 pub(crate) fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress<'_>) -> Result<Vec<u8>, ExportError> {
     let meshes: Vec<&Mesh> = parts.iter().map(|part| part.mesh).collect();
     let (colours, triangle_colour) = colour_table(&meshes);
-    // Only a painted model carries the materials extension: an unpainted one
-    // is written exactly as it was before colours existed, so nothing that
-    // reads plain 3MF has to cope with a namespace it does not need.
+    // Only painted models use the materials extension, so unpainted files stay plain 3MF.
     let painted = colours.len() > 1;
     let colour_group_id = parts.len() + 1;
     let total_vertices: usize = meshes.iter().map(|m| m.positions.len()).sum();
@@ -100,9 +84,7 @@ pub(crate) fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress
     ));
     model.push_str(" <resources>\n");
     if painted {
-        // One colour group holding every colour in the model; each triangle
-        // then names its own entry. Not declared as a required extension: a
-        // reader that ignores colour still gets the whole solid.
+        // One colour group for the model, not declared required, so colour-blind readers get the solid.
         model.push_str(&format!("  <m:colorgroup id=\"{colour_group_id}\">\n"));
         for rgb in &colours {
             model.push_str(&format!("   <m:color color=\"#{:02X}{:02X}{:02X}\"/>\n", rgb[0], rgb[1], rgb[2]));
@@ -110,8 +92,7 @@ pub(crate) fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress
         model.push_str("  </m:colorgroup>\n");
     }
 
-    // Progress across every part together, so the bar means the same thing
-    // whether one object is being written or twenty.
+    // Progress across all parts together.
     let mut vertices_done = 0usize;
     let mut triangles_done = 0usize;
     for (index, part) in parts.iter().enumerate() {
@@ -132,8 +113,7 @@ pub(crate) fn three_mf(parts: &[Part<'_>], options: &Options, progress: Progress
         model.push_str("    </vertices>\n    <triangles>\n");
         for (i, t) in mesh.indices.iter().enumerate() {
             let paint = if painted {
-                // One index for the whole triangle: p1 alone means a flat face,
-                // which is what a painted body has.
+                // One index per triangle: p1 alone means a flat-coloured face.
                 format!(" p1=\"{}\"", triangle_colour[index][i])
             } else {
                 String::new()

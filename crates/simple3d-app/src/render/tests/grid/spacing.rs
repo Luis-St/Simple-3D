@@ -4,16 +4,12 @@ use super::*;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_core::scene::Camera;
 
 #[test]
 pub(crate) fn zooming_out_brings_the_next_grid_decade_in_without_a_step() {
-    // Issue 25: the grid stepped up a whole decade at one particular zoom,
-    // and the picture lurched -- every cell tenfold wider from one wheel
-    // notch to the next, and the ground's extent with it. Sweeping the zoom
-    // continuously, neither the coarse spacing nor the extent may ever jump.
+    // Issue 25: the grid lurched up a decade at one zoom. Sweeping the zoom, neither spacing nor extent
+    // may jump.
     let mut previous: Option<(f64, f64)> = None;
     let mut distance = 20.0_f64;
     while distance < 200_000.0 {
@@ -22,20 +18,14 @@ pub(crate) fn zooming_out_brings_the_next_grid_decade_in_without_a_step() {
         let (fine, coarse, strength) = grid_levels(&view, 1.0);
         let radius = grid_radius(&view);
         if let Some((previous_coarse, previous_radius)) = previous {
-            // The extent follows the zoom itself, so one step of it moves
-            // the extent by one step.
+            // The extent follows the zoom, so one step moves it by one step.
             assert!(
                 radius / previous_radius < 1.05,
                 "the ground's extent jumped at distance {distance}: {previous_radius} to {radius}"
             );
-            // Nothing to check where the level that stepped up was the
-            // document's own spacing: there was no finer decade under it to
-            // be faded, and it was being drawn in full.
+            // Nothing to check where the stepping level was the document's own spacing.
             if coarse != previous_coarse {
-                // A decade may only arrive by taking over from the one below
-                // it, and that one has to still be drawn at full strength as
-                // it hands over -- so the frame after the step looks like the
-                // frame before it.
+                // A decade only arrives by taking over from the one below at full strength, so the frame looks the same.
                 assert!((coarse - previous_coarse * 10.0).abs() < 1e-9, "the grid skipped a decade");
                 assert!((fine - previous_coarse).abs() < 1e-9, "the level that stepped up is not the old coarse");
                 assert!(
@@ -65,7 +55,7 @@ pub(crate) fn grid_spacing_steps_up_so_a_fine_grid_stays_legible() {
     let v = view(800, 600);
     let v = v.with_camera(Camera { distance: 50.0, ..v.camera() });
     assert_eq!(effective_grid_spacing(&v, 10.0), 10.0);
-    // Zoomed far out, a 1mm grid would be sub-pixel, so it coarsens.
+    // Zoomed far out, a 1 mm grid would be sub-pixel, so it coarsens.
     let v = v.with_camera(Camera { distance: 100_000.0, ..v.camera() });
     let spacing = effective_grid_spacing(&v, 1.0);
     assert!(spacing >= 100.0, "spacing stayed at {spacing}");
@@ -77,13 +67,13 @@ pub(crate) fn the_light_and_dark_palettes_differ_in_every_role() {
     let (dark, light) = (Palette::dark(), Palette::light());
     assert_ne!(dark.background, light.background);
     assert_ne!(dark.background_low, light.background_low);
-    // The gradient runs one way only: the sky is never darker than the floor.
+    // The sky is never darker than the floor.
     assert!(dark.background[0] < dark.background_low[0]);
     assert_ne!(dark.solid, light.solid);
     assert_ne!(dark.grid, light.grid);
     assert_eq!(Palette::for_dark_mode(true).background, dark.background);
     assert_eq!(Palette::for_dark_mode(false).background, light.background);
-    // A dark background needs a light model and vice versa, or nothing reads.
+    // A dark background needs a light model and vice versa.
     assert!(dark.background[0] < dark.solid[0]);
     assert!(light.background[0] > light.solid[0]);
 }

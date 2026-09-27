@@ -1,5 +1,4 @@
-//! The BSP node itself: its fields, the scratch space its clipping borrows,
-//! and the iterative drop that keeps a deep tree off the stack.
+//! The BSP node: its fields, the scratch space clipping borrows, and an iterative drop for deep trees.
 
 use super::*;
 use crate::vec3::Vec3;
@@ -9,37 +8,23 @@ pub(crate) struct BspNode {
     pub(super) front: Option<Box<BspNode>>,
     pub(super) back: Option<Box<BspNode>>,
     pub(super) polygons: Vec<Polygon>,
-    /// A hierarchy over the boxes of the polygons this tree was built from,
-    /// held by the root and used by `clip_polygons` to prove that a polygon
-    /// meets no face of this body at all. `None` disables that shortcut, which
-    /// only ever costs time.
+    /// A box hierarchy over the source polygons, held by the root, used by `clip_polygons` to prove a
+    /// polygon meets no face. `None` only disables the shortcut.
     pub(super) surface: Option<BoxTree>,
-    /// The plane of each of those polygons, indexed as `surface` indexes them.
-    /// `clip_near` cuts by these and by nothing else, so a body's far faces
-    /// never reach a polygon their own surface is nowhere near.
+    /// Each polygon's plane, indexed like `surface`; `clip_near` cuts by these alone.
     pub(super) face_planes: Vec<Plane>,
-    /// The faces themselves, kept only for a body `clip_near` will be used on:
-    /// deciding a piece that lies in a face's plane needs to know whether the
-    /// face actually covers it, and a plane cannot say. A convex body needs
-    /// none of this -- its face planes support it, so anything lying in one and
-    /// outside the face is outside the body, which `ConvexBody::contains`
-    /// already answers -- so the copy is not made there.
+    /// The faces themselves, for bodies `clip_near` is used on, to check whether a coplanar piece is
+    /// actually covered. Not kept for convex bodies, where `ConvexBody::contains` answers.
     pub(super) faces: Vec<Polygon>,
-    /// Set when this body's own planes divide none of its faces, which is what
-    /// `non_splitting_order` proves. `clip_polygons` uses it instead of
-    /// descending the chain. Only a root carries one; the nodes `chain` and
-    /// `chain` create are empty.
+    /// Set when this body's planes divide none of its faces (`non_splitting_order`), so
+    /// `clip_polygons` can skip the chain. Only on the root.
     pub(super) convex: Option<ConvexBody>,
-    /// Which side of a general body's surface is solid. Flipped by `invert`,
-    /// the way `ConvexBody::inverted` is: a general body has no tree to turn
-    /// inside out any more, only its faces and the parity test over them, and
-    /// parity says nothing about which side of the count is the solid one.
+    /// Which side of a general body's surface is solid, flipped by `invert` like
+    /// `ConvexBody::inverted`, since parity alone cannot say.
     pub(super) inverted: bool,
 }
 
-/// Do the two boxes come within `EPSILON` of each other? Deliberately generous:
-/// the point of the test is to prove that a polygon *cannot* meet a surface, and
-/// a box that only just misses proves nothing.
+/// Whether two boxes come within `EPSILON`: generous, since it must prove a polygon cannot meet a surface.
 pub(crate) fn boxes_meet(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
     let (alo, ahi) = a;
     let (blo, bhi) = b;
@@ -51,38 +36,31 @@ pub(crate) fn boxes_meet(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
         && blo.z <= ahi.z + EPSILON
 }
 
-/// The buffers a clip reuses from one polygon to the next. Held by `op` for
-/// the whole boolean rather than by any one call, so the deepest chain costs
-/// no more allocations than the shallowest tree.
+/// Buffers a clip reuses between polygons, held for the whole boolean to avoid allocations.
 #[derive(Default)]
 pub(crate) struct ClipScratch {
     pub(super) splitter: Splitter,
     pub(super) boxes: Vec<u32>,
-    /// The faces a convex clip found near one polygon, and the planes they lie
-    /// in, deduplicated.
+    /// The faces a convex clip found near one polygon, and their deduplicated planes.
     pub(super) near: Vec<u32>,
     pub(super) planes: Vec<u32>,
-    /// The pieces a convex clip has not yet decided, and the next round of them.
+    /// Undecided pieces of a convex clip, and the next round.
     pub(super) pieces: Vec<Polygon>,
     pub(super) next: Vec<Polygon>,
     /// A general clip's undecided pieces.
     pub(super) work: Vec<Undecided>,
-    /// The faces a parity ray could cross, and the hierarchy walk that finds
-    /// them.
+    /// The faces a parity ray could cross, and the walk that finds them.
     pub(super) ray: Vec<u32>,
     pub(super) ray_stack: Vec<u32>,
 }
 
-/// A piece a general clip has not settled yet: the piece itself, the face index
-/// it has been cut past, and whichever face it was found to lie in the plane of.
+/// An unsettled piece of a general clip: the piece, the face index it is cut past, and any face it
+/// lies in.
 pub(crate) type Undecided = (Polygon, u32, Option<u32>);
 
 impl Drop for BspNode {
     fn drop(&mut self) {
-        // The compiler's own drop glue is recursive, so a deep tree overflows
-        // the stack on the way out just as surely as on the way in. Unlink the
-        // children into a list first; each box then drops with no children of
-        // its own left to recurse into.
+        // The compiler's drop glue recurses, overflowing on deep trees; unlink children into a list first.
         let mut stack: Vec<Box<BspNode>> = Vec::new();
         stack.extend(self.front.take());
         stack.extend(self.back.take());

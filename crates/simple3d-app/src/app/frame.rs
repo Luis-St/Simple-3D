@@ -5,19 +5,8 @@ use crate::panel_viewport;
 use simple3d_core::config::{self, Side};
 
 impl App {
-    /// Everything the window is, in the order it stacks: the bars, the tool
-    /// rail, the two docks, the viewport, the drag that may be crossing between
-    /// them, and whatever modal is open over the lot.
-    ///
-    /// Separate from `update` so a test can drive a real frame -- the same
-    /// panels in the same order -- against a headless context and replay a
-    /// pointer over it. A gesture that is only ever performed by hand is a
-    /// gesture nothing checks.
-    /// Build the GPU renderer if it is wanted and can be had, and give egui the
-    /// texture it draws into.
-    ///
-    /// Failure here is not fatal and is not silent: the reason is kept and shown
-    /// beside the engine picker, and the viewport goes on drawing in software.
+    /// Build the GPU renderer if wanted and possible, and register its texture with egui. Failure is
+    /// kept and shown beside the engine picker, and the viewport draws in software.
     pub(super) fn prepare_gpu(&mut self, frame: &mut eframe::Frame) {
         if self.settings.render_engine != config::RenderEngine::Gpu || self.gpu.is_some() {
             return;
@@ -36,9 +25,7 @@ impl App {
                 return;
             }
         };
-        // A texture of its own, made at once so there is something to register;
-        // the first real frame reallocates it to the viewport's size without
-        // changing its identity.
+        // Made now so there is something to register; the first frame resizes it keeping its identity.
         match gpu.prepare_texture() {
             Ok(texture) => {
                 let id = frame.register_native_glow_texture(texture);
@@ -50,15 +37,11 @@ impl App {
         }
     }
 
+    /// Everything the window is, in stacking order. Separate from `update` so tests can drive a
+    /// real frame against a headless context.
     pub fn ui(&mut self, ctx: &egui::Context) {
-        // Before the panels rather than after: what they change this frame is
-        // written on the next one, and a frame is drawn for every change any of
-        // them makes.
-        // The window that is drawn in the root viewport keeps both: how big the
-        // window was left is one answer for the application, and the settings
-        // file has one writer (issue 107). The shell hands a change made in any
-        // window to all of them, so nothing of what another window changed is
-        // lost by only writing here.
+        // Before the panels, so changes are written the next frame. Only the root viewport's window
+        // persists geometry and settings (issue 107); the shell spreads changes to every window.
         if self.root_window {
             self.record_window_shape(ctx);
             self.persist_settings_if_changed(ctx);
@@ -68,16 +51,12 @@ impl App {
         crate::panel_toolrail::show(self, ctx);
         crate::dock::show(self, ctx, Side::Left);
         crate::dock::show(self, ctx, Side::Right);
-        // After the docks and the rail, so the row of tabs spans the workspace
-        // itself rather than the whole window: the documents belong to the
-        // viewport under them, not to the window's chrome.
+        // After the docks and rail, so the tab row spans only the workspace it belongs to.
         crate::tabs::show(self, ctx);
         // The project's components, under its tab (issue 113).
         crate::components::strip::show(self, ctx);
         panel_viewport::show(self, ctx);
-        // Over the viewport, and drawn after it so it is the layer above: an
-        // in-place popup is part of the picture rather than a window in front of
-        // the application (issue 82).
+        // Drawn after the viewport, as the layer above it (issue 82).
         crate::split_tool::show(self, ctx);
         crate::simplify_tool::show(self, ctx);
         crate::reassemble_tool::show(self, ctx);
@@ -86,21 +65,10 @@ impl App {
         crate::pattern_tool::show(self, ctx);
         crate::noise_popup::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
-        // And the other drag that crosses the window: a tab on its way out of it
-        // (issue 107). After the panels for the same reason -- it needs the row
-        // of tabs to have said where it is.
+        // Tab drags leaving the window (issue 107), after the panels so the tab row's rect is known.
         crate::tabs::resolve_drag(self, ctx);
-        // A dialog is modal, and it was only half of one: `handle_shortcuts`
-        // hands it the keyboard, but nothing stopped the main window taking the
-        // pointer, so a dialog left open behind it was an application whose
-        // shortcuts had all silently stopped while the document could still be
-        // edited by mouse -- including, with the Export dialog up, editing the
-        // very geometry that dialog is reporting on.
-        //
-        // Drawn before the dialog itself, so the dialog's own layer is created
-        // after this one and therefore sits above it: an embedded dialog is a
-        // window in this same viewport and has to stay live. A dialog that is a
-        // window of its own is a viewport of its own, which this cannot reach.
+        // Block the main window's pointer while a dialog is open, so the document cannot be edited
+        // behind it. Drawn before the dialog so an embedded dialog stays above and live.
         if self.modal != Modal::None {
             egui::Modal::new(egui::Id::new("dialog-backdrop"))
                 .backdrop_color(egui::Color32::from_black_alpha(64))
@@ -108,11 +76,7 @@ impl App {
                 .show(ctx, |_ui| {});
         }
         self.modals(ctx);
-        // A load let go of somewhere no drop could take it is simply put down.
-        // The outliner ends a drag it can see the end of, but a shape picked up
-        // from the palette can be released over a window with no outliner in it
-        // at all -- and a drag left running would have shown a phantom slab the
-        // next time the tree was opened.
+        // A drag released where nothing can take it is dropped, so no phantom drag lingers.
         if ctx.input(|i| !i.pointer.any_down()) {
             self.outliner_drag = None;
             self.drop_target = None;

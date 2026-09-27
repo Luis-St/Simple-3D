@@ -1,10 +1,8 @@
-//! What one parameter of a shape is: its kind, its value, and the range it
-//! is allowed.
+//! One shape parameter: its kind, value and allowed range.
 
 use serde::{Deserialize, Serialize};
 
-/// What a parameter is, which is all the property editor needs to render and
-/// validate a field for it.
+/// What a parameter is: all the property editor needs to render and validate its field.
 #[derive(Clone, Copy, Debug)]
 pub enum ParamKind {
     /// A length, stored in millimetres and shown in the display unit.
@@ -20,21 +18,13 @@ pub enum ParamKind {
     Angle {
         min: f64,
         max: f64,
-        /// Whether the number is a *direction* rather than a quantity, in which
-        /// case what is typed comes back brought into `[0, 360)` -- 400 is 40,
-        /// -90 is 270 -- instead of clamped to `min`..`max`, exactly as the
-        /// transform panel's rotation reads (issue 84).
-        ///
-        /// Said per parameter rather than assumed of every angle, because most
-        /// of them are quantities: a sweep of 360 is a whole revolution and a
-        /// ring's span of 360 is a whole ring, and wrapping either to nothing
-        /// would erase the shape.
+        /// Whether the angle is a direction, wrapped into `[0, 360)` like the rotation fields (issue 84),
+        /// rather than a quantity clamped to `min`..`max`, where 360 means a full sweep.
         wrap: bool,
     },
     Bool,
-    /// A radio-style choice between named alternatives, for measurements that
-    /// are otherwise ambiguous (across corners vs across flats, wall thickness
-    /// vs inner diameter).
+    /// A choice between named alternatives, for otherwise ambiguous measurements (across corners or
+    /// flats, wall thickness or inner diameter).
     Choice {
         options: &'static [&'static str],
     },
@@ -81,13 +71,9 @@ pub struct ParamSpec {
     pub label: &'static str,
     pub kind: ParamKind,
     pub default: ParamValue,
-    /// Parameters sharing a non-zero lock group can be tied together by a lock
-    /// toggle in the property editor (a sphere's three diameters, a cylinder's
-    /// two). Zero means no lock.
+    /// Parameters sharing a non-zero lock group can be tied by a lock toggle; zero means none.
     pub lock_group: u8,
-    /// When set, this parameter is only shown while the named `Choice`
-    /// parameter has the given value -- how "wall thickness *or* inner
-    /// diameter" is expressed without a second primitive type.
+    /// Shown only while the named `Choice` has this value, expressing alternatives in one primitive.
     pub shown_when: Option<(&'static str, u32)>,
 }
 
@@ -137,8 +123,7 @@ impl ParamSpec {
         ParamSpec { shown_when: Some((param, value)), ..self }
     }
 
-    /// How far round a turn a revolved shape goes. Always the same range and
-    /// the same default, so a swept cylinder and a swept tube read alike.
+    /// How far round a revolved shape goes, with a shared range and default.
     pub(super) const fn sweep() -> ParamSpec {
         ParamSpec {
             key: "sweep",

@@ -1,21 +1,9 @@
 //! Ear clipping: a simple polygon to triangles.
 
 use super::*;
-/// Ear-clip a counter-clockwise loop, appending triangles to `out`.
-///
-/// Two rules beyond the textbook version, both about *not losing a vertex*.
-///
-/// The whole point of this pass is that the region's boundary comes out
-/// unchanged, and a vertex that no emitted triangle mentions has silently left
-/// the boundary -- reopening exactly the T-junction
-/// [`crate::repair::split_t_junctions`] closed. So a zero-area ear (three
-/// collinear vertices, which is what a healed boundary is full of) is never
-/// clipped: its apex stays in the loop and gets used as a neighbour of some
-/// other ear instead.
-///
-/// The exception is the seam a bridged hole leaves, where one vertex appears
-/// twice in the loop. There a zero-area ear is exactly what should be removed,
-/// and doing so loses nothing because the other copy still carries the vertex.
+/// Ear-clip a counter-clockwise loop into `out`, never losing a boundary vertex: zero-area ears
+/// (collinear T-junction vertices) are not clipped, or the T-junction would reopen. The exception is
+/// a bridge seam, where the vertex appears twice and the other copy keeps it.
 pub(crate) fn ear_clip(ids: &[u32], points: &[Point], out: &mut Vec<[u32; 3]>) -> Option<()> {
     let mut remaining: Vec<usize> = (0..ids.len()).collect();
     let mut guard = ids.len() * ids.len() + 16;
@@ -40,14 +28,9 @@ pub(crate) fn ear_clip(ids: &[u32], points: &[Point], out: &mut Vec<[u32; 3]>) -
             if remaining.iter().any(|&j| j != ia && j != ib && j != ic && strictly_inside(points[j], a, b, c)) {
                 continue;
             }
-            // A vertex lying on the diagonal the ear would leave behind blocks
-            // it just as one inside does. The ear's own sides are edges of the
-            // loop already, but its third side is new, and a corner of the loop
-            // sitting on it means the loop turns back in right there: two boxes
-            // unioned off-centre leave an outline whose inner corner is exactly
-            // in line with two outer ones, and clipping across it laid a
-            // triangle over the notch, facing the wrong way. Only a copy of `a`
-            // or `c` itself -- a bridge seam -- may lie on it.
+            // A loop vertex on the ear's new diagonal blocks it like one inside: two off-centre boxes leave an
+            // inner corner in line with two outer ones, and clipping across it laid a flipped triangle over the
+            // notch. Only a bridge-seam copy of `a` or `c` may lie on it.
             if remaining.iter().any(|&j| {
                 let p = points[j];
                 j != ia && j != ib && j != ic && p != a && p != c && on_open_segment(p, c, a)
@@ -62,9 +45,7 @@ pub(crate) fn ear_clip(ids: &[u32], points: &[Point], out: &mut Vec<[u32; 3]>) -
                 out.push(tri);
                 remaining.remove(i);
             }
-            // No real ear left. Unpicking a bridge seam may expose one; if there
-            // is no seam either, this loop is beyond us and the caller keeps the
-            // region's original triangles.
+            // No real ear: unpicking a bridge seam may expose one; otherwise the caller keeps the original.
             None => {
                 remaining.remove(seam?);
             }
@@ -73,8 +54,7 @@ pub(crate) fn ear_clip(ids: &[u32], points: &[Point], out: &mut Vec<[u32; 3]>) -
     if remaining.len() == 3 {
         let (a, b, c) = (points[remaining[0]], points[remaining[1]], points[remaining[2]]);
         if ((b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)).abs() <= 1e-12 {
-            // Three collinear vertices left over: emitting them would be a
-            // sliver, dropping them would lose a boundary vertex.
+            // Three collinear leftovers: emitting makes a sliver, dropping loses a boundary vertex.
             return None;
         }
         out.push([ids[remaining[0]], ids[remaining[1]], ids[remaining[2]]]);

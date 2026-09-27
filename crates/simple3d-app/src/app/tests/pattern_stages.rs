@@ -1,13 +1,11 @@
-//! Editing a rule's stages in the tool, starting it over, and keeping its
-//! scatter on the shelf (issue 79).
+//! Editing a rule's stages in the tool, starting over, and keeping its scatter (issue 79).
 
 use super::*;
 use simple3d_core::pattern;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 use simple3d_geom::Vec3;
 
-/// An app with the tool open on a pattern of the starting shape, its rule
-/// started from a linear run.
+/// An app with the tool open on a pattern of the starting shape, started from a linear run.
 fn with_rule() -> (App, simple3d_core::scene::NodeId) {
     let mut app = headless_app();
     app.open_pattern_tool();
@@ -21,12 +19,8 @@ fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primiti
     app.scene.node(id).params().cloned().expect("a pattern has parameters")
 }
 
-/// A stage that is added starts as the next thing the rule is missing -- a run
-/// along an axis nothing above it runs along, spaced clear of the shape -- and
-/// not as whatever its slot last held.
-///
-/// Asked for from the analysis of the tool: after a blank rule, "Add a stage"
-/// put one copy in place, which looked like the button doing nothing.
+/// A new stage is the next thing the rule lacks (a run along a free axis, clear of the shape),
+/// not its slot's old contents. After a blank rule, "Add a stage" used to look like it did nothing.
 #[test]
 pub(crate) fn a_stage_that_is_added_runs_along_a_free_axis_clear_of_the_shape() {
     let (mut app, pattern) = with_rule();
@@ -42,15 +36,14 @@ pub(crate) fn a_stage_that_is_added_runs_along_a_free_axis_clear_of_the_shape() 
     let first = pattern::stage(&params(&app, pattern), 0).copies();
     assert_eq!(pattern::instance_count(&params(&app, pattern)).1, first * 2, "the new stage made no copies");
 
-    // After a blank rule too: the one stage goes nowhere, so the new one takes X.
+    // After a blank rule the one stage goes nowhere, so the new one takes X.
     app.start_rule_from(pattern, pattern::CUSTOM);
     app.add_stage_doing(pattern::StageMode::Move);
     let fresh = pattern::stage(&params(&app, pattern), 1);
     assert!(fresh.step.x > 0.0 && fresh.count >= 2, "after a blank rule the new stage was {fresh:?}");
 }
 
-/// Any stage can be dropped and the ones below move up; any can move; and
-/// undo takes each back. A stage's fold goes with the stage, not its slot.
+/// Stages can be dropped and moved, undo restores each, and a fold follows its stage.
 #[test]
 pub(crate) fn a_stage_can_be_dropped_or_moved_from_anywhere_and_undone() {
     let (mut app, pattern) = with_rule();
@@ -79,8 +72,7 @@ pub(crate) fn a_stage_can_be_dropped_or_moved_from_anywhere_and_undone() {
     assert_eq!(params(&app, pattern), moved, "a stage moved off the end of the stack");
 }
 
-/// "Start over" asks the question again and writes nothing until it is
-/// answered; the rule it was asked over is one click away.
+/// "Start over" asks again and writes nothing until answered; the old rule stays one click away.
 #[test]
 pub(crate) fn starting_over_asks_again_and_changes_nothing_until_answered() {
     let (mut app, pattern) = with_rule();
@@ -94,8 +86,7 @@ pub(crate) fn starting_over_asks_again_and_changes_nothing_until_answered() {
     app.resume_rule();
     assert!(app.pattern_tool_started && !app.pattern_tool_resumable);
 
-    // Answered with a ready-made layout, the rule is replaced by it, sized to
-    // what the pattern repeats.
+    // A ready-made layout replaces the rule, sized to the repeated shape.
     app.start_rule_over();
     app.start_rule_from_preset(pattern, 0);
     assert!(app.pattern_tool_started && !app.pattern_tool_resumable);
@@ -104,13 +95,11 @@ pub(crate) fn starting_over_asks_again_and_changes_nothing_until_answered() {
     assert_eq!(pattern::stage_count(&planks), 2);
     assert!(pattern::stage(&planks, 0).step.x > size.x, "the planks were not laid out clear of the shape");
     assert!(pattern::Noise::of(&planks).wanted(), "the planks came without their scatter");
-    // And the stage that staggers them does it with a variation of its own,
-    // which is the card the builder draws the stagger on.
+    // The staggering stage uses a variation, which the builder draws as a card.
     assert!(pattern::stage(&planks, 1).varies(), "the planks' rows are not staggered");
 }
 
-/// Saved with its noise, a kind brings the noise back wherever it is used;
-/// saved without, it leaves the other pattern's own alone.
+/// A kind saved with noise brings it along; saved without, it leaves the target's noise alone.
 #[test]
 pub(crate) fn a_saved_kind_keeps_the_noise_only_when_it_was_saved_with_it() {
     let dir = temp_config_dir("pattern-kind-noise");
@@ -136,7 +125,7 @@ pub(crate) fn a_saved_kind_keeps_the_noise_only_when_it_was_saved_with_it() {
     other.select_only(shape);
     other.open_pattern_tool();
     let target = other.pattern_tool.unwrap();
-    // Picked from the question the window opens with, which it answers.
+    // Picked from the opening question, which it answers.
     assert!(!other.pattern_tool_started);
     let scattered = other.pattern_kinds.iter().find(|e| e.name == "Scattered").cloned().unwrap();
     other.apply_saved_kind_to(target, &scattered);
@@ -149,7 +138,7 @@ pub(crate) fn a_saved_kind_keeps_the_noise_only_when_it_was_saved_with_it() {
     assert_eq!(params(&other, target).num("noise_y"), 2.0, "a kind saved without noise took the pattern's off");
 }
 
-/// The pointer over a stage marks what the rule has made by the end of it.
+/// Hovering a stage marks what the rule has made by its end.
 #[test]
 pub(crate) fn the_copies_through_a_stage_are_where_the_viewport_marks_them() {
     let (mut app, pattern) = with_rule();
@@ -160,10 +149,7 @@ pub(crate) fn the_copies_through_a_stage_are_where_the_viewport_marks_them() {
     assert_eq!(app.pattern_placements_through(1).len(), pattern::instance_count(&rule).1);
 }
 
-/// The window fits whatever width it is given with everything a stage can
-/// show open at once -- the arrows and cross on every heading, a card for each
-/// of several variations, a shift's three fields on one row, the noise card --
-/// and so does the question, with the ready-made layouts and a saved kind on it.
+/// The window and the start question fit any width with everything open at once.
 #[test]
 pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
     let dir = temp_config_dir("pattern-tool-fit-vary");
@@ -213,7 +199,7 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
             let what = if asking { "the question" } else { "the stages" };
             assert!(used <= room + 0.5, "{what} at {room} px of room laid out {used} px of content");
             if !asking {
-                // Every stage drew its own cross, flush with its own fields.
+                // Every stage drew its own cross, flush with its fields.
                 for index in 0..3 {
                     assert!(ctx.read_response(crate::pattern_tool::drop_stage_id(index)).is_some());
                 }
@@ -230,9 +216,8 @@ pub(crate) fn the_tool_fits_its_width_with_every_stage_section_open() {
     }
 }
 
-/// Two stages each with a "Step" row gave the axis chips in front of the fields
-/// the same ids, and a popup short enough to scroll took the bar out of the
-/// fields' width. Neither may happen again.
+/// Regression: two stages' "Step" rows gave axis chips the same ids, and a scrolling popup's bar
+/// took space from the fields.
 #[test]
 pub(crate) fn a_scrolling_tool_keeps_its_field_widths_and_no_ids_clash() {
     let (mut app, _) = with_rule();
@@ -248,8 +233,7 @@ pub(crate) fn a_scrolling_tool_keeps_its_field_widths_and_no_ids_clash() {
         app.viewport_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, tall));
         app.popups.clear();
         let mut clashes = Vec::new();
-        // Enough frames, a tenth of a second apart, for the window to grow to
-        // its height and the bar to slide in or out again.
+        // Enough frames, 0.1 s apart, for the window to settle and the bar to slide.
         for frame in 0..30 {
             let input = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, tall))),
@@ -269,7 +253,7 @@ pub(crate) fn a_scrolling_tool_keeps_its_field_widths_and_no_ids_clash() {
             }
         }
         assert!(clashes.is_empty(), "ids clashed at {tall} px: {clashes:?}");
-        // The stage's cross ends where its fields do, at the column's edge.
+        // The stage's cross ends where its fields do.
         widths.push(ctx.read_response(crate::pattern_tool::drop_stage_id(0)).map(|r| r.rect.max.x));
     }
     assert_eq!(widths[0], widths[1], "the scrollbar took room from the column");

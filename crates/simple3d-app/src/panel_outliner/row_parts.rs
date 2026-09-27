@@ -4,16 +4,10 @@ use crate::app::App;
 use crate::icon::Glyph;
 use simple3d_core::scene::{GroupOp, NodeId, Scene};
 
-/// The operator mark a node carries in the tree: its own, for a group, or the
-/// one it is subject to, for a child of a difference or intersection. Reading
-/// the boolean tree at a glance is the whole reason these are inline rather
-/// than in a modifier stack somewhere else.
-///
-/// The flag says the mark is a *cut*: an operand being removed, drawn in the
-/// danger colour, which is the one distinction worth a second colour here.
+/// The operator mark a node carries: its own for a group, or the one it is subject to for a child
+/// of a difference or intersection. The flag marks a cut operand, drawn in the danger colour.
 pub fn operator_badge(scene: &Scene, id: NodeId) -> Option<(Glyph, bool)> {
-    // The root is a union of everything by definition; badging it says nothing
-    // and puts a mark on the one row that never changes.
+    // The root is always a union; badging it says nothing.
     if scene.node(id).parent.is_none() {
         return None;
     }
@@ -23,17 +17,14 @@ pub fn operator_badge(scene: &Scene, id: NodeId) -> Option<(Glyph, bool)> {
     let parent = scene.node(id).parent?;
     let op = scene.node(parent).group_op()?;
     match op {
-        // The base of a difference is what is being cut, not a cut.
+        // A difference's base is what is cut, not a cut.
         GroupOp::Difference if scene.difference_base(parent) != Some(id) => Some((symbol(op), true)),
         GroupOp::Intersection => Some((symbol(op), false)),
         _ => None,
     }
 }
 
-/// The set-theory symbols would be the obvious mark, but the bundled UI face
-/// has no glyph for any of them and would draw three identical tofu boxes.
-/// These are the same three shapes the tool rail's boolean buttons carry, which
-/// makes the tree and the rail read as one vocabulary.
+/// The rail's boolean glyphs, since the UI font lacks the set-theory symbols.
 pub(crate) fn symbol(op: GroupOp) -> Glyph {
     match op {
         GroupOp::Union => Glyph::Union,
@@ -44,13 +35,7 @@ pub(crate) fn symbol(op: GroupOp) -> Glyph {
     }
 }
 
-/// The mark a node wears in the tree, by what kind of body it is.
-///
-/// One function rather than the same chain of tests written out at each of the
-/// three places a row's mark is drawn -- the row itself, the drag slab, and the
-/// palette's own tiles -- because a body type added without a mark shows up as
-/// a box in some of them and not others, which is worse than showing up as a
-/// box in all three.
+/// A node's tree mark by body kind, in one place for the row, drag slab and palette tiles.
 pub(crate) fn node_glyph(node: &simple3d_core::scene::Node) -> Glyph {
     if node.is_component() {
         Glyph::Component
@@ -91,9 +76,7 @@ pub(crate) fn hover_text(
             }
         }
     } else if app.scene.is_collection(id) {
-        // The one row stands for all of them, so it has to say how many there
-        // are: the tree cannot show it and the count is the whole point of the
-        // row being one (issue 82).
+        // One row stands for all the pieces, so it shows the count (issue 82).
         let node = app.scene.node(id);
         let total = node.children.len();
         let shown = app.scene.row_children(id).len();

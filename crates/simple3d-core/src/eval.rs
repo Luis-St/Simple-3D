@@ -1,18 +1,11 @@
-//! Scene evaluation (spec section 5.2).
+//! Scene evaluation (spec section 5.2): the node tree to one mesh.
 //!
-//! Turns the node tree into one mesh. Three properties matter and are all
-//! tested here:
+//! * **Deterministic**, so cache keys can be content hashes and runs are comparable.
+//! * **Cached per subtree**, invalidated only where the tree changed.
+//! * **Cancellable**, superseded cleanly by a new edit.
 //!
-//! * **Deterministic.** The same tree always produces the same mesh, so the
-//!   cache key can be a hash of the subtree and two runs are comparable.
-//! * **Cached per subtree**, invalidated only where the tree actually changed,
-//!   so editing one dimension does not re-evaluate the whole scene.
-//! * **Cancellable.** Evaluation runs off the interaction path and is
-//!   superseded cleanly when the user edits again while one is running.
-//!
-//! A boolean that cannot be evaluated fails loudly on its own node -- named, so
-//! the outliner can show it -- while every other branch still previews. It never
-//! emits geometry it knows to be broken.
+//! A failing boolean is reported on its own node while every other branch still previews; broken
+//! geometry is never emitted.
 
 mod evaluated;
 pub use evaluated::Evaluated;
@@ -36,8 +29,7 @@ use simple3d_geom::{Mesh, Vec3};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-/// A node-specific evaluation failure, carrying the name so the interface can
-/// say which node is at fault rather than showing a generic message.
+/// A node-specific evaluation failure, naming the node for the interface.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeError {
     pub node: NodeId,
@@ -45,25 +37,17 @@ pub struct NodeError {
     pub message: String,
 }
 
-/// Holds the caches between runs. Keys are content hashes, so a node that moved
-/// in the tree but did not change still hits.
+/// The caches between runs, keyed by content hash, so a node moved in the tree still hits.
 pub struct Evaluator {
     primitives: BTreeMap<u64, Arc<Mesh>>,
     subtrees: BTreeMap<u64, Arc<SubtreeResult>>,
-    /// What a group, a split or a pattern makes of its children before it is
-    /// placed, by [`Evaluator::content_key`]. A subtree's own key covers where
-    /// it stands, so moving a group used to miss the cache and run its whole
-    /// boolean again for a result that had only moved; now it misses only the
-    /// cheap last step of placing the result.
+    /// What a group, split or pattern makes of its children before placement, by
+    /// [`Evaluator::content_key`], so moving a group only redoes the placement, not its boolean.
     locals: BTreeMap<u64, Arc<LocalResult>>,
-    /// Each node's world-space mesh from the last run, with what it was made
-    /// from. A node whose source mesh, placement and colour are all unchanged
-    /// gets the very same `Arc` back rather than a fresh copy, which is what
-    /// lets the viewport and the snapping recognise it as unchanged by address
-    /// and keep what they worked out from it.
+    /// Each node's world mesh from the last run with its sources. Unchanged nodes get the same `Arc`
+    /// back, so the viewport and snapping recognise them by address.
     worlds: BTreeMap<NodeId, WorldMesh>,
-    /// Bounded so a long editing session cannot grow without limit. Entries are
-    /// pure functions of their key, so dropping any of them is always safe.
+    /// Cache bound for long sessions; entries are pure functions of their key, so dropping is safe.
     pub cache_limit: usize,
 }
 
@@ -74,8 +58,7 @@ impl Default for Evaluator {
 }
 
 struct WorldMesh {
-    /// Held rather than compared by address alone, so it cannot be freed and
-    /// its address handed to a different mesh while this entry remembers it.
+    /// Held rather than compared by address alone, so the address cannot be reused while remembered.
     source: Arc<Mesh>,
     frame: crate::xform::Xform,
     tag: Option<u32>,
@@ -84,34 +67,30 @@ struct WorldMesh {
 
 #[derive(Debug)]
 struct SubtreeResult {
-    /// The subtree's mesh in its *parent's* frame.
+    /// The subtree's mesh in its parent's frame.
     mesh: Arc<Mesh>,
-    /// The shift the `Base` anchor applied in the node's own frame, before
-    /// rotation. Kept so the per-node world transforms agree with the mesh.
+    /// The `Base` anchor's shift in the node's frame before rotation, so world transforms agree.
     anchor_offset: Vec3,
     errors: Vec<NodeError>,
-    /// The children whose geometry is in `mesh` as it came, untouched by the
-    /// node's own operation: each by its place among the visible children,
-    /// with where its first vertex is. See [`Evaluated::ranges`].
+    /// The visible children passed through untouched, by index, with their first vertex. See
+    /// [`Evaluated::ranges`].
     passed: Vec<(usize, u32)>,
 }
 
-/// A node's geometry in its own frame, before its anchor, scale, rotation and
-/// position -- see `Evaluator::locals`.
+/// A node's geometry in its own frame, before anchor, scale, rotation and position
+/// (`Evaluator::locals`).
 #[derive(Debug)]
 struct LocalResult {
     mesh: Arc<Mesh>,
     errors: Vec<NodeError>,
     passed: Vec<(usize, u32)>,
-    /// The node it was worked out for. Its errors name that node and the ones
-    /// under it, so a result with errors is only handed back to the node it
-    /// names -- another group of the same content works its own out.
+    /// The node it was computed for; a result with errors is only reused for that node, since the
+    /// errors name it.
     node: NodeId,
 }
 
 impl SubtreeResult {
-    /// What a run that was abandoned part-way leaves: nothing, and never
-    /// cached.
+    /// An abandoned run's result: nothing, and never cached.
     fn abandoned(errors: Vec<NodeError>) -> SubtreeResult {
         SubtreeResult { mesh: Arc::new(Mesh::new()), anchor_offset: Vec3::ZERO, errors, passed: Vec::new() }
     }

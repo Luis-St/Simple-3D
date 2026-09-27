@@ -1,23 +1,20 @@
-//! Putting one pixel down, with depth and with blending.
+//! Writing one pixel, with depth and blending.
 
 use super::*;
 impl Frame<'_> {
-    /// Whose depth writes are from here on. The renderer sets it to the item it
-    /// is about to draw, and back to 0 for anything that belongs to no item.
+    /// Tags the depth writes that follow with an item; 0 for none.
     pub fn set_tag(&mut self, tag: u16) {
         self.tag = tag;
     }
 
-    /// Depth-tested, optionally alpha-blended write. `write_depth` is false for
-    /// translucent passes, so ghosts do not hide each other.
+    /// Depth-tested write, optionally blended; `write_depth` is false for translucent passes so ghosts do
+    /// not hide each other.
     pub(super) fn put(&mut self, x: usize, y: usize, key: f32, rgba: Rgba, write_depth: bool) {
         self.put_with(x, y, key, rgba, write_depth, None);
     }
 
-    /// As `put`, with a list of the items this write may be drawn through,
-    /// indexed by their tag. A pixel that loses the depth test is still written
-    /// if what won it is one of them -- which is how an axis crosses the solid
-    /// it runs into without crossing the ones it merely passes behind.
+    /// As `put`, but a pixel losing the depth test is still written when the winner is in the see-through
+    /// list, so an axis crosses the solid it enters but not those it passes behind.
     pub(super) fn put_with(
         &mut self,
         x: usize,
@@ -27,8 +24,7 @@ impl Frame<'_> {
         write_depth: bool,
         through: Option<&[bool]>,
     ) {
-        // A row outside this band belongs to another one, which is drawing it
-        // from the very same sequence of primitives.
+        // Rows outside this band belong to another band drawing the same primitives.
         if y < self.row_lo || y >= self.row_hi {
             return;
         }
@@ -51,8 +47,7 @@ impl Frame<'_> {
         }
     }
 
-    /// Blend over a pixel whatever its depth, and leave the depth alone. The
-    /// glow that says a body is there when something else is in front of it.
+    /// Blend over a pixel regardless of depth, leaving depth alone: the glow of an occluded body.
     pub(super) fn put_over(&mut self, x: usize, y: usize, rgba: Rgba) {
         if y < self.row_lo || y >= self.row_hi {
             return;
@@ -60,7 +55,7 @@ impl Frame<'_> {
         self.blend(((y - self.row_lo) * self.width + x) * 4, rgba);
     }
 
-    /// Straight-alpha blend of one colour over the pixel at byte offset `o`.
+    /// Straight-alpha blend over the pixel at byte offset `o`.
     pub(super) fn blend(&mut self, o: usize, rgba: Rgba) {
         let a = rgba[3] as u32;
         for (c, &value) in rgba.iter().enumerate().take(3) {

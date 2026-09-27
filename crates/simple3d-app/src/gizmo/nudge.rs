@@ -9,12 +9,8 @@ use simple3d_core::undo::History;
 use simple3d_core::unit::wrap_degrees;
 use simple3d_geom::Vec3;
 
-/// What one press of a nudge key does, in the terms the caller has to write back
-/// (spec section 6.2, acceptance criterion 26).
-///
-/// This lives here rather than in `App::nudge` so the arithmetic -- which axis,
-/// which direction, and how far -- can be asserted from a test. `App` needs a
-/// live `egui::Context` to construct, which makes anything inside it unreachable.
+/// What one nudge press does (spec section 6.2, acceptance criterion 26). Separate from
+/// `App::nudge` so tests can check it without a live `egui::Context`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Nudge {
     /// Move the node this far in world space.
@@ -25,17 +21,13 @@ pub enum Nudge {
     Resize { axis: usize, driver: AxisDriver, extent: f64 },
     /// Set the node's own scale factor on `axis` to `factor`.
     Scale { axis: usize, factor: f64 },
-    /// A resize nudge on an axis no parameter governs: nothing to write, and the
-    /// caller says so rather than silently doing nothing.
+    /// A resize on an axis no parameter governs; the caller reports it.
     NoDimension { axis: usize },
 }
 
 impl Nudge {
-    /// Write the step into the scene. `gizmo` must be the one it was computed
-    /// from -- the move case needs its parent frame to turn a world delta back
-    /// into `Node::position`, which lives in the parent's coordinates.
-    ///
-    /// Caller records the undo snapshot first, with `nudge_coalesce_key`.
+    /// Write the step into the scene. `gizmo` must be the one it was computed from, whose parent frame
+    /// converts a world move into `Node::position`. The caller records undo first.
     pub fn apply(self, gizmo: &Gizmo, scene: &mut Scene, id: NodeId) {
         match self {
             Nudge::Move { world_delta, .. } => {
@@ -49,10 +41,7 @@ impl Nudge {
             Nudge::Rotate { axis, degrees } => {
                 if let Some(node) = scene.get_mut(id) {
                     let mut rotation = node.rotation;
-                    // Brought back into one turn, the way the ring and the
-                    // rotation field both do it (issue 84): holding an arrow key
-                    // down would otherwise wind the number up past 360 and leave
-                    // it there.
+                    // Wrapped into one turn (issue 84), so holding a key does not wind past 360.
                     let turned = wrap_degrees(get_axis(rotation, axis) + degrees);
                     set_axis(&mut rotation, axis, turned);
                     node.position = gizmo.position_keeping_pivot(rotation, node.scale);
@@ -71,15 +60,13 @@ impl Nudge {
                     node.scale = scale;
                 }
             }
-            // Nothing this axis can be resized by. The caller says so; silently
-            // doing nothing would look like a dropped keypress.
+            // Nothing to resize by; the caller reports it rather than seeming to drop the key.
             Nudge::NoDimension { .. } => {}
         }
     }
 }
 
-/// The signed handle-frame axis a nudge command acts on: the axis index and
-/// `±1`, already corrected against the view so "left" really goes left.
+/// The signed handle-frame axis a nudge acts on, corrected against the view so "left" goes left.
 pub fn nudge_axis(gizmo: &Gizmo, view: &View, command: Command) -> Option<(usize, f64)> {
     let [horizontal, vertical, third] = screen_aligned_axes(gizmo, view);
     let (axis, mut sign) = match command {
@@ -91,7 +78,7 @@ pub fn nudge_axis(gizmo: &Gizmo, view: &View, command: Command) -> Option<(usize
         Command::NudgeAway => (third, 1.0),
         _ => return None,
     };
-    // The third axis has no screen direction to match, so it is left alone.
+    // The third axis has no screen direction to match.
     let vertical_key = matches!(command, Command::NudgeUp | Command::NudgeDown);
     if vertical_key || matches!(command, Command::NudgeLeft | Command::NudgeRight) {
         sign *= axis_screen_sign(gizmo, view, axis, vertical_key);
@@ -99,8 +86,7 @@ pub fn nudge_axis(gizmo: &Gizmo, view: &View, command: Command) -> Option<(usize
     Some((axis, sign))
 }
 
-/// One press of a nudge key. `move_snap` is the scene step, which governs both
-/// the move step and the resize step; `rotate_snap_deg` governs rotation.
+/// One nudge press. `move_snap` governs move and resize steps; `rotate_snap_deg` rotation.
 pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, rotate_snap_deg: f64) -> Option<Nudge> {
     let (axis, sign) = nudge_axis(gizmo, view, command)?;
     Some(match gizmo.mode {
@@ -113,9 +99,7 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
             }
             None => Nudge::NoDimension { axis },
         },
-        // A scale nudge moves the face by the step, the same distance a resize
-        // nudge would -- expressed as the factor that produces it, since that is
-        // what a scale writes.
+        // A scale nudge moves the face by one step, expressed as the factor that achieves it.
         Mode::Scale => {
             let local = get_axis(gizmo.local_hi, axis) - get_axis(gizmo.local_lo, axis);
             let world = local * gizmo.axis_scale[axis];
@@ -130,23 +114,14 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
     })
 }
 
-/// The undo-coalescing key for a nudge. Every press within the coalescing window
-/// that carries the same key extends one undo step, so holding an arrow key down
-/// undoes in one (acceptance criterion 26). It deliberately does *not* mention
-/// the direction: a run of left presses followed by right presses is still one
-/// gesture, but nudging a different node, or in a different mode, is not.
+/// The undo-coalescing key for a nudge, so a held key is one undo step (acceptance criterion 26).
+/// Direction is deliberately omitted; node and mode are included.
 pub fn nudge_coalesce_key(id: NodeId, mode: Mode) -> String {
     format!("nudge:{id}:{mode:?}")
 }
 
-/// One press of a nudge key, all the way through: work out the step, open or
-/// extend the undo run it belongs to, and write it into the scene.
-///
-/// This is `App::nudge` minus the parts that need a live `egui::Context` -- the
-/// selection, the status line and the field cache. Keeping the undo record here
-/// rather than at the call site is what lets criterion 26's "the whole repeat run
-/// is a single undo step" be asserted against the code that actually runs.
-/// Returns the step taken, so the caller can report an axis with no dimension.
+/// One nudge press end to end: compute, record undo, apply. `App::nudge` minus the context-bound
+/// parts, so criterion 26 can be tested against the real code. Returns the step taken.
 pub fn apply_nudge(
     history: &mut History,
     scene: &mut Scene,
@@ -158,7 +133,7 @@ pub fn apply_nudge(
     rotate_snap_deg: f64,
 ) -> Option<Nudge> {
     let step = nudge_step(gizmo, view, command, move_snap, rotate_snap_deg)?;
-    // Record before mutating, under a key stable across the whole held run.
+    // Record before mutating, under a key stable across the held run.
     history.record(scene, "Nudge", Some(&nudge_coalesce_key(id, gizmo.mode)));
     step.apply(gizmo, scene, id);
     Some(step)

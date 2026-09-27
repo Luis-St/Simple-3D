@@ -1,9 +1,5 @@
-//! The node tree (spec section 3): nodes, groups, the scene and every
-//! structural edit the outliner offers.
-//!
-//! The tree is an arena of nodes keyed by a stable id that survives save/load,
-//! reparenting and undo. `BTreeMap` rather than `HashMap` so iteration order is
-//! deterministic, which matters because evaluation must be (section 5.2).
+//! The node tree (spec section 3) and every structural edit. An arena keyed by stable ids that survive
+//! save/load, reparenting and undo; `BTreeMap` for deterministic evaluation (section 5.2).
 
 mod naming;
 pub use naming::{copy_name, free_name, is_default_name};
@@ -67,10 +63,8 @@ pub struct Scene {
     next_id: NodeId,
     pub settings: SceneSettings,
     pub camera: Camera,
-    /// The components this scene integrates, each with the ones it integrates
-    /// in turn (issue 113) -- see [`component`]. Not part of the scene as the
-    /// user edits it: the application puts it here from the rest of the
-    /// project, undo keeps whichever is current, and nothing saves it.
+    /// Integrated components, recursively (issue 113; see [`component`]). Filled from the project, kept by
+    /// undo, never saved with the scene.
     pub components: std::sync::Arc<Components>,
 }
 

@@ -1,12 +1,10 @@
-//! A section plane cut down to a rectangle: only the material straight behind
-//! the rectangle goes, which takes a box out of the model rather than half of
-//! it.
+//! A section plane limited to a rectangle, removing a box behind it rather than half the model.
 
 use super::*;
 use crate::vec3::Vec3;
 
-/// The rectangle a windowed [`Plane`] cuts within: its middle, which lies in
-/// the plane, the two directions it spans, and its half-width along each.
+/// The rectangle a windowed [`Plane`] cuts within: its middle (on the plane), its two directions,
+/// and its half-widths.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Window {
     pub centre: Vec3,
@@ -15,8 +13,7 @@ pub struct Window {
     pub half: [f64; 2],
 }
 
-/// The part of a convex polygon on the side of `wall` its depth is at most
-/// zero on, when `kept` -- or the rest of it otherwise.
+/// The part of a convex polygon where `wall`'s depth is at most zero when `kept`, else the rest.
 pub fn clip_polygon(polygon: &[Vec3], wall: &Plane, kept: bool) -> Vec<Vec3> {
     let side = |p: Vec3| match kept {
         true => wall.depth(p),
@@ -43,14 +40,10 @@ fn fan(polygon: &[Vec3], out: &mut Vec<[Vec3; 3]>) {
     }
 }
 
-/// What is left of a triangle with the box behind a window taken out of it.
-///
-/// The part outside the box is split into pieces that do not overlap: what is
-/// in front of the first wall, then what is behind that one but in front of the
-/// second, and so on -- each a convex polygon, so each a fan.
+/// What is left of a triangle with the box removed, as non-overlapping convex pieces: in front of
+/// the first wall, behind it but in front of the second, and so on.
 pub(super) fn clip_box(walls: &[Plane], world: [Vec3; 3]) -> Clipped {
-    // Wholly in front of any one wall is wholly kept, which is nearly every
-    // triangle of the model.
+    // Wholly in front of any one wall is wholly kept, which is nearly every triangle.
     if walls.iter().any(|wall| world.iter().all(|&p| wall.depth(p) <= 0.0)) {
         return Clipped::whole(world);
     }
@@ -72,21 +65,17 @@ pub(super) fn clip_box(walls: &[Plane], world: [Vec3; 3]) -> Clipped {
     }
 }
 
-/// One face of what the cut opens up: a plane the model's inside shows through,
-/// and the part of it that is really open.
+/// One face the cut opens: a plane showing the inside, and the part of it that is really open.
 #[derive(Clone, Debug)]
 pub struct Face {
     /// The face, facing into what was cut away, with no window.
     pub plane: Plane,
-    /// The other walls: the face is open only where every one of them has a
-    /// depth of at least zero, which is the side of the face the box is.
-    /// Empty for a plane that cuts everywhere.
+    /// The other walls: the face is open where each has depth at least zero; empty for a full plane.
     pub bounds: Vec<Plane>,
 }
 
-/// The faces a cut opens: the plane alone, or the rectangle and the four sides
-/// of the box behind it. Each is capped as a plane of its own and then cut down
-/// to its face.
+/// The faces a cut opens: the plane, or a window's rectangle and the box's four sides, each capped
+/// as a plane and trimmed to its face.
 pub fn faces(plane: &Plane) -> Vec<Face> {
     let walls = plane.walls();
     (0..walls.len())
@@ -97,8 +86,7 @@ pub fn faces(plane: &Plane) -> Vec<Face> {
         .collect()
 }
 
-/// A convex polygon cut down to where every one of `bounds` has a depth of at
-/// least zero.
+/// A convex polygon cut to where every one of `bounds` has depth at least zero.
 pub fn within(polygon: &[Vec3], bounds: &[Plane]) -> Vec<Vec3> {
     let mut out = polygon.to_vec();
     for bound in bounds {
@@ -110,8 +98,7 @@ pub fn within(polygon: &[Vec3], bounds: &[Plane]) -> Vec<Vec3> {
     out
 }
 
-/// The part of `a`-`b` where every one of `bounds` has a depth of at least
-/// zero, or `None` when there is none.
+/// The part of `a`-`b` where every one of `bounds` has depth at least zero, or `None`.
 pub fn segment_within(a: Vec3, b: Vec3, bounds: &[Plane]) -> Option<(Vec3, Vec3)> {
     let (mut enter, mut leave) = (0.0_f64, 1.0_f64);
     for bound in bounds {
@@ -131,16 +118,14 @@ pub fn segment_within(a: Vec3, b: Vec3, bounds: &[Plane]) -> Option<(Vec3, Vec3)
     (enter < leave).then(|| (a + (b - a) * enter, a + (b - a) * leave))
 }
 
-/// Whether the cut runs through this triangle: the plane crosses it, and with
-/// a window, crosses it inside the window.
+/// Whether the cut runs through this triangle, within the window if there is one.
 pub fn triangle_touches(plane: &Plane, world: [Vec3; 3]) -> bool {
     let d = world.map(|p| plane.depth(p));
     if d.iter().all(|&at| at > 0.0) || d.iter().all(|&at| at < 0.0) {
         return false;
     }
     let Some(window) = plane.window else { return true };
-    // The piece of the plane the triangle crosses it in, tested against the
-    // rectangle.
+    // The triangle's crossing segment of the plane, tested against the rectangle.
     let mut hits = Vec::with_capacity(3);
     for i in 0..3 {
         let j = (i + 1) % 3;

@@ -4,34 +4,21 @@ use super::*;
 use crate::raster::{Frame, Image};
 use simple3d_core::config::DisplayMode;
 
-/// Draw the scene. The frame is cut into horizontal bands and each is drawn on
-/// its own thread, from the same list of primitives in the same order -- see
-/// `Frame`'s own note on why the split is by rows rather than by work.
-///
-/// Everything that has to be decided before drawing starts is decided once,
-/// here, and shared: `axis_material` walks every triangle of every item to find
-/// where the axes run through material, and doing that once per band would put
-/// most of the work back.
-/// Prepare and draw in one step. The application prepares once and hands the
-/// result to whichever engine is drawing, so this is the tests' way in.
+/// Prepare and draw in one step, the tests' entry point; the application prepares once and hands
+/// the result to whichever engine draws.
 #[cfg(test)]
 pub fn render(request: &Request<'_>) -> Image {
     render_prepared(request, &prepare_frame(request))
 }
 
-/// The software renderer, from a frame that has already been prepared.
+/// The software renderer, from a prepared frame.
 pub fn render_prepared(request: &Request<'_>, prepared: &Prepared) -> Image {
     let [_, height] = request.size;
     render_in_bands(request, prepared, band_count(height.max(1)))
 }
 
-/// The scene worked out but not yet drawn: screen-space primitives in drawing
-/// order, and the pieces of the origin axes with the rule that governs them.
-///
-/// The software renderer's own: projection, culling, shading, the grid's
-/// falloff and the whole of the axis-through-material question decided once,
-/// on the CPU, for every band to draw from. The GPU renderer works all of it
-/// out on the card and is never handed one of these.
+/// The scene prepared for the software renderer: screen-space primitives in drawing order, and
+/// the axis pieces with their rule, decided once for every band. The GPU never uses this.
 pub struct Prepared {
     pub(crate) steps: Vec<Step>,
     pub(crate) axes: Vec<AxisStep>,
@@ -43,22 +30,18 @@ pub fn prepare_frame(request: &Request<'_>) -> Prepared {
     Prepared { steps: prepare_with(request), axes }
 }
 
-/// Draw the frame in a given number of bands. The band count must not change
-/// the picture -- see the test at the bottom of this file, which holds the two
-/// against each other -- so it is a parameter only so that the test can ask.
+/// Draw the frame in `bands` bands. The count must not change the picture (tested at the bottom
+/// of this file); it is a parameter only for that test.
 pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands: usize) -> Image {
     let [width, height] = request.size;
     let (width, height) = (width.max(1), height.max(1));
     let Prepared { steps, axes } = prepared;
 
-    // The one buffer the whole frame is drawn into. Each band is handed the
-    // stretch of it holding its own rows, so what the threads write is already
-    // the finished image -- no copy at the end, which on a large viewport was
-    // costing more than the drawing.
+    // One buffer for the whole frame; each band writes its own rows directly, avoiding a final copy
+    // that cost more than drawing on large viewports.
     let mut color = vec![0u8; width * height * 4];
 
-    // Rows are handed out by how much there is to draw in them -- see
-    // `balanced_ranges`.
+    // Rows are shared out by work (`balanced_ranges`).
     let ranges = balanced_ranges(steps, height, bands);
     if ranges.len() == 1 {
         let mut frame = Frame::band(&mut color, width, height, 0, height);
@@ -81,8 +64,7 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
         for (band, (&(lo, hi), slice)) in ranges.iter().zip(slices).enumerate() {
             let (steps, axes, bins) = (steps, axes, &bins);
             scope.spawn(move || {
-                // The band's steps from every chunk, in chunk order: which is
-                // preparation order, since the chunks are consecutive.
+                // The band's steps in chunk order, which is preparation order.
                 let mine: Vec<&[u32]> = bins.iter().map(|chunk| &chunk[band][..]).collect();
                 let mut frame = Frame::band(slice, width, height, lo, hi);
                 draw(&mut frame, request, steps, &mine, axes);
@@ -92,14 +74,13 @@ pub(crate) fn render_in_bands(request: &Request<'_>, prepared: &Prepared, bands:
     Image { width, height, color }
 }
 
-/// All of it as steps: the tests' way in.
+/// All of it as steps, for tests.
 #[cfg(test)]
 pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
     prepare_with(request)
 }
 
-/// Everything of the model that is the same whichever rows are being drawn:
-/// projected, culled, shaded and ordered exactly as the drawing order requires.
+/// Everything row-independent: projected, culled, shaded and ordered as drawing requires.
 pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     let view = request.view;
     let mut steps = Vec::new();
@@ -108,8 +89,7 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     }
     let cut = &request.section[..];
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
-        // Every vertex projected once for everything this item draws from its
-        // mesh: faces and edges share their corners.
+        // Each vertex projected once for everything this item draws.
         let needs_screen = item.style != Style::Selected && cut.is_empty();
         let screen = if needs_screen { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         let screen = &screen[..];
@@ -130,13 +110,8 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
                 }
                 push_cap(&mut steps, &view, item.renderable, palette, cut, request.mode);
             }
-            // Always outlined, in every display mode: the selection has to be
-            // visible, and an outline reads clearly over a shaded body. A
-            // larger bias than the solid's own edges, or the two would tie at
-            // equal depth and the outline would lose.
-            //
-            // A glowing body is outlined here too; the glow itself comes
-            // last, after everything that could be standing in front of it.
+            // The selection is always outlined, with more bias than the solid's own edges so it wins ties.
+            // Glowing bodies are outlined too; the glow itself comes last.
             Style::Selected | Style::Glow => push_selection(
                 &mut steps,
                 &view,
@@ -149,34 +124,26 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut),
         }
     }
-    // Last of all, over the finished model: what a buried body is pointed out
-    // with, and the cells of a tool's preview.
+    // Last, over the finished model: glows for buried bodies, and tool preview cells.
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {
         let screen = if cut.is_empty() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         push_glow(&mut steps, &view, item.renderable, &screen, request.palette.glow, cut);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {
-        // After the solids: the mark belongs on the surface, and in wireframe
-        // there is no surface for it to sit on.
+        // After the solids, since the mark sits on the surface; wireframe has none.
         push_plane_marks(&mut steps, &view, &request.items, &request.palette, &request.grid, cut);
     }
     steps
 }
 
-/// Draw the whole scene into one frame -- a band of one, or the lot.
+/// Draw the scene into one frame: a single band or the whole.
 pub(crate) fn draw(frame: &mut Frame, request: &Request<'_>, steps: &[Step], mine: &[&[u32]], axes: &[AxisStep]) {
     fill_background(frame, &request.palette);
     draw_steps(frame, steps, mine);
     frame.set_tag(0);
-    // Last: an axis is hidden by the material it runs through, which is cut out
-    // of the line, and by anything in front of it -- except on the approach to a
-    // surface it is about to go into, which is drawn over the shape it is
-    // arriving at. Depth alone eats that approach, because the line is behind
-    // the shape's own front faces for the whole stretch between the silhouette
-    // and the point it enters, and losing it is what made the origin read as
-    // being somewhere behind the model (issue 47). The grid is untouched, drawn
-    // first and covered by everything.
+    // Axes last: hidden by material they run through and by what is in front, except on the approach
+    // to the surface they enter, which depth alone would hide (issue 47). The grid is drawn first.
     for step in axes {
         frame.line_through(step.a, step.b, step.colour, AXIS_BIAS, &step.seen);
     }

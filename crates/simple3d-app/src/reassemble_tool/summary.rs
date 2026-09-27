@@ -4,13 +4,8 @@ use super::*;
 use crate::theme;
 use simple3d_geom::reassemble::{Assembly, Shape};
 
-/// What was found, counted up by kind: "12 objects: 5 boxes, 3 cylinders and 4
-/// kept as meshes".
-///
-/// Counted rather than listed. A list of every body is the outliner, which is
-/// where it belongs once this is pressed; what has to be readable *before* it
-/// is pressed is whether the recognition worked at all -- twenty boxes is a
-/// reassembly, and twenty meshes is a mesh that has merely been chopped up.
+/// Found bodies counted by kind ("12 objects: 5 boxes, 3 cylinders and 4 kept as meshes"), which
+/// shows whether recognition worked; the outliner lists them after applying.
 pub(crate) fn tally(assembly: &Assembly) -> String {
     let objects = assembly.objects();
     let mut counted: Vec<(&'static str, &'static str, usize)> = Vec::new();
@@ -20,8 +15,7 @@ pub(crate) fn tally(assembly: &Assembly) -> String {
             None => counted.push((part.shape.label(), part.shape.plural(), 1)),
         }
     }
-    // The shapes first and the meshes last, whatever order the bodies came in:
-    // what was recovered is the news, and what was not is the caveat.
+    // Shapes first, meshes last: what was recovered is the news.
     counted.sort_by_key(|(singular, _, count)| (*singular == Shape::Mesh.label(), std::cmp::Reverse(*count)));
     let mut kinds: Vec<String> = counted
         .into_iter()
@@ -39,7 +33,7 @@ pub(crate) fn tally(assembly: &Assembly) -> String {
     format!("{objects} object{}: {}{assemblies}", if objects == 1 { "" } else { "s" }, list(&kinds))
 }
 
-/// "a, b and c" -- the way a sentence reads rather than the way a list prints.
+/// "a, b and c", as a sentence reads.
 fn list(items: &[String]) -> String {
     match items {
         [] => "nothing".to_string(),
@@ -61,9 +55,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, tool: &ReassembleTool) {
         (Some(found), _) => tally(&found.assembly),
     };
     ui.add(egui::Label::new(theme::hint(text)).selectable(false));
-    // Said only when it is true, and said where the checkbox that turns it on
-    // is looked at: a preview that silently does not appear reads as a setting
-    // that does not work.
+    // Say when the preview is too large to draw, beside its checkbox, or it looks broken.
     if tool.outlines && tool.found.as_ref().is_some_and(|found| !found.drawn) {
         ui.add_space(4.0);
         ui.add(

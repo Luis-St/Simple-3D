@@ -4,12 +4,8 @@ use super::*;
 
 #[test]
 pub(crate) fn the_clipboard_chords_reach_the_application() {
-    // `egui-winit` turns Ctrl+X, Ctrl+C and Ctrl+V into `Cut`, `Copy` and
-    // `Paste` and never emits the key press underneath them, so these three
-    // bindings -- alone in the whole keymap -- can only be tested through the
-    // events the window system really delivers. Driving `Command::Copy`
-    // directly, which is what the other tests do, is exactly what let this go
-    // unnoticed.
+    // `egui-winit` turns Ctrl+X/C/V into Cut/Copy/Paste without emitting the key, so these bindings can
+    // only be tested through real window events; driving `Command::Copy` directly missed it.
     let mut harness = harness("clipboard-chords");
     let root = harness.state().scene.root();
     let before = harness.state().scene.node(root).children.len();
@@ -28,10 +24,8 @@ pub(crate) fn the_clipboard_chords_reach_the_application() {
 
 #[test]
 pub(crate) fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
-    // Issue 77: Ctrl, Shift and Alt could not be bound at all, because a chord
-    // needed a key beside them. Driven through the window because that is where
-    // the rule lives: the toolkit reports no key event for a modifier, so the
-    // press has to be read off the modifier state frame by frame.
+    // Issue 77: modifiers alone were unbindable. Driven through the window, since modifier presses
+    // are read from frame-to-frame state.
     let mut harness = harness("modifier-only-binding");
     harness
         .state_mut()
@@ -44,7 +38,7 @@ pub(crate) fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
         .unwrap();
     let before = harness.state().scene.settings.grid_visible;
 
-    // Alt down for a couple of frames, then up with nothing pressed under it.
+    // Alt down for a couple of frames, then up with nothing under it.
     modifiers(&mut harness, egui::Modifiers::ALT);
     harness.step();
     harness.step();
@@ -53,8 +47,7 @@ pub(crate) fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
     harness.step();
     assert_ne!(harness.state().scene.settings.grid_visible, before, "releasing the modifier did not fire its binding");
 
-    // The same modifier held under another key is a combination, and firing that
-    // must not also fire the modifier's own binding on the way out.
+    // A modifier held under another key is a combination, and must not also fire its own binding.
     let grid = harness.state().scene.settings.grid_visible;
     modifiers(&mut harness, egui::Modifiers::ALT);
     key(&mut harness, egui::Key::J);
@@ -65,8 +58,7 @@ pub(crate) fn a_modifier_released_on_its_own_fires_what_it_is_bound_to() {
 
 #[test]
 pub(crate) fn several_keys_held_together_fire_the_combination_they_make() {
-    // Any key can be the base of a combination, not only a modifier: Q+W+E is a
-    // binding, and it fires on the press that completes it.
+    // Any key can base a combination: Q+W+E fires on the completing press.
     let mut harness = harness("combination-binding");
     harness
         .state_mut()
@@ -75,8 +67,7 @@ pub(crate) fn several_keys_held_together_fire_the_combination_they_make() {
         .unwrap();
     let before = harness.state().scene.settings.grid_visible;
 
-    // Held down one after another, the way a hand performs it. `keys_down` is
-    // raw-input state, so each key stays down until it is let go.
+    // Held one after another; `keys_down` is raw input, so each stays down until released.
     hold_key(&mut harness, egui::Key::Q, true);
     hold_key(&mut harness, egui::Key::W, true);
     assert_eq!(harness.state().scene.settings.grid_visible, before, "an incomplete combination fired");
@@ -92,8 +83,7 @@ pub(crate) fn several_keys_held_together_fire_the_combination_they_make() {
 
 #[test]
 pub(crate) fn a_modifier_held_over_a_click_is_the_click_not_a_binding() {
-    // Ctrl+click adds to the selection, and must not also fire whatever Ctrl
-    // alone is bound to when the hand comes off the key.
+    // Ctrl+click adds to the selection without firing Ctrl's own binding.
     let mut harness = harness("modifier-only-click");
     harness
         .state_mut()

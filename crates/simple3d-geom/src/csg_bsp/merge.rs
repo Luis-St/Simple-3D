@@ -1,27 +1,16 @@
-//! Putting split faces back together, so a boolean does not leave a mesh
-//! fanned into slivers.
+//! Putting split faces back together, so a boolean does not leave a mesh fanned into slivers.
 
 use super::*;
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
 
-/// Undo a plane group's internal triangulation (a "fan from centre" cap, or
-/// a diagonal-split quad wall) back into a single polygon, by dropping edges
-/// shared by two triangles of the group and chaining what's left into one
-/// boundary loop. This matters because BSP-CSG clips whole input polygons:
-/// if a primitive's own flat face is fed in pre-split by an arbitrary
-/// internal diagonal, a neighbouring face clipped at a slightly different
-/// point along that same physical edge produces a T-vertex the strict
-/// manifold check (and downstream slicers) will flag, even though the
-/// surface has no real gap. Returns None (caller falls back to per-triangle
-/// polygons) if the group isn't a single simple loop -- e.g. it is itself
-/// the result of an earlier boolean op and legitimately has multiple
-/// boundary components (a face with a hole in it).
+/// Merge a plane group's internal triangulation back into one polygon by dropping shared edges and
+/// chaining the rest into one loop. BSP-CSG clips whole polygons, so a face pre-split by an arbitrary
+/// diagonal gives neighbours mismatched T-vertices. `None` if the group is not one simple loop (e.g. a
+/// face with a hole); the caller then uses the triangles.
 pub(crate) fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane, tag: u32) -> Option<Polygon> {
-    // BTreeMap, not HashMap: `start` below is picked by iteration order, and
-    // `HashMap`'s is randomised per instance, which would make boolean output
-    // vary between runs of identical input (spec section 5.2 requires
-    // deterministic evaluation).
+    // BTreeMap, not HashMap: `start` depends on iteration order, and HashMap's is randomised, breaking
+    // deterministic evaluation (spec section 5.2).
     use std::collections::{BTreeMap, BTreeSet};
     let mut edge_count: BTreeMap<((i64, i64, i64), (i64, i64, i64)), i32> = BTreeMap::new();
     let mut pos_of: BTreeMap<(i64, i64, i64), Vec3> = BTreeMap::new();
@@ -68,19 +57,14 @@ pub(crate) fn try_merge_group(mesh: &Mesh, tri_idxs: &[usize], plane: Plane, tag
         return None; // boundary has more than one loop (e.g. a face with a hole)
     }
     if !is_convex_loop(&verts, &plane) {
-        // Both `split_polygon` and `polygons_to_mesh` assume convexity (the
-        // latter fan-triangulates from vertex 0). A concave merged face -- an
-        // L-shaped face left behind by an earlier boolean, say -- would be
-        // silently mis-split and mis-triangulated, so fall back to feeding
-        // this group's triangles in individually.
+        // Splitting and fan triangulation assume convexity, so a concave merged face falls back to triangles.
         return None;
     }
     Some(Polygon::new(verts, plane, tag))
 }
 
-/// True if the loop turns the same way at every vertex when viewed along the
-/// plane normal. Exactly-collinear vertices (a fan triangulation's midpoints)
-/// are tolerated: they are harmless for both splitting and fan-triangulation.
+/// Whether the loop turns the same way at every vertex along the plane normal; collinear vertices
+/// are tolerated.
 pub(crate) fn is_convex_loop(verts: &[Vec3], plane: &Plane) -> bool {
     let n = verts.len();
     if n < 3 {

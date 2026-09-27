@@ -10,33 +10,25 @@ pub(crate) fn painting_remembers_the_colour_and_only_a_ghost_is_drawn_as_one() {
     let id = app.primary().expect("the plate is selected");
     assert!(app.settings.recent_colours.is_empty());
 
-    // Issue 29: a colour used once should be offered again, wherever a
-    // colour is chosen.
+    // Issue 29: a colour used once is offered again.
     app.paint(&[id], Some(Colour([0x2E, 0x9A, 0xFF])), None);
     assert_eq!(app.settings.recent_colours, vec![[0x2E, 0x9A, 0xFF]]);
     app.paint(&[id], Some(Colour([0x77, 0x11, 0x22])), None);
     assert_eq!(app.settings.recent_colours[0], [0x77, 0x11, 0x22]);
-    // Clearing paints nothing, so it remembers nothing.
+    // Clearing paints nothing, so remembers nothing.
     app.paint(&[id], None, None);
     assert_eq!(app.settings.recent_colours.len(), 2);
 
-    // Issue 35: one of the eight presets is already a click away on the
-    // row above, so using it is not what "recent" is for.
+    // Issue 35: presets are already a click away, so they are not recent.
     let preset = crate::theme::PAINT_PRESETS[6].1;
     app.paint(&[id], Some(Colour([preset.r(), preset.g(), preset.b()])), None);
     assert_eq!(app.settings.recent_colours.len(), 2, "a preset was remembered as a recent colour");
     assert_eq!(app.custom_recent_colours(), vec![[0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]]);
 
-    // Issues 35 and 85: a drag through the picker paints on every frame it
-    // moves, and each of those frames used to be able to take a slot --
-    // which is how the row ended up holding eight shades of black. Nothing
-    // is remembered until the picker is put away, however long the drag
-    // takes or how often it pauses: a visit to the picker is one choice.
+    // Issues 35 and 85: a picker drag remembers nothing until the picker closes: one visit, one choice.
     for step in 0..40_u8 {
         app.paint_from_picker(&[id], [0x10 + step, 0x40, 0x90]);
-        // The undo history's coalescing window ages out mid-drag on any
-        // drag slower than a second, which is what used to split one visit
-        // into a swatch per pause.
+        // The undo coalescing window ages out on slow drags, which once split a visit per pause.
         app.history.close();
     }
     assert_eq!(
@@ -50,18 +42,16 @@ pub(crate) fn painting_remembers_the_colour_and_only_a_ghost_is_drawn_as_one() {
         vec![[0x37, 0x40, 0x90], [0x77, 0x11, 0x22], [0x2E, 0x9A, 0xFF]],
         "a single drag through the picker filled the recent row"
     );
-    // Closing it again is not a second choice.
+    // Closing again is not a second choice.
     app.picker_closed();
     assert_eq!(app.custom_recent_colours().len(), 3);
 
-    // A second visit to the picker is a second choice.
+    // A second visit is a second choice.
     app.paint_from_picker(&[id], [0x01, 0x02, 0x03]);
     app.picker_closed();
     assert_eq!(app.custom_recent_colours()[..2], [[0x01, 0x02, 0x03], [0x37, 0x40, 0x90]]);
 
-    // Issue 85: a shade of a colour already on the row is that colour, and
-    // takes its slot rather than a slot of its own -- both on the way in,
-    // and on the way out for a row an older version filled with them.
+    // Issue 85: a shade of a colour on the row takes its slot, coming in and for rows older versions filled.
     app.paint_from_picker(&[id], [0x05, 0x06, 0x07]);
     app.picker_closed();
     assert_eq!(app.custom_recent_colours()[..2], [[0x05, 0x06, 0x07], [0x37, 0x40, 0x90]]);
@@ -72,8 +62,7 @@ pub(crate) fn painting_remembers_the_colour_and_only_a_ghost_is_drawn_as_one() {
         "a row an older version filled with shades of one black still shows eight of them"
     );
 
-    // Issue 21: the three states, and which of them the viewport is asked
-    // to draw as a ghost.
+    // Issue 21: the three states, and which are drawn as ghosts.
     assert!(app.ghosts().is_empty());
     app.scene.get_mut(id).unwrap().set_visibility(Visibility::Hidden);
     assert!(app.ghosts().is_empty(), "a hidden node is gone, not translucent");

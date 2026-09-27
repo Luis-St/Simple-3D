@@ -6,9 +6,8 @@ use super::*;
 
 #[test]
 pub(crate) fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_first_press() {
-    // The menu selects the row it was opened on, and that selection used to
-    // renumber the row underneath it, so the menu was looked for under an id
-    // nothing had drawn and closed again on the very next frame.
+    // Regression: the menu selects its row, which renumbered it, so the menu was looked up under a
+    // stale id and closed the next frame.
     let mut harness = harness("outliner-context-menu");
     let root = harness.state().scene.root();
     let cube = harness.state_mut().scene.add_primitive("box", root, 1).expect("the box is in the registry");
@@ -20,8 +19,7 @@ pub(crate) fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_fi
     move_to(&mut harness, at);
     button(&mut harness, at, egui::PointerButton::Secondary, true);
     button(&mut harness, at, egui::PointerButton::Secondary, false);
-    // Two more frames: the menu is opened out of memory on the frame after the
-    // click, and it is the frame after *that* which used to lose it.
+    // Two more frames: the menu opens the frame after the click, and the one after that lost it.
     harness.step();
     harness.step();
 
@@ -32,15 +30,8 @@ pub(crate) fn right_clicking_an_unselected_outliner_row_opens_its_menu_at_the_fi
     );
 }
 
-/// Issue 67: the tree's own Add menu offers the custom-kind tool, the way the
-/// menu bar's does.
-///
-/// The two Add menus are meant to hold the same things and differ only in where
-/// what they add lands, and they drifted: "Custom pattern" went into the menu
-/// bar's only, so the tree -- which is where a container is most often added
-/// from -- offered "Pattern" and "Make a pattern of the selection" and no way at
-/// all to reach the tool that builds a rule. A feature nobody can find is a
-/// feature nobody has.
+/// Issue 67: the tree's Add menu offers the custom-pattern tool like the menu bar's; the two had
+/// drifted apart.
 #[test]
 pub(crate) fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     use egui_kittest::kittest::Queryable;
@@ -58,10 +49,8 @@ pub(crate) fn the_tree_add_menu_offers_the_custom_pattern_tool() {
     harness.step();
     harness.step();
 
-    // The menu bar has an "Add" of its own, and it is the one a plain lookup by
-    // label finds -- which is how this test first passed against the very code it
-    // was written to catch. The tree's is a submenu, so its label carries the
-    // arrow egui puts on one, and it is drawn well below the menu bar.
+    // Find the tree's Add submenu, not the menu bar's, which a plain label lookup finds first (and let
+    // this test pass against the bug).
     let add = harness
         .query_all_by_label_contains("Add")
         .find(|node| node.rect().center().y > 40.0)

@@ -1,5 +1,4 @@
-//! The solids of revolution: prisms, cones, cylinders, discs, tubes, rings
-//! and the torus.
+//! Solids of revolution: prisms, cones, cylinders, discs, tubes, rings and the torus.
 
 use super::*;
 use crate::mesh::Mesh;
@@ -16,8 +15,7 @@ pub fn cone_mesh(bottom_diameter: f64, top_diameter: f64, height: f64, segments:
     cone_sector_mesh(bottom_diameter, top_diameter, height, segments, 360.0)
 }
 
-/// A cone swept through part of a turn: short of a full 360 the two cut faces
-/// close it, so a quarter cone is still a solid.
+/// A cone over part of a turn, closed by its two cut faces.
 pub fn cone_sector_mesh(bottom_diameter: f64, top_diameter: f64, height: f64, segments: u32, sweep_deg: f64) -> Mesh {
     let n = segments.max(3);
     let bottom = sector_outline(n, bottom_diameter / 2.0, bottom_diameter / 2.0, sweep_deg);
@@ -60,8 +58,7 @@ pub fn cylinder_mesh(dx: f64, dy: f64, height: f64, segments: u32) -> Mesh {
     cylinder_sector_mesh(dx, dy, height, segments, 360.0)
 }
 
-/// A cylinder swept through part of a turn -- a pie slice, capped by the two
-/// flat faces where it was cut.
+/// A cylinder over part of a turn: a capped pie slice.
 pub fn cylinder_sector_mesh(dx: f64, dy: f64, height: f64, segments: u32, sweep_deg: f64) -> Mesh {
     let outline = sector_outline(segments.max(3), dx / 2.0, dy / 2.0, sweep_deg);
     extrude_frustum_polygon(&outline, &outline, height)
@@ -79,8 +76,7 @@ pub fn tube_mesh(outer_diameter: f64, inner_diameter: f64, height: f64, segments
     tube_sector_mesh(outer_diameter, inner_diameter, height, segments, 360.0)
 }
 
-/// A tube swept through part of a turn: a curved channel or a pipe elbow,
-/// closed at both ends by the faces it was cut on.
+/// A tube over part of a turn (a channel or elbow), closed by its cut faces.
 pub fn tube_sector_mesh(outer_diameter: f64, inner_diameter: f64, height: f64, segments: u32, sweep_deg: f64) -> Mesh {
     let ri = inner_diameter / 2.0;
     let ro = outer_diameter / 2.0;

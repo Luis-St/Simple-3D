@@ -1,25 +1,13 @@
-//! Spreading the per-triangle work of preparing a frame over the cores,
-//! without changing what comes out.
+//! Spreading a frame's per-triangle preparation over the cores without changing its output.
 
 use std::ops::Range;
 
-/// How many items a thread must be given before starting one is worth it.
-/// Below this the work is over in well under a millisecond on one core, and
-/// spawning threads to share it out costs more than it saves.
+/// The fewest items worth a thread; below this spawning costs more than it saves.
 const MIN_CHUNK: usize = 16_384;
 
-/// Run `work` over `0..count` and append what it produces to `out`, in the
-/// order a single pass from 0 to `count` would have produced it.
-///
-/// The range is cut into consecutive chunks, one per thread, and the chunks'
-/// output is laid end to end afterwards -- so the result is the very list the
-/// single-threaded loop makes, not merely the same set of steps. The drawing
-/// order is part of the picture (see `Frame`), which is why the work is not
-/// simply shared out and gathered as it finishes.
-///
-/// The gathering is itself done in parallel: a dense mesh prepares close to a
-/// million steps, and copying those end to end on one core cost a good part of
-/// what splitting the work had saved.
+/// Run `work` over `0..count` and append its output to `out` in single-pass order, since drawing
+/// order is part of the picture (see `Frame`). Chunks run per thread and are concatenated, also in
+/// parallel, since copying a million steps on one core cost much of the gain.
 pub(crate) fn extend_in_order<T: Copy + Send + Sync>(
     out: &mut Vec<T>,
     count: usize,
@@ -60,12 +48,12 @@ pub(crate) fn extend_in_order<T: Copy + Send + Sync>(
             });
         }
     });
-    // Every slot in `start..start + total` was written above: the parts are
-    // laid over exactly that stretch of the spare capacity, end to end.
+    // Every slot in `start..start + total` was written above: the parts cover exactly that stretch of
+    // the spare capacity, end to end.
     unsafe { out.set_len(start + total) };
 }
 
-/// `f` applied to every index in `0..count`, collected in order.
+/// `f` over `0..count`, collected in order.
 pub(crate) fn map_in_order<T: Copy + Send + Sync>(count: usize, f: impl Fn(usize) -> T + Sync) -> Vec<T> {
     let mut out = Vec::with_capacity(count);
     extend_in_order(&mut out, count, |range, part| part.extend(range.map(&f)));

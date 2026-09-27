@@ -1,5 +1,4 @@
-//! Bridging a hole into its surrounding loop, so a region with holes can be
-//! ear-clipped as one simple polygon.
+//! Bridging a hole into its surrounding loop, so a region with holes ear-clips as one polygon.
 
 use super::*;
 pub(crate) fn point_in_polygon(p: Point, polygon: &[Point]) -> bool {
@@ -17,21 +16,9 @@ pub(crate) fn point_in_polygon(p: Point, polygon: &[Point]) -> bool {
     inside
 }
 
-/// Splice `hole` into `outer` along a bridge, turning a polygon with a hole into
-/// a single (self-touching) loop that an ear clipper can eat.
-///
-/// The bridge runs from the hole's rightmost vertex to the nearest outer vertex
-/// it can reach without crossing any edge of either loop -- or of the holes
-/// still waiting to be bridged, `waiting`. Both endpoints appear twice in the
-/// result, which is what makes the seam infinitely thin and leaves the enclosed
-/// area unchanged.
-///
-/// The waiting holes are not in the outer loop yet, so nothing else keeps a
-/// bridge out of them. In a drilled grid the first hole's nearest outer vertex
-/// was a far corner of the plate, and the bridge to it ran straight through the
-/// holes in between: the loop crossed itself, the ear clipper ran out of ears,
-/// and a plate with a hundred holes kept all 37 000 triangles the clipping had
-/// left on each face.
+/// Splice `hole` into `outer` along a bridge from the hole's rightmost vertex to the nearest outer
+/// vertex reachable without crossing either loop or the `waiting` holes. Both endpoints appear twice,
+/// a zero-width seam. Ignoring waiting holes once let a bridge cross them in a drilled grid.
 pub(crate) fn bridge_hole(
     outer: &mut Vec<u32>,
     outer_points: &mut Vec<Point>,
@@ -80,9 +67,7 @@ pub(crate) fn bridge_hole(
     Some(())
 }
 
-/// Whether the open segment `a`-`b` properly crosses any edge of `polygon`.
-/// Touching at an endpoint does not count: a bridge is *meant* to land on a
-/// vertex of both loops.
+/// Whether open segment `a`-`b` properly crosses an edge of `polygon`; endpoint contact does not count.
 pub(crate) fn crosses_any(a: Point, b: Point, polygon: &[Point]) -> bool {
     let n = polygon.len();
     (0..n).any(|i| segments_properly_cross(a, b, polygon[i], polygon[(i + 1) % n]))
@@ -92,7 +77,6 @@ pub(crate) fn segments_properly_cross(a: Point, b: Point, c: Point, d: Point) ->
     let side = |p: Point, q: Point, r: Point| (q.0 - p.0) * (r.1 - p.1) - (q.1 - p.1) * (r.0 - p.0);
     const EPS: f64 = 1e-12;
     let (d1, d2, d3, d4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
-    // Strict signs on both segments: shared endpoints and collinear overlaps
-    // fall through as "not crossing", which is what a bridge needs.
+    // Strict signs: shared endpoints and collinear overlaps are not crossings.
     ((d1 > EPS && d2 < -EPS) || (d1 < -EPS && d2 > EPS)) && ((d3 > EPS && d4 < -EPS) || (d3 < -EPS && d4 > EPS))
 }

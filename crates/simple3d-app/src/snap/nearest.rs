@@ -3,14 +3,8 @@
 use super::*;
 use simple3d_geom::Vec3;
 
-/// The nearest point on the segment `a`..`b` to `cursor`, measured on screen,
-/// and how far away that landed (issue 78).
-///
-/// An edge is a line, not the three points on it the feature list carries, and
-/// "measure from here along this edge" is an ordinary thing to want. The whole
-/// segment is projected and the cursor is dropped onto it in screen space, so
-/// what is caught is the place actually being pointed at. `None` when either end
-/// falls off screen, where the projection cannot be trusted.
+/// The nearest point on segment `a`..`b` to `cursor` on screen, and its distance (issue 78), so an
+/// edge is caught where it is pointed at. `None` if either end is off screen.
 pub fn nearest_on_edge(
     a: Vec3,
     b: Vec3,
@@ -29,24 +23,13 @@ pub fn nearest_on_edge(
     if distance > max_pixels {
         return None;
     }
-    // The screen parameter is used in the model: a perspective divide would put
-    // the point slightly off along the edge, but the viewport is orthographic
-    // (issue 26), where the two parameters are the same number.
+    // The screen parameter equals the world one under the orthographic viewport (issue 26).
     Some((a + (b - a) * t as f64, distance))
 }
 
-/// Every feature within `max_pixels` of the cursor on screen, with how far away
-/// each landed, in the order the list holds them.
-///
-/// The match is by screen distance, not world distance: what a user means by
-/// "that corner" is the one under the pointer, and two corners far apart in the
-/// model can sit close together in the frame. `project` returns `None` for a
-/// point that does not land on screen, which is skipped.
-///
-/// All of them, rather than only the nearest, because a caller that will not
-/// take every feature -- the measure tool, which takes only what the picture
-/// shows -- has to work outward from the cursor until one is acceptable. Asking
-/// that question of every feature instead costs a ray cast each.
+/// Every feature within `max_pixels` of the cursor on screen, with distances, in list order. By
+/// screen distance, since "that corner" is the one under the pointer. All of them, so callers
+/// rejecting some (hidden ones) can work outward cheaply.
 pub fn near_on_screen(
     features: &[Feature],
     project: impl Fn(Vec3) -> Option<egui::Pos2>,

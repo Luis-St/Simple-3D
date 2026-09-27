@@ -1,22 +1,13 @@
-//! A tag scanner, which is all the XML a 3MF model part needs reading as.
+//! A tag scanner, which is all the XML a 3MF model part needs.
 //!
-//! What has to be understood is a flat sequence of elements and their
-//! attributes: `<object>`, `<vertex x= y= z=>`, `<triangle v1= v2= v3=>`,
-//! `<item objectid= transform=>`. Nothing is asked of the document's shape --
-//! no validation, no namespace resolution, no text content -- so a scanner
-//! that yields one tag at a time is the whole job, and a parser crate would be
-//! a dependency for less than this file does.
-//!
-//! Element names are reported without their prefix. 3MF's materials extension
-//! is written `<m:colorgroup>` by this workspace's exporter and `<ns2:color>`
-//! or plain `<colorgroup>` by other programs, all meaning the same element:
-//! matching on the local name is what makes those the same file to read.
+//! Only a flat sequence of elements and attributes is read (no validation, namespaces or text), so
+//! a parser crate is unnecessary. Names are matched without their prefix, since the materials
+//! extension appears as `<m:colorgroup>`, `<ns2:color>` or unprefixed depending on the writer.
 
-/// One tag, as it was written.
+/// One tag, as written.
 #[derive(Clone, Copy, Debug)]
 pub struct Tag<'a> {
-    /// The element name with any namespace prefix removed, lowercased at the
-    /// point of comparison rather than here so the borrow stays cheap.
+    /// The element name without prefix; lowercased at comparison to keep the borrow cheap.
     pub name: &'a str,
     /// `</name>`.
     pub closing: bool,
@@ -26,20 +17,17 @@ pub struct Tag<'a> {
 }
 
 impl<'a> Tag<'a> {
-    /// Whether this is the opening of `name`, compared without case or prefix.
+    /// Whether this opens `name`, ignoring case and prefix.
     pub fn opens(&self, name: &str) -> bool {
         !self.closing && self.name.eq_ignore_ascii_case(name)
     }
 
-    /// Whether this is the close of `name` -- either `</name>` or the `/>` of
-    /// an empty element, since the two say the same thing to a reader tracking
-    /// depth.
+    /// Whether this closes `name`: `</name>` or an empty element's `/>`.
     pub fn closes(&self, name: &str) -> bool {
         (self.closing || self.empty) && self.name.eq_ignore_ascii_case(name)
     }
 
-    /// An attribute's value with its entities resolved, or `None` when the tag
-    /// does not carry one by that name.
+    /// An attribute's value with entities resolved, or `None` if absent.
     pub fn attr(&self, name: &str) -> Option<String> {
         let mut rest = self.attributes;
         while let Some(equals) = rest.find('=') {
@@ -61,23 +49,21 @@ impl<'a> Tag<'a> {
         None
     }
 
-    /// An attribute read as a number, `None` when it is absent or not one.
+    /// An attribute as a number, or `None` if absent or not a number.
     pub fn number(&self, name: &str) -> Option<f64> {
         let value = self.attr(name)?;
         let parsed = value.trim().parse::<f64>().ok()?;
         parsed.is_finite().then_some(parsed)
     }
 
-    /// An attribute read as a whole number, for the indices and ids a 3MF is
-    /// held together by.
+    /// An attribute as a whole number, for 3MF indices and ids.
     pub fn index(&self, name: &str) -> Option<usize> {
         self.attr(name)?.trim().parse::<usize>().ok()
     }
 }
 
-/// Every tag in `text`, in order. Comments, processing instructions, doctypes
-/// and CDATA are skipped; text between tags is not reported, because nothing in
-/// a 3MF model part is carried as element text.
+/// Every tag in `text`, in order. Comments, processing instructions, doctypes and CDATA are skipped;
+/// element text is not reported, since a 3MF model part carries none.
 pub fn tags(text: &str) -> Tags<'_> {
     Tags { rest: text }
 }
@@ -93,7 +79,7 @@ impl<'a> Iterator for Tags<'a> {
         loop {
             let open = self.rest.find('<')?;
             let after = &self.rest[open + 1..];
-            // The three things that start with `<` and are not an element.
+            // The three things starting with `<` that are not elements.
             if let Some(body) = after.strip_prefix("!--") {
                 let end = body.find("-->").map(|at| at + 3).unwrap_or(body.len());
                 self.rest = &body[end..];
@@ -111,8 +97,7 @@ impl<'a> Iterator for Tags<'a> {
             }
             let end = match after.find('>') {
                 Some(end) => end,
-                // A tag the file ends in the middle of: there is nothing left
-                // to read, and the caller finds out from what is missing.
+                // The file ends mid-tag: nothing left to read; the caller notices what is missing.
                 None => {
                     self.rest = "";
                     return None;
@@ -140,9 +125,7 @@ impl<'a> Iterator for Tags<'a> {
     }
 }
 
-/// Resolve the five named entities XML defines, and numeric character
-/// references. Anything else is left exactly as written: an unknown entity in
-/// a node's name is not a reason to refuse a model.
+/// Resolve XML's five named entities and numeric references; anything else is left as written.
 fn unescape(value: &str) -> String {
     if !value.contains('&') {
         return value.to_string();

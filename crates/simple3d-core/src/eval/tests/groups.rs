@@ -59,9 +59,7 @@ pub(crate) fn per_node_meshes_land_in_world_space() {
 
 #[test]
 pub(crate) fn a_nodes_frame_places_its_origin_and_orients_its_axes() {
-    // What a manipulator handle relies on: `node_frames[id]` is the *parent*
-    // frame, so the node's origin is `frame.point(node.position)` and its
-    // own axes come from composing its rotation on top.
+    // `node_frames[id]` is the parent frame: the origin is `frame.point(position)`, as handles assume.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
@@ -73,15 +71,15 @@ pub(crate) fn a_nodes_frame_places_its_origin_and_orients_its_axes() {
     let out = Evaluator::new().evaluate(&scene, &Cancel::new());
     let frame = out.node_frames[&id];
     let origin = frame.point(scene.node(id).position);
-    // The group's 90-degree Z rotation turns the child's local +X into +Y.
+    // The group's 90-degree Z turn maps the child's +X to +Y.
     assert!((origin - Vec3::new(50.0, 10.0, 0.0)).length() < 1e-9, "{origin:?}");
 
-    // And the world-space mesh agrees with that origin.
+    // The world mesh agrees with that origin.
     let (lo, hi) = out.node_meshes[&id].bounds().unwrap();
     let centre = (lo + hi) * 0.5;
     assert!((centre - origin).length() < 1e-9, "{centre:?} vs {origin:?}");
 
-    // Turning a world-space drag back into parent-frame coordinates.
+    // A world-space drag back into parent-frame coordinates.
     let dragged_to = Vec3::new(50.0, 25.0, 0.0);
     let new_position = frame.inverse().point(dragged_to);
     assert!((new_position - Vec3::new(25.0, 0.0, 0.0)).length() < 1e-9, "{new_position:?}");
@@ -117,9 +115,7 @@ pub(crate) fn a_group_frame_carries_its_ancestors_anchor_shift() {
     let id = plate(&mut scene, group);
 
     let out = Evaluator::new().evaluate(&scene, &Cancel::new());
-    // The group's base anchor lifted its contents by half the plate's
-    // thickness, and the child's frame has to know that or its handles would
-    // sit below the geometry.
+    // The group's base anchor lifted its contents, which the child's frame must include.
     let origin = out.node_frames[&id].point(scene.node(id).position);
     assert!((origin.z - 2.0).abs() < 1e-9, "{origin:?}");
     let (lo, _) = out.node_meshes[&id].bounds().unwrap();
@@ -128,9 +124,7 @@ pub(crate) fn a_group_frame_carries_its_ancestors_anchor_shift() {
 
 #[test]
 pub(crate) fn a_group_measures_the_assembly_it_evaluates_to() {
-    // A group owns no mesh of its own, so the property editor used to report
-    // "no geometry yet" for every group in the scene, forever. Its measured
-    // size is the size of what it evaluates to, in world space.
+    // A group's measured size is its evaluated result's, in world space; it used to report no geometry.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -144,16 +138,13 @@ pub(crate) fn a_group_measures_the_assembly_it_evaluates_to() {
     assert!((hi - lo - Vec3::new(40.0, 20.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
     // In world space, so the group's own position is included.
     assert!(((lo.x + hi.x) / 2.0 - 100.0).abs() < 1e-9, "{lo:?}");
-    // And the root, which is a group too.
+    // The root is a group too.
     assert!(out.node_world_bounds.contains_key(&root));
 }
 
 #[test]
 pub(crate) fn a_rotated_group_is_measured_over_its_geometry_not_its_box() {
-    // Transporting a group's local box by rotating its eight corners would
-    // report a 40mm plate turned 45 degrees as 42mm across -- the box's
-    // diagonal, not the plate's. The measurement has to come from the
-    // geometry.
+    // Measured from geometry, since a rotated box's corners overstate the size.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
@@ -162,13 +153,12 @@ pub(crate) fn a_rotated_group_is_measured_over_its_geometry_not_its_box() {
 
     let out = Evaluator::new().evaluate(&scene, &Cancel::new());
     let (lo, hi) = out.node_world_bounds[&group];
-    // Turned a quarter turn about Z, the 40 x 20 plate measures 20 x 40.
+    // A quarter turn about Z makes the 40 x 20 plate measure 20 x 40.
     assert!((hi - lo - Vec3::new(20.0, 40.0, 4.0)).length() < 1e-9, "{:?}", hi - lo);
 }
 
-/// An assembly lays its children side by side and runs no boolean: two plates
-/// stacked face to face come out as both plates' triangles, where a union
-/// welds them into one slab.
+/// An assembly places children side by side with no boolean: two stacked plates keep all their
+/// triangles, where a union welds them.
 #[test]
 pub(crate) fn an_assembly_keeps_its_children_apart() {
     let mut scene = Scene::new();

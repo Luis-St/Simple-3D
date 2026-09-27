@@ -15,8 +15,7 @@ pub fn draw(app: &App, painter: &egui::Painter, view: &View) {
     }
 }
 
-/// One section's frame and grips. With more than one, each frame carries its
-/// number, which is the tab the window shows it under.
+/// One section's frame and grips; with several, each frame carries its tab number.
 fn draw_one(app: &App, painter: &egui::Painter, view: &View, which: usize, count: usize) {
     let section = *app.scene.settings.section_at(which);
     let corners = frame(&section, app.evaluated.bounds);
@@ -24,19 +23,14 @@ fn draw_one(app: &App, painter: &egui::Painter, view: &View, which: usize, count
     if screen.len() < 4 {
         return;
     }
-    // The frame is a reference rather than a selection, so it is drawn in the
-    // quiet grey the scene's own bounding box uses -- and brightens to the
-    // accent while the plane is under the pointer or being moved.
+    // A reference, so quiet grey like the scene's bounding box, brightening to accent when hovered or moved.
     let grabbed = app.section_grab.is_some() && app.section_tab == which;
     let live = grabbed || app.section_hover.is_some_and(|(hovered, _)| hovered == which);
     let colour = match live {
         true => crate::theme::token::ACCENT,
         false => crate::theme::token::TEXT_LO,
     };
-    // The grips are drawn a shade brighter than the frame when they are at
-    // rest: they lie over the model as often as over the background, and the
-    // frame's grey is the model's own grey -- a hairline in it disappears
-    // exactly where the shape is.
+    // Grips at rest are a shade brighter than the frame, whose grey vanishes over the model.
     let mark = match live {
         true => crate::theme::token::ACCENT,
         false => crate::theme::token::TEXT_HI,
@@ -55,10 +49,7 @@ fn draw_one(app: &App, painter: &egui::Painter, view: &View, which: usize, count
     }
     for (index, at) in grips(&corners).into_iter().enumerate() {
         let Some((middle, _)) = view.project(at) else { continue };
-        // Filled, not outlined. Half of what a grip lies over is the model
-        // itself, and a hairline square in a grey close to the model's own is
-        // invisible exactly where it is most needed -- which is where the shape
-        // is.
+        // Filled, since a hairline square vanishes over the model.
         painter.rect_filled(
             egui::Rect::from_center_size(middle, egui::Vec2::splat(GRIP)),
             2.0,
@@ -70,10 +61,7 @@ fn draw_one(app: &App, painter: &egui::Painter, view: &View, which: usize, count
             egui::Stroke::new(1.5_f32, mark),
             egui::StrokeKind::Middle,
         );
-        // An arrow head each way out of the grip under the pointer, along the
-        // line the plane travels: the frame says where the plane is, not which
-        // way it slides. On that one grip alone, because five sets of arrows
-        // over the model is a diagram of the control rather than the model.
+        // Travel arrows on the hovered grip only, so the model is not covered in arrows.
         if app.section_hover != Some((which, index)) {
             continue;
         }

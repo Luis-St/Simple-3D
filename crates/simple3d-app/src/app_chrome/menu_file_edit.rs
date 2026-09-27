@@ -29,9 +29,7 @@ impl App {
                 });
             });
 
-            // Where an opened model goes when there is already one open
-            // (issue 107): beside the two entries that open one, which is where
-            // the question comes up.
+            // Where an opened model goes (issue 107), beside the entries that open one.
             ui.menu_button("Open a model in", |ui| {
                 for option in OpenTarget::ALL {
                     let chosen = self.settings.open_target == option;
@@ -47,9 +45,7 @@ impl App {
             self.command_item(ui, Command::CloseTab, true);
             self.command_item(ui, Command::NextTab, self.tab_count() > 1);
             self.command_item(ui, Command::PreviousTab, self.tab_count() > 1);
-            // Closing the window rather than the document in it. With one window
-            // open it is the same thing as Quit and asks the same question; with
-            // more than one it leaves the others where they are.
+            // Closes the window, not a document; with one window it is Quit.
             if ui.button("Close window").on_hover_text("Close this window and the documents in it").clicked() {
                 self.request_close_window();
                 ui.close();
@@ -58,7 +54,7 @@ impl App {
             self.command_item(ui, Command::Save, true);
             self.command_item(ui, Command::SaveAs, true);
             ui.separator();
-            // Beside Export, which it is the other half of (issue 105).
+            // Beside Export, its other half (issue 105).
             self.command_item(ui, Command::Import, true);
             self.command_item(ui, Command::Export, true);
             ui.separator();
@@ -111,15 +107,9 @@ impl App {
             self.command_item(ui, Command::Duplicate, has_selection);
             self.command_item(ui, Command::Delete, has_selection);
             ui.separator();
-            // The same blocks the outliner's own menu is divided into, in the
-            // same order (issue 94): the two containers, then what a node can
-            // be turned into, then the row itself.
+            // The same blocks as the outliner's menu, in the same order (issue 94).
             self.command_item(ui, Command::Group, has_selection);
-            // Beside Group, which is the command it is a variant of. It works
-            // with nothing selected too -- an empty pattern to fill later -- so
-            // unlike Group it is never disabled, and says which of the two it
-            // is about to do: "of the selection" with nothing selected read as
-            // an entry left enabled by mistake.
+            // Beside Group; it also works with nothing selected (an empty pattern), and its label says which.
             if has_selection {
                 self.command_item(ui, Command::Pattern, true);
             } else {
@@ -133,32 +123,26 @@ impl App {
                     ui.close();
                 }
             }
-            // What a group can be taken out into (issue 113): a part of its own,
-            // edited in its own tab, and placed wherever it is wanted.
+            // Make a group a component of its own (issue 113).
             self.command_item(ui, Command::MakeComponent, self.primary_is_group());
             self.command_item(ui, Command::NewComponent, true);
             ui.separator();
-            // Baking a shape into the triangles it evaluates to (issue 80), and
-            // cutting one into a pattern of pieces (issue 82).
+            // Bake into triangles (issue 80), and cut into pieces (issue 82).
             self.command_item(ui, Command::ConvertToMesh, !self.selection.is_empty());
-            // Enabled only on a mesh: it is the only body made of triangles
-            // rather than of a recipe, and so the only one with triangles to
-            // drop (issue 106).
+            // Only on a mesh, the one body with triangles to drop (issue 106).
             self.command_item(
                 ui,
                 Command::SimplifyMesh,
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
             );
-            // The way back from the conversion, and so enabled on the same one
-            // row it is (issue 108).
+            // The way back from conversion, enabled on the same rows (issue 108).
             self.command_item(
                 ui,
                 Command::Reassemble,
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
             );
             self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
-            // Enabled only on a split, because a split is the only thing it has
-            // anything to say to -- everything else was never cut up.
+            // Only on a split, the only thing that was cut up.
             self.command_item(
                 ui,
                 Command::Rejoin,

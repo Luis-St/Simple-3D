@@ -6,13 +6,9 @@ use crate::render::{self, Grid, Item, Palette, Style};
 use crate::view::View;
 use simple3d_core::scene::NodeId;
 
-/// Rasterize the scene into a texture, reusing the last image while nothing that
-/// affects it has changed, and paint it into the place `slot` reserved for it
-/// earlier in the frame.
-///
-/// The slot is why this runs at the *end* of the viewport's frame rather than at
-/// the start: the picture is made from the camera the frame's own gestures have
-/// left behind, so nothing drawn over it is a frame ahead of it (issue 102).
+/// Rasterise the scene into a texture (reusing the last one when unchanged) and paint it into
+/// `slot`. Runs at the end of the frame so the picture uses the camera the frame's gestures left
+/// (issue 102).
 pub(crate) fn paint_scene(
     app: &mut App,
     ui: &mut egui::Ui,
@@ -26,55 +22,37 @@ pub(crate) fn paint_scene(
         (rect.height() * pixels_per_point).round().max(1.0) as usize,
     ];
 
-    // A question about the picture that the frame on screen could not answer
-    // is answered by drawing it again (`gpu/depth.rs`).
+    // A picture query the on-screen frame could not answer is answered by redrawing (`gpu/depth.rs`).
     if app.gpu.as_ref().is_some_and(|gpu| gpu.depth_wanted()) {
         app.invalidate_image();
     }
     let key = image_key(app, size, dark);
     if key != app.image_key || app.texture.is_none() {
         let palette = Palette::for_dark_mode(dark);
-        // The framebuffer's own coordinate space: its origin is its top-left
-        // corner and its unit is the pixel, not the panel's position on screen in
-        // points. Handing the rasterizer the panel rect instead would offset
-        // every projected vertex by the panel's position and scale it by the
-        // wrong factor -- the model would sit away from its own manipulator.
+        // Framebuffer coordinates (origin top-left, unit pixel), not the panel rect in points, or the
+        // model would be offset from its manipulator.
         let render_rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32));
         let view = View::new(app.scene.camera, render_rect);
-        // Asked before anything below borrows the scene's renderables, since
-        // whether the plane crosses the model is remembered on the application.
+        // Asked before the scene's renderables are borrowed below, since the crossing cache is on the app.
         let section = crate::section_tool::cut(app, view.forward());
-        // A hidden node is hidden: no body, and no selection outline drawn
-        // around the body it does not have. Selecting it still gets a
-        // manipulator, so it can be put where it belongs before being shown.
-        // Ticked pieces are outlined like a selection: they are what Extract is
-        // about to act on, and a list of two thousand names says nothing about
-        // which part of the shape each one is (issue 82).
+        // Hidden nodes get no body and no outline, but still a manipulator.
         let selected: Vec<NodeId> =
             app.top_level_selection().into_iter().filter(|&id| app.scene.is_shown(id)).collect();
-        // A ticked piece is outlined like a selection and *glows through*
-        // whatever is in front of it: a piece of a split usually sits inside
-        // the shape it was cut from, where an outline has nothing on screen to
-        // draw itself around (issue 82).
+        // Ticked pieces are outlined and glow through what is in front (issue 82), since a split piece
+        // usually sits inside its shape.
         let ticked: Vec<NodeId> = app.piece_ticks.iter().copied().filter(|&id| app.scene.is_shown(id)).collect();
 
-        // While a tool draws a preview, the document says what the viewport
-        // does under it: nothing, drop the axes, drop the grid, or drop
-        // everything but the object being previewed (issue 82).
+        // While a tool previews, the document's setting says what the viewport hides (issue 82).
         let preview = app.preview_subject();
         let mode = app.scene.settings.preview_viewport;
         let solid = match preview.filter(|_| !mode.keeps_other_bodies()).and_then(|id| app.node_renderables.get(&id)) {
-            // The previewed object alone, drawn as the model rather than as an
-            // outline: everything else in the scene is out of the picture, so
-            // what is left has to be the picture.
+            // Only the previewed object, drawn as the model.
             Some(only) => only,
             None => &app.scene_renderable,
         };
         let mut items: Vec<Item> = vec![Item { renderable: solid, style: Style::Solid }];
-        // A body being dragged, drawn where the drag has got to: left out of
-        // the scene and drawn from its own renderable instead, moved -- or,
-        // when it goes into a boolean, the boolean left out and drawn per
-        // pixel from the shapes that go into it.
+        // A dragged body is drawn moved from its own renderable, or as a per-pixel boolean when it is
+        // an operand.
         let whole = std::ptr::eq(solid, &app.scene_renderable);
         let ready = if whole { app.csg_ready() } else { Vec::new() };
         let mut live = render::Live { ready: ready.iter().map(|shape| &**shape).collect(), ..Default::default() };
@@ -100,8 +78,7 @@ pub(crate) fn paint_scene(
                     }
                 }
             }
-            // Its own renderable, and those of everything under it, wherever
-            // they are drawn -- as the solid, the selection or a ghost.
+            // Its own renderable and its descendants', however they are drawn.
             for (other, renderable) in &app.node_renderables {
                 if other == id || app.scene.is_ancestor_of(*id, *other) {
                     live.placed.push((renderable.id, *moved));
@@ -111,8 +88,7 @@ pub(crate) fn paint_scene(
         // Ghosts before the selection outline, so the outline stays readable.
         let ghosts = app.ghosts();
         for (id, renderable) in &app.node_renderables {
-            // A ghost group shows its own children as ghosts, so a whole
-            // assembly can be positioned before it is subtracted.
+            // A ghost group shows its children as ghosts, so an assembly can be positioned before subtracting.
             if ghosts.iter().any(|&g| g == *id || app.scene.is_ancestor_of(g, *id)) {
                 items.push(Item { renderable, style: Style::Ghost });
             }
@@ -145,25 +121,17 @@ pub(crate) fn paint_scene(
             },
             items,
             live,
-            // The split tool's cells, drawn on the model with the depth buffer
-            // rather than over the finished picture, so the far side of the
-            // shape hides the ones behind it (issue 82).
-            // The split tool's cells and the simplify tool's triangles go
-            // through the same channel: only one tool is ever open, and neither
-            // knows about the other.
+            // Tool previews (split cells, simplify triangles) are depth-tested by the renderer (issue 82);
+            // only one tool is open at a time.
             preview: crate::split_tool::preview_loops(app)
                 .into_iter()
                 .chain(crate::simplify_tool::preview_loops(app))
                 .chain(crate::reassemble_tool::preview_loops(app))
                 .collect(),
-            // The plane the model is cut with, while there is one (issue 71),
-            // cutting away the side the camera looks from (issue 109).
+            // The section planes (issue 71), cutting the side the camera looks from (issue 109).
             section,
         };
-        // The GPU works the whole frame out on the card from the request; the
-        // CPU renderer prepares it as primitives first, and only when it is
-        // the one drawing, so nothing is spent on the CPU for a picture the
-        // card is making.
+        // The GPU builds the frame from the request; the CPU prepares primitives only when it draws.
         match app.gpu.as_mut() {
             Some(gpu) => match {
                 gpu.place(rect.min, pixels_per_point);
@@ -171,8 +139,7 @@ pub(crate) fn paint_scene(
             } {
                 Ok(id) => app.gpu_texture = Some(id),
                 Err(why) => {
-                    // The driver said no. Say so once, and go on drawing in
-                    // software rather than showing nothing.
+                    // The driver refused: report once and fall back to software rather than show nothing.
                     app.gpu_error = Some(why);
                     app.gpu = None;
                     app.gpu_texture = None;
@@ -190,9 +157,7 @@ pub(crate) fn paint_scene(
         app.image_key = key;
     }
 
-    // The GPU renderer draws into an OpenGL texture egui was handed once; the
-    // software one uploads a fresh image. From here on they are the same thing:
-    // a texture painted over the panel.
+    // Either way the result is a texture painted over the panel.
     let drawn = app.gpu_texture.or_else(|| app.texture.as_ref().map(|texture| texture.id()));
     if let Some(id) = drawn {
         ui.painter().set(

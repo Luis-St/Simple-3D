@@ -51,9 +51,7 @@ pub(crate) fn boolean_intersect_simple_boxes() {
 
 #[test]
 pub(crate) fn boolean_subtract_coplanar_face_is_manifold() {
-    // Spec acceptance criterion 5, first half: the tool's face lies exactly on
-    // the base's face. This is the normal case, not an edge case -- every
-    // pocket cut from a face produces it.
+    // Spec acceptance criterion 5, first half: coplanar faces, which every pocket cut produces.
     let base = primitives::box_mesh(40.0, 20.0, 4.0);
     let tool = primitives::box_mesh(10.0, 10.0, 4.0); // top and bottom coplanar with base
     let result = evaluate_boolean(BooleanOp::Difference, &[base, tool]);
@@ -62,8 +60,7 @@ pub(crate) fn boolean_subtract_coplanar_face_is_manifold() {
 
 #[test]
 pub(crate) fn boolean_subtract_touching_at_edge_is_manifold() {
-    // Criterion 5, second half: operands touch along a single edge, so the
-    // subtraction removes nothing and the base must survive intact.
+    // Criterion 5, second half: touching along an edge removes nothing, so the base survives intact.
     let base = primitives::box_mesh(20.0, 20.0, 20.0);
     let tool = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(15.0, 15.0, 0.0));
     let result = evaluate_boolean(BooleanOp::Difference, &[base, tool]);
@@ -79,7 +76,7 @@ pub(crate) fn boolean_subtract_disjoint_and_contained() {
     let (lo, hi) = result.bounds().unwrap();
     assert!((hi.x - lo.x - 20.0).abs() < 1e-9, "disjoint subtract changed the base");
 
-    // Fully contained tool: hollows the base out, leaving two nested shells.
+    // A fully contained tool hollows the base into two nested shells.
     let inner = primitives::box_mesh(10.0, 10.0, 10.0);
     let result = evaluate_boolean(BooleanOp::Difference, &[base, inner]);
     assert_manifold("contained_subtract", &result);

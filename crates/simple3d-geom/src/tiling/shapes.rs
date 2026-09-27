@@ -3,11 +3,10 @@
 use super::*;
 use std::f64::consts::PI;
 
-/// One cell as it is laid out: where its centre is, and its outline
-/// counter-clockwise about it.
+/// A laid-out cell: its centre and its counter-clockwise outline.
 pub(crate) type CellShape = ((f64, f64), Vec<(f64, f64)>);
 
-/// The cell or cells at one place in the lattice, in the grid's own frame.
+/// The cells at one lattice place, in the grid's frame.
 pub(crate) fn cell_shapes(tiling: &Tiling, i: i64, j: i64) -> Vec<CellShape> {
     let (sx, sy) = tiling.steps();
     let (i, j) = (i as f64, j as f64);
@@ -23,16 +22,14 @@ pub(crate) fn cell_shapes(tiling: &Tiling, i: i64, j: i64) -> Vec<CellShape> {
             ];
             vec![(centre, outline)]
         }
-        // Two per step: one pointing up whose base is the bottom of the row,
-        // and one pointing down between it and the next, whose base is the top.
-        // Together they fill the row exactly.
+        // Two per step, one up and one down, filling the row exactly.
         CellKind::Triangles => {
             let radius = sx / f64::sqrt(3.0);
             let up = (i * sx + sx / 2.0, j * sy + sy / 3.0);
             let down = (i * sx + sx, j * sy + 2.0 * sy / 3.0);
             vec![(up, triangle(up, radius, false)), (down, triangle(down, radius, true))]
         }
-        // Rows interlock, so every other one is shifted half a cell across.
+        // Rows interlock, so every other one shifts half a cell.
         CellKind::Hexagons => {
             let shift = if j.rem_euclid(2.0) == 0.0 { 0.0 } else { sx / 2.0 };
             let centre = (i * sx + shift, j * sy);
@@ -41,7 +38,7 @@ pub(crate) fn cell_shapes(tiling: &Tiling, i: i64, j: i64) -> Vec<CellShape> {
     }
 }
 
-/// An equilateral triangle about its own centre, point up or point down.
+/// An equilateral triangle about its centre, point up or down.
 pub(crate) fn triangle(centre: (f64, f64), radius: f64, down: bool) -> Vec<(f64, f64)> {
     let turn = if down { PI } else { 0.0 };
     (0..3)
@@ -52,8 +49,7 @@ pub(crate) fn triangle(centre: (f64, f64), radius: f64, down: bool) -> Vec<(f64,
         .collect()
 }
 
-/// A pointy-top hexagon about its own centre. `radius` is corner to centre,
-/// which is the width across the flats over the square root of three.
+/// A pointy-top hexagon; `radius` is corner to centre, the across-flats width over sqrt(3).
 pub(crate) fn hexagon(centre: (f64, f64), radius: f64) -> Vec<(f64, f64)> {
     (0..6)
         .map(|k| {

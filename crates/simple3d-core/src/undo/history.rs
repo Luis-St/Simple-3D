@@ -1,4 +1,4 @@
-//! Recording a step, and stepping back and forward through them.
+//! Recording steps, and stepping back and forward through them.
 
 use super::*;
 use crate::scene::Scene;
@@ -20,8 +20,7 @@ impl History {
         self.revision
     }
 
-    /// How many steps are on the undo stack. A gesture that should be one step
-    /// can be checked against this rather than against how it feels.
+    /// How many steps are on the undo stack, for checking gestures in tests.
     pub fn undo_len(&self) -> usize {
         self.past.len()
     }
@@ -42,24 +41,22 @@ impl History {
         self.future.last().map(|s| s.label.as_str())
     }
 
-    /// Say that the step just recorded made `components` (issue 113), so taking
-    /// it back can take them away with it. The one the step placed comes
-    /// first, and the ones it holds after it.
+    /// Record that the last step made `components` (issue 113), so undoing it removes them; the placed
+    /// one first, then those it holds.
     pub fn mark_created(&mut self, components: &[ComponentId]) {
         if let Some(last) = self.past.last_mut() {
             last.created = components.to_vec();
         }
-        // A step that made a component is a step of its own: a later edit
-        // coalescing into it would be undone together with the making.
+        // A component-making step stands alone, so later edits do not coalesce into it.
         self.close();
     }
 
-    /// The components the step an undo would take back made.
+    /// The components made by the step an undo would take back.
     pub fn undo_creates(&self) -> &[ComponentId] {
         self.past.last().map_or(&[], |s| s.created.as_slice())
     }
 
-    /// The components the step a redo would put back made.
+    /// The components made by the step a redo would restore.
     pub fn redo_creates(&self) -> &[ComponentId] {
         self.future.last().map_or(&[], |s| s.created.as_slice())
     }
@@ -71,20 +68,15 @@ impl History {
         self.open_at = None;
     }
 
-    /// Call **before** mutating `scene`. `coalesce` groups consecutive edits of
-    /// the same thing into one step; pass `None` for an edit that always gets
-    /// its own step.
-    ///
-    /// Returns whether this edit joined the run that was already open, which is
-    /// what a caller needs to tell one continuous gesture from a fresh choice.
+    /// Call before mutating `scene`. `coalesce` groups consecutive edits of the same thing into one
+    /// step; `None` always makes a new one. Returns whether the edit joined the open run.
     pub fn record(&mut self, scene: &Scene, label: &str, coalesce: Option<&str>) -> bool {
         self.revision += 1;
         let coalescing = match (coalesce, &self.open_key, self.open_at) {
             (Some(key), Some(open), Some(at)) => key == open && at.elapsed() < COALESCE_WINDOW,
             _ => false,
         };
-        // Refresh the timer either way, so a held-down arrow key keeps extending
-        // one step instead of splitting once the first press ages out.
+        // Refresh the timer either way, so a held key keeps extending one step.
         self.open_key = coalesce.map(|k| k.to_string());
         self.open_at = Some(Instant::now());
         if coalescing {
@@ -98,21 +90,15 @@ impl History {
         false
     }
 
-    /// Drop the most recent snapshot without restoring it, for an edit that was
-    /// recorded and then abandoned -- a drag cancelled with Escape, which puts
-    /// the pre-drag values back itself. Keeping the snapshot would leave an undo
-    /// step that restores the state it is already in.
-    ///
-    /// Does *not* touch the redo stack: `record` cleared it when the abandoned
-    /// edit opened, and a cancel cannot bring it back.
+    /// Drop the last snapshot without restoring it, for an abandoned edit such as an Escaped drag.
+    /// The redo stack stays cleared.
     pub fn discard_last(&mut self) -> bool {
         self.close();
         self.revision += 1;
         self.past.pop().is_some()
     }
 
-    /// Ends any open coalescing run, so the next edit definitely starts a new
-    /// step. Called when the selection changes or a field loses focus.
+    /// End any open coalescing run, so the next edit starts a new step.
     pub fn close(&mut self) {
         self.open_key = None;
         self.open_at = None;
@@ -145,19 +131,9 @@ impl History {
     }
 }
 
-/// Put a snapshot back, **keeping the camera where it is now**.
-///
-/// A snapshot is the whole `Scene`, camera included, because the camera is
-/// saved with the project. Restoring it wholesale would mean undoing a move
-/// also threw the view back to wherever it happened to be when the move was
-/// made -- which is not what "undo" means to anyone. Undo is over the model;
-/// where you are looking from is not part of it.
-///
-/// The components the scene integrates are kept as they are now as well
-/// (issue 113). They are the other components of the project, edited in tabs
-/// of their own, and a snapshot holds them as they were when it was taken --
-/// so restoring them brought back a component's old contents, or one since
-/// deleted, until the next tab switch linked them again.
+/// Restore a snapshot, keeping the current camera, since undo is about the model, not the view.
+/// Integrated components are also kept as they are now (issue 113), since they are edited in
+/// their own tabs and a snapshot's copies would be stale.
 pub(crate) fn restore(scene: &mut Scene, snapshot: Scene) {
     let camera = scene.camera;
     let components = std::mem::take(&mut scene.components);

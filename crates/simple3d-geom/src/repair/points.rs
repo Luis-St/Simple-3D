@@ -1,33 +1,23 @@
-//! A bounding-box hierarchy over the vertices of a mesh, for finding the ones
-//! that lie along an edge.
+//! A bounding-box hierarchy over a mesh's vertices, for finding those along an edge.
 
 use crate::vec3::Vec3;
 
 /// Below this many vertices a node stops dividing.
 const LEAF: usize = 8;
 
-/// Vertices sorted into boxes that halve at the median of their widest axis,
-/// so a box holds the same number of vertices wherever the mesh is dense.
-///
-/// This replaces a uniform grid, and the density is why. A boolean between two
-/// bodies that share a face leaves its vertices crowded along the seam, ten
-/// thousand of them to a half-millimetre cell, while the rest of the surface
-/// has a handful to a cell; every edge through the seam was tested against the
-/// whole crowd, and one T-junction pass over the union of an imported model's
-/// coloured parts made some ten billion such tests. The hierarchy tests an edge
-/// against the few boxes it actually passes through, however small those have
-/// to be.
+/// Vertices in boxes halved at the median of their widest axis, so boxes hold equal counts however
+/// dense the mesh. Replaced a uniform grid, which tested seam edges against crowds of thousands of
+/// vertices (billions of tests on an imported model).
 pub(crate) struct PointTree {
     nodes: Vec<Node>,
-    /// Vertex indices, permuted so that each leaf owns a contiguous run.
+    /// Vertex indices, permuted so each leaf owns a contiguous run.
     order: Vec<u32>,
 }
 
 struct Node {
     lo: Vec3,
     hi: Vec3,
-    /// Two children for a split, one past the other; a run of `order` for a
-    /// leaf.
+    /// Two consecutive children when split; a run of `order` for a leaf.
     split: bool,
     a: u32,
     b: u32,
@@ -77,10 +67,8 @@ impl PointTree {
         tree
     }
 
-    /// Every vertex in a box that the segment from `a` to `b`, thickened by
-    /// `tol`, passes through: a superset of the vertices within `tol` of it,
-    /// which the caller measures exactly. `stack` is scratch space, kept by the
-    /// caller so a query per edge allocates nothing.
+    /// Every vertex in boxes the segment `a`-`b`, thickened by `tol`, passes through: a superset the
+    /// caller measures exactly. `stack` is reused so queries do not allocate.
     pub(crate) fn near_segment(&self, a: Vec3, b: Vec3, tol: f64, stack: &mut Vec<u32>, mut visit: impl FnMut(u32)) {
         if self.nodes.is_empty() {
             return;
@@ -102,8 +90,7 @@ impl PointTree {
     }
 }
 
-/// Whether the segment from `a` to `b` meets the box: the slab test, clipping
-/// the segment's parameter range to each axis in turn.
+/// Whether segment `a`-`b` meets the box: the slab test.
 fn crosses(a: Vec3, b: Vec3, lo: Vec3, hi: Vec3) -> bool {
     let d = b - a;
     let (mut t0, mut t1) = (0.0f64, 1.0f64);

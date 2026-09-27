@@ -1,12 +1,8 @@
-//! PLY: the header deciding where everything is, in either byte order, with
-//! whatever else a file happens to carry per vertex.
+//! PLY: the header decides the layout, in either byte order, with any extra vertex properties.
 
 use super::*;
 
-/// A PLY from another program carries properties this one has no use for --
-/// normals, colours, a scanner's confidence -- and the coordinates are still
-/// where the header says. Every property is stepped over by its declared
-/// width, so none of it shifts the geometry.
+/// Unknown properties (normals, colours, confidence) are stepped over by width without shifting geometry.
 #[test]
 pub(crate) fn properties_that_are_not_geometry_are_stepped_over() {
     let file = "ply\nformat ascii 1.0\n\
@@ -25,8 +21,7 @@ pub(crate) fn properties_that_are_not_geometry_are_stepped_over() {
     assert_eq!((lo.x, lo.y, hi.x, hi.y), (0.0, 0.0, 10.0, 10.0), "a property was read as a coordinate");
 }
 
-/// Big-endian binary, which nothing in this workspace writes and which a PLY
-/// from a machine that does is entirely valid in.
+/// Big-endian binary, valid though nothing here writes it.
 #[test]
 pub(crate) fn a_big_endian_binary_file_reads_the_same_as_a_little_endian_one() {
     let mut big = b"ply\nformat binary_big_endian 1.0\nelement vertex 3\n\
@@ -48,7 +43,7 @@ pub(crate) fn a_big_endian_binary_file_reads_the_same_as_a_little_endian_one() {
     assert!((hi.x - 10.0).abs() < 1e-9 && (hi.y - 10.0).abs() < 1e-9, "the bytes were read the other way round");
 }
 
-/// A face may be a polygon, and is fanned like every other format's.
+/// Polygon faces are fanned.
 #[test]
 pub(crate) fn a_polygon_face_is_fanned() {
     let file = "ply\nformat ascii 1.0\nelement vertex 4\n\
@@ -60,8 +55,7 @@ pub(crate) fn a_polygon_face_is_fanned() {
     assert_eq!(model.triangle_count(), 2);
 }
 
-/// A face naming a vertex past the end of the list is refused. An index nobody
-/// checked is the one way a mesh reader reaches past its own array.
+/// A face naming a vertex past the list is refused, never read past the array.
 #[test]
 pub(crate) fn a_face_index_past_the_end_of_the_vertices_is_refused() {
     let file = "ply\nformat ascii 1.0\nelement vertex 3\n\
@@ -73,8 +67,7 @@ pub(crate) fn a_face_index_past_the_end_of_the_vertices_is_refused() {
     assert!(matches!(error, ImportError::Malformed(_)), "{error:?}");
 }
 
-/// A header that does not say how the file is encoded, and a body that stops
-/// half way through: both are refused with the reason.
+/// A header without an encoding, and a truncated body, are both refused with the reason.
 #[test]
 pub(crate) fn a_header_or_body_that_does_not_hold_up_is_refused_with_the_reason() {
     let no_format = b"ply\nelement vertex 1\nproperty float x\nend_header\n0\n";

@@ -1,4 +1,4 @@
-//! Visibility, sibling order, and the group operation a node carries.
+//! Visibility, sibling order, and a node's group operation.
 
 use super::*;
 use simple3d_core::scene::{GroupOp, NodeId};
@@ -10,8 +10,7 @@ impl App {
             return;
         }
         self.edit("Toggle visibility", None);
-        // Everything follows the primary node, so a mixed selection ends up
-        // consistent rather than inverted node by node.
+        // Everything follows the primary node, so a mixed selection ends up consistent.
         let target_state = self.primary().map(|id| !self.scene.node(id).visible).unwrap_or(false);
         for id in targets {
             if let Some(node) = self.scene.get_mut(id) {
@@ -20,29 +19,19 @@ impl App {
         }
     }
 
-    /// Whether a move by `delta` would do anything: at least one of the nodes
-    /// it acts on has somewhere to go. What the menus grey their entries out
-    /// on, rather than letting a click answer with a status line nobody sees.
+    /// Whether a move by `delta` would move anything, for greying out menu entries.
     pub fn can_reorder(&self, delta: isize) -> bool {
         !self.reorder_plan(delta).is_empty()
     }
 
-    /// What a reorder acts on: the topmost selected nodes, in tree order,
-    /// minus the root. The whole selection rather than the primary alone --
-    /// moving one of three selected siblings and leaving the other two behind
-    /// looks exactly like the command not working (issue 41).
+    /// What a reorder acts on: the topmost selected nodes in tree order, minus the root, so all
+    /// selected siblings move (issue 41).
     pub(super) fn reorder_targets(&self) -> Vec<NodeId> {
         self.top_level_selection().into_iter().filter(|id| *id != self.scene.root()).collect()
     }
 
-    /// Which of those nodes would actually move, in the order they have to be
-    /// moved in.
-    ///
-    /// Selected siblings move as a block: the one nearest the end goes first,
-    /// into the space it has, and a node whose neighbour is a selected node
-    /// that could not move cannot move either -- otherwise a run of three
-    /// pushed against the end of the list would come apart, one node
-    /// overtaking another that had nowhere to go.
+    /// Which of those would move, in move order. Selected siblings move as a block, so a node blocked
+    /// by an unmovable selected neighbour stays too.
     pub(super) fn reorder_plan(&self, delta: isize) -> Vec<NodeId> {
         let mut targets = self.reorder_targets();
         if delta > 0 {
@@ -92,7 +81,7 @@ impl App {
         }
     }
 
-    /// Set a group's boolean operator, from wherever a group can be pointed at.
+    /// Set a group's boolean operator.
     pub fn set_group_op(&mut self, id: NodeId, op: GroupOp) {
         if self.scene.node(id).group_op() == Some(op) {
             return;
@@ -104,24 +93,12 @@ impl App {
         self.status = Status::Info(format!("{} group", op.label()));
     }
 
-    /// Add a group or a primitive *where the tree is pointing*: inside `at` when
-    /// it can hold children, beside it otherwise. What the outliner's own Add
-    /// menu uses, so a shape made from a row lands on that row rather than at the
-    /// document's insertion point (issue 44).
-    /// Where a node added *from an outliner row* lands: inside the row when it
-    /// can hold children, beside it otherwise (issue 44).
-    ///
-    /// A pattern holds children exactly as a group does (issue 67), so Add from
-    /// a pattern's own row goes *into* it. Asking `is_group` here put the shape
-    /// beside the pattern instead, which made the row menu disagree with both
-    /// the drag-and-drop rule and the document-level Add, and both of those
-    /// already say "into".
+    /// Where a node added from an outliner row lands (issue 44): inside it if it can hold children
+    /// (patterns too, issue 67), beside it otherwise.
     pub(crate) fn insertion_from_row(&self, at: NodeId) -> (NodeId, usize) {
         let end_of_root = (self.scene.root(), self.scene.node(self.scene.root()).children.len());
         match self.scene.get(at) {
-            // Not into a collection: the tree does not open one, so a shape
-            // added on its row would land somewhere it cannot be seen
-            // (issue 82).
+            // Not into a collection, which the tree does not open (issue 82).
             Some(node) if node.can_hold_children() && !node.is_split() => (at, self.scene.node(at).children.len()),
             Some(node) => match node.parent {
                 Some(parent) => {

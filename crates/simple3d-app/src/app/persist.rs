@@ -8,9 +8,7 @@ use std::time::{Duration, Instant};
 impl App {
     // -- shutdown -----------------------------------------------------------
 
-    /// Quit the application, every window of it. Asks first if anything
-    /// anywhere would be lost -- in this window's documents or in another
-    /// window's, since the windows go together.
+    /// Quit every window, asking first if anything anywhere would be lost.
     pub fn request_quit(&mut self) {
         self.closing_window = false;
         if self.any_unsaved() || self.unsaved_elsewhere {
@@ -21,10 +19,7 @@ impl App {
         }
     }
 
-    /// Close this window: its own close button, and File > Close window
-    /// (issue 107). Asks about this window's own documents and no others --
-    /// the windows that are staying are not being asked about. With one window
-    /// open the shell turns this into a quit, because then it is one.
+    /// Close this window (issue 107), asking only about its own documents; with one window it is a quit.
     pub fn request_close_window(&mut self) {
         self.closing_window = true;
         if self.any_unsaved() {
@@ -35,7 +30,7 @@ impl App {
         }
     }
 
-    /// The answer to the question above, whichever of the two was asked.
+    /// The answer to the question above, whichever was asked.
     pub fn confirm_quit(&mut self) {
         if self.closing_window {
             self.close_now = true;
@@ -44,8 +39,7 @@ impl App {
         }
     }
 
-    /// Whether the question on screen is about closing one window of several.
-    /// With one window open, closing it *is* quitting and it says so.
+    /// Whether the question is about closing one of several windows.
     pub(crate) fn closing_one_window(&self) -> bool {
         self.closing_window && !self.other_windows.is_empty()
     }
@@ -62,30 +56,15 @@ impl App {
         self.persist_keymap();
     }
 
-    /// Remember how big the window is and whether it is maximized, so the next
-    /// run opens the way this one was left (issue 95).
-    ///
-    /// Nothing ever wrote these two. `main` reads `window_size` and
-    /// `window_maximized` out of the settings to build the window, and no code
-    /// path put a new value back -- so however the window was left, every run
-    /// opened at the 1400 x 880 default. They are read off the window itself
-    /// here, on every frame, and the ordinary save-on-change below writes them
-    /// out; sampling them in `on_exit` instead would lose them to exactly the
-    /// endings that setting has already been fixed for.
-    ///
-    /// The size is only taken while the window is in its ordinary state. What a
-    /// maximized or fullscreen window reports is the screen, and restoring the
-    /// screen as the *unmaximized* size is how a window comes back filling the
-    /// display with no way back to the size it used to have. Rounded to whole
-    /// points because a resize otherwise writes the file for a fraction of a
-    /// pixel of drift.
+    /// Record the window's size and maximized state every frame so the next run matches (issue 95);
+    /// the save-on-change below writes them. The size is taken only while unmaximized, since a
+    /// maximized window reports the screen, and rounded to whole points to avoid drift writes.
     pub(super) fn record_window_shape(&mut self, ctx: &egui::Context) {
         let (size, maximized, fullscreen, minimized) = ctx.input(|i| {
             let viewport = i.viewport();
             (viewport.inner_rect.map(|rect| rect.size()), viewport.maximized, viewport.fullscreen, viewport.minimized)
         });
-        // Only where the window system answers at all: a platform that reports
-        // nothing must not reset a maximized window to "not maximized".
+        // Only where the window system answers, so silence never un-maximizes.
         if let Some(maximized) = maximized {
             self.settings.window_maximized = maximized;
         }
@@ -98,21 +77,9 @@ impl App {
         }
     }
 
-    /// Write the settings out as soon as they change, rather than only when the
-    /// application is closed cleanly.
-    ///
-    /// A setting changed in the property panel -- where a shape lands, the snap
-    /// mode, a snap step -- used to live in memory until `on_exit` ran, so
-    /// anything that ended the process another way took it with it: a crash, a
-    /// kill, a power cut. The keymap has been written on the spot since
-    /// acceptance criterion 28 asked for a rebinding to survive a hard kill, and
-    /// there is no reason the rest of the settings deserve less.
-    ///
-    /// Noticed by comparing rather than by calling `persist` from each of the
-    /// dozen places that change something, because that is a list nobody keeps
-    /// complete. Rate-limited because a scrubbed number changes every frame,
-    /// and the frame that the limit turned away asks for one more frame so the
-    /// value is not left unwritten until something else happens to repaint.
+    /// Write settings as soon as they change, so a crash or kill does not lose them. Detected by
+    /// comparison rather than calls at every change site, and rate-limited for scrubs, with a follow-up
+    /// frame requested so the last value gets written.
     pub(super) fn persist_settings_if_changed(&mut self, ctx: &egui::Context) {
         const GAP: Duration = Duration::from_millis(250);
         if self.settings == self.persisted_settings {
@@ -128,9 +95,7 @@ impl App {
         }
     }
 
-    /// Write the keymap out now, so a rebinding survives even a hard kill --
-    /// this is the half of acceptance criterion 28 that happens before the
-    /// restart. Called from every place the keymap editor changes something.
+    /// Write the keymap now, so a rebinding survives a hard kill (acceptance criterion 28).
     pub fn persist_keymap(&self) {
         let _ = config::save_keymap_to(&self.config_dir, &self.keymap);
     }

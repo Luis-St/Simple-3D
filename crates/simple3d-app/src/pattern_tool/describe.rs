@@ -3,8 +3,7 @@
 use simple3d_core::pattern::{self, StageMode, Variation, Vary};
 use simple3d_core::unit::Unit;
 
-/// A line of English saying what one stage does, so the numbers under it can be
-/// read without working them out.
+/// One stage in a line of English, so its numbers need not be worked out.
 pub(crate) fn describe(stage: &pattern::Stage, unit: Unit) -> String {
     use simple3d_core::unit::format_number;
     let axis = pattern::VARY_AXES[stage.axis.min(2)];
@@ -26,21 +25,19 @@ pub(crate) fn describe(stage: &pattern::Stage, unit: Unit) -> String {
     } else if stage.step.length() > 1e-9 {
         what.push(format!("{} apart", length(stage.step.length())));
     }
-    // What varies the copies, in the same sentence: a rule that staggers its
-    // rows has to say so where the rule is read, even with its cards folded.
+    // Variations go in the same sentence, visible even with their cards folded.
     for variation in stage.variations().iter().filter(|v| v.acts(stage.mode)) {
         what.push(describe_variation(variation, stage.mode, unit));
     }
     if what.is_empty() {
         what.push("in place".to_string());
     }
-    // A blank stage makes exactly one copy, and a line of English reading
-    // "1 copies" draws attention to itself rather than to the stage.
+    // A blank stage makes one copy; "1 copies" would jar.
     let copies = stage.copies();
     format!("{copies} cop{}, {}", if copies == 1 { "y" } else { "ies" }, what.join(", "))
 }
 
-/// A few words saying what one variation does to a stage doing `mode`.
+/// A few words on what one variation does to a stage doing `mode`.
 pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: Unit) -> String {
     use simple3d_core::unit::format_number;
     if !variation.what.fits(mode) {
@@ -67,7 +64,7 @@ pub(crate) fn describe_variation(variation: &Variation, mode: StageMode, unit: U
     }
 }
 
-/// A length with its unit, the way a sentence says it.
+/// A length with its unit, for a sentence.
 pub(crate) fn length(mm: f64, unit: Unit) -> String {
     format!("{} {}", simple3d_core::unit::format_length(mm, unit), unit.suffix())
 }

@@ -9,25 +9,15 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         let rect = ui.available_rect_before_wrap();
         app.viewport_rect = rect;
         let response = ui.allocate_rect(rect, egui::Sense::click_and_drag());
-        // The rasterized frame's place in the paint list, claimed now and filled
-        // in at the end of the frame.
-        //
-        // The picture has to be made *after* this frame's navigation, or the
-        // model is drawn from the camera the frame opened with while the
-        // manipulator over it is drawn from the camera the drag has just moved:
-        // a frame of orbit between the two, varying with however long the frame
-        // took, which on screen is a handle wobbling around the shape it is
-        // attached to (issue 102). Reserving a slot is what lets the picture be
-        // painted late and still come out underneath everything drawn over it.
+        // Reserve the picture's paint slot now and fill it at the end of the frame, so the model is drawn
+        // from the same camera as the overlays after this frame's navigation (issue 102).
         let scene = ui.painter().add(egui::Shape::Noop);
 
-        // The cube gets the pointer before the viewport does, or a click on a
-        // face would also orbit the camera it just turned.
+        // The cube gets the pointer first, or a face click would also orbit.
         let cube = view_cube_interact(app, ui, rect);
         if !cube.taken {
             navigate(app, ui, &response);
-            // The measure tool owns the pointer while it is out: clicks pick
-            // features to measure between rather than selecting or manipulating.
+            // The measure tool owns the pointer while out: clicks pick features to measure.
             if app.measure.active {
                 let view = app.current_view();
                 measure_interact(app, ui, &response, &view);
@@ -35,29 +25,19 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 let view = app.current_view();
                 place_cursor(app, ui, &response, &view);
                 let view = app.current_view();
-                // A pattern's lay-out grips take the pointer before the
-                // manipulator, so dragging one lays the copies out rather than
-                // moving the whole pattern (issue 67).
+                // Pattern grips take the pointer before the manipulator (issue 67).
                 let grips_owned = pattern_grips_interact(app, ui, &view);
-                // The section plane's grip, on the same terms: a drag on it
-                // slides the cut rather than selecting what is behind it
-                // (issue 71).
+                // The section grip likewise slides the cut rather than selecting behind it (issue 71).
                 let section_owned = crate::section_tool::interact(app, ui, &view);
                 let owned = grips_owned || section_owned || manipulate(app, ui, &response, &view);
-                // Picking is *outside* the manipulator, because it has to work when
-                // there is no manipulator: with nothing selected there is no primary
-                // node and no gizmo, and while this lived inside `manipulate` the
-                // first click into an empty selection was thrown away. Clicking a
-                // shape is how most people select one, so it cannot depend on
-                // already having selected one.
+                // Picking is outside the manipulator, since with nothing selected there is no gizmo and the first
+                // click was lost.
                 if !owned && response.clicked_by(egui::PointerButton::Primary) {
                     select_under_cursor(app, ui, &view);
                 }
             }
         }
-        // One camera for the whole picture: the model, the cube in the corner
-        // and every overlay are drawn from where the camera stands now that the
-        // frame's gestures have been read.
+        // One camera for the whole picture, read after the frame's gestures.
         let dark = ui.visuals().dark_mode;
         paint_scene(app, ui, rect, dark, scene);
         let view = app.current_view();
@@ -73,24 +53,17 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.evaluation_generation.hash(&mut hasher);
     app.renderable_key.hash(&mut hasher);
     (app.settings.display_mode as u8).hash(&mut hasher);
-    // A preview opening or closing changes what is drawn under it, so the frame
-    // has to be redrawn for it -- and so does a change to the setting that says
-    // what (issue 82).
+    // A preview opening or closing, or its setting changing, changes what is drawn (issue 82).
     app.preview_subject().hash(&mut hasher);
-    // The cells themselves are in the picture now, so every number that moves
-    // them is part of what the picture was drawn from.
+    // The split cells are in the picture, so their numbers are part of the key.
     if let Some(tool) = app.split_tool.as_ref() {
         tool.hash_preview(&mut hasher);
     }
-    // The simplify tool's own picture is the mesh in the document, which the
-    // evaluation above already stands for -- but whether its triangles are
-    // drawn over that mesh is a switch in the window and nothing else in this
-    // key moves with it (issue 106).
+    // The simplify wireframe switch is not reflected elsewhere in the key (issue 106).
     if let Some(tool) = app.simplify_tool.as_ref() {
         tool.wireframe.hash(&mut hasher);
     }
-    // What the reassembly found is drawn over the mesh and is not the mesh, so
-    // nothing else in this key moves with it (issue 108).
+    // The reassembly overlay is not the mesh, so it needs its own key part (issue 108).
     if let Some(tool) = app.reassemble_tool.as_ref() {
         tool.hash_preview(&mut hasher);
     }
@@ -104,8 +77,7 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     for section in app.scene.settings.sections() {
         crate::section_tool::hash_section(section, &mut hasher);
     }
-    // A body the GPU draws where a drag has got to moves without anything
-    // above changing.
+    // A GPU-drawn dragged body moves without anything above changing.
     if let Some(moved) = app.live_csg().map(|csg| csg.xform).or_else(|| app.live_move().map(|(_, _, moved)| moved)) {
         for value in moved.m.as_flattened().iter().chain([moved.t.x, moved.t.y, moved.t.z].iter()) {
             value.to_bits().hash(&mut hasher);

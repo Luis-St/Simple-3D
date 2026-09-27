@@ -3,18 +3,9 @@
 use super::*;
 use crate::primitive::{Params, ParamsExt};
 
-/// The parameter names one stage owns, and the names its viewport handles go by.
-///
-/// A table rather than names built with `format!` at each use: the parameter
-/// keys and the grip labels have to be `'static` to be a [`ParamSpec`] and a
-/// [`Grip`], and having them in one place is what keeps the maths, the editor
-/// and the handles talking about the same stage.
-///
-/// The numeric labels -- "1 Copies", "1.2 Shift" -- are what the field
-/// answers to rather than what it reads as: a value field is remembered by its
-/// label across a relayout, so four stages sharing the word "Copies" would be
-/// four widgets under one name. The tool draws them without the number, because
-/// the stage they sit under already says which stage they are.
+/// The parameter names one stage owns and its handle labels, in a `'static` table as [`ParamSpec`]
+/// and [`Grip`] need. Labels carry the stage number ("1 Copies") because value fields are
+/// remembered by label; the tool draws them without it.
 pub struct StageKeys {
     pub label: &'static str,
     /// Which of the three things a stage can do (issue 79).
@@ -27,17 +18,13 @@ pub struct StageKeys {
     pub growth: &'static str,
     /// How far along the axis each copy of a turning stage climbs.
     pub rise: &'static str,
-    /// How many variations the stage has (issue 79). Each one's own numbers
-    /// are named by [`vary_key`].
+    /// How many variations the stage has (issue 79); their own numbers are named by [`vary_key`].
     pub variations: &'static str,
-    /// How many of its four fixed variation slots a stage used, while it had
-    /// four. Read once, when an older rule is migrated, and never written.
+    /// The old count of used fixed variation slots; read once for migration, never written.
     pub(super) legacy_varied: &'static str,
-    /// What a stage varied its copies by before it could vary them more than
-    /// one way. Read once, when an older rule is migrated, and never written.
+    /// The old single-variation-set fields; read once for migration, never written.
     pub(super) legacy: LegacyVary,
-    /// The flag a stage used to carry instead of a mode. Read once, when a rule
-    /// saved before the mode existed is migrated, and never written.
+    /// The old mirror flag replaced by the mode; read once for migration, never written.
     pub(super) legacy_mirror: &'static str,
     pub(super) grip_spacing: &'static str,
     pub(super) grip_copies: &'static str,
@@ -53,11 +40,8 @@ pub(super) struct LegacyVary {
     pub(super) scale: &'static str,
 }
 
-/// One stage's row of the table, every name spelled out from the stage number.
-///
-/// Written once rather than four times over: a score of names a stage, typed by
-/// hand for each of four stages, is eighty strings that each have to say the
-/// right number, and the first new number a stage learns is another four.
+/// One stage's row of the table, every name built from the stage number, instead of eighty
+/// hand-typed strings.
 macro_rules! stage_keys {
     ($n:literal) => {
         StageKeys {
@@ -93,28 +77,27 @@ macro_rules! stage_keys {
 
 pub const STAGES: [StageKeys; MAX_STAGES] = [stage_keys!(1), stage_keys!(2), stage_keys!(3), stage_keys!(4)];
 
-/// How many parameters of its own one stage has, beside its variations'.
+/// How many parameters of its own one stage has, besides its variations'.
 pub const STAGE_KEY_COUNT: usize = 11;
 
-/// Every parameter key a stage owns itself: what it does, its own numbers, and
-/// how many variations it has. The variations' own are [`variation_keys`].
+/// Every key a stage owns itself (mode, numbers, variation count); variations' own are
+/// [`variation_keys`].
 pub fn stage_keys(stage: usize) -> Vec<&'static str> {
     let k = &STAGES[stage.min(MAX_STAGES - 1)];
     vec![k.mode, k.count, k.step[0], k.step[1], k.step[2], k.axis, k.turn, k.radius, k.growth, k.rise, k.variations]
 }
 
-/// How many stages a custom rule is currently using.
+/// How many stages a custom rule is using.
 pub fn stage_count(params: &Params) -> usize {
     params.int("stages").clamp(1, MAX_STAGES as u32) as usize
 }
 
-/// How many variations stage `stage` is currently using.
+/// How many variations stage `stage` is using.
 pub fn variation_count(params: &Params, stage: usize) -> usize {
     params.int(STAGES[stage.min(MAX_STAGES - 1)].variations).min(MAX_VARIATIONS) as usize
 }
 
-/// The stage a parameter key belongs to, zero-based -- `None` for every key
-/// that is not one of a stage's own.
+/// The zero-based stage a key belongs to, or `None` for other keys.
 pub(crate) fn stage_of(key: &str) -> Option<usize> {
     let digit = key.strip_prefix("stage")?.as_bytes().first().copied()?;
     let index = digit.checked_sub(b'1')? as usize;

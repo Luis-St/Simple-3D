@@ -1,4 +1,4 @@
-//! Putting the component on screen away and bringing another out.
+//! Putting the on-screen component away and bringing another out.
 
 use super::*;
 use crate::app::{App, Status};
@@ -7,8 +7,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 impl App {
-    /// The scene of component `id`, wherever it is: on `App` for the one on
-    /// screen, in the project for every other.
+    /// Component `id`'s scene: on `App` for the one on screen, in the project otherwise.
     pub(crate) fn component_scene(&self, id: ComponentId) -> Option<&Scene> {
         if id == self.project.active {
             Some(&self.scene)
@@ -17,19 +16,13 @@ impl App {
         }
     }
 
-    /// What component `id` is called, or nothing for one the project does not
-    /// have.
+    /// Component `id`'s name, or nothing if the project lacks it.
     pub(crate) fn component_label(&self, id: ComponentId) -> Option<String> {
         self.component_scene(id).map(component_name)
     }
 
-    /// Hand the scene on screen the components it integrates, as they are now.
-    ///
-    /// Called whenever that could have changed: on coming to a component, and
-    /// after anything that makes, deletes or edits one other than the one on
-    /// screen. The component on screen is left out of the map -- nothing it
-    /// integrates can hold it -- which is also what keeps the map from being
-    /// stale about the one scene that changes on every edit.
+    /// Give the on-screen scene its integrated components as they are now, whenever that may have
+    /// changed. The on-screen one is left out, since nothing it integrates can hold it.
     pub(crate) fn relink_components(&mut self) {
         let active = self.project.active;
         let scenes: BTreeMap<ComponentId, &Scene> =
@@ -39,8 +32,7 @@ impl App {
         self.dirty = true;
     }
 
-    /// Lift the component on screen off `App`, leaving the project's other
-    /// state -- its path, its other components -- where it is.
+    /// Lift the on-screen component off `App`, leaving the project's other state.
     fn take_component(&mut self) -> Component {
         self.cancel_simplify_tool();
         Component {
@@ -69,8 +61,7 @@ impl App {
         self.evaluated = component.evaluated;
     }
 
-    /// Show component `id` of the project on screen, opening its tab if it is
-    /// not open yet.
+    /// Show component `id`, opening its tab if needed.
     pub fn activate_component(&mut self, id: ComponentId) {
         if id == self.project.active {
             return;
@@ -90,17 +81,14 @@ impl App {
         self.status = Status::Info(format!("Editing {}", component_name(&self.scene)));
     }
 
-    /// Close the tab of component `id`. The component stays in the project --
-    /// closing a tab is putting it out of sight, not deleting anything -- and
-    /// the root component's tab never closes.
+    /// Close component `id`'s tab without deleting it; the root's tab never closes.
     pub fn close_component(&mut self, id: ComponentId) {
         if id == ROOT_COMPONENT {
             return;
         }
         let Some(at) = self.project.open.iter().position(|&open| open == id) else { return };
         if id == self.project.active {
-            // The neighbour to the left: the root is always there to fall back
-            // on, so there always is one.
+            // The left neighbour; the root always exists to fall back on.
             let next = self.project.open[at.saturating_sub(1)];
             self.activate_component(next);
         }

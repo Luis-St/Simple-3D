@@ -1,13 +1,10 @@
-//! Dragging a label to change the number beside it.
+//! Dragging a field to change its number.
 
 use super::*;
 use simple3d_core::primitive::ParamKind;
 use simple3d_core::unit::Unit;
 
-/// How much one horizontal pixel of a label scrub is worth.
-///
-/// Shift is fine, Ctrl is coarse -- the same two modifiers the manipulator uses
-/// for the same two meanings, so there is one thing to learn rather than two.
+/// The value of one horizontal pixel of scrub. Shift is fine, Ctrl coarse, as for the manipulator.
 pub fn scrub_step(step: f64, fine: bool, coarse: bool) -> f64 {
     let factor = match (fine, coarse) {
         (true, _) => 0.1,
@@ -17,48 +14,25 @@ pub fn scrub_step(step: f64, fine: bool, coarse: bool) -> f64 {
     step * factor / PIXELS_PER_STEP
 }
 
-/// A drag on a field's *label*, which scrubs the value.
-///
-/// The whole gesture is one undo step: the snapshot is taken when the drag
-/// starts, and every frame after it only touches the scene. Forty snapshots for
-/// one drag would make undo useless exactly where it is needed most. The id is
-/// held so a pointer that runs off one label and over another cannot hand the
-/// gesture to a field the user never grabbed.
+/// A scrub gesture on a field. The whole drag is one undo step (snapshot at the start). The id is
+/// held so running over another field never hands the gesture to it.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Scrub {
     pub id: Option<egui::Id>,
-    /// The part of the drag a whole-numbered field could not take yet.
-    ///
-    /// A count is stored as an integer and read back out of the model on every
-    /// frame, so the fraction of a copy each frame of the drag is worth was
-    /// rounded away sixty times a second rather than added up. A hand moving a
-    /// pixel a frame rounded to nothing and the field never moved at all; a hand
-    /// moving four rounded *up* on every frame and the field ran away from the
-    /// pointer. Kept here instead, and spent on the frame it comes to a whole
-    /// one, which is what makes a count follow the pointer at the same six
-    /// pixels a step every other field does.
+    /// The part of the drag a whole-number field could not take yet, carried so counts follow the
+    /// pointer like other fields instead of rounding each frame away (or overshooting).
     pub carry: f64,
-    /// Whether this gesture has moved the value yet.
-    ///
-    /// The frame that reports `started` is the frame a field records its one
-    /// undo step on, so a gesture that has not moved anything must not report it:
-    /// the field scrubs on the horizontal axis alone, and a press dragged
-    /// straight down would otherwise leave a step behind that undoes nothing.
+    /// Whether this gesture has moved the value yet, so a purely vertical press records no empty undo step.
     pub moved: bool,
 }
 
-/// One frame of a scrub on a value box: which field owns the gesture, and how
-/// far it has moved.
-///
-/// The id is held for the length of the drag so a pointer that runs off one
-/// field and over another cannot hand the gesture to a field the user never
-/// grabbed -- and any real edit does run off, six pixels to the millimetre.
+/// One frame of a scrub: which field owns the gesture and how far it moved. The id is held since
+/// any real edit runs off the field.
 pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut Scrub, step: f64) -> Option<Scrubbed> {
     let id = response.id;
     if response.drag_started() {
         scrub.id = Some(id);
-        // Nothing is owed at the start of a gesture: a fraction left over from
-        // the last one would be spent on this field's first frame.
+        // Start with nothing owed, so a leftover fraction is not spent on this field.
         scrub.carry = 0.0;
         scrub.moved = false;
     }
@@ -73,10 +47,7 @@ pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut S
     }
     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     let (fine, coarse) = ui.input(|i| (i.modifiers.shift, i.modifiers.command));
-    // The value follows the pointer sideways and nothing else. Vertical movement
-    // is how a hand holds a horizontal drag steady, not a second axis to edit
-    // on -- and a field that answered to both could not be dragged along a row
-    // without wandering.
+    // Horizontal only: vertical movement is a hand steadying the drag, not a second axis.
     let delta = scrub_delta(response.drag_delta().x, step, fine, coarse);
     if delta == 0.0 && !scrub.moved {
         return None;
@@ -86,13 +57,12 @@ pub fn scrub_gesture(ui: &mut egui::Ui, response: &egui::Response, scrub: &mut S
     Some(Scrubbed { started, delta })
 }
 
-/// This frame's pointer movement as a change in the field's own units.
+/// This frame's pointer movement in the field's own units.
 pub fn scrub_delta(dx: f32, step: f64, fine: bool, coarse: bool) -> f64 {
     dx as f64 * scrub_step(step, fine, coarse)
 }
 
-/// The scrub increment for a field of a given kind, in the unit the field
-/// shows. One millimetre in a millimetre document, one degree, one segment.
+/// The scrub increment for a field kind in its displayed unit: one millimetre, degree or segment.
 pub fn scrub_increment(kind: ParamKind, unit: Unit) -> f64 {
     match kind {
         ParamKind::Length { .. } => unit.from_mm(1.0),

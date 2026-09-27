@@ -3,8 +3,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// Cheap co-operative cancellation. The UI thread flips this when the user
-/// edits again, and the worker abandons the run at the next node boundary.
+/// Co-operative cancellation: flipped by the UI on a new edit, checked by the worker at node boundaries.
 #[derive(Clone, Debug, Default)]
 pub struct Cancel(pub(super) Arc<AtomicBool>);
 

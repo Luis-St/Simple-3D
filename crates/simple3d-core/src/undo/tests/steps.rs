@@ -8,16 +8,13 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn undo_and_redo_leave_the_camera_exactly_where_it_is() {
-    // The camera is part of the saved project and therefore part of every
-    // snapshot, but it is not part of what an edit did. Undoing a move must
-    // not also throw the view back to where it was looking from.
+    // The camera is in every snapshot but not in the edit; undoing a move must not reset the view.
     let mut scene = Scene::new();
     let mut history = History::new();
     let id = shape(&mut scene);
     history.record(&scene, "Move", None);
     scene.get_mut(id).unwrap().position = Vec3::new(10.0, 0.0, 0.0);
 
-    // The user then orbits and zooms.
     let looking = crate::scene::Camera { yaw: 12.5, pitch: -40.0, distance: 999.0, ..Default::default() };
     scene.camera = looking;
 
@@ -77,7 +74,7 @@ pub(crate) fn twenty_mixed_edits_undo_and_redo_to_the_same_tree() {
     scene.remove(ids[5]);
 
     let after_all = fingerprint(&scene);
-    // Twenty-two edits, comfortably past the criterion's twenty.
+    // Twenty-two edits, past the criterion's twenty.
     let steps = history.past.len();
     assert!(steps >= 20, "only {steps} snapshots");
     for _ in 0..steps {

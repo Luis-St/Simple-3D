@@ -6,14 +6,8 @@ use crate::ui;
 use simple3d_core::keymap::Command;
 
 impl App {
-    /// The menu bar.
-    ///
-    /// Only the menus and the document's name: the window system draws the
-    /// title bar above this row, so there are no window buttons to place and
-    /// nothing here drags the window. What used to be drawn by hand -- the
-    /// buttons, the drag, the eight resize grips -- is the compositor's again,
-    /// which is where the snapping, the window menu and the user's own button
-    /// layout come from.
+    /// The menu bar: menus and the document name only. The compositor draws the title bar, so window
+    /// buttons, dragging and resizing are its (snapping, window menu, button layout) again.
     pub(crate) fn menu_bar(&mut self, ctx: &egui::Context) {
         let frame = egui::Frame::NONE.fill(theme::token::SURFACE_2).inner_margin(egui::Margin {
             left: 8,
@@ -31,10 +25,7 @@ impl App {
                     self.manipulate_menu(ui);
                     self.help_menu(ui);
                 });
-                // The document's name at the far end: what is open, and whether
-                // it still matches what is on disk. The title bar carries it
-                // too, but a title bar can be off the top of a maximised
-                // screen's attention while this row never is.
+                // The document name and saved state at the far end; the title bar may be out of view when maximised.
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let name = self
                         .path

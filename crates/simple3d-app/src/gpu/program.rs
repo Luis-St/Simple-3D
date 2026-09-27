@@ -11,9 +11,8 @@ pub(crate) struct Program {
 pub(crate) struct Buffers {
     pub(super) array: glow::VertexArray,
     pub(super) vertices: glow::Buffer,
-    /// The stretches of material along each axis, a row per axis, uploaded
-    /// as a texture because there are as many as the axes run through
-    /// bodies -- see `ground::draw_axes`.
+    /// Material stretches along each axis, a row per axis, as a texture since their count is unbounded
+    /// (see `ground::draw_axes`).
     pub(super) seen: glow::Texture,
 }
 
@@ -22,8 +21,7 @@ impl Program {
         Program::with_geometry(gl, vertex, None, fragment)
     }
 
-    /// A program with a geometry stage between the two: what the resident
-    /// meshes' lines, outlines and plane crossings are drawn with.
+    /// A program with a geometry stage, for resident meshes' lines, outlines and plane crossings.
     pub(super) unsafe fn with_geometry(
         gl: &glow::Context,
         vertex: &str,
@@ -91,7 +89,7 @@ impl Buffers {
         gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, stride, 0);
         gl.enable_vertex_attrib_array(1);
         gl.vertex_attrib_pointer_f32(1, 1, glow::FLOAT, false, stride, 8);
-        // Normalised, so the shader sees the same 0..1 the palette's bytes mean.
+        // Normalised, so the shader sees 0..1 as the palette bytes mean.
         gl.enable_vertex_attrib_array(2);
         gl.vertex_attrib_pointer_f32(2, 4, glow::UNSIGNED_BYTE, true, stride, 12);
         gl.enable_vertex_attrib_array(3);
@@ -115,8 +113,7 @@ impl Buffers {
     }
 }
 
-/// A vertex array with one attribute, laid out by each draw: the grid's quad
-/// and the axes' arms, a handful of vertices uploaded as they are drawn.
+/// A one-attribute vertex array for the grid quad and axis arms, uploaded per draw.
 pub(crate) struct GroundBuffers {
     pub(super) array: glow::VertexArray,
     pub(super) vertices: glow::Buffer,

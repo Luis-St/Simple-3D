@@ -4,10 +4,7 @@ use super::*;
 use crate::primitive::ParamValue;
 use simple3d_geom::Vec3;
 
-/// Asked for as "a bit of noise, like for placing planks on a surface where
-/// some randomness is needed": every copy nudged off where the rule put it,
-/// by no more than the amount asked for, and the same nudge every time the
-/// file is opened.
+/// Noise for placing planks: every copy nudged within the amount asked, the same every time.
 #[test]
 pub(crate) fn noise_moves_every_copy_a_little_and_never_further_than_it_was_told() {
     let exact = with(&[
@@ -33,19 +30,16 @@ pub(crate) fn noise_moves_every_copy_a_little_and_never_further_than_it_was_told
     }
     assert!(moved >= 38, "only {moved} of 40 copies were nudged at all, which is not a scatter");
 
-    // Deterministic: the same seed lays the same copies down, so a file opened
-    // tomorrow is the file that was saved today.
+    // Deterministic: the same seed gives the same copies.
     assert_eq!(instances(&scattered), after, "the same rule scattered differently the second time");
 
-    // And the seed is what makes it a choice: the next number is a different
-    // scatter of the same size.
+    // A different seed gives a different scatter of the same size.
     let mut reseeded = scattered.clone();
     reseeded.insert("noise_seed".to_string(), ParamValue::Count(2));
     assert_ne!(instances(&reseeded), after, "changing the seed changed nothing");
 }
 
-/// A pattern with no noise on it is the pattern it always was -- to the bit,
-/// not to a tolerance.
+/// Without noise the pattern is unchanged bit for bit.
 #[test]
 pub(crate) fn a_pattern_with_no_noise_is_left_exactly_where_the_rule_put_it() {
     for kind in 0..KINDS.len() as u32 {
@@ -59,9 +53,7 @@ pub(crate) fn a_pattern_with_no_noise_is_left_exactly_where_the_rule_put_it() {
     }
 }
 
-/// The turn is about the copy's own middle, not about the centre of the
-/// pattern: a plank is meant to sit askew where it lies, not to swing round
-/// the whole deck.
+/// The turn is about each copy's own middle, not the pattern's centre.
 #[test]
 pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
     let mut params = with(&[
@@ -76,7 +68,7 @@ pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
             (copy.xform.t - Vec3::new(50.0 * index as f64, 0.0, 0.0)).length() < 1e-9,
             "copy {index} was carried off its place by a turn that should have spun it there"
         );
-        // Turned, and by no more than the six degrees asked for.
+        // Turned, by no more than the six degrees asked.
         let turned = copy.xform.axis_vector(0);
         let angle = turned.y.atan2(turned.x).to_degrees();
         assert!(angle.abs() <= 6.0 + 1e-9, "copy {index} turned {angle} degrees, past the 6 asked for");
@@ -88,13 +80,7 @@ pub(crate) fn a_jittered_turn_spins_each_copy_where_it_stands() {
     assert_eq!(Noise::of(&params).turn, Vec3::new(0.0, 0.0, 6.0));
 }
 
-/// A jitter typed with a minus sign is a jitter of that size, not an error and
-/// not nothing.
-///
-/// Asked for from the running application: the three distances refused a
-/// negative number where every other distance in the panel takes one. They are
-/// read either way round whatever the sign -- a scatter has no direction -- so
-/// the sign costs nothing, and a field that silently snapped -2 back to zero
+/// A negative jitter is a jitter of that size. Regression: the fields refused negatives, which
 /// looked like a jitter that would not switch on.
 #[test]
 pub(crate) fn a_negative_jitter_scatters_exactly_as_far_as_the_positive_one() {
@@ -115,9 +101,7 @@ pub(crate) fn a_negative_jitter_scatters_exactly_as_far_as_the_positive_one() {
     assert_ne!(instances(&negative), instances(&base), "the negative jitter did nothing at all");
 }
 
-/// The original can be left exactly where it is while every copy after it
-/// wanders -- the first plank against the wall, the part the rest are measured
-/// from.
+/// The original can stay put while every later copy wanders.
 #[test]
 pub(crate) fn the_original_can_be_left_in_place_while_the_copies_wander() {
     let mut params = with(&[
@@ -135,8 +119,7 @@ pub(crate) fn the_original_can_be_left_in_place_while_the_copies_wander() {
     assert_eq!(kept[1..], wandering[1..], "keeping the original changed where the others went");
 }
 
-/// A size jitter makes each copy anything up to that much bigger or smaller,
-/// and never more.
+/// A size jitter scales each copy by up to that much either way, never more.
 #[test]
 pub(crate) fn a_size_jitter_resizes_every_copy_within_the_bound() {
     let params = with(&[
@@ -148,15 +131,14 @@ pub(crate) fn a_size_jitter_resizes_every_copy_within_the_bound() {
     let sizes: Vec<f64> = instances(&params).iter().map(|c| c.xform.axis_vector(0).length()).collect();
     assert!(sizes.iter().all(|s| (0.8 - 1e-9..=1.2 + 1e-9).contains(s)), "a size fell outside 80..120 %: {sizes:?}");
     assert!(sizes.iter().any(|s| *s < 0.95) && sizes.iter().any(|s| *s > 1.05), "the sizes hardly varied");
-    // Uniformly: a copy made bigger is bigger every way, not stretched.
+    // Uniformly: bigger in every direction, not stretched.
     for copy in instances(&params) {
         let (x, y, z) = (copy.xform.axis_vector(0), copy.xform.axis_vector(1), copy.xform.axis_vector(2));
         assert!((x.length() - y.length()).abs() < 1e-12 && (y.length() - z.length()).abs() < 1e-12);
     }
 }
 
-/// A turn about each axis turns each copy about all three at once, each by its
-/// own amount: a stone dropped on a path tilts every way, not only about Z.
+/// A turn jitter turns each copy about all three axes, each by its own amount.
 #[test]
 pub(crate) fn a_turn_about_every_axis_tilts_every_way() {
     let params = with(&[
@@ -168,11 +150,11 @@ pub(crate) fn a_turn_about_every_axis_tilts_every_way() {
         ("noise_turn_z", ParamValue::Angle(10.0)),
     ]);
     let copies = instances(&params);
-    // A turn about Z alone leaves each copy's Z axis pointing straight up.
+    // A turn about Z alone would leave each copy's Z axis straight up.
     assert!(copies.iter().any(|c| c.xform.axis_vector(2).z < 1.0 - 1e-6), "no copy tilted off Z");
     assert!(copies.iter().any(|c| c.xform.axis_vector(0).y.abs() > 1e-6), "no copy turned about Z");
 
-    // About one axis only, by more about that one than the others are.
+    // About one axis only, more about that one than the others.
     let tilted = with(&[
         ("kind", ParamValue::Choice(LINEAR)),
         ("count", ParamValue::Count(20)),
@@ -184,15 +166,13 @@ pub(crate) fn a_turn_about_every_axis_tilts_every_way() {
     }
 }
 
-/// A scatter saved while it had one turn and a choice of axis turns every copy
-/// exactly as it did: the turn becomes the amount about that axis, or about
-/// each of the three.
+/// An old scatter with one turn and an axis choice migrates to per-axis amounts, turning copies
+/// exactly as before.
 #[test]
 pub(crate) fn a_scatter_from_when_it_had_one_turn_lands_every_copy_where_it_did() {
     let base =
         [("kind", ParamValue::Choice(LINEAR)), ("count", ParamValue::Count(12)), ("step_x", ParamValue::Length(40.0))];
-    // What the one turn laid down, worked out the way it was: one channel for a
-    // turn about one axis, three for all of them.
+    // The old turn: one channel for a single axis, three for all.
     let old_turn = |axis: usize, index: usize| -> Vec3 {
         let noise = Noise { offset: Vec3::ZERO, turn: Vec3::splat(8.0), scale: 0.0, seed: 1, keep_first: false };
         let about_one = Noise { turn: unit(axis) * 8.0, ..noise };
@@ -216,12 +196,10 @@ pub(crate) fn a_scatter_from_when_it_had_one_turn_lands_every_copy_where_it_did(
     }
 }
 
-/// The scatter says when it can make two copies meet: they would be welded
-/// into one body, and a deck of planks a millimetre too generously scattered
-/// stops being planks.
+/// The scatter reports when it could make copies meet, which would weld them into one body.
 #[test]
 pub(crate) fn a_scatter_that_can_close_the_gap_between_copies_says_so() {
-    // 10 mm shapes 12 mm apart: 2 mm between them.
+    // 10 mm shapes 12 mm apart: a 2 mm gap.
     let size = Vec3::new(10.0, 10.0, 10.0);
     let mut params = with(&[
         ("kind", ParamValue::Choice(LINEAR)),
@@ -230,11 +208,11 @@ pub(crate) fn a_scatter_that_can_close_the_gap_between_copies_says_so() {
     ]);
     assert_eq!(crowding(&params, size), None, "a pattern with no scatter was said to crowd");
 
-    // Half a millimetre each way: two neighbours can close a millimetre of it.
+    // 0.5 mm each way: two neighbours can close 1 mm.
     params.insert("noise_x".to_string(), ParamValue::Length(0.5));
     assert_eq!(crowding(&params, size), None);
 
-    // A millimetre and a half each way can close three: more than there is.
+    // 1.5 mm each way can close 3 mm: more than there is.
     params.insert("noise_x".to_string(), ParamValue::Length(1.5));
     let crowded = crowding(&params, size).expect("a scatter wider than the gap was not caught");
     assert!((crowded.gap - 2.0).abs() < 1e-9 && (crowded.reach - 3.0).abs() < 1e-9, "{crowded:?}");
@@ -244,7 +222,7 @@ pub(crate) fn a_scatter_that_can_close_the_gap_between_copies_says_so() {
     params.insert("noise_y".to_string(), ParamValue::Length(5.0));
     assert_eq!(crowding(&params, size), None, "a sideways scatter was said to close a gap along the run");
 
-    // And copies that touch already are the rule's doing, not the scatter's.
+    // Copies touching already is the rule's doing, not the scatter's.
     params.insert("step_x".to_string(), ParamValue::Length(10.0));
     params.insert("noise_x".to_string(), ParamValue::Length(1.0));
     assert_eq!(crowding(&params, size), None);

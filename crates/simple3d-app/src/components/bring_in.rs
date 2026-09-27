@@ -1,5 +1,4 @@
-//! Components arriving from outside the project: in a paste, or in a saved
-//! primitive placed from the palette.
+//! Components arriving from outside the project: pasted, or in a placed saved primitive.
 
 use super::*;
 use crate::app::{App, Status};
@@ -8,18 +7,9 @@ use simple3d_core::scene::{GroupOp, NodeData};
 use std::collections::BTreeMap;
 
 impl App {
-    /// Make `clip` mean something in this project: every component it carries
-    /// that the project does not already have becomes one of its own, under a
-    /// fresh id, and the clip is rewritten to point at them.
-    ///
-    /// A clip copied out of this very project keeps meaning the components it
-    /// was copied with, which is what makes copy and paste a way of placing a
-    /// component twice. From anywhere else -- another project, the palette --
-    /// what it carries is a copy, never a link: editing it here changes nothing
-    /// there (issue 113).
-    ///
-    /// Also gives back the components it made, for the step that places the
-    /// clip to take away with it when it is undone.
+    /// Make `clip` meaningful here: components the project lacks are added under fresh ids and the clip
+    /// rewritten. A clip from this project keeps its links (paste places the same component again);
+    /// from elsewhere it brings copies (issue 113). Also returns the components made, for undo.
     pub(crate) fn bring_in_components(&mut self, clip: &Clip) -> (Clip, Vec<ComponentId>) {
         let mut clip = clip.clone();
         if clip.components.is_empty() {
@@ -57,11 +47,8 @@ impl App {
         (clip, made)
     }
 
-    /// Whether every integration in `clip` could be placed in the component on
-    /// screen, and why not when one could not.
-    ///
-    /// Only a clip from this very project can fail: from anywhere else, every
-    /// component it carries arrives as a new one, which nothing here holds.
+    /// Whether every integration in `clip` could be placed in the on-screen component, and why not.
+    /// Only a clip from this project can fail.
     pub(crate) fn clip_fits_here(&self, clip: &Clip) -> Result<(), String> {
         if clip.origin != Some(self.project.origin) {
             return Ok(());
@@ -73,14 +60,8 @@ impl App {
         used.into_iter().filter(|&id| self.project.get(id).is_some()).try_for_each(|id| self.can_integrate(id))
     }
 
-    /// Place a saved primitive as a component of its own (issue 113): the
-    /// component is made from what was saved, and one integration of it goes
-    /// where a new shape would.
-    ///
-    /// Every placement is its own component. A primitive placed twice is two
-    /// components that happen to start out the same, and editing one leaves
-    /// the other alone -- which is what taking something off a shelf twice
-    /// means.
+    /// Place a saved primitive as its own component (issue 113), with one integration where a new shape
+    /// would go. Each placement is a separate component.
     pub(crate) fn place_primitive(&mut self, clip: &Clip, name: &str) {
         let (clip, carried) = self.bring_in_components(clip);
         let Some(root) = component_root(&clip.nodes, name) else {
@@ -93,8 +74,7 @@ impl App {
         };
         let component = self.project.fresh_id();
         self.edit("Add", None);
-        // Undone, the placement takes with it the component it made and every
-        // one that came along inside it.
+        // Undo removes the component made and any carried inside it.
         let made: Vec<ComponentId> = std::iter::once(component).chain(carried).collect();
         self.history.mark_created(&made);
         self.project.components.push(Component::new(component, scene));
@@ -108,9 +88,8 @@ impl App {
     }
 }
 
-/// The root a component made of `nodes` has: the one group itself when that
-/// is all there is, standing at the origin, and otherwise a union of them,
-/// moved together so the first stands at the origin.
+/// A new component's root from `nodes`: the single group at the origin, or a union with the first
+/// node at the origin.
 fn component_root(nodes: &[NodeData], name: &str) -> Option<NodeData> {
     let first = nodes.first()?;
     if let [only] = nodes {

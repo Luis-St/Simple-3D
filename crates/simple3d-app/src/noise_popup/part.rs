@@ -1,22 +1,19 @@
-//! The parts a scatter is built from, and the ids of the controls that add,
-//! move and drop them.
+//! The parts a scatter is built from, and the ids of the controls that add, move and drop them.
 
 use simple3d_core::primitive::{Params, ParamsExt};
 
-/// The parts a scatter is built from, in the order the builder lists them
-/// (issue 79).
+/// The parts a scatter is built from, in builder order (issue 79).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Part {
     /// Moved off where the rule put it, along each axis.
     Nudge,
-    /// Turned where it stands, about one axis. A scatter takes one for each.
+    /// Turned in place about one axis; one per axis.
     Turn(usize),
     /// Made bigger or smaller.
     Size,
 }
 
-/// The axes a turn is added about, in the order "+ Turn" takes them: Z first,
-/// the way a plank lies askew on a floor.
+/// The order "+ Turn" adds axes in: Z first, as a plank lies askew on a floor.
 pub(super) const TURN_ORDER: [usize; 3] = [2, 0, 1];
 
 /// The axes' names, by index.
@@ -52,8 +49,7 @@ impl Part {
         }
     }
 
-    /// The numbers it is made of, which are what taking it off puts back to
-    /// nothing.
+    /// The numbers it is made of, reset when it is removed.
     pub(super) fn keys(self) -> &'static [&'static str] {
         match self {
             Part::Nudge => &["noise_x", "noise_y", "noise_z"],
@@ -69,28 +65,27 @@ impl Part {
     }
 }
 
-/// The id of the chip that adds `part`, in the builder drawn under `scope`:
-/// the tool and the window can both be up on one pattern.
+/// The id of the chip adding `part` in the builder under `scope` (tool and window can both be open).
 pub(crate) fn part_id(scope: &str, part: Part) -> egui::Id {
     egui::Id::new(("noise-add-part", scope.to_string(), part.index()))
 }
 
-/// The id of the chip that adds a turn about the next axis without one.
+/// The id of the chip adding a turn about the next free axis.
 pub(crate) fn add_turn_id(scope: &str) -> egui::Id {
     egui::Id::new(("noise-add-turn", scope.to_string()))
 }
 
-/// The id of the chip that moves a turn onto `axis`.
+/// The id of the chip moving a turn onto `axis`.
 pub(crate) fn turn_axis_id(scope: &str, from: usize, to: usize) -> egui::Id {
     egui::Id::new(("noise-turn-axis", scope.to_string(), from, to))
 }
 
-/// The id of the cross that takes `part` off.
+/// The id of the cross removing `part`.
 pub(crate) fn drop_part_id(scope: &str, part: Part) -> egui::Id {
     egui::Id::new(("noise-drop-part", scope.to_string(), part.index()))
 }
 
-/// The id of the button that steps the seed on.
+/// The id of the button stepping the seed.
 pub(crate) fn shuffle_id(scope: &str) -> egui::Id {
     egui::Id::new(("noise-shuffle", scope.to_string()))
 }

@@ -7,15 +7,11 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-/// A file being read in. Shaped like [`super::ExportJob`], and for the same
-/// reason: a hundred-megabyte STL is a second or two of parsing, and the
-/// interface must not stop answering for it. Progress is a permille count in
-/// an atomic so the footer can read it every frame without locking.
+/// A file being read, off the interface thread like [`super::ExportJob`]; progress is a permille
+/// atomic the footer reads without locking.
 pub struct ImportJob {
     pub path: PathBuf,
-    /// Which document asked for the file. Checked again when the model lands:
-    /// an import must never be dropped into whatever tab the user has switched
-    /// to in the meantime.
+    /// The document that asked, rechecked on landing so the model never goes into another tab.
     pub tab: usize,
     pub(super) progress: Arc<AtomicU32>,
     pub(super) cancelled: Arc<AtomicBool>,
@@ -25,10 +21,7 @@ pub struct ImportJob {
 }
 
 impl ImportJob {
-    /// `limit` is the point at which the import gives up with a clear message
-    /// rather than reading forever -- the same guard the export has, since a
-    /// file that is not what it claims to be can keep a parser busy for a very
-    /// long time.
+    /// `limit` is when the import gives up with a message, since a bogus file can keep a parser busy.
     pub fn spawn(path: PathBuf, tab: usize, limit: Duration) -> ImportJob {
         let progress = Arc::new(AtomicU32::new(0));
         let cancelled = Arc::new(AtomicBool::new(false));
@@ -44,8 +37,7 @@ impl ImportJob {
                 let mut report = |fraction: f32| {
                     worker_progress.store((fraction.clamp(0.0, 1.0) * 1000.0) as u32, Ordering::Relaxed);
                     if Instant::now() > deadline {
-                        // Read by the parser as a cancellation, so nothing
-                        // half-read comes back; the message is corrected below.
+                        // Read as a cancellation, so nothing half-read comes back; the message is corrected below.
                         return false;
                     }
                     !worker_cancelled.load(Ordering::Relaxed)
@@ -81,7 +73,7 @@ impl ImportJob {
         self.limit
     }
 
-    /// The name the file itself gives the model, for the node it becomes.
+    /// The file's own name for the model, for the node it becomes.
     pub fn stem(&self) -> String {
         self.path
             .file_stem()

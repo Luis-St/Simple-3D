@@ -3,13 +3,8 @@
 use super::*;
 use crate::vec3::Vec3;
 
-/// Scratch buffers for splitting, so the hot loop allocates nothing.
-///
-/// `clip_polygons` calls `split` once per polygon per node it descends. For a
-/// dense convex operand that is a chain one node deep per face, and the count
-/// runs into the hundred million: the three `Vec`s this used to build afresh
-/// inside every call, and the clone every polygon that did not actually need
-/// splitting was given, were between them most of the cost of a boolean.
+/// Reused scratch buffers: `split` runs up to a hundred million times per boolean, and fresh `Vec`s
+/// and clones per call were most of a boolean's cost.
 #[derive(Default)]
 pub(crate) struct Splitter {
     pub(super) types: Vec<i32>,
@@ -18,11 +13,8 @@ pub(crate) struct Splitter {
 }
 
 impl Splitter {
-    /// Split `poly` by `plane`, appending results into the four buckets.
-    ///
-    /// Takes the polygon *by value*: three of the four outcomes hand it on
-    /// whole, and moving it there costs nothing where copying it cost an
-    /// allocation and a walk over its vertices.
+    /// Split `poly` by `plane` into the four buckets. Takes it by value since three outcomes pass it on
+    /// whole without copying.
     pub(super) fn split(
         &mut self,
         plane: &Plane,

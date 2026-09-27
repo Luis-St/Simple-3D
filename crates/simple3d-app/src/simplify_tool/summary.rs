@@ -1,23 +1,17 @@
-//! What the simplification came to, in the two numbers that say it.
+//! What the simplification came to, in two numbers.
 
 use super::*;
 use crate::app::App;
 use crate::theme;
 use simple3d_core::unit::{format_length, Unit};
 
-/// A distance in the document's own unit, with the unit on it.
+/// A distance in the document's unit.
 pub(crate) fn distance(mm: f64, unit: Unit) -> String {
     format!("{} {}", format_length(mm, unit), unit.suffix())
 }
 
-/// How many triangles the result has and how far it moved the surface -- or,
-/// while a run is going, that it is going.
-///
-/// The deviation is the number worth reading twice. A triangle count says how
-/// much was dropped, which is what was asked for; the deviation says what it
-/// cost, in millimetres, against the mesh the tool opened on -- and it is an
-/// upper bound, so the real surface is at least that close. It is the only
-/// thing on screen that can say a simplification is safe to print.
+/// Result triangle count and surface deviation, or that a run is going. The deviation is an upper
+/// bound against the original mesh, the only on-screen sign a result is safe to print.
 pub(crate) fn summary(app: &App, ui: &mut egui::Ui, tool: &SimplifyTool) {
     let before = tool.original.triangle_count();
     let unit = app.unit();
@@ -38,9 +32,7 @@ pub(crate) fn summary(app: &App, ui: &mut egui::Ui, tool: &SimplifyTool) {
         }
     };
     ui.add(egui::Label::new(theme::hint(text)).selectable(false));
-    // Said only when it is true, and said where the checkbox that turns it on
-    // is looked at: a wireframe that silently does not appear reads as a
-    // setting that does not work (issue 23 was exactly that).
+    // Said beside its checkbox when the preview is not drawn, or it reads as broken (issue 23).
     let drawn = tool.shown.is_some()
         && app.evaluated.node_meshes.get(&tool.target).is_some_and(|mesh| mesh.triangle_count() > WIREFRAME_LIMIT);
     if tool.wireframe && drawn {

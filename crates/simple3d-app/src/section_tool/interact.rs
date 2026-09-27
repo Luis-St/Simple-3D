@@ -5,15 +5,8 @@ use crate::app::App;
 use crate::view::View;
 use simple3d_geom::Vec3;
 
-/// Drag any of the grips to slide the plane. Returns whether the pointer
-/// belongs to one of them this frame, so a drag that moves the plane does not
-/// also select what is behind it.
-///
-/// Every grip is the same control in a different place, so they share the one
-/// drag: whichever is taken hold of, the plane slides along its axis by the
-/// same rule, and the others follow the frame while it does. A tilted plane
-/// slides along its own normal, which moves the offset by exactly the distance
-/// dragged, the way an untilted one does along its axis.
+/// Drag any grip to slide the plane along its normal; returns whether the pointer is a grip's, so
+/// the drag does not also select behind it. All grips share one drag rule.
 pub fn interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
     if !app.scene.settings.section.enabled {
         app.section_grab = None;
@@ -21,9 +14,7 @@ pub fn interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
         return false;
     }
     let mut owned = false;
-    // Which grip the pointer is on, kept for the drawing: the arrows that say
-    // which way the plane travels are put on that one alone, so five grips do
-    // not become five pairs of arrows over the model.
+    // The hovered grip, so only it gets the travel arrows.
     let mut live = None;
     let count = app.scene.settings.section_count();
     for which in 0..count {
@@ -48,12 +39,8 @@ pub fn interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
                     view, at, travel,
                 )));
             }
-            // Where the pointer took hold of the plane, kept for the length of
-            // the drag: without it the plane jumps so that the point grabbed
-            // lands under the pointer, which for a grip in the middle of a
-            // large frame is a jump of the whole model. Taking hold of a plane
-            // also brings it up in the window, so the numbers there are the
-            // ones moving.
+            // The grab offset, so the plane does not jump to put the grabbed point under the pointer. Grabbing
+            // also shows this section in the window.
             if response.drag_started() {
                 app.section_tab = which;
                 app.section_grab = ui
@@ -65,9 +52,7 @@ pub fn interact(app: &mut App, ui: &mut egui::Ui, view: &View) -> bool {
                 let grab = app.section_grab.unwrap_or(0.0);
                 if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
                     if let Some(under) = view.ray_axis(cursor, Vec3::ZERO, travel) {
-                        // Snapped to the document's move step, and freed or
-                        // coarsened by the same modifiers every other drag
-                        // answers to.
+                        // Snapped to the move step, with the usual modifiers.
                         let wanted = crate::panel_viewport::mods_from(ui).snap(under + grab, app.move_snap());
                         app.set_section_offset(wanted);
                     }

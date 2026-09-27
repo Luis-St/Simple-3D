@@ -4,8 +4,7 @@ use super::*;
 use simple3d_core::keymap::Command;
 use simple3d_core::pattern::{self, Vary};
 
-/// The chips on a stage's card add a variation card each -- the same kind twice
-/// if asked -- and a card's cross takes that one off and no other.
+/// Each chip adds a card (the same kind twice if asked); a card's cross removes only that one.
 #[test]
 pub(crate) fn variations_are_added_and_dropped_from_the_stage_card() {
     let mut harness = harness("pattern-variation-cards");
@@ -13,7 +12,7 @@ pub(crate) fn variations_are_added_and_dropped_from_the_stage_card() {
     harness.step();
     let id = harness.state().primary().expect("the pattern is selected");
     harness.state_mut().open_pattern_tool();
-    // Staggered planks: the rows' stage already carries its stagger.
+    // Staggered planks: the rows' stage already has its stagger.
     harness.state_mut().start_rule_from_preset(id, 0);
     harness.state_mut().pattern_tool_folded[0] = true;
     for _ in 0..4 {
@@ -36,8 +35,7 @@ pub(crate) fn variations_are_added_and_dropped_from_the_stage_card() {
         harness.ctx.read_response(crate::panel_properties::grip_id("tool:2.2 Spin")).is_some(),
         "the spin's card was not drawn"
     );
-    // The spin's card is taller than the window has room for below it, so the
-    // chips it pushed down are scrolled back up to.
+    // The spin's card overflows the window, so the chips it pushed down are scrolled back to.
     let spin = rect_of(&harness, crate::panel_properties::grip_id("tool:2.2 Spin"));
     crate::gestures::camera::wheel(&mut harness, spin.center(), egui::vec2(0.0, -400.0));
     for _ in 0..4 {

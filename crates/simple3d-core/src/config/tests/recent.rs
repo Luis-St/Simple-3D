@@ -23,8 +23,7 @@ pub(crate) fn recent_files_are_most_recent_first_deduplicated_and_bounded() {
 #[test]
 pub(crate) fn recent_colours_are_most_recent_first_deduplicated_and_bounded() {
     let mut settings = AppSettings::default();
-    // Twenty apart, so each is a colour of its own rather than a shade of
-    // the one before it.
+    // Twenty apart, so each is its own colour, not a shade of the last.
     let step = 20_u8;
     for i in 0..MAX_RECENT_COLOURS + 4 {
         settings.remember_colour([i as u8 * step, 0, 0]);
@@ -32,15 +31,14 @@ pub(crate) fn recent_colours_are_most_recent_first_deduplicated_and_bounded() {
     assert_eq!(settings.recent_colours.len(), MAX_RECENT_COLOURS);
     assert_eq!(settings.recent_colours[0], [(MAX_RECENT_COLOURS + 3) as u8 * step, 0, 0]);
 
-    // Using one again moves it to the front rather than repeating it.
+    // Reusing one moves it to the front instead of repeating it.
     let again = settings.recent_colours[3];
     settings.remember_colour(again);
     assert_eq!(settings.recent_colours[0], again);
     assert_eq!(settings.recent_colours.iter().filter(|c| **c == again).count(), 1);
 }
 
-/// Issue 85: the row holds colours to click, not a record of where a drag
-/// went. A shade of one already on it takes that one's slot.
+/// Issue 85: the row holds colours to click, not a drag's trail; a close shade takes the existing slot.
 #[test]
 pub(crate) fn a_shade_of_a_remembered_colour_takes_its_slot_rather_than_another() {
     let mut settings = AppSettings::default();

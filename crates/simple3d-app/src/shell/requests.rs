@@ -1,9 +1,5 @@
-//! Carrying out what the windows asked for, once they have all drawn.
-//!
-//! Nothing here runs while a window is being drawn, which is the whole point of
-//! going through [`WindowRequest`]: moving a document between two windows takes
-//! both of them mutably, and closing one moves every window after it in the
-//! vector.
+//! Carrying out window requests once every window has drawn, since moving documents or closing
+//! windows needs several windows mutably.
 
 use super::*;
 use crate::app::Status;
@@ -18,8 +14,7 @@ impl Shell {
             .filter_map(|window| window.window_request.take().map(|request| (window.window_id, request)))
             .collect();
         for (from, request) in asked {
-            // The window that asked may already be gone: an earlier request in
-            // the same frame can have closed it.
+            // An earlier request this frame may have closed the asking window.
             let Some(index) = self.index_of(from) else { continue };
             match request {
                 WindowRequest::Open(path) => self.open_in_window(ctx, index, &path),
@@ -33,11 +28,7 @@ impl Shell {
         }
     }
 
-    /// Open a file in a window of its own -- unless one of the windows already
-    /// holds it, in which case that window is shown instead. Reading one file
-    /// into two windows would be two documents that disagree and one of them
-    /// silently losing, which is the same reason a file already open in a tab is
-    /// never opened twice.
+    /// Open a file in its own window, or show the window already holding it, so no file is open twice.
     fn open_in_window(&mut self, ctx: &egui::Context, from: usize, path: &Path) {
         let held = self
             .windows
@@ -50,9 +41,7 @@ impl Shell {
             self.focus(ctx, index);
             return;
         }
-        // Nowhere to put a window: the file opens in a tab of the window that
-        // asked, which is what the setting's other answer does, and says so
-        // rather than quietly doing something else.
+        // No windows possible: open in a tab of the asking window and say so.
         if !self.can_open_windows() {
             self.windows[from].open_path_in_tab(path);
             self.windows[from].status = Status::Warning(
@@ -65,16 +54,13 @@ impl Shell {
         self.focus(ctx, window);
     }
 
-    /// Whether a second window can be had at all. With dialogs drawn inside the
-    /// window there are no viewports to put one in -- see
-    /// `Shell::fold_windows_together`.
+    /// Whether a second window is possible; embedded dialogs leave no viewports
+    /// (`Shell::fold_windows_together`).
     fn can_open_windows(&self) -> bool {
         !self.settings.embed_dialogs
     }
 
-    /// Put one tab into a window of its own. A window's only tab is already in a
-    /// window of its own, so that gesture does nothing rather than opening an
-    /// empty window beside it.
+    /// Put one tab into its own window; a window's only tab is left alone.
     fn detach_tab(&mut self, ctx: &egui::Context, index: usize, tab: usize) {
         if self.windows[index].tab_count() < 2 {
             self.windows[index].status = Status::Info("This is the window's only document".into());
@@ -91,12 +77,8 @@ impl Shell {
         self.focus(ctx, window);
     }
 
-    /// Move one tab, or every tab, into another window.
-    ///
-    /// Moving the last tab out of a window moves the window: what would be left
-    /// is an empty window nobody asked for, so it goes -- which is also what
-    /// makes dragging a single-tab window's tab onto another window read as
-    /// merging the two.
+    /// Move one tab or every tab into another window. Moving the last tab closes the source window,
+    /// which makes dragging a single-tab window's tab a merge.
     fn move_tabs(&mut self, ctx: &egui::Context, index: usize, tab: Option<usize>, to: u64) {
         let Some(target) = self.index_of(to) else { return };
         if target == index {
@@ -112,9 +94,7 @@ impl Shell {
             self.windows[target].receive(document);
         }
         if whole {
-            // The source window is empty now -- `take_all_tabs` leaves it
-            // holding a fresh scratch document -- so it is closed without
-            // asking: nothing was in it that has not just been moved.
+            // The source now holds only a fresh scratch document, so close it without asking.
             self.close_window_now(index);
         }
         if let Some(target) = self.index_of(to) {
@@ -126,13 +106,8 @@ impl Shell {
         }
     }
 
-    /// Give the tab that is being held out to the window the pointer is over,
-    /// or, once nobody has taken it, to a window of its own.
-    ///
-    /// Only one window can claim it: the one whose own row of tabs the pointer
-    /// is on this frame. The window it came from is not asked -- the pointer was
-    /// outside it when the button came up, which is what put the tab in the air
-    /// in the first place.
+    /// Give the held-out tab to the window whose tab row the pointer is on, or its own window once
+    /// unclaimed. The source window never claims it.
     pub(super) fn resolve_offer(&mut self, ctx: &egui::Context) {
         let Some(offer) = &self.offer else { return };
         let (from, tab, since) = (offer.from, offer.tab, offer.since);
@@ -147,23 +122,18 @@ impl Shell {
             return;
         }
         if since.elapsed() < CLAIM {
-            // Frames have to keep coming while the tab is in the air, or the
-            // window under the pointer never draws the frame it would notice
-            // in -- nothing else is asking for one, since the drag is over.
+            // Keep frames coming while the tab is held, or the target window never notices.
             ctx.request_repaint();
             return;
         }
         self.offer = None;
-        // Nobody took it, so a tab becomes a window of its own -- which is what
-        // letting one go outside the window asks for. A whole window let go over
-        // nothing stays where it is: it is already a window of its own.
+        // Unclaimed: a tab becomes its own window; a whole window stays as it is.
         if let Some(tab) = tab {
             self.detach_tab(ctx, index, tab);
         }
     }
 
-    /// Close a window the user asked to close. Whatever had to be asked about
-    /// its unsaved documents has been asked by the window itself.
+    /// Close a window the user asked to close; its unsaved documents were already asked about.
     fn close_window(&mut self, ctx: &egui::Context, index: usize) {
         if self.windows.len() == 1 {
             self.quit(ctx);
@@ -172,28 +142,20 @@ impl Shell {
         self.close_window_now(index);
     }
 
-    /// Take a window out of the shell. Its evaluation worker goes with it: the
-    /// thread's job channel is dropped here, which is how it learns to stop.
-    ///
-    /// Whichever window is first afterwards is drawn in the root viewport -- see
-    /// the module comment on why the root window cannot be the one that
-    /// disappears.
+    /// Remove a window; dropping its job channel stops its worker. The next first window takes the
+    /// root viewport (see the module docs).
     fn close_window_now(&mut self, index: usize) {
         self.windows.remove(index);
     }
 
     fn quit(&mut self, ctx: &egui::Context) {
         self.windows[0].persist();
-        // The window drawn in the root viewport must not question the close
-        // that follows: it is this one.
+        // The root viewport's window must let the following close through.
         self.windows[0].leaving = true;
         ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Close);
     }
 
-    /// Bring a window to the front, so a document that has just been moved into
-    /// it, or opened in it, is the window the user is looking at. Wayland grants
-    /// no client its own focus and ignores this without complaint, which is the
-    /// same treatment it gives a dialog asking to stay above its parent.
+    /// Bring a window to the front; Wayland ignores this.
     fn focus(&self, ctx: &egui::Context, index: usize) {
         ctx.send_viewport_cmd_to(self.viewport_of(index), egui::ViewportCommand::Focus);
     }

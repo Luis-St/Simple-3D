@@ -8,8 +8,7 @@ use simple3d_core::primitive;
 use simple3d_core::scene::GroupOp;
 
 impl App {
-    /// Built entirely from the primitive registry: adding a primitive type puts
-    /// it in this menu with no code here to change (spec section 3.2).
+    /// Built from the primitive registry, so new types need no code here (spec section 3.2).
     pub(super) fn add_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("Add", |ui| {
             for op in GroupOp::ALL {
@@ -18,15 +17,9 @@ impl App {
                     ui.close();
                 }
             }
-            // Ruled off from the group operators above: both halves add a
-            // container, but a group is one that combines what is in it and a
-            // pattern is one that repeats it, and six buttons in an unbroken
-            // column read as six of the same thing.
+            // Separates combining containers (groups) from repeating ones (patterns).
             ui.separator();
-            // The other container a node can be (issue 67), beside the group
-            // operators it belongs with. Adding one is always "an empty one to
-            // fill"; wrapping the selection in a pattern is what Edit > Make a
-            // pattern of the selection does.
+            // An empty pattern (issue 67); wrapping the selection is under Edit.
             if ui
                 .button("Pattern")
                 .on_hover_text("An empty pattern, for shapes to be put into it and repeated")
@@ -35,10 +28,7 @@ impl App {
                 self.add_pattern();
                 ui.close();
             }
-            // The other half of the same feature: a rule the user writes
-            // themselves, rather than one of the six that ship with a name
-            // (issue 67). It wraps whatever is selected the way Edit > Make a
-            // pattern does, and then opens the tool on it.
+            // A custom rule (issue 67): wraps the selection and opens the tool.
             if ui
                 .button("Custom pattern")
                 .on_hover_text("Build a repetition rule out of stages, and keep it for other projects")
@@ -112,8 +102,7 @@ impl App {
                 }
             }
             ui.separator();
-            // Where the panels are is a view decision, so it lives here with the
-            // rest of them rather than in a preferences window.
+            // Panel placement is a view decision.
             ui.menu_button("Panels", |ui| {
                 for panel in Panel::ALL {
                     let side = self.settings.layout.side_of(panel);

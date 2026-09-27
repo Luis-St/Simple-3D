@@ -3,18 +3,10 @@
 use super::*;
 use simple3d_core::config::DisplayMode;
 use simple3d_geom::Vec3;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_geom::primitives;
 
-/// The preview is a step of its own, and it comes after the model.
-///
-/// The two engines are handed the same prepared steps, and only the
-/// software one draws them in the order it was given: the GPU sorts them
-/// into passes by kind, and a line that writes no depth meant the ground
-/// grid, which goes *under* the model. Drawn as one, the preview was
-/// covered by the very shape it is drawn on -- invisible in the running
-/// application while every pixel test on this file passed.
+/// The preview is its own step after the model. Regression: the GPU sorts steps into passes, and a
+/// no-depth line meant the grid under the model, so the preview was hidden while pixel tests passed.
 #[test]
 pub(crate) fn a_preview_is_its_own_kind_of_step_and_comes_after_the_model() {
     let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
@@ -33,13 +25,8 @@ pub(crate) fn a_preview_is_its_own_kind_of_step_and_comes_after_the_model() {
     assert!(first > last_face, "the preview was prepared before the model it is drawn over");
 }
 
-/// A tool's preview is drawn *on* the model, not through it (issue 82).
-///
-/// The cells at the near end of a run lie in the face turned towards the
-/// camera and have to be drawn over it; the ones at the far end lie in the
-/// face turned away and are behind forty millimetres of solid. A grid that
-/// shows through the shape reads as floating in front of it, which is the
-/// one thing the preview must not say.
+/// A preview is drawn on the model, not through it (issue 82): near-face cells show, far-face cells
+/// are hidden behind the solid.
 #[test]
 pub(crate) fn a_preview_loop_is_drawn_on_the_solid_and_hidden_behind_it() {
     let prepared = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));

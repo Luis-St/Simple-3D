@@ -1,8 +1,5 @@
-//! The primitive palette: the shapes, as silhouettes, under the outliner.
-//!
-//! The Add menu still exists and still lists every one of these, but a menu is
-//! two gestures and a read. A grid of silhouettes is one gesture and a glance,
-//! which is what the five-second budget for an operation actually needs.
+//! The primitive palette: the shapes as silhouettes, under the outliner. One click instead of the
+//! Add menu's two gestures and a read.
 
 use crate::app::{App, Carried};
 use crate::icon::{self, Glyph};
@@ -13,27 +10,22 @@ use simple3d_core::scene::GroupOp;
 /// Side of one palette tile.
 const TILE: f32 = 26.0;
 
-/// A palette tile answers to both gestures: a click adds the shape, a drag
-/// carries it into the tree.
+/// Tiles take clicks (add the shape) and drags (carry it into the tree).
 const DRAG_OR_CLICK: egui::Sense = egui::Sense::CLICK.union(egui::Sense::DRAG);
 
-/// A tile's own name, so the gesture that grabs it is found by the shape it
-/// offers rather than by where it happens to sit in the grid.
+/// A tile's id, by the shape it offers rather than its grid position.
 pub fn tile_id(type_id: &str) -> egui::Id {
     egui::Id::new(("palette-tile", type_id))
 }
 
-/// How many tiles fit across a palette `width` wide, never fewer than one.
-/// Eight is the design's row length; a narrower dock gets fewer rather than a
-/// horizontal scrollbar.
+/// Tiles across a palette `width` wide: up to eight, fewer when narrow, never zero.
 pub fn columns(width: f32) -> usize {
     let usable = width - 2.0 * theme::metric::PANEL_PAD;
     ((usable / (TILE + theme::metric::GAP)).floor() as usize).clamp(1, 8)
 }
 
 pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
-    // An empty document opens every category: with nothing in the scene, the
-    // shapes are the only thing worth reading.
+    // An empty document opens every category, since shapes are all there is to read.
     let empty = app.scene.node(app.scene.root()).children.is_empty();
     ui.spacing_mut().item_spacing = egui::vec2(theme::metric::GAP, theme::metric::GAP);
     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
@@ -42,7 +34,7 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The shapes themselves, in the space the hint has left.
+/// The shapes, in the space the hint left.
 fn shapes(app: &mut App, ui: &mut egui::Ui, empty: bool) {
     let (area, restore) = theme::list_scroll_area(ui);
     area.show(ui, |ui| {
@@ -56,30 +48,20 @@ fn shapes(app: &mut App, ui: &mut egui::Ui, empty: bool) {
     });
 }
 
-/// Where a new shape lands, said in words, pinned to the foot of the panel.
-///
-/// It is drawn before the shapes and from the bottom up, so it keeps its place
-/// against the panel's own edge instead of floating directly under the last row
-/// of tiles -- a line that moves every time a category is folded is a line
-/// nobody reads. The choice it reports lives in the document options, beside
-/// the rest of what the document does to a new shape.
+/// Where a new shape lands, in words, pinned to the panel's foot so it does not move as
+/// categories fold.
 fn landing_hint(app: &mut App, ui: &mut egui::Ui) {
     let hint = crate::app::insertion_hint(app);
     ui.horizontal(|ui| {
         ui.add_space(theme::metric::PANEL_PAD);
-        // Held to the room actually left, and told to wrap in it. It used to run
-        // off the end at the stock dock width -- "Lands at what the camera is
-        // looking at: 0," and then nothing -- so the coordinates, which are the
-        // only reason the line exists, were the part that was cut off.
+        // Wrapped to the room left, since at the default width the coordinates were cut off.
         ui.set_max_width((ui.available_width() - theme::metric::PANEL_PAD).max(1.0));
         ui.add(egui::Label::new(theme::hint(hint)).selectable(false).wrap());
     });
     ui.add_space(4.0);
 }
 
-/// Groups and whole projects the user has kept for reuse. Empty until something
-/// has been saved, and then it is the first place to look -- so it goes at the
-/// end of the palette, where a growing list can grow.
+/// Saved groups and projects, at the palette's end where the list can grow; empty until one exists.
 fn saved_block(app: &mut App, ui: &mut egui::Ui) {
     if app.library.is_empty() {
         return;
@@ -135,8 +117,7 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
     }
     let painter = ui.painter();
     let colour = if response.hovered() { token::TEXT_HI } else { token::TEXT_LO };
-    // The twisty is drawn rather than typed: the bundled face has no triangle
-    // glyph, and a tofu box in front of every category is worse than none.
+    // Painted, since the bundled font has no triangle glyph.
     theme::twisty(&painter, egui::pos2(bar.left() + theme::metric::PANEL_PAD + 3.0, bar.center().y), open, colour);
     painter.text(
         egui::pos2(bar.left() + theme::metric::PANEL_PAD + 12.0, bar.center().y),
@@ -156,10 +137,7 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
             ui.add_space(theme::metric::PANEL_PAD - theme::metric::GAP);
             for spec in chunk {
                 let hint = crate::app::insertion_hint(app);
-                // Clicked, the tile adds a shape where the document says. Dragged,
-                // it carries the shape into the outliner and the drop says which
-                // row it belongs on -- the same gesture, and the same slab on the
-                // pointer, as dragging a row that is already there.
+                // Click adds where the document says; drag carries it into the outliner like a row drag.
                 let response = icon::button_sensing(
                     ui,
                     tile_id(spec.type_id),
@@ -194,16 +172,14 @@ mod tests {
     #[test]
     fn a_narrow_dock_gets_fewer_tiles_rather_than_a_scrollbar() {
         assert!(columns(120.0) < 8);
-        // Even squeezed to nothing there is always one column, so no shape
-        // becomes unreachable.
+        // Always at least one column, so no shape is unreachable.
         assert_eq!(columns(0.0), 1);
         assert_eq!(columns(-50.0), 1);
     }
 
     #[test]
     fn every_category_in_the_registry_ends_up_on_the_palette() {
-        // The palette iterates categories and filters the registry by them; a
-        // primitive whose category is not in the list would never be drawn.
+        // A primitive whose category is not listed would never be drawn.
         let categories = primitive::categories();
         for spec in primitive::REGISTRY {
             assert!(categories.contains(&spec.category), "{} is in no palette category", spec.type_id);

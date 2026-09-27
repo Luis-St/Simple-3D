@@ -12,8 +12,7 @@ fn shape(scene: &mut Scene) -> NodeId {
     scene.add_primitive("box", root, index).unwrap()
 }
 
-/// A structural fingerprint of the tree, so "identical" can be asserted
-/// without relying on node ids being reused in the same order.
+/// A structural fingerprint, so identity is asserted without relying on node id reuse.
 fn fingerprint(scene: &Scene) -> String {
     let mut out = String::new();
     for id in scene.depth_first() {

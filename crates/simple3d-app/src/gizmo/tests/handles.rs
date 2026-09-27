@@ -6,15 +6,14 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn no_resize_handle_is_offered_on_an_axis_no_parameter_governs() {
-    // A torus's X and Y extents are its ring and tube diameters together, so
-    // the registry withdraws those handles rather than offer one that lies.
+    // A torus's X and Y extents combine two diameters, so those handles are withdrawn.
     let f = Fixture::new("torus");
     let gizmo = f.gizmo(Mode::Resize);
     let handles = gizmo.handles(false);
     assert!(handles.contains(&Handle::ResizeFace(2, true)), "the Z handle should be offered");
     assert!(!handles.contains(&Handle::ResizeFace(0, true)), "an X handle was offered on a torus");
     assert!(!handles.contains(&Handle::ResizeFace(1, false)));
-    // With only one drivable axis there is nothing for a corner to do either.
+    // With one drivable axis, corners have nothing to do.
     assert!(!handles.iter().any(|h| matches!(h, Handle::ResizeCorner(_))));
 }
 
@@ -22,14 +21,14 @@ pub(crate) fn no_resize_handle_is_offered_on_an_axis_no_parameter_governs() {
 pub(crate) fn a_polyhedron_offers_no_resize_handles_at_all() {
     let f = Fixture::new("icosahedron");
     assert!(f.gizmo(Mode::Resize).handles(false).is_empty());
-    // But it can still be moved and rotated.
+    // It can still be moved and rotated.
     assert_eq!(f.gizmo(Mode::Move).handles(false).len(), 6);
     assert_eq!(f.gizmo(Mode::Rotate).handles(false).len(), 3);
 }
 
 #[test]
 pub(crate) fn groups_get_move_and_rotate_but_not_resize() {
-    // Spec section 6.2: resize handles on groups are out of scope.
+    // Spec section 6.2: no resize handles on groups.
     let f = Fixture::new("box");
     let gizmo = f.gizmo(Mode::Resize);
     assert!(gizmo.handles(true).is_empty());
@@ -87,9 +86,7 @@ pub(crate) fn a_rotate_ring_is_grabbable_along_its_whole_circumference() {
         let screen = f.view.project(*point).unwrap().0;
         let hit = gizmo.hit_test(&f.view, screen, false);
         assert!(matches!(hit, Some(Handle::RotateRing(_))), "{point:?} grabbed {hit:?}");
-        // The three rings genuinely cross where they meet an axis, and there
-        // the nearest one legitimately wins; away from those crossings it must
-        // be this ring.
+        // Rings cross near the axes, where the nearest may win; elsewhere it must be this ring.
         let near_axis = i % 6 <= 1 || i % 6 >= 5;
         if !near_axis {
             assert_eq!(hit, Some(Handle::RotateRing(1)), "{point:?}");
@@ -99,13 +96,12 @@ pub(crate) fn a_rotate_ring_is_grabbable_along_its_whole_circumference() {
 
 #[test]
 pub(crate) fn the_handle_frame_follows_the_nodes_own_rotation() {
-    // There is one frame now, the node's own: the switch to the world's axes
-    // went with the rail button that worked it (issue 100).
+    // One frame, the node's own; the world-axes switch is gone (issue 100).
     let mut f = Fixture::new("box");
     f.scene.get_mut(f.node).unwrap().rotation = Vec3::new(0.0, 0.0, 90.0);
     f.reevaluate();
     let gizmo = Gizmo::build(&f.scene, &f.evaluated, f.node, Mode::Move).unwrap();
-    // The node's local X now points along world +Y, and so does its handle.
+    // The node's local X points along world +Y, and so does its handle.
     assert!((gizmo.axes[0] - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-9, "{:?}", gizmo.axes[0]);
 }
 
@@ -115,12 +111,8 @@ pub(crate) fn the_gizmo_is_not_offered_for_the_scene_root() {
     assert!(Gizmo::build(&f.scene, &f.evaluated, f.scene.root(), Mode::Move).is_none());
 }
 
-/// Seen from straight in front, the camera looks along the plane that X is
-/// perpendicular to, and its handle collapses onto a line. Drawn anyway, that
-/// line of no area was tessellated with mitre spikes: a pale red line straight
-/// through the handle and across the viewport, at exactly that yaw and gone
-/// the moment the camera turned. Edge-on, a plane handle is neither drawn nor
-/// grabbed; turned away from edge-on, it is both again.
+/// Regression: an edge-on plane handle was drawn as a degenerate line with mitre spikes across the
+/// viewport. Edge-on it is neither drawn nor grabbed.
 #[test]
 pub(crate) fn a_plane_handle_seen_edge_on_is_neither_drawn_nor_grabbed() {
     let mut f = Fixture::new("box");

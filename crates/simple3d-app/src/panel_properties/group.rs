@@ -7,10 +7,8 @@ use simple3d_core::scene::{Body, GroupOp, NodeId};
 
 pub(crate) fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: GroupOp) {
     let mut op = current;
-    // Wrapped, not merely laid out left to right: the four names together are
-    // wider than the dock at its default width, and a row that overflows widens
-    // the whole column behind it -- which is what used to carry the Z field of
-    // Position, Rotation and Scale off the panel with no way to reach it.
+    // Wrapped: the four names overflow the default dock, and overflow widened the column and pushed the Z
+    // fields of Position, Rotation and Scale out of reach.
     field_row(ui, "Operation", "", |ui| {
         for option in GroupOp::ALL {
             if theme::choice(ui, op == option, option.label()).clicked() && op != option {
@@ -25,8 +23,7 @@ pub(crate) fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: Group
 
     let children = app.scene.node(id).children.clone();
     if op.order_matters() {
-        // When a difference group is selected, state plainly which child is the
-        // base (spec section 7.3).
+        // Name the base child of a difference (spec section 7.3).
         match app.scene.difference_base(id) {
             Some(base) => {
                 ui.add(
@@ -56,10 +53,7 @@ pub(crate) fn group(app: &mut App, ui: &mut egui::Ui, id: NodeId, current: Group
             } else {
                 ""
             };
-            // The two reorder buttons are placed first, pinned to the right-hand
-            // edge, and the name takes whatever is left: laid out the other way
-            // round, a long name in a narrow panel pushed the buttons off the
-            // edge, out of reach (issue 51).
+            // Reorder buttons first, pinned right, so a long name cannot push them out of reach (issue 51).
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.add_enabled(index + 1 < children.len(), egui::Button::new("\u{25BE}").small()).clicked() {
                     app.edit("Reorder", None);

@@ -1,10 +1,6 @@
-//! The spec's performance targets (section 5.3, acceptance criterion 13): a
-//! scene of 200 primitives with nested booleans must preview interactively, and
-//! a single-value edit must update it in well under a second.
-//!
-//! Wall-clock assertions, so the thresholds are generous enough not to be flaky
-//! on a loaded machine while still failing loudly on an order-of-magnitude
-//! regression.
+//! The spec's performance targets (section 5.3, acceptance criterion 13): 200 primitives with nested
+//! booleans preview interactively, and a single edit updates well under a second. Thresholds are
+//! generous against flakiness but catch order-of-magnitude regressions.
 
 use simple3d_core::eval::{Cancel, Evaluator};
 use simple3d_core::primitive::ParamValue;
@@ -12,8 +8,7 @@ use simple3d_core::scene::{GroupOp, NodeId, Scene};
 use simple3d_geom::Vec3;
 use std::time::Instant;
 
-/// Fifty assemblies, each a plate with a hole and a slot cut from it plus a boss
-/// unioned on: 200 primitives inside 100 nested boolean groups.
+/// Fifty assemblies (a plate with a hole and slot cut, plus a boss): 200 primitives in 100 nested groups.
 fn big_scene() -> (Scene, Vec<NodeId>) {
     let mut scene = Scene::new();
     let root = scene.root();
@@ -61,8 +56,7 @@ fn big_scene() -> (Scene, Vec<NodeId>) {
 
 #[test]
 fn two_hundred_primitives_with_nested_booleans_evaluate_and_stay_valid() {
-    // Spec acceptance criterion 13, first half: the scene evaluates fast enough
-    // for the viewport to stay interactive.
+    // Criterion 13, first half: the scene evaluates fast enough to stay interactive.
     let (scene, holes) = big_scene();
     let primitives = scene.depth_first().into_iter().filter(|id| !scene.node(*id).is_group()).count();
     assert_eq!(primitives, 200, "the fixture is meant to hold 200 primitives");
@@ -76,25 +70,17 @@ fn two_hundred_primitives_with_nested_booleans_evaluate_and_stay_valid() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     assert!(result.mesh.manifold_issue().is_none(), "{:?}", result.mesh.manifold_issue());
     eprintln!("cold: {cold:?}, {} triangles", result.mesh.triangle_count());
-    // Generous enough not to be flaky on a loaded machine while still failing on
-    // an order-of-magnitude regression: a release build does this in ~0.2s. An
-    // unoptimised build runs the kernel several times slower, so the ceiling has
-    // to account for which one is being tested.
+    // A release build takes ~0.2 s; unoptimised builds run the kernel several times slower.
     let ceiling = if cfg!(debug_assertions) { 40.0 } else { 5.0 };
     assert!(cold.as_secs_f64() < ceiling, "a cold evaluation of 200 primitives took {cold:?}");
 }
 
 #[test]
 fn a_single_value_edit_reuses_the_cache() {
-    // Spec acceptance criterion 13, second half: single-value edits still feel
-    // immediate. The point of per-subtree caching -- editing one dimension
-    // re-evaluates one assembly, not fifty.
+    // Criterion 13, second half: editing one dimension re-evaluates one assembly, not fifty.
     let (mut scene, holes) = big_scene();
-    // Every hole a hair different, so no two assemblies are the same shape.
-    // The fixture's fifty are identical but for where they stand, and a group
-    // that has only moved gets its boolean back from the cache -- which makes
-    // a cold run of the fixture as cheap as an edit, and would leave nothing
-    // here to measure the cache against.
+    // Every hole slightly different, since identical assemblies that only moved would all hit the cache
+    // and leave nothing to measure against.
     for (index, &hole) in holes.iter().enumerate() {
         let diameter = ParamValue::Length(6.0 + index as f64 * 0.01);
         scene.get_mut(hole).unwrap().params_mut().unwrap().insert("diameter_x".into(), diameter);
@@ -130,10 +116,7 @@ fn a_repeat_evaluation_of_an_unchanged_scene_is_nearly_free() {
 
 #[test]
 fn moving_a_boolean_group_does_not_run_its_boolean_again() {
-    // Dragging a drilled plate moves it; nothing about the holes has changed,
-    // so the difference must come back from the cache and only be placed. It
-    // used to be keyed by where the group stands, and every step of the drag
-    // ran the whole boolean again.
+    // Moving a drilled plate must reuse its boolean from the cache; it used to be keyed by placement.
     let mut scene = Scene::new();
     let root = scene.root();
     let drilled = scene.add_group(GroupOp::Difference, root, 0);

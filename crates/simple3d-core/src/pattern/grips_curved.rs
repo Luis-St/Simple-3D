@@ -17,9 +17,7 @@ pub(crate) fn helix_grips(params: &Params) -> Vec<Grip> {
         radial,
         Drive::Length { keys: &["helix_radius"], base: 0.0, per: 1.0, min: POSITIVE },
     )];
-    // Both grips ride the axis rather than the helix itself: a grip on the last
-    // copy would swing round the turn as the drag changed it, and chase the
-    // pointer sideways while it was being pulled straight up.
+    // Height grips ride the axis, since one on the last copy would swing round as the drag changed it.
     if count >= 2 {
         out.push(Grip::slide(
             "Rise",
@@ -36,9 +34,7 @@ pub(crate) fn helix_grips(params: &Params) -> Vec<Grip> {
             Drive::Count { key: "helix_count", base: 0.0, per: rise },
         ));
     }
-    // The twist, taken hold of on the second copy: it is one turn from the
-    // first, so the angle the grip is carried round to *is* the turn per copy,
-    // and the rest of the helix follows behind it.
+    // The twist grip sits on the second copy, one turn from the first, so its angle is the turn per copy.
     if count >= 2 && radius.abs() > 1e-9 {
         let angle = params.num("helix_angle");
         out.push(Grip {
@@ -53,14 +49,8 @@ pub(crate) fn helix_grips(params: &Params) -> Vec<Grip> {
     out
 }
 
-/// A custom rule's handles: the run of every stage that moves, and the radius
-/// of every stage that turns.
-///
-/// A moving stage's numbers are laid out exactly as a linear pattern's are,
-/// because that is what a stage stepping along a line is. A turning stage offers
-/// its radius and leaves the turn as a number: a handle riding a curve that its
-/// own neighbour is also moving is one nobody can aim at. A mirror is a plane
-/// and two copies, so it has nothing to drag.
+/// A custom rule's handles: each moving stage's run, laid out like a linear pattern's, and each
+/// turning stage's radius. Turns stay numbers, and mirrors have nothing to drag.
 pub(crate) fn custom_grips(params: &Params) -> Vec<Grip> {
     let mut out = Vec::new();
     for (index, k) in STAGES.iter().enumerate().take(stage_count(params)) {
@@ -111,9 +101,7 @@ pub(crate) fn spiral_grips(params: &Params) -> Vec<Grip> {
     let rise = params.num("spiral_rise");
     let radial = unit(radial_axis(ax));
     let up = unit(ax);
-    // Three grips along one radial line, at the first copy's radius, the last
-    // one's, and one copy beyond: a ruler out from the centre that says where
-    // the spiral starts, how fast it opens and how far it goes.
+    // Three grips along one radial line: start radius, last copy's radius, and one beyond.
     let mut out = vec![Grip::slide(
         "Start radius",
         radial * start,

@@ -4,15 +4,8 @@ use super::*;
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
 
-/// Cut a solid into the pieces one cell of the tiling each, in a stable order.
-///
-/// `report` is called once per cell as it is finished, and `give_up` is asked
-/// often enough that a split of thousands of cells can be abandoned promptly;
-/// giving up returns `None`, and what had been cut so far is dropped rather
-/// than handed back as a half-cut shape.
-///
-/// Every returned piece has geometry in it: a cell the shape does not reach is
-/// not a piece, and neither is one it touches with no volume.
+/// Cut a solid into one piece per cell, in a stable order. `report` is called per finished cell;
+/// giving up returns `None` and drops partial results. Every piece has volume.
 pub fn cut(
     mesh: &Mesh,
     tiling: &Tiling,
@@ -23,15 +16,8 @@ pub fn cut(
     cut_within(mesh, tiling, bounds, report, give_up)
 }
 
-/// Cut a solid by a tiling laid out over `frame` rather than over the solid
-/// itself.
-///
-/// The two are the same thing for a shape being cut on its own, and they are
-/// not for the second cut of a plan: that one cuts the *pieces* the first left,
-/// and a lattice anchored on each piece in turn is a different lattice for
-/// every piece -- nine columns of a plate would each be cut into a grid centred
-/// on themselves, and the cuts would not line up across the shape. The frame is
-/// the whole shape, so every piece is cut by the same grid.
+/// Cut a solid by a tiling laid over `frame` rather than the solid, so later passes of a plan cut
+/// every piece with the same grid instead of one centred on each piece.
 pub(crate) fn cut_within(
     mesh: &Mesh,
     tiling: &Tiling,
@@ -43,12 +29,9 @@ pub(crate) fn cut_within(
     if tiling.refusal(frame).is_some() {
         return Some(Vec::new());
     }
-    // Planned over the whole frame, kept where it reaches this solid: what is
-    // left is this piece's share of the one grid.
+    // Planned over the whole frame, kept where it reaches this solid.
     let cells: Vec<Cell> = plan(tiling, frame).into_iter().filter(|cell| reaches(cell.bounds, bounds)).collect();
-    // The box of every triangle, once. A cell that overlaps none of them holds
-    // no surface at all, which is the question asked of every cell and the one
-    // that keeps the inside of a large shape free.
+    // Each triangle's box, once: a cell overlapping none holds no surface, keeping large interiors cheap.
     let faces: Vec<(Vec3, Vec3)> = mesh
         .indices
         .iter()
@@ -67,10 +50,7 @@ pub(crate) fn cut_within(
                 let (cells, faces, mesh) = (&cells, &faces, &mesh);
                 scope.spawn(move || {
                     let mut mine = Vec::new();
-                    // Every nth cell rather than a block of them: the cells that
-                    // cost anything are the ones along the surface, and they
-                    // arrive in runs, so a block each would leave one thread
-                    // with all of them.
+                    // Every nth cell rather than a block, since costly surface cells come in runs.
                     for index in (t..cells.len()).step_by(threads) {
                         if give_up() {
                             break;
@@ -89,14 +69,13 @@ pub(crate) fn cut_within(
     if give_up() {
         return None;
     }
-    // Back into the order the cells were planned in, so the same split of the
-    // same shape always names the same piece "3".
+    // Back into planned order, so the same split always names the same piece.
     let mut pieces: Vec<(usize, Mesh)> = batches.into_iter().flatten().collect();
     pieces.sort_by_key(|(index, _)| *index);
     Some(pieces.into_iter().map(|(_, mesh)| mesh).collect())
 }
 
-/// The piece one cell holds, if it holds one.
+/// The piece one cell holds, if any.
 pub(crate) fn cut_cell(
     mesh: &Mesh,
     faces: &[(Vec3, Vec3)],
@@ -108,25 +87,19 @@ pub(crate) fn cut_cell(
     if !crate::boxes_overlap(cell.bounds, bounds) {
         return None;
     }
-    // A cell no face comes near is wholly inside the shape or wholly outside
-    // it, and one ray says which. Inside, the piece *is* the cell -- no boolean
-    // is run at all, which is what makes a solid block affordable to cut up.
+    // A cell no face nears is wholly in or out; one ray decides, and inside the piece is the cell with
+    // no boolean at all.
     if !faces.iter().any(|face| crate::boxes_overlap(*face, cell.bounds)) {
         let centre = tiling.to_world(cell.centre.0, cell.centre.1, (cell.span.0 + cell.span.1) / 2.0);
         return inside(mesh, centre).then(|| cell.prism(tiling));
     }
     let piece = crate::csg_bsp::intersect_until(mesh, &cell.prism(tiling), &|| give_up());
-    // A cell that only grazes the surface comes back as a sliver of no volume,
-    // or as nothing at all. Neither is a piece anybody asked for.
+    // A grazing cell yields a volumeless sliver or nothing; neither is a piece.
     (volume(&piece) > 1e-9).then_some(piece)
 }
 
-/// Whether a point is inside a closed mesh, by counting the faces a ray from it
-/// crosses: an odd count is inside.
-///
-/// The direction is a fixed skew one so that it cannot run along a face or
-/// through an edge of an axis-aligned shape, which is what every shape in a
-/// document like this one is.
+/// Whether a point is inside a closed mesh, by ray-crossing parity. The fixed direction is skew so
+/// it never runs along axis-aligned faces or edges.
 pub(crate) fn inside(mesh: &Mesh, point: Vec3) -> bool {
     let dir = Vec3::new(0.5773502691896258, 0.3313, 0.7443).normalized();
     let mut crossings = 0;
@@ -157,8 +130,7 @@ pub(crate) fn inside(mesh: &Mesh, point: Vec3) -> bool {
     crossings % 2 == 1
 }
 
-/// The volume a closed mesh encloses, as the signed tetrahedra its faces make
-/// with the origin.
+/// The volume a closed mesh encloses, from signed tetrahedra to the origin.
 pub(crate) fn volume(mesh: &Mesh) -> f64 {
     let sum: f64 = mesh
         .indices

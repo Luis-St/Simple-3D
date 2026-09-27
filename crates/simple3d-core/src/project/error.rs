@@ -4,14 +4,11 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoadError {
-    /// A file written by a newer version. Refused with a clear message rather
-    /// than half-understood.
+    /// Written by a newer version; refused clearly rather than half-understood.
     TooNew { found: u32, supported: u32 },
-    /// Not valid JSON at all -- truncated mid-file, or not a project file. The
-    /// message names the position and what was expected.
+    /// Not valid JSON (truncated or not a project); the message names the position and what was expected.
     Malformed(String),
-    /// Valid JSON, but not a valid scene: an unknown primitive type, a missing
-    /// required field.
+    /// Valid JSON but not a valid scene, such as an unknown type or missing field.
     Invalid(String),
 }
 

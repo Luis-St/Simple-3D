@@ -5,12 +5,8 @@ use crate::app::{App, Status};
 use simple3d_core::xform::Xform;
 
 impl App {
-    /// Open the tool on the selection (issue 108).
-    ///
-    /// Only on a mesh, and only on one at a time. Everything else in the tree
-    /// is already the thing this makes: a group is objects, a primitive is a
-    /// shape with its parameters in front of you, and there is nothing in
-    /// either of them to recover.
+    /// Open the tool on the selection (issue 108): one mesh only, since groups and primitives have
+    /// nothing to recover.
     pub fn open_reassemble_tool(&mut self) {
         let targets = self.top_level_selection();
         let Some(&id) = targets.first() else {
@@ -42,10 +38,8 @@ impl App {
         });
     }
 
-    /// Where the mesh's own frame stands in the world: the node's transform
-    /// with the anchor shift on top, which is the composition the evaluation
-    /// itself places the node with -- so what the preview draws lands exactly on
-    /// the surface rather than an anchor's distance off it.
+    /// The mesh frame in the world: node transform plus anchor shift, as evaluation places it, so the
+    /// preview lands on the surface.
     pub(super) fn reassemble_placement(&self, id: NodeId) -> Xform {
         let parent = self.evaluated.node_frames.get(&id).copied().unwrap_or(Xform::IDENTITY);
         simple3d_core::eval::baked_mesh_in_place(&self.scene, id, parent).1

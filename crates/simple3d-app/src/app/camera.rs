@@ -1,4 +1,4 @@
-//! Where the scene is looked at from: framing, presets and turning.
+//! Where the scene is viewed from: framing, presets and turning.
 
 use super::*;
 use crate::gizmo::Gizmo;
@@ -18,13 +18,8 @@ impl App {
         }
     }
 
-    /// Frame `lo`..`hi`, honouring the view-centre lock: a pinned centre keeps
-    /// its place and only the zoom changes.
-    ///
-    /// Framing is the one command whose whole job is to move the view centre, so
-    /// a lock could as easily have disabled it. It fits the zoom instead, and
-    /// says which half it did: a Frame button that does nothing at all reads as
-    /// a broken button, and half of framing is still worth having.
+    /// Frame `lo`..`hi`; with the view centre locked only the zoom changes, and the status says so
+    /// rather than the button seeming broken.
     pub(super) fn frame_onto(&mut self, lo: Vec3, hi: Vec3) {
         let aspect = self.aspect();
         let pinned = self.settings.lock_view_centre.then_some(self.scene.camera.target);
@@ -63,16 +58,13 @@ impl App {
             });
         };
         for id in &self.selection {
-            // What the node evaluates to, when that was measured: a difference
-            // is the size of what is left, not of the cutters that went into
-            // it, which put a 60 mm box round a 25 mm drilled block.
+            // The evaluated size: a difference is what is left, not its cutters.
             if let Some(&bounds) = self.evaluated.node_world_bounds.get(id) {
                 grow(bounds);
                 continue;
             }
             for node in std::iter::once(*id).chain(self.scene.descendants(*id)) {
-                // The nodes with a mesh of their own, measured by the
-                // evaluation rather than here on every frame the box is drawn.
+                // Nodes with their own mesh, measured by the evaluation.
                 if !self.evaluated.node_meshes.contains_key(&node) {
                     continue;
                 }
@@ -89,10 +81,7 @@ impl App {
         self.status = Status::Info(format!("View: {}", preset.label()));
     }
 
-    /// Turn the camera to face a given way, over the design's 200 ms, taking
-    /// the short way round. Under a reduced-motion preference it simply arrives:
-    /// the transition is there to show that this is the same camera moving, and
-    /// someone who does not want things moving does not need to be shown that.
+    /// Turn the camera over 200 ms the short way round; with reduced motion it arrives at once.
     pub fn turn_camera_to(&mut self, yaw: f64, pitch: f64) {
         let from = (self.scene.camera.yaw, self.scene.camera.pitch);
         let to = (from.0 + crate::view::shortest_turn(from.0, yaw), pitch);
@@ -105,8 +94,7 @@ impl App {
         self.camera_move = Some(CameraMove { from, to, started: std::time::Instant::now() });
     }
 
-    /// Advance a view change. Called once a frame; does nothing when none is in
-    /// flight.
+    /// Advance a view change, once per frame.
     pub fn advance_camera(&mut self) {
         let Some(move_) = self.camera_move else { return };
         let ((yaw, pitch), done) = move_.at(std::time::Instant::now());

@@ -5,15 +5,8 @@ use crate::app::{App, Status};
 use simple3d_geom::simplify::MIN_TRIANGLES;
 
 impl App {
-    /// Open the tool on the selection (issue 106).
-    ///
-    /// Only on a mesh, and only on one at a time. A primitive or a group is not
-    /// refused for want of a way to simplify it -- it could be baked and
-    /// simplified in one gesture -- but because what would come back is not the
-    /// shape that was selected: the parameters behind it would be gone, and a
-    /// box that is no longer 40 by 30 by 10 is a different kind of loss from a
-    /// mesh with fewer triangles in it. Convert to a mesh says that in its own
-    /// step, and this one then says what it costs.
+    /// Open the tool on the selection (issue 106): one mesh only. Primitives and groups are refused
+    /// because their parameters would be lost; Convert to mesh says so as its own step.
     pub fn open_simplify_tool(&mut self) {
         let targets = self.top_level_selection();
         let Some(&id) = targets.first() else {

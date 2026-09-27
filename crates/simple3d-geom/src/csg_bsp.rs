@@ -1,17 +1,10 @@
-//! Self-contained BSP-tree boolean CSG kernel (union / subtract / intersect),
-//! following the classic algorithm popularised by Evan Wallace's csg.js and
-//! used by many browser-based CAD tools. We don't depend on an external CSG
-//! crate: at the time this was written every published version of the one
-//! obvious crate (`csgrs`) pulls in a yanked transitive dependency and fails
-//! to build from crates.io, and pulling in a big C++ kernel would break the
-//! "fully self-contained, nothing to install" constraint. This kernel is
-//! deliberately small and easy to audit instead.
+//! A self-contained BSP boolean kernel (union, subtract, intersect) after Evan Wallace's csg.js.
+//! Written here since `csgrs` failed to build from crates.io and a C++ kernel would break the
+//! nothing-to-install constraint.
 //!
-//! Known limitation: plane classification uses a fixed epsilon rather than
-//! exact/rational arithmetic, so pathologically thin or near-degenerate
-//! inputs can in principle still produce a non-manifold result. `Mesh::manifold_issue`
-//! is used by the evaluator to detect that and fail loudly on the offending
-//! node rather than emit broken geometry, per the spec's requirement.
+//! Known limitation: fixed-epsilon plane classification means near-degenerate inputs can still
+//! yield non-manifold results; the evaluator detects them with `Mesh::manifold_issue` and fails on
+//! that node rather than emit broken geometry.
 
 mod plane;
 pub(crate) use plane::*;
@@ -45,8 +38,7 @@ use crate::mesh::Mesh;
 
 const EPSILON: f64 = 1e-8;
 
-/// How many polygons a clip gets through between asking whether the answer is
-/// still wanted. See [`crate::Abandon`].
+/// Polygons clipped between cancellation checks (see [`crate::Abandon`]).
 const ABANDON_EVERY: u32 = 256;
 
 fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
@@ -91,10 +83,8 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
     if give_up() {
         return Mesh::new();
     }
-    // The BSP clips whole polygons, which leaves T-junctions wherever two
-    // polygons sharing an edge were split at different points along it; heal
-    // them here so every boolean result -- including one feeding the next
-    // boolean in a chain -- is edge-manifold. See `repair`.
+    // Heal the T-junctions whole-polygon clipping leaves, so every result (and chained input) is
+    // edge-manifold. See `repair`.
     crate::repair::heal_until(&polygons_to_mesh(&polys), give_up)
 }
 
@@ -116,8 +106,7 @@ pub fn intersect(a: &Mesh, b: &Mesh) -> Mesh {
     op(a, b, BoolOp::Intersect, &crate::never)
 }
 
-/// The three of them again, abandoned part-way when `give_up` says so. See
-/// [`crate::Abandon`].
+/// The three operations, abandoned when `give_up` says so (see [`crate::Abandon`]).
 pub fn union_until(a: &Mesh, b: &Mesh, give_up: crate::Abandon<'_>) -> Mesh {
     op(a, b, BoolOp::Union, give_up)
 }

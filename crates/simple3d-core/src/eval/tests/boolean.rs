@@ -17,7 +17,7 @@ pub(crate) fn a_single_primitive_evaluates_to_its_declared_dimensions() {
 
 #[test]
 pub(crate) fn a_hole_drilled_through_a_plate_is_watertight_and_in_place() {
-    // Spec acceptance criterion 4, through the node tree this time.
+    // Spec acceptance criterion 4, through the node tree.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -76,10 +76,8 @@ pub(crate) fn evaluation_is_deterministic() {
 
 #[test]
 pub(crate) fn a_failing_boolean_names_the_offending_node() {
-    // Spec section 5.2: "must fail loudly on that node, naming it in the
-    // outliner". A lone triangle is not a solid, so unioning it with itself
-    // cannot produce a manifold result -- a deterministic stand-in for the
-    // degenerate input a user might build.
+    // Spec section 5.2: a failure names its node. A lone triangle unioned with itself is a
+    // deterministic non-manifold input.
     let mut sliver = Mesh::new();
     sliver.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
     let mut errors = Vec::new();
@@ -88,16 +86,14 @@ pub(crate) fn a_failing_boolean_names_the_offending_node() {
     assert_eq!(errors[0].node, 42);
     assert_eq!(errors[0].name, "Bad group");
     assert!(errors[0].message.contains("Union"), "{}", errors[0].message);
-    // The operands still come back so the rest of the scene can preview.
+    // The operands still come back so the scene previews.
     assert!(out.triangle_count() > 0);
 }
 
 #[test]
 pub(crate) fn a_failing_boolean_does_not_stop_the_rest_of_the_scene_previewing() {
-    // Spec acceptance criterion 15. A needle-thin operand is the kind of
-    // input the epsilon-based kernel cannot resolve; whether it fails is up
-    // to the kernel, but if it does the healthy plate must still be there
-    // and every reported error must name a real node.
+    // Spec acceptance criterion 15: if a needle-thin operand fails, the healthy plate remains and every
+    // error names a real node.
     let mut scene = Scene::new();
     let root = scene.root();
     let good = plate(&mut scene, root);
@@ -119,9 +115,7 @@ pub(crate) fn a_failing_boolean_does_not_stop_the_rest_of_the_scene_previewing()
 
 #[test]
 pub(crate) fn two_broken_groups_alike_are_each_named() {
-    // A group's boolean is cached by its content alone, so two groups of the
-    // same content share it wherever they stand. A failed one names the group
-    // it failed in, though, and the other group has to be named for its own.
+    // Two groups share a cached result by content, but each failure must name its own group.
     let mut sliver = Mesh::new();
     sliver.push_triangle(Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0));
     let mut scene = Scene::new();

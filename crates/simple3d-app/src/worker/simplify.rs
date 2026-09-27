@@ -1,4 +1,4 @@
-//! The simplification running on its own thread.
+//! Simplification on its own thread.
 
 use simple3d_core::mesh_data::MeshData;
 use simple3d_geom::simplify::{Outcome, Simplify};
@@ -7,17 +7,10 @@ use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-/// A mesh being simplified (issue 106).
-///
-/// Here rather than on the interaction path for the reason the evaluation and
-/// the split are: a hundred thousand triangles is a fraction of a second, which
-/// is a fraction of a second the window would not be answering in -- and the
-/// window is being *scrubbed*. The tool asks for a run on every change of a
-/// number, so a run is also something that has to be abandoned: the answer to
-/// the number before last is of no interest the moment the next one is typed.
+/// A mesh being simplified (issue 106), off the UI thread because the tool is scrubbed; a run is
+/// abandoned as soon as the next number is typed.
 pub struct SimplifyJob {
-    /// What this run was asked for, so the tool can tell whether the answer
-    /// that lands is still the answer to the question on screen.
+    /// What this run was asked for, so a stale answer can be recognised.
     pub plan: Simplify,
     cancelled: Arc<AtomicBool>,
     result: Receiver<Option<Outcome>>,
@@ -47,13 +40,12 @@ impl SimplifyJob {
         self.started.elapsed()
     }
 
-    /// The simplified mesh, once it is made. The inner `None` is a run that was
-    /// abandoned: there is no mesh, and nothing is to be shown.
+    /// The simplified mesh once made; the inner `None` is an abandoned run.
     pub fn poll(&self) -> Option<Option<Outcome>> {
         match self.result.try_recv() {
             Ok(outcome) => Some(outcome),
             Err(TryRecvError::Empty) => None,
-            // The thread died, which is not something to change a document on.
+            // A dead thread is no reason to change the document.
             Err(TryRecvError::Disconnected) => Some(None),
         }
     }

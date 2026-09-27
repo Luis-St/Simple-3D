@@ -1,10 +1,9 @@
-//! The small pieces of wording the interface asks for.
+//! Small pieces of interface wording.
 
 use super::*;
 use simple3d_core::config::Placement;
 
-/// Whether a colour is one of the fixed swatches the palette rows already
-/// offer.
+/// Whether a colour is one of the fixed palette swatches.
 pub(crate) fn is_preset(rgb: [u8; 3]) -> bool {
     crate::theme::PAINT_PRESETS.iter().any(|(_, colour)| [colour.r(), colour.g(), colour.b()] == rgb)
 }
@@ -25,14 +24,11 @@ pub(crate) fn children_plural(n: usize) -> &'static str {
     }
 }
 
-/// Where the next shape will land, in words. The palette says this in its hint
-/// line and in every tile's tooltip, so the two can never disagree about it.
+/// Where the next shape lands, in words; shared by the hint line and tile tooltips so they agree.
 pub fn insertion_hint(app: &App) -> String {
     let unit = app.unit();
-    // Nothing is being added yet, so nothing has a width to clear: under
-    // "beside the selection" this is the line the next shape's near side will
-    // meet, and the wording below says so rather than passing it off as the
-    // point the shape's origin will sit at.
+    // With no shape yet there is no width to clear, so "beside the selection" names the line its near side
+    // meets, not where its origin sits.
     let at = app.insertion_point_world(0.0);
     let where_ = format!(
         "{}, {}, {} {}",

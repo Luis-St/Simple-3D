@@ -1,5 +1,4 @@
-//! What the renderer is handed: a body's triangles, and the edges worth
-//! drawing on it.
+//! What the renderer is handed: a body's triangles and the edges worth drawing.
 
 use super::{axis_inside_spans, map_in_order};
 use simple3d_core::scene::NodeId;
@@ -8,91 +7,50 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-/// An edge of the surface with the triangles that meet at it.
-///
-/// What the selection outline is drawn from. Which edges make up a shape's
-/// outline depends on where the camera is -- an edge is on the silhouette when
-/// the surface turns away from the eye across it -- so it cannot be settled
-/// once at preparation time the way a crease can.
+/// A surface edge with the triangles that meet at it, for the camera-dependent selection outline.
 pub struct BorderEdge {
     pub ends: [u32; 2],
-    /// The two triangles either side of it, or the same one twice when the edge
-    /// has only one -- an open boundary. Those are drawn whatever the camera is
-    /// doing: there is no surface on the far side for the silhouette test to
-    /// ask about.
+    /// The triangles either side, or the same one twice for an open boundary edge, which is
+    /// always drawn.
     pub faces: [u32; 2],
-    /// More than two triangles meet along this edge, which is what happens
-    /// where two bodies of the same mesh touch: the seam between two pieces of
-    /// a split has each piece's own face and the face they share. It is inside
-    /// the shape, not on its outline, and drawing it lit every cut of an
-    /// eighty-piece split as a cage over the model.
+    /// More than two triangles meet here, as where two bodies of one mesh touch. Inside the shape,
+    /// so not outlined; drawing it lit every cut of a split as a cage over the model.
     pub junction: bool,
 }
 
-/// A mesh prepared for drawing: welded, so edges can be found, together with
-/// its feature edges.
+/// A welded mesh prepared for drawing, with its feature edges.
 ///
-/// Everything here that does not depend on where the camera is standing is
-/// worked out once, when the renderable is made, rather than once per frame:
-/// the face normals, how far the mesh reaches from the origin, and where each
-/// origin axis runs through it. A renderable is rebuilt only when the
-/// evaluation or the selection changes, so an orbit re-uses all of it, and the
-/// alternative was re-deriving it from a hundred and fifty thousand triangles
-/// for every frame of the drag.
+/// Everything camera-independent (normals, reach, axis spans) is computed once here, so an
+/// orbit reuses it instead of re-deriving it from every triangle each frame.
 pub struct Renderable {
     pub mesh: Mesh,
-    /// One outward unit normal per triangle, in the order `mesh.indices` has
-    /// them. `Vec3::ZERO` for a triangle too degenerate to have one, which is
-    /// exactly what [`Mesh::triangle_normal`] answers for it, so a caller tests
-    /// for that rather than measuring the cross product itself.
+    /// One outward unit normal per triangle; `Vec3::ZERO` for a degenerate one, as
+    /// [`Mesh::triangle_normal`] gives.
     pub normals: Vec<Vec3>,
-    /// Edges worth drawing: a real crease in the surface, not an artefact of how
-    /// a flat face happens to be triangulated.
+    /// Real creases, not artefacts of how flat faces are triangulated.
     pub edges: Vec<[u32; 2]>,
-    /// Every edge of the surface, with its neighbours -- what the silhouette is
-    /// picked out of each frame.
-    ///
-    /// Empty unless the item may be drawn as a selection: it is one entry per
-    /// edge rather than per crease, which for a large mesh is millions, and the
-    /// scene as a whole is never outlined.
+    /// Every surface edge with its neighbours, for the per-frame silhouette. Empty unless the item
+    /// may be drawn as a selection, since this can be millions of entries.
     pub outline: Vec<BorderEdge>,
-    /// Which separate body each vertex belongs to: two vertices share a number
-    /// when the surface joins them. The viewport hands the renderer the whole
-    /// evaluated scene as *one* mesh, so this is the only thing that says where
-    /// one solid ends and the next begins -- and an origin axis has to know,
-    /// because the solid it runs into may not hide it while every other one
-    /// must (issue 47).
+    /// The connected body of each vertex. The scene is one mesh, so this is the only way to tell
+    /// solids apart, which the origin axis needs (issue 47).
     pub bodies: Vec<u16>,
-    /// How many bodies that is: what the next item's tags start after, so two
-    /// items' bodies are never the same body as far as the frame is concerned.
+    /// Number of bodies, so the next item's tags start after them.
     pub body_count: u16,
-    /// The distance from the origin to the furthest vertex: what an origin
-    /// axis's arms have to be longer than (see `AxisMaterial::reach`).
+    /// Distance from the origin to the furthest vertex (see `AxisMaterial::reach`).
     pub reach: f64,
-    /// Per axis, the stretches of that axis that run inside this mesh, each
-    /// with the *body* it runs through -- not the tag, because the tag depends
-    /// on where this item's bodies start in the frame and the spans do not.
+    /// Per axis, the stretches inside this mesh with the body they run through. Bodies rather than
+    /// tags, since tags depend on the item's base in the frame.
     pub(super) axis_spans: [Vec<((f64, f64), u16)>; 3],
-    /// Per principal plane, numbered by the axis it is perpendicular to, the
-    /// segments where it crosses the surface: the plane marks, which used to be
-    /// found anew on every frame from every triangle, three times over.
-    ///
-    /// Found the first time the software renderer asks for them, and only
-    /// then: the GPU finds the marks on the card and never does.
+    /// Per principal plane (by perpendicular axis), the segments where it crosses the surface.
+    /// Computed lazily for the software renderer; the GPU finds them on the card.
     plane_marks: OnceLock<[Vec<[Vec3; 2]>; 3]>,
-    /// Which welded vertices are each node's, for every node whose geometry
-    /// is a stretch of this mesh of its own -- untouched by any boolean, see
-    /// `Evaluated::ranges`, and sharing no vertex with anything else. A node's
-    /// triangles and edges are exactly the ones that use its vertices, which
-    /// is what lets the GPU leave a node out of the picture while it is being
-    /// dragged and draw it where the drag has got to instead.
-    ///
+    /// The welded vertex range of each node whose geometry is its own untouched, unshared stretch
+    /// (`Evaluated::ranges`), letting the GPU hide a dragged node and draw it moved instead.
     /// Empty for anything but the whole scene.
     pub parts: BTreeMap<NodeId, Range<u32>>,
-    /// Which renderable this is, unique for the life of the process. What the
-    /// GPU renderer keys the copy of the mesh it keeps on the card by: the
-    /// renderable never changes once made, so as long as the same one is
-    /// handed in, the geometry already uploaded for it is still the geometry.
+    /// Unique per process; the GPU renderer keys its uploaded copy by it, since a renderable never
+    /// changes once made.
     pub(crate) id: u64,
 }
 
@@ -107,16 +65,12 @@ impl Renderable {
         Renderable::prepare_with(mesh, false, &BTreeMap::new())
     }
 
-    /// The whole evaluated scene, with where each node that came through the
-    /// evaluation untouched is in it: `ranges` is `Evaluated::ranges`, in
-    /// the scene mesh's own vertices, and comes out as [`Renderable::parts`].
+    /// The whole evaluated scene; `ranges` (`Evaluated::ranges`) become [`Renderable::parts`].
     pub fn prepare_scene(mesh: &Mesh, ranges: &BTreeMap<NodeId, Range<u32>>) -> Renderable {
         Renderable::prepare_with(mesh, false, ranges)
     }
 
-    /// The same, plus the edge adjacency the selection outline needs. For the
-    /// nodes that may be drawn as a selection, which is a handful rather than
-    /// the whole scene.
+    /// The same, plus the edge adjacency the selection outline needs.
     pub fn prepare_outlined(mesh: &Mesh) -> Renderable {
         Renderable::prepare_with(mesh, true, &BTreeMap::new())
     }
@@ -125,9 +79,8 @@ impl Renderable {
         let (welded, remap) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
-        // The rest is independent work over the same welded mesh, so it runs
-        // side by side: on a large import each part is a pass over millions of
-        // triangles, and one after another they were most of a second.
+        // Independent passes over the welded mesh run in parallel: sequentially they took most of a
+        // second on a large import.
         let (table, bodies, parts) = std::thread::scope(|scope| {
             let table = scope.spawn(|| EdgeTable::of(&welded));
             let parts = scope.spawn(|| parts_of(&remap, welded.positions.len(), ranges));
@@ -157,8 +110,7 @@ impl Renderable {
         }
     }
 
-    /// Lines with no surface under them -- a tool's preview loops -- for the
-    /// GPU to keep on the card like any mesh's edges.
+    /// Lines with no surface, such as a tool's preview loops, kept on the card like mesh edges.
     pub(crate) fn lines(positions: Vec<Vec3>, edges: Vec<[u32; 2]>) -> Renderable {
         let bodies = vec![0; positions.len()];
         Renderable {
@@ -169,18 +121,14 @@ impl Renderable {
         }
     }
 
-    /// A surface to draw and nothing else -- no weld, no edges, no bodies: a
-    /// shape a boolean is drawn from on the card while it is dragged
-    /// (`App::live_csg`), which needs its triangles and its paint only.
+    /// Only a surface (no weld, edges or bodies): a boolean operand drawn on the card while dragged
+    /// (`App::live_csg`).
     pub(crate) fn surface(mesh: Mesh) -> Renderable {
         let bodies = vec![0; mesh.positions.len()];
         Renderable { mesh, bodies, ..Renderable::empty() }
     }
 
-    /// [`Renderable::surface`] with its feature edges: what a shape a boolean
-    /// is drawn from needs when the model's lines are drawn, so the boolean
-    /// keeps its edges while it is dragged. Welded to find them, and nothing
-    /// more -- no bodies, spans or outline.
+    /// [`Renderable::surface`] plus feature edges, for when the model's lines are drawn.
     pub(crate) fn surface_with_edges(mesh: &Mesh) -> Renderable {
         let (welded, _) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
@@ -206,9 +154,7 @@ impl Renderable {
         }
     }
 
-    /// The body a triangle belongs to, as a tag for the depth buffer. `base` is
-    /// where this item's bodies start, so two items never share a tag, and 0
-    /// means "no body", so the numbering starts at 1.
+    /// The depth-buffer tag of a triangle's body; `base` offsets per item, and 0 means no body.
     pub(super) fn tag(&self, triangle: usize, base: u16) -> u16 {
         self.mesh.indices.get(triangle).map_or(0, |tri| self.body_tag(tri[0] as usize, base))
     }
@@ -217,28 +163,22 @@ impl Renderable {
         self.bodies.get(vertex).map_or(0, |body| body_tag(*body, base))
     }
 
-    /// The plane marks -- see the field.
+    /// The plane marks (see the field).
     pub(crate) fn plane_marks(&self) -> &[Vec<[Vec3; 2]>; 3] {
         self.plane_marks.get_or_init(|| std::array::from_fn(|axis| plane_marks_of(&self.mesh, axis)))
     }
 }
 
-/// Which welded vertices are each node's -- [`Renderable::parts`] -- from
-/// where the weld sent each of the mesh's own vertices and which of those
-/// were each node's.
+/// Which welded vertices are each node's ([`Renderable::parts`]).
 ///
-/// Welded vertices are numbered in the order their first copy appears, so a
-/// node whose vertices are a stretch of the mesh and are shared with nothing
-/// outside it welds to a stretch as well: the ones first seen inside its own.
-/// It is kept when that holds -- nothing it welds to was seen before it began
-/// or is used again after it ends -- and dropped when it does not, which is
-/// what two bodies laid side by side and touching do.
+/// Welded vertices are numbered by first appearance, so an unshared node range welds to a
+/// contiguous range. A node is dropped when its vertices weld to ones outside it, as with two
+/// touching bodies.
 fn parts_of(remap: &[u32], welded: usize, ranges: &BTreeMap<NodeId, Range<u32>>) -> BTreeMap<NodeId, Range<u32>> {
     if ranges.is_empty() {
         return BTreeMap::new();
     }
-    // For each welded vertex, the first and the last of the mesh's vertices
-    // that went into it.
+    // For each welded vertex, the first and last mesh vertices that went into it.
     let mut first = vec![u32::MAX; welded];
     let mut last = vec![0u32; welded];
     for (index, &to) in remap.iter().enumerate() {
@@ -254,9 +194,7 @@ fn parts_of(remap: &[u32], welded: usize, ranges: &BTreeMap<NodeId, Range<u32>>)
         }
         let lo = remap[start..end].iter().copied().min().unwrap_or(0) as usize;
         let hi = remap[start..end].iter().copied().max().unwrap_or(0) as usize + 1;
-        // The first copy of every one of them is inside the range -- first
-        // copies come in order, so the lowest and the highest decide -- and
-        // no copy of any of them comes after it.
+        // First copies come in order, so the lowest and highest decide; no copy may come after the range.
         let owned = first[lo] >= range.start && first[hi - 1] < range.end;
         if owned && last[lo..hi].iter().all(|&at| at < range.end) {
             parts.insert(id, lo as u32..hi as u32);
@@ -265,15 +203,12 @@ fn parts_of(remap: &[u32], welded: usize, ranges: &BTreeMap<NodeId, Range<u32>>)
     parts
 }
 
-/// The depth-buffer tag a body of one item carries, where `base` is where that
-/// item's bodies start. Shared, because a span cached on the renderable knows
-/// its body but cannot know the base, and the two have to agree.
+/// The depth-buffer tag of an item's body. Shared so cached spans and draws agree on it.
 pub(crate) fn body_tag(body: u16, base: u16) -> u16 {
     base.saturating_add(body).saturating_add(1)
 }
 
-/// Where the plane perpendicular to `axis` through the origin crosses the
-/// surface, one segment per triangle it runs through, in triangle order.
+/// Where the plane perpendicular to `axis` through the origin crosses the surface, per triangle.
 fn plane_marks_of(mesh: &Mesh, axis: usize) -> Vec<[Vec3; 2]> {
     mesh.indices
         .iter()
@@ -284,13 +219,8 @@ fn plane_marks_of(mesh: &Mesh, axis: usize) -> Vec<[Vec3; 2]> {
         .collect()
 }
 
-/// Group the vertices of a welded mesh into connected bodies: union-find over
-/// the triangles, which is what "one solid" means once the scene has been
-/// evaluated into a single mesh.
-///
-/// More than `u16::MAX` bodies would be a scene of sixty-five thousand separate
-/// solids; past that they share the last number, which costs nothing but the
-/// distinction between two axes' worth of far-off shapes.
+/// Group a welded mesh's vertices into connected bodies by union-find over the triangles.
+/// Past `u16::MAX` bodies they share the last number.
 pub(crate) fn bodies_of(mesh: &Mesh) -> Vec<u16> {
     let mut parent: Vec<u32> = (0..mesh.positions.len() as u32).collect();
     fn find(parent: &mut [u32], mut of: u32) -> u32 {
@@ -319,39 +249,24 @@ pub(crate) fn bodies_of(mesh: &Mesh) -> Vec<u16> {
         .collect()
 }
 
-/// Edges where the surface actually creases, plus any edge with only one
-/// triangle. Drawing *every* triangle edge would cover a cylinder in meridians
-/// and a boolean result in the arbitrary cuts the BSP made across flat faces --
-/// noise rather than information.
-///
-/// The tests' way in: a renderable finds its edges from the normals it has
-/// already worked out.
+/// Real creases plus single-triangle edges; every triangle edge would just be noise.
+/// Test entry point.
 #[cfg(test)]
 pub fn feature_edges(mesh: &Mesh, angle_deg: f64) -> Vec<[u32; 2]> {
     let normals: Vec<Vec3> = mesh.indices.iter().map(|tri| mesh.triangle_normal(*tri)).collect();
     EdgeTable::of(mesh).feature_edges(&normals, angle_deg)
 }
 
-/// Every edge of the mesh with the triangles that meet at it, in a
-/// deterministic order.
+/// Every edge with the triangles that meet at it, in a deterministic order.
 #[cfg(test)]
 pub(crate) fn border_edges(mesh: &Mesh) -> Vec<BorderEdge> {
     EdgeTable::of(mesh).border_edges()
 }
 
-/// Every edge of a mesh with the triangles that meet at it, grouped by edge.
+/// Every edge of a mesh with its triangles, grouped by the edge's lower vertex like a sparse
+/// matrix row: `entries[start[v]..start[v + 1]]` holds (upper end, triangle), sorted.
 ///
-/// Laid out by the edge's lower vertex, the way a sparse matrix is stored by
-/// row: `entries[start[v]..start[v + 1]]` holds, for every edge whose lower
-/// end is `v`, its upper end and one triangle along it, sorted. The entries of
-/// one edge are then side by side, and walking the table visits the edges in
-/// order of their ends -- the order both callers had sorted their output into.
-///
-/// It replaces a hash map from edge to triangles, which on an import of a
-/// million and a half triangles took most of a second to build and twice that
-/// when the outline needed a second one. A vertex has half a dozen edges, so
-/// each row sorts in a handful of comparisons and the whole table is a few
-/// passes over the triangles.
+/// Replaces a hash map that took most of a second on a 1.5M-triangle import.
 struct EdgeTable {
     start: Vec<u32>,
     /// Upper end, then triangle.
@@ -392,7 +307,7 @@ impl EdgeTable {
         EdgeTable { start, entries }
     }
 
-    /// Each edge in order, with the triangles along it in ascending order.
+    /// Each edge in order, with its triangles in ascending order.
     fn for_each(&self, mut f: impl FnMut([u32; 2], &[(u32, u32)])) {
         for a in 0..self.start.len().saturating_sub(1) {
             let row = &self.entries[self.start[a] as usize..self.start[a + 1] as usize];
@@ -408,8 +323,7 @@ impl EdgeTable {
         self.for_each(|ends, faces| {
             let keep = match faces {
                 [(_, a), (_, b)] => normals[*a as usize].dot(normals[*b as usize]) < cos_limit,
-                // One triangle (a boundary of an open mesh) or more than two (a
-                // non-manifold junction): both are worth seeing.
+                // A boundary edge or a non-manifold junction: both are worth seeing.
                 _ => true,
             };
             if keep {
@@ -422,9 +336,8 @@ impl EdgeTable {
     fn border_edges(&self) -> Vec<BorderEdge> {
         let mut out = Vec::new();
         self.for_each(|ends, faces| {
-            // A third triangle on one edge is a non-manifold junction; anything
-            // but two is always drawn, which `push_selection` reads off a
-            // repeated triangle as "there is no far side to ask about".
+            // Anything but two faces is always drawn; `push_selection` reads a repeated triangle as
+            // "no far side".
             let pair = match faces {
                 [(_, a), (_, b)] => [*a, *b],
                 _ => [faces[0].1; 2],

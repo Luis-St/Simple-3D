@@ -8,10 +8,8 @@ use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
 
 impl App {
     pub(super) fn keymap_body(&mut self, ui: &mut egui::Ui) {
-        // Recording swallows the next key press, so it cannot also fire the
-        // command it is being bound to. The keys are read from *this* window's
-        // context: the dialog is a window of its own now, and the press that is
-        // being bound is delivered to whichever window has the keyboard.
+        // Recording swallows the next key press so it cannot fire the command being bound. Keys are read
+        // from this window's context, since the dialog is its own window.
         if let Some(command) = self.recording {
             let (escaped, modifiers, held) = ui.input(|input| {
                 let escaped = input
@@ -20,11 +18,8 @@ impl App {
                     .any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }));
                 (escaped, input.modifiers, ui::keys_down(input))
             });
-            // Whatever is held down together is the binding, and it is taken
-            // when the hand comes off it: a modifier on its own, an ordinary key,
-            // Ctrl+S, or Q+W+E (issues 77 and the follow-up to it). Waiting for
-            // the release is what makes the last of those possible at all --
-            // taking the first key press could never see the two after it.
+            // The binding is whatever is held together, taken on release (issue 77): waiting for the
+            // release is what makes multi-key chords like Q+W+E possible.
             let captured = if escaped {
                 self.recording = None;
                 self.record_mods.reset();
@@ -38,8 +33,7 @@ impl App {
                         self.recording = None;
                         self.persist_keymap();
                     }
-                    // Name the command currently holding it and offer to
-                    // reassign or cancel; never overwrite silently.
+                    // Name the current holder and offer to reassign or cancel; never overwrite silently.
                     Err(holder) => {
                         self.keymap_conflict = Some((command, chord, holder));
                         self.recording = None;
@@ -48,11 +42,8 @@ impl App {
             }
         }
 
-        // The window is wider than the contents used to claim, which left every
-        // row bunched against the left edge with a band of empty window beside
-        // it. The rows are laid out to the width there actually is: one label
-        // column for both grids, and the command list below spreading its
-        // binding and Reset buttons out to the right-hand edge (issue 63).
+        // Rows are laid out to the actual width, with one label column for both grids and buttons at
+        // the right edge (issue 63).
         let full = ui.available_width();
         let label_column = 130.0_f32;
         egui::Grid::new("keymap-top").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
@@ -166,19 +157,14 @@ impl App {
         });
 
         let needle = self.keymap_search.to_lowercase();
-        // The bindings sit at the right-hand edge and the command name takes
-        // whatever is left, so the list is as wide as the window rather than a
-        // narrow column with the rest of the window empty beside it.
+        // Bindings at the right edge, the command name takes the rest.
         let binding_column = 190.0_f32;
         let reset_column = 72.0_f32;
         let name_column = (full - binding_column - reset_column - 48.0).max(160.0);
         let (area, restore) = theme::list_scroll_area(ui);
         area.show(ui, |ui| {
             ui.set_style(restore);
-            // One grid for every area rather than one each: a grid measures its
-            // own columns, so a grid per area put each area's bindings at its
-            // own indent and the buttons down the list did not line up with one
-            // another (issue 63). The area names are rows of this one grid.
+            // One grid for all areas so the buttons line up (issue 63); area names are rows of it.
             egui::Grid::new("keymap-commands").num_columns(3).spacing([12.0, 6.0]).show(ui, |ui| {
                 for area in Area::ALL {
                     let commands: Vec<Command> = Command::ALL
@@ -196,10 +182,7 @@ impl App {
                         label_cell(ui, command.label(), name_column);
                         let recording = self.recording == Some(command);
                         let text = if recording {
-                            // Modifiers are keys too now (issue 77), and so is
-                            // any set of keys held together, so the prompt says
-                            // what it takes rather than leaving someone waiting
-                            // for a single letter to be required.
+                            // Modifiers and multi-key holds are bindings too (issue 77), so the prompt says so.
                             "hold the keys, then let go...".to_string()
                         } else {
                             let shown = self.keymap.shortcut_text(command);
@@ -212,8 +195,7 @@ impl App {
                         let button = egui::vec2(binding_column, theme::metric::INPUT_ROW);
                         if ui.add(egui::Button::new(text).min_size(button)).clicked() {
                             self.recording = Some(command);
-                            // The click itself may have been made with a modifier
-                            // down; that hold is not the binding.
+                            // A modifier held for the click itself is not the binding.
                             self.record_mods.reset();
                         }
                         let reset = egui::vec2(reset_column, theme::metric::INPUT_ROW);
@@ -228,8 +210,7 @@ impl App {
             });
         });
 
-        // Drawn over the keymap dialog, inside it: a question about the key that
-        // was just pressed belongs to the window that took the press.
+        // Drawn inside the keymap dialog, the window that took the key press.
         if let Some((command, chord, holder)) = self.keymap_conflict.clone() {
             egui::Window::new("That combination is already in use")
                 .collapsible(false)

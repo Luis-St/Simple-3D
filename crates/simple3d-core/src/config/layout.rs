@@ -1,24 +1,19 @@
-//! Where the panels sit, and moving one from dock to dock.
+//! Where the panels sit, and moving one between docks.
 
 use serde::{Deserialize, Serialize};
 
-/// Where a new shape lands (spec section 8.1 leaves this to the application).
-///
-/// The origin used to be the only answer, with the 3D cursor as an override
-/// nobody could see they had. Making it a named choice puts the four reasonable
-/// answers in one control, and says which one is in force.
+/// Where a new shape lands (spec section 8.1 leaves this to the application), as one visible choice.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Placement {
     /// 0, 0, 0.
     #[default]
     Origin,
-    /// Where Shift+right-click put the 3D cursor; the origin until it is placed.
+    /// Where Shift+right-click put the 3D cursor; the origin until placed.
     Cursor,
     /// What the camera is looking at, rounded to the step.
     ViewCentre,
-    /// Clear of what is selected, along +X, so the new shape does not land
-    /// inside it.
+    /// Clear of the selection along +X, so the new shape is not inside it.
     BesideSelection,
 }
 
@@ -55,10 +50,7 @@ impl Side {
     }
 }
 
-/// A movable panel. Everything in a dock is one of these; the viewport, the
-/// tool rail, the menu bar and the status bar are the window's frame and do not
-/// move, because a rail that can end up somewhere else is a rail you have to
-/// look for.
+/// A movable panel. The viewport, rail, menu bar and status bar are fixed frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Panel {
@@ -79,12 +71,8 @@ impl Panel {
     }
 }
 
-/// Where each panel lives, which of them are rolled up to their header, and
-/// whether the docks are showing at all.
-///
-/// Hiding is one flag rather than a saved copy of the arrangement: `Tab` cannot
-/// lose a layout it never touched, so restoring it is exact by construction
-/// rather than by care.
+/// Where each panel lives, which are rolled up, and whether the docks show. Hiding is one flag, so
+/// restoring is exact.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Layout {
@@ -128,10 +116,7 @@ impl Layout {
         }
     }
 
-    /// Move a panel to `side`, at `index` among the panels already there.
-    /// Moving a panel within its own dock is a reorder, and the index is read
-    /// after the panel has been lifted out, so dragging something down one place
-    /// puts it one place down rather than back where it started.
+    /// Move a panel to `side` at `index`; within its own dock the index is read after lifting it out.
     pub fn move_to(&mut self, panel: Panel, side: Side, index: usize) {
         for list in [&mut self.left, &mut self.right] {
             list.retain(|p| *p != panel);
@@ -153,19 +138,13 @@ impl Layout {
         }
     }
 
-    /// Which panel in a dock takes the leftover height: the last one that is not
-    /// rolled up. `None` when every panel there is collapsed, in which case the
-    /// dock is nothing but headers.
+    /// The panel taking a dock's leftover height: the last not rolled up, or `None` if all are.
     pub fn filler(&self, side: Side) -> Option<Panel> {
         self.panels(side).iter().rev().find(|p| !self.is_collapsed(**p)).copied()
     }
 
-    /// Put a layout read from disk back into a state the window can draw.
-    ///
-    /// A settings file from another version -- or one edited by hand -- can name
-    /// a panel twice or leave one out entirely. A panel that appears nowhere
-    /// would be unreachable, with no menu entry able to bring it back, so it is
-    /// returned to the dock it starts in rather than lost.
+    /// Repair a layout from disk: a panel named twice or missing is returned to its starting dock, so
+    /// none becomes unreachable.
     pub fn repair(&mut self) {
         let mut seen: Vec<Panel> = Vec::new();
         for list in [&mut self.left, &mut self.right] {

@@ -1,60 +1,33 @@
 //! A DEFLATE encoder (RFC 1951), so a 3MF is written compressed.
 //!
-//! The package used to be written with every entry *stored*, on the grounds
-//! that a 3MF is three small XML parts and a compression crate is a dependency
-//! tree. Two of the parts are small. The third is not: `3D/3dmodel.model`
-//! carries every vertex and every triangle as XML text, so it grows with the
-//! model and is the most repetitive kind of data there is. A 100k-triangle
-//! export is some 6MB stored, and the reason to compress it is not disk space
-//! but that the file gets sent to somebody or uploaded to a printer.
-//!
-//! So the encoder is hand-written, for the reason the rest of the container is:
-//! one self-contained binary with no dependency tree. What it implements:
-//!
-//! * **LZ77 with hash chains and one-step lazy matching**, which is what turns
-//!   repeated XML into references rather than bytes.
-//! * **Both Huffman block types.** A block is emitted with its own code tables
-//!   when they pay for themselves, with the fixed tables when they do not, and
-//!   stored when the data is incompressible -- whichever of the three is
-//!   smallest, counted in bits before anything is written.
-//!
-//! On a 40k-vertex model part that is a factor of 4.3, against 3.3 for fixed
-//! tables alone. The dynamic tables are the reason the second Huffman pass and
-//! the length-limiting below exist at all; a third off the size of every file
-//! the program writes was worth the page of code.
-//!
-//! The decoder that reads these files back is [`simple3d_import`]'s, and the
-//! tests round-trip through it.
+//! Hand-written to keep the binary dependency-free. The model part grows with the model and is
+//! highly repetitive, so compression matters for sharing and uploading. Implements LZ77 with hash
+//! chains and one-step lazy matching, and picks per block the smallest of dynamic Huffman, fixed
+//! Huffman or stored. Dynamic tables give about 4.3x versus 3.3x for fixed on a model part.
+//! Tests round-trip through [`simple3d_import`]'s decoder.
 
-/// The window a match may reach back over, which DEFLATE fixes at 32 KiB.
+/// The window a match may reach back over, fixed by DEFLATE at 32 KiB.
 const WINDOW: usize = 32768;
 
-/// The shortest and longest run worth referring back to, also fixed by the
-/// format.
+/// The shortest and longest match, fixed by the format.
 const MIN_MATCH: usize = 3;
 const MAX_MATCH: usize = 258;
 
-/// How many earlier positions with the same three-byte prefix are examined
-/// before taking the best match found so far.
-///
-/// The ratio is nearly flat past this and the time is not: the chain for a
-/// three-byte prefix like `="0` in a model part is every vertex in the file.
+/// How many same-prefix positions are examined before taking the best match. The ratio is
+/// nearly flat past this but the time is not: a prefix like `="0` chains through every vertex.
 const MAX_CHAIN: usize = 192;
 
-/// A match this long is taken without looking further back. Anything longer is
-/// a run of identical bytes, and the nearest one encodes in fewer bits.
+/// A match this long is taken without searching further back.
 const GOOD_ENOUGH: usize = 128;
 
-/// How many tokens go into one block. The code tables are written once per
-/// block, so a block wants to be long enough to pay for its header and short
-/// enough that the statistics still describe the data in it.
+/// Tokens per block: long enough to pay for the table header, short enough for the statistics
+/// to still fit the data.
 const BLOCK_TOKENS: usize = 16384;
 
 const HASH_BITS: usize = 15;
 const HASH_SIZE: usize = 1 << HASH_BITS;
 
-/// The length a length symbol stands for, and the extra bits it carries. The
-/// same tables the decoder reads, in the direction that writes them.
+/// The length each length symbol stands for, and its extra bits.
 const LENGTH_BASE: [u16; 29] =
     [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
 const LENGTH_EXTRA: [u8; 29] = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
@@ -68,8 +41,7 @@ const DIST_EXTRA: [u8; 30] =
 /// The order the code-length alphabet's own lengths are written in.
 const CODE_LENGTH_ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
 
-/// What the literal/length alphabet and the distance alphabet are capped at,
-/// and the shorter cap on the alphabet that describes them.
+/// The code length caps for the main alphabets and for the code-length alphabet.
 const MAX_BITS: usize = 15;
 const MAX_CODE_LENGTH_BITS: usize = 7;
 
@@ -80,14 +52,11 @@ enum Token {
     Match { length: u16, distance: u16 },
 }
 
-/// Compress `data` as a raw DEFLATE stream: no zlib or gzip wrapper, which is
-/// what a zip entry holds.
+/// Compress `data` as a raw DEFLATE stream, as a zip entry holds.
 pub(crate) fn deflate(data: &[u8]) -> Vec<u8> {
     let mut out = Bits::new(data.len() / 3 + 64);
     if data.is_empty() {
-        // An empty entry still has to be a valid stream: one final block, of
-        // nothing. A zip reader that inflates it expects an end-of-block
-        // symbol rather than no bytes at all.
+        // An empty entry still needs one final empty block; zip readers expect an end-of-block symbol.
         out.push(1, 1);
         out.push(1, 2);
         let (literals, _) = fixed_tables();
@@ -96,8 +65,7 @@ pub(crate) fn deflate(data: &[u8]) -> Vec<u8> {
     }
 
     let tokens = tokenize(data);
-    // Where each block's tokens start and what of `data` they cover, so a
-    // block that is better off stored can find its own bytes again.
+    // Tracks each block's byte range, so a stored block can find its bytes again.
     let mut at = 0;
     let mut consumed = 0usize;
     while at < tokens.len() {
@@ -122,23 +90,17 @@ pub(crate) fn deflate(data: &[u8]) -> Vec<u8> {
 
 /// Turn `data` into literals and back-references.
 ///
-/// Every position is entered into the hash chain, including the ones inside a
-/// match: a later match may want to start there, and skipping them is what
-/// makes a fast encoder a poor one.
+/// Every position is entered into the hash chain, including those inside a match; skipping
+/// them costs noticeable ratio.
 fn tokenize(data: &[u8]) -> Vec<Token> {
     let mut tokens = Vec::with_capacity(data.len() / 4 + 16);
     let mut head = vec![u32::MAX; HASH_SIZE];
-    // One slot per position in the window rather than one per byte of the
-    // file: a 20MB model part would otherwise carry 80MB of chain. Positions
-    // further back than the window share a slot, and a chain that reaches one
-    // of those has already left the window and is stopped by the check in
-    // `longest_match`.
+    // One slot per window position rather than per byte, so a 20MB part does not need 80MB of
+    // chain. Older positions share slots and are rejected by the window check in `longest_match`.
     let mut prev = vec![u32::MAX; WINDOW];
 
     let mut at = 0usize;
-    // The match found at `at` while deciding whether the one at `at + 1` is
-    // better -- the "lazy" step, worth a few percent for the cost of holding
-    // one match back.
+    // The lazy step: a match held back while checking whether the next position has a better one.
     let mut held: Option<(usize, usize)> = None;
     while at < data.len() {
         let (mut length, mut distance) = (0usize, 0usize);
@@ -151,8 +113,7 @@ fn tokenize(data: &[u8]) -> Vec<Token> {
         }
 
         match held.take() {
-            // A match was held back from the previous position. Take whichever
-            // of the two is longer; the held one wins ties, being nearer.
+            // Take the longer of the held and current match; the held one wins ties, being nearer.
             Some((held_length, held_distance)) => {
                 if length > held_length {
                     tokens.push(Token::Literal(data[at - 1]));
@@ -160,11 +121,8 @@ fn tokenize(data: &[u8]) -> Vec<Token> {
                     at += 1;
                 } else {
                     tokens.push(Token::Match { length: held_length as u16, distance: held_distance as u16 });
-                    // The match covers `at - 1` up to `at - 1 + held_length`.
-                    // The first of those was entered when it was looked at and
-                    // the second at the top of this turn, so the rest are
-                    // entered here -- entering one twice would leave its chain
-                    // pointing at itself.
+                    // The first two covered positions are already entered, so enter only the rest; entering one
+                    // twice would make its chain point at itself.
                     for skip in (at + 1)..(at - 1 + held_length).min(data.len()) {
                         if skip + MIN_MATCH <= data.len() {
                             let key = hash(&data[skip..]);
@@ -193,9 +151,7 @@ fn tokenize(data: &[u8]) -> Vec<Token> {
 }
 
 fn hash(bytes: &[u8]) -> usize {
-    // Three bytes into fifteen: a multiply and a shift, which spreads the
-    // handful of characters an XML file is made of across the whole table far
-    // better than the shift-and-xor it replaced.
+    // Multiply-and-shift spreads XML's few characters far better than the shift-and-xor it replaced.
     let key = (bytes[0] as u32) | ((bytes[1] as u32) << 8) | ((bytes[2] as u32) << 16);
     ((key.wrapping_mul(0x9E37_79B1)) >> (32 - HASH_BITS)) as usize
 }
@@ -205,8 +161,7 @@ fn insert(head: &mut [u32], prev: &mut [u32], key: usize, at: usize) {
     head[key] = at as u32;
 }
 
-/// The longest run at `at` that also appears within the window behind it, and
-/// how far back it is. `(0, 0)` when there is nothing worth referring to.
+/// The longest earlier run within the window matching at `at`, and its distance; `(0, 0)` if none.
 fn longest_match(data: &[u8], at: usize, key: usize, head: &[u32], prev: &[u32]) -> (usize, usize) {
     let limit = (data.len() - at).min(MAX_MATCH);
     if limit < MIN_MATCH {
@@ -224,8 +179,7 @@ fn longest_match(data: &[u8], at: usize, key: usize, head: &[u32], prev: &[u32])
         if start < earliest {
             break;
         }
-        // The byte one past the best match so far: if it does not agree, this
-        // candidate cannot beat it, and most candidates fail here.
+        // Check the byte past the current best first; most candidates fail here.
         if best_length == 0 || data[start + best_length] == data[at + best_length] {
             let mut length = 0;
             while length < limit && data[start + length] == data[at + length] {
@@ -262,9 +216,7 @@ fn emit_block(out: &mut Bits, tokens: &[Token], bytes: &[u8], last: bool) {
     let dynamic = DynamicTables::new(&literal_lengths, &distance_lengths);
     let dynamic_bits = dynamic.header_bits() + token_bits(tokens, &dynamic.literals, &dynamic.distances);
 
-    // A stored block costs its bytes plus the padding to the next byte and a
-    // four-byte length; it wins on data that is already compressed, which a
-    // 3MF's thumbnail would be.
+    // Stored wins on already compressed data, such as a 3MF thumbnail.
     let stored_bits = 3 + 7 + 32 + bytes.len() * 8;
 
     if stored_bits <= fixed_bits.min(dynamic_bits) {
@@ -282,8 +234,7 @@ fn emit_block(out: &mut Bits, tokens: &[Token], bytes: &[u8], last: bool) {
 }
 
 fn emit_stored(out: &mut Bits, bytes: &[u8], last: bool) {
-    // A stored block may hold 65535 bytes at most, so a long one is written as
-    // several -- only the final block of the final run may say it is last.
+    // Stored blocks hold at most 65535 bytes; only the final chunk of the final run is marked last.
     let mut chunks = bytes.chunks(u16::MAX as usize).peekable();
     if chunks.peek().is_none() {
         out.push(last as u32, 1);
@@ -321,8 +272,7 @@ fn frequencies(tokens: &[Token]) -> (Vec<u32>, Vec<u32>) {
     (literals, distances)
 }
 
-/// How many bits these tokens take under a given pair of code tables, which is
-/// what the choice between the block types is decided on.
+/// The bits these tokens take under the given tables, used to choose the block type.
 fn token_bits(tokens: &[Token], literals: &Codes, distances: &Codes) -> usize {
     let mut bits = literals.lengths[256] as usize;
     for token in tokens {
@@ -366,8 +316,7 @@ fn distance_symbol(distance: u16) -> usize {
 
 // -- Huffman ----------------------------------------------------------------
 
-/// A Huffman table as the encoder needs it: one code and one length per
-/// symbol, with the code already in the order DEFLATE writes its bits.
+/// A Huffman table: a code and length per symbol, the code already bit-reversed for writing.
 struct Codes {
     lengths: Vec<u8>,
     codes: Vec<u16>,
@@ -375,21 +324,16 @@ struct Codes {
 
 /// Code lengths for `freqs`, none longer than `limit`.
 ///
-/// The tree is built the ordinary way, by repeatedly joining the two least
-/// frequent nodes, and is then *limited*: a length past the cap is clamped and
-/// the table repaired until it is exactly full again. Limiting this way rather
-/// than by package-merge costs a fraction of a percent on the ratio, and the
-/// repair is a loop over sixteen counters instead of a second algorithm.
+/// Builds an ordinary Huffman tree, then clamps over-long lengths and repairs the table until it
+/// is exactly full. Cheaper to implement than package-merge and within a fraction of a percent.
 fn huffman_lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
     let mut lengths = vec![0u8; freqs.len()];
     let used: Vec<usize> = (0..freqs.len()).filter(|&symbol| freqs[symbol] > 0).collect();
     match used.len() {
-        // Nothing to code. For the distance alphabet this is a block of
-        // literals only, which is written as one unused code.
+        // Nothing to code, e.g. a literals-only block's distance alphabet.
         0 => return lengths,
-        // One symbol still needs a bit to be read as anything, and a table of
-        // a single one-bit code is incomplete -- which every decoder accepts
-        // for this case, and is what every other encoder writes.
+        // A single symbol still needs a one-bit code; the incomplete table is accepted by every decoder
+        // and written by every other encoder.
         1 => {
             lengths[used[0]] = 1;
             return lengths;
@@ -418,8 +362,7 @@ fn huffman_lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
     }
     let std::cmp::Reverse((_, _, root)) = heap.pop().expect("one node is left");
 
-    // Depths, walked iteratively: a tree over 286 symbols is shallow, but a
-    // degenerate one is 285 deep and recursion has no business being that.
+    // Iterative, since a degenerate tree can be 285 deep.
     let mut depth = vec![0usize; leaves + children.len()];
     let mut stack = vec![(root, 0usize)];
     while let Some((node, at)) = stack.pop() {
@@ -433,9 +376,8 @@ fn huffman_lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
         }
     }
 
-    // Clamping may have made the table more than full, which is not a code at
-    // all. Repair: take a code off the longest length, split a shorter one in
-    // two to replace it, and repeat until the table is exactly full.
+    // Clamping may over-fill the table. Repair: remove a code at the longest length, split a
+    // shorter one to replace it, and repeat until exactly full.
     let mut counts = vec![0u32; limit + 2];
     for &symbol in &used {
         counts[lengths[symbol] as usize] += 1;
@@ -453,12 +395,10 @@ fn huffman_lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
         }
         total -= 1;
     }
-    // The other direction never comes up: the tree is a complete code, so its
-    // table is exactly full, and clamping a length can only over-fill it.
+    // Under-filling cannot happen: the tree is complete and clamping only over-fills.
     debug_assert_eq!(total, full, "the repaired table is not a complete code");
 
-    // Hand the lengths back out, longest to the least frequent symbol, so the
-    // repaired table is still the best assignment of it.
+    // Assign the longest lengths to the least frequent symbols, so the table stays optimal.
     let mut by_frequency = used.clone();
     by_frequency.sort_by_key(|&symbol| (std::cmp::Reverse(freqs[symbol]), symbol));
     let mut at = 0;
@@ -472,8 +412,7 @@ fn huffman_lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
     lengths
 }
 
-/// Canonical codes for a set of lengths: shortest first, in symbol order, each
-/// code the previous one plus one and shifted when the length grows.
+/// Canonical codes for a set of lengths.
 fn canonical(lengths: Vec<u8>) -> Codes {
     let longest = lengths.iter().copied().max().unwrap_or(0) as usize;
     let mut counts = vec![0u16; longest + 2];
@@ -511,16 +450,14 @@ fn fixed_tables() -> (Codes, Codes) {
     (canonical(literals), canonical(vec![5u8; 30]))
 }
 
-/// A block's own code tables, and the description of them that goes in front
-/// of the block.
+/// A block's own code tables and the header describing them.
 struct DynamicTables {
     literals: Codes,
     distances: Codes,
     /// How many of each alphabet is written, trailing unused symbols dropped.
     literal_count: usize,
     distance_count: usize,
-    /// The two length sequences run together and run-length encoded, as
-    /// (symbol, extra value) pairs.
+    /// Both length sequences concatenated and run-length encoded, as (symbol, extra value) pairs.
     encoded: Vec<(u8, u8)>,
     code_lengths: Codes,
     written_code_lengths: usize,
@@ -541,8 +478,7 @@ impl DynamicTables {
             code_length_freq[*symbol as usize] += 1;
         }
         let code_lengths = canonical(huffman_lengths(&code_length_freq, MAX_CODE_LENGTH_BITS));
-        // Trailing entries of the permuted order that are zero are not
-        // written; four is the fewest the format allows.
+        // Trailing zero entries of the permuted order are not written; four is the minimum.
         let written_code_lengths =
             CODE_LENGTH_ORDER.iter().rposition(|&at| code_lengths.lengths[at] > 0).map_or(4, |at| (at + 1).max(4));
 
@@ -557,8 +493,7 @@ impl DynamicTables {
         }
     }
 
-    /// What the description of these tables costs, so a block can tell whether
-    /// they are worth writing at all.
+    /// The cost of describing these tables, to decide whether they are worth writing.
     fn header_bits(&self) -> usize {
         let mut bits = 3 + 5 + 5 + 4 + self.written_code_lengths * 3;
         for (symbol, _) in &self.encoded {
@@ -592,9 +527,7 @@ impl DynamicTables {
     }
 }
 
-/// Run-length encode a sequence of code lengths with symbols 16, 17 and 18,
-/// which is how the table describing a block's tables is kept small: a model
-/// part's distance alphabet is mostly zeroes, and 138 of them are two symbols.
+/// Run-length encode code lengths with symbols 16, 17 and 18.
 fn run_length_encode(sequence: &[u8]) -> Vec<(u8, u8)> {
     let mut out = Vec::new();
     let mut at = 0;
@@ -622,8 +555,7 @@ fn run_length_encode(sequence: &[u8]) -> Vec<(u8, u8)> {
                 at += 1;
             }
         } else {
-            // The value itself, then repeats of it: symbol 16 copies whatever
-            // was written last, so the first one always has to be written out.
+            // Symbol 16 repeats the previous value, so the first one must be written out.
             out.push((value, 0u8));
             at += 1;
             run -= 1;
@@ -644,9 +576,8 @@ fn run_length_encode(sequence: &[u8]) -> Vec<(u8, u8)> {
 
 // -- bits -------------------------------------------------------------------
 
-/// Bits out, least significant first, which is the order DEFLATE packs them
-/// in. A Huffman code is the exception: it is written most significant bit
-/// first, so [`Bits::push_code`] reverses it.
+/// Bits out, least significant first as DEFLATE packs them; Huffman codes are reversed by
+/// [`Bits::push_code`].
 struct Bits {
     out: Vec<u8>,
     accumulator: u32,
@@ -675,9 +606,7 @@ impl Bits {
         let length = table.lengths[symbol] as usize;
         debug_assert!(length > 0, "symbol {symbol} was written without a code");
         let code = table.codes[symbol];
-        // Reversed, because a canonical code is written with its most
-        // significant bit first while everything else here is written least
-        // significant first.
+        // Reversed: canonical codes are written most significant bit first.
         let mut reversed = 0u32;
         for bit in 0..length {
             reversed |= (((code >> bit) & 1) as u32) << (length - 1 - bit);

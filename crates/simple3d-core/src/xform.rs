@@ -1,11 +1,7 @@
-//! Affine transforms: scale a node's own axes, rotate by its Euler angles, then
-//! translate.
+//! Affine transforms: scale in the node's axes, rotate by its Euler angles, then translate.
 //!
-//! A matrix rather than a stack of Euler triples, so nesting depth is unbounded
-//! and composing a group's transform with its children's is exact. The rotation
-//! is built by rotating the basis vectors with `Vec3::rotate_xyz_deg`, so it is
-//! the same rotation the mesh transform performs by construction, rather than by
-//! a hand-derived matrix product that could drift away from it.
+//! A matrix composes exactly at any nesting depth. Rotation is built by rotating basis vectors with
+//! `Vec3::rotate_xyz_deg`, so it matches the mesh transform by construction.
 
 #[cfg(test)]
 mod tests;
@@ -36,8 +32,7 @@ impl Xform {
         Xform::from_pos_rot_scale(position, rotation_deg, Vec3::ONE)
     }
 
-    /// Scale first, in the node's own axes, then rotate, then translate -- the
-    /// order the mesh transform performs, so the two cannot disagree.
+    /// Scale, then rotate, then translate: the mesh transform's order.
     pub fn from_pos_rot_scale(position: Vec3, rotation_deg: Vec3, scale: Vec3) -> Xform {
         let x = Vec3::new(1.0, 0.0, 0.0).rotate_xyz_deg(rotation_deg) * scale.x;
         let y = Vec3::new(0.0, 1.0, 0.0).rotate_xyz_deg(rotation_deg) * scale.y;
@@ -64,9 +59,7 @@ impl Xform {
         self.axis_vector(axis).normalized()
     }
 
-    /// The same, unnormalised: its length is how many world units one unit along
-    /// that local axis covers -- the accumulated scale, this node's and every
-    /// ancestor's.
+    /// The same, unnormalised: its length is the accumulated scale along that axis.
     pub fn axis_vector(&self, axis: usize) -> Vec3 {
         Vec3::new(self.m[0][axis], self.m[1][axis], self.m[2][axis])
     }
@@ -82,15 +75,9 @@ impl Xform {
         Xform { m, t: self.point(inner.t) }
     }
 
-    /// The general 3x3 inverse. Used to turn a world-space drag back into the
-    /// parent-frame coordinates a node's `position` is stored in.
-    ///
-    /// Not the transpose: once a node can carry a scale the linear part is no
-    /// longer orthonormal, and transposing it would divide by the scale where it
-    /// should multiply. A degenerate matrix -- which only a zero scale can
-    /// produce, and nothing lets one through -- inverts to the identity rotation
-    /// with the translation undone, so a caller gets something finite rather than
-    /// a field of NaN.
+    /// The general 3x3 inverse, turning world drags into parent-frame positions. Not the transpose,
+    /// since scale makes the matrix non-orthonormal. A degenerate matrix inverts to identity rotation
+    /// with the translation undone, never NaN.
     pub fn inverse(&self) -> Xform {
         let m = self.m;
         let cofactor = |r: usize, c: usize| {
@@ -107,7 +94,7 @@ impl Xform {
         let linear = if det.abs() < 1e-18 {
             Xform::IDENTITY.m
         } else {
-            // The inverse is the transposed cofactor matrix over the determinant.
+            // The transposed cofactor matrix over the determinant.
             let mut out = [[0.0; 3]; 3];
             for r in 0..3 {
                 for c in 0..3 {

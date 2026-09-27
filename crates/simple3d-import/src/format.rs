@@ -1,9 +1,6 @@
-//! The formats a model can be read from, how a file is recognised as one, and
-//! the units a file may state its numbers in.
+//! The readable formats, how a file is recognised, and the units a file may use.
 
-/// What this crate reads. One variant per *format* rather than per encoding:
-/// binary and text STL are the same format and the same extension, and which
-/// one a file is is answered by looking at it rather than by asking the user.
+/// What this crate reads, one variant per format: binary and text STL are one, told apart by content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Format {
     ThreeMf,
@@ -13,8 +10,7 @@ pub enum Format {
 }
 
 impl Format {
-    /// Every format, in the order the export dialog lists its own -- so the
-    /// file dialog's filters read the same way round as the ones beside them.
+    /// Every format, in the export dialog's order, so the filters read the same way round.
     pub const ALL: [Format; 4] = [Format::ThreeMf, Format::Stl, Format::Obj, Format::Ply];
 
     pub fn label(self) -> &'static str {
@@ -36,20 +32,14 @@ impl Format {
         }
     }
 
-    /// The format a file name claims, `None` for one this crate does not read.
+    /// The format a file name claims, or `None`.
     pub fn from_path(path: &std::path::Path) -> Option<Format> {
         let extension = path.extension()?.to_string_lossy().to_lowercase();
         Format::ALL.into_iter().find(|format| format.extensions().contains(&extension.as_str()))
     }
 
-    /// The format the *content* is, for the formats that say so in their first
-    /// bytes. OBJ says nothing -- it is a text file of lines with no header at
-    /// all -- so it is never sniffed, only named.
-    ///
-    /// Content is consulted before the name because a renamed file is common
-    /// and harmless: a 3MF saved as `.stl` is still a 3MF, and refusing it on
-    /// its extension would be refusing a model this crate can read perfectly
-    /// well.
+    /// The format the content is, for formats with a signature; OBJ has none and is only named.
+    /// Content wins over the name, since renamed files are common and harmless.
     pub fn sniff(bytes: &[u8]) -> Option<Format> {
         if bytes.starts_with(b"PK\x03\x04") {
             return Some(Format::ThreeMf);
@@ -64,12 +54,8 @@ impl Format {
     }
 }
 
-/// The unit a file states its numbers in. Everything above this crate is
-/// millimetres, so a file that names anything else is converted on the way in
-/// and the import says what it converted from.
-///
-/// Only 3MF carries a unit. The others are assumed to be millimetres, which is
-/// what this workspace writes and what a slicer assumes of an STL.
+/// The unit a file states. Everything here is millimetres, so others are converted and reported.
+/// Only 3MF carries a unit; the rest are assumed millimetres.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Unit {
     Micron,
@@ -81,8 +67,7 @@ pub enum Unit {
 }
 
 impl Unit {
-    /// The unit a 3MF `<model unit="...">` names, `None` for a value the
-    /// specification does not define.
+    /// The unit a 3MF `<model unit="...">` names, or `None` for an undefined value.
     pub fn from_3mf(value: &str) -> Option<Unit> {
         match value.trim().to_lowercase().as_str() {
             "micron" => Some(Unit::Micron),

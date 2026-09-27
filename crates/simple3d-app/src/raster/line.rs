@@ -2,28 +2,20 @@
 
 use super::*;
 impl Frame<'_> {
-    /// Draw a line, depth-tested. `bias` nudges it towards the eye so an edge
-    /// drawn on the face it belongs to is not swallowed by it.
-    ///
-    /// The segment is clipped to the framebuffer *before* it is stepped along,
-    /// rather than tested per pixel. That matters for the origin axes and the
-    /// ground grid, whose lines run far outside the viewport: stepping them
-    /// end to end would cost thousands of rejected samples each.
-    /// Draw a line. `write_depth` false leaves the depth buffer alone, for
-    /// decoration -- a grid, an axis -- that must never win a depth tie against
-    /// the model it is drawn under.
+    /// Draw a depth-tested line; `bias` nudges it towards the eye so an edge is not swallowed by its
+    /// own face. Clipped to the framebuffer before stepping, since grid and axis lines run far outside.
     pub fn line(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32) {
         self.line_with_depth(a, b, rgba, bias, true);
     }
 
+    /// Draw a line; `write_depth` false leaves the depth buffer alone, for decoration that must
+    /// never win a depth tie against the model.
     pub fn line_with_depth(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, write_depth: bool) {
         self.line_inner(a, b, rgba, bias, write_depth, None);
     }
 
-    /// A line the items in `through` do not hide -- they are indexed by tag, so
-    /// `through[tag]` says whether the item drawn under that tag is one the line
-    /// is seen through. Everything else hides it as usual, and the line leaves
-    /// no depth of its own.
+    /// A line not hidden by the items marked in `through` (indexed by tag); others hide it as usual,
+    /// and it writes no depth.
     pub fn line_through(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, through: &[bool]) {
         self.line_inner(a, b, rgba, bias, false, Some(through));
     }
@@ -37,17 +29,10 @@ impl Frame<'_> {
         write_depth: bool,
         through: Option<&[bool]>,
     ) {
-        // Clipped to the whole frame, never to this band: the step count and so
-        // the position of every sample along the line come out of these two
-        // endpoints, and clipping them to the band would re-space the samples.
-        // A banded frame has to draw the same line the whole frame would, and
-        // then keep the part of it that is its own.
+        // Clipped to the whole frame, never the band, so sample spacing matches the unbanded line.
         let Some((a, b)) = self.clip_to_frame(a, b) else { return };
         let steps = ((b.pos.x - a.pos.x).abs().max((b.pos.y - a.pos.y).abs()).ceil() as usize).max(1);
-        // Which of those samples can land in this band. `y` runs monotonically
-        // along the segment, so they are one run, and skipping the rest is what
-        // keeps a grid line that crosses the whole frame from being stepped end
-        // to end once per band.
+        // The samples landing in this band form one run, since `y` is monotonic; the rest are skipped.
         let (first, last) = self.steps_in_band(a, b, steps);
         for step in first..=last {
             let t = step as f32 / steps as f32;

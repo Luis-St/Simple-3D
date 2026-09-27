@@ -1,25 +1,17 @@
-//! Cutting one triangle by the section plane, and the edge each cut leaves
-//! behind for the cap to close.
+//! Cutting one triangle by the section plane, and the edge each cut leaves for the cap.
 
 use super::*;
 use crate::vec3::Vec3;
 
-/// The part of `world` on the kept side of `plane`.
-///
-/// The usual answer is "all of it" or "none of it" -- a plane crosses a band of
-/// triangles and misses every other one -- so both of those are decided on
-/// three comparisons before anything is worked out.
-///
-/// A windowed plane takes a box out instead, which [`window::clip_box`] cuts;
-/// that leaves no single cut edge, and its caps are found face by face (see
-/// [`faces`]).
+/// The part of `world` on the kept side of `plane`. All or nothing is decided with three
+/// comparisons first. A windowed plane goes through [`window::clip_box`] and leaves no single cut
+/// edge; its caps are found per face ([`faces`]).
 pub fn clip_triangle(plane: &Plane, world: [Vec3; 3]) -> Clipped {
     if plane.window.is_some() {
         return super::window::clip_box(&plane.walls(), world);
     }
     let d = [plane.depth(world[0]), plane.depth(world[1]), plane.depth(world[2])];
-    // Wholly kept, which includes a triangle lying *in* the plane: it is the
-    // surface the cut runs along, not something the cut removes.
+    // Wholly kept, including a triangle in the plane: it is the surface the cut runs along.
     if d.iter().all(|&at| at <= 0.0) {
         return Clipped::whole(world);
     }
@@ -27,14 +19,11 @@ pub fn clip_triangle(plane: &Plane, world: [Vec3; 3]) -> Clipped {
         return Clipped::nothing();
     }
 
-    // Sutherland-Hodgman against the one plane, in the triangle's own winding
-    // so the polygon that comes out keeps the surface's orientation.
+    // Sutherland-Hodgman in the triangle's winding, preserving orientation.
     let mut poly = [Vec3::ZERO; 4];
     let mut corners = 0;
-    // Where the cut meets this triangle: the crossings of its edges, plus any
-    // corner sitting exactly on the plane -- a plane through a box's own
-    // vertices is the common case, not the exotic one, and a crossing counted
-    // only where a *strict* sign change happens misses those.
+    // The crossings plus any corner exactly on the plane, which strict sign changes would miss (common
+    // for planes through a box's vertices).
     let mut hits: [Vec3; 3] = [Vec3::ZERO; 3];
     let mut hit_count = 0;
     for i in 0..3 {
@@ -72,16 +61,9 @@ pub fn clip_triangle(plane: &Plane, world: [Vec3; 3]) -> Clipped {
     out
 }
 
-/// The cut edge of one clipped triangle, wound the way the cap wants it.
-///
-/// The direction is not a guess. The cap closes the kept solid, so along their
-/// shared edge it runs *against* the face the edge came off -- that is what
-/// makes a closed surface closed. Walking the clipped face in its own winding,
-/// the cut edge runs along `n x m` (the face's outward normal crossed with the
-/// plane's), so the cap's runs along `m x n`. Every cap edge taken that way
-/// chains into loops that are counter-clockwise about the plane normal for an
-/// outer boundary and clockwise for a hole, which is exactly what the
-/// triangulator reads them as.
+/// The cut edge of one clipped triangle, wound for the cap. The cap runs against the face along
+/// their shared edge, along `m x n`, so edges chain into CCW outer loops and CW holes about the
+/// plane normal, as the triangulator expects.
 pub(crate) fn cap_edge(world: [Vec3; 3], hits: &[Vec3], plane: &Plane) -> Option<[Vec3; 2]> {
     if hits.len() < 2 {
         return None;
@@ -92,8 +74,7 @@ pub(crate) fn cap_edge(world: [Vec3; 3], hits: &[Vec3], plane: &Plane) -> Option
     }
     let normal = (world[1] - world[0]).cross(world[2] - world[0]);
     let forward = plane.normal.cross(normal);
-    // A face lying in the plane has no direction to take -- and no cut edge of
-    // its own either: its neighbours draw the boundary around it.
+    // A face in the plane has no direction and no cut edge; its neighbours bound it.
     if forward.length() < 1e-12 {
         return None;
     }
@@ -103,9 +84,7 @@ pub(crate) fn cap_edge(world: [Vec3; 3], hits: &[Vec3], plane: &Plane) -> Option
     }
 }
 
-/// The part of the segment `a`-`b` on the kept side, or `None` when the whole
-/// of it is cut away. What every *line* of the picture goes through: a feature
-/// edge, a selection outline, the mark a principal plane leaves on a surface.
+/// The kept part of segment `a`-`b`, or `None` if all cut; used for every line in the picture.
 pub fn clip_segment(plane: &Plane, a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
     let (da, db) = (plane.depth(a), plane.depth(b));
     if da <= 0.0 && db <= 0.0 {
@@ -121,9 +100,8 @@ pub fn clip_segment(plane: &Plane, a: Vec3, b: Vec3) -> Option<(Vec3, Vec3)> {
     }
 }
 
-/// What is left of a segment once the cuts have had it: nothing, all of it, a
-/// piece off one end -- or, past a windowed plane, the two ends with the box
-/// taken out of the middle, once per windowed plane.
+/// What is left of a segment after the cuts: nothing, all, an end, or with a windowed plane two
+/// ends around the removed box, per windowed plane.
 #[derive(Clone, Copy, Debug)]
 pub struct Segments {
     pieces: [(Vec3, Vec3); MAX_CUTS + 1],
@@ -159,9 +137,8 @@ impl std::ops::Deref for Segments {
     }
 }
 
-/// The parts of `a`-`b` that stay, whatever shape the cut is. The stretch the
-/// cut takes out is where the segment is past every wall at once, which is one
-/// interval along it, found by narrowing it wall by wall.
+/// The kept parts of `a`-`b` for any cut shape. The removed stretch is where it is past every wall,
+/// one interval narrowed wall by wall.
 pub fn kept_segments(plane: &Plane, a: Vec3, b: Vec3) -> Segments {
     let mut out = Segments::default();
     if plane.window.is_none() {
@@ -197,8 +174,7 @@ pub fn kept_segments(plane: &Plane, a: Vec3, b: Vec3) -> Segments {
     out
 }
 
-/// The parts of `a`-`b` that every one of `cuts` keeps: each cut in turn, on
-/// what the ones before it left.
+/// The parts of `a`-`b` every cut keeps, applied in turn.
 pub fn kept_by_all(cuts: &[Plane], a: Vec3, b: Vec3) -> Segments {
     let mut kept = Segments::whole(a, b);
     for cut in cuts {
@@ -216,7 +192,7 @@ pub fn kept_by_all(cuts: &[Plane], a: Vec3, b: Vec3) -> Segments {
     kept
 }
 
-/// What is left of a triangle once every one of `cuts` has had it.
+/// What is left of a triangle after every cut.
 pub fn clip_by_all(cuts: &[Plane], world: [Vec3; 3]) -> Clipped {
     match cuts {
         [] => Clipped::untouched(world),

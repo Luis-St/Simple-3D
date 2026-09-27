@@ -1,14 +1,8 @@
 //! On-screen manipulators (spec section 6.2): move, rotate and resize.
 //!
-//! The important property, and the one the tests are built around, is that
-//! **resize writes dimensions, never a scale factor**. Dragging the right face
-//! of a box changes its width parameter and leaves the left face where it was;
-//! the property editor then shows the new real width, and the saved project file
-//! contains no scale anywhere. Which parameter governs which extent comes from
-//! the primitive registry's `axes` declaration, so a handle is only ever offered
-//! on an axis some parameter genuinely controls.
-//!
-//! Modifiers, consistent across all three modes:
+//! **Resize writes dimensions, never a scale factor**: dragging a box's right face changes its
+//! width and leaves the left face in place. Which parameter drives which extent comes from the
+//! registry's `axes` declaration, so handles appear only on governed axes.
 //!
 //! | Modifier | Effect |
 //! |---|---|
@@ -17,8 +11,7 @@
 //! | Shift | snap coarsely (ten times the increment) |
 //! | Ctrl  | resize about the centre (faces) / preserve proportions (corners) |
 //!
-//! Where Ctrl is also the key held to snap to geometry, a face drag with it
-//! held snaps and does not resize about the centre (`App::snap_holds_ctrl`).
+//! Where Ctrl is also the snap key, a face drag with it snaps instead (`App::snap_holds_ctrl`).
 
 mod mode;
 pub use mode::{Handle, Mode};
@@ -43,16 +36,14 @@ pub use pointer::{drag_phase, DragPhase, PointerState};
 #[cfg(test)]
 mod tests;
 
-/// How far from the origin an axis arrow reaches, in screen pixels. Handles keep
-/// a constant on-screen size regardless of zoom (spec section 6.2).
+/// An axis arrow's length in screen pixels; handles keep a constant size (spec section 6.2).
 pub const ARM_PIXELS: f64 = 78.0;
 
 /// Where a plane handle's corner sits along each of its two axes.
 pub const PLANE_FRACTION: f64 = 0.42;
 
-/// How much of its face-on area a plane handle must still show to be drawn
-/// and grabbed: a fifth, which is the plane turned to within about twelve
-/// degrees of edge-on.
+/// The fraction of face-on area a plane handle must show to be drawn and grabbed (about twelve
+/// degrees from edge-on).
 pub const PLANE_MIN_FACING: f32 = 0.2;
 
 /// Click tolerance in pixels.

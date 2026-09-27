@@ -7,36 +7,23 @@ use simple3d_geom::Vec3;
 
 // -- custom kinds (issue 67) -------------------------------------------------
 //
-// The six kinds above are the ones worth having a name for. A custom kind is
-// the rule underneath all of them, spelled out: a stack of *stages*, each one
-// repeating whatever the stages before it made. One stage stepping along X is a
-// linear pattern; a second stepping along Y makes it a grid; a stage that turns
-// about Z at a radius makes a ring, and a ring of rows is something no fixed
-// kind can say. Every kind above is one or more stages -- which is not only the
-// check that the model is the right one, but what the fixed kinds are now laid
-// out *by* (see [`rule_stages`]).
+// A custom kind is a stack of stages, each repeating what the previous stages made. Every fixed
+// kind is one or more stages and is laid out by them (see [`rule_stages`]).
 
-/// The three things a stage can be asked to do (issue 79).
-///
-/// A stage used to carry every number at once -- a run, a turn, a radius, a
-/// growth and a mirror flag -- and show all nine of them whatever it was
-/// actually doing, so "3 Radius per copy" sat under a stage that was a straight
-/// run and meant nothing there. What a stage does is one choice out of three,
-/// and saying so first is what lets the rest of the stage be the four or five
-/// numbers that choice actually needs.
+/// The three things a stage can do (issue 79). Choosing one first lets the stage show only the
+/// numbers that choice needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StageMode {
     /// A run: each copy a fixed step further along.
     Move,
-    /// A ring, a helix or a spiral: each copy turned further about an axis, at
-    /// a radius that may grow and a height that may climb.
+    /// A ring, helix or spiral: each copy turned further about an axis, at a radius that may grow and
+    /// a height that may climb.
     Turn,
     /// The original and its reflection across a plane through the origin.
     Mirror,
 }
 
-/// The modes in the order they appear in a stage's "does" choice; the index
-/// into this list is the value the choice parameter holds.
+/// The modes in choice order; the index is the parameter's value.
 pub const STAGE_MODES: &[&str] = &["Move", "Turn", "Mirror"];
 
 impl StageMode {
@@ -57,34 +44,26 @@ impl StageMode {
     }
 }
 
-/// One stage of a custom rule: how many copies it makes, what it does to
-/// place each of them, and what varies them from one to the next.
+/// One stage of a custom rule: its copy count, placement, and variations.
 ///
-/// The transform of copy `i` is worked out from `i` directly rather than by
-/// composing the stage with itself `i` times. That is what makes a stage able to
-/// say "the radius grows 5 mm a copy" -- repeated composition would carry the
-/// growth round the turn with it and draw an involute instead of a spiral -- and
-/// it is what lets the copies *vary* at all: a gap that widens, a shift that
-/// comes round every other copy, a size that shrinks are all a function of `i`
-/// and of nothing a previous copy did.
+/// Copy `i` is computed from `i` directly rather than by composing the stage `i` times, so a
+/// growing radius gives a spiral rather than an involute and variations can depend on `i` alone.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Stage {
     pub mode: StageMode,
     pub count: u32,
-    /// Moved this far further along for each copy. [`StageMode::Move`] only.
+    /// Moved this far further along per copy; [`StageMode::Move`] only.
     pub step: Vec3,
-    /// Turned this much further about `axis` for each copy.
+    /// Turned this much further about `axis` per copy.
     pub turn: f64,
     pub axis: usize,
-    /// How far out from the axis the first copy sits.
+    /// The first copy's distance from the axis.
     pub radius: f64,
-    /// How much further out each copy after it sits.
+    /// How much further out each later copy sits.
     pub growth: f64,
-    /// How far along `axis` each copy after the first climbs -- what turns a
-    /// ring into a helix.
+    /// How far along `axis` each later copy climbs: a ring becomes a helix.
     pub rise: f64,
-    /// What changes the copies from one to the next, applied in this order
-    /// (issue 79).
+    /// What changes the copies from one to the next, applied in order (issue 79).
     pub vary: Vec<Variation>,
 }
 
@@ -103,7 +82,7 @@ impl Stage {
         Stage { mode: StageMode::Mirror, axis, ..Stage::still() }
     }
 
-    /// A stage that does nothing, for the other constructors to fill in.
+    /// A no-op stage, for the other constructors to fill in.
     fn still() -> Stage {
         Stage {
             mode: StageMode::Move,
@@ -118,24 +97,23 @@ impl Stage {
         }
     }
 
-    /// The same stage with `variation` on the end of its list.
+    /// The same stage with `variation` appended.
     pub fn with(mut self, variation: Variation) -> Stage {
         self.vary.push(variation);
         self
     }
 
-    /// The variations, in the order they are applied.
+    /// The variations, in application order.
     pub fn variations(&self) -> &[Variation] {
         &self.vary
     }
 
-    /// Whether the stage changes its copies from one to the next rather than
-    /// only placing them (issue 79).
+    /// Whether the stage varies its copies rather than only placing them (issue 79).
     pub fn varies(&self) -> bool {
         self.variations().iter().any(|variation| variation.acts(self.mode))
     }
 
-    /// The copies this stage makes, in the frame of whatever it is repeating.
+    /// The copies this stage makes, in the frame of whatever it repeats.
     pub fn instances(&self) -> Vec<Instance> {
         if self.mode == StageMode::Mirror {
             let mut m = Xform::IDENTITY;
@@ -145,17 +123,10 @@ impl Stage {
         (0..self.count.max(1)).map(|i| Instance::plain(self.place(i))).collect()
     }
 
-    /// Where copy `i` goes: placed by the stage's run or turn, then changed by
-    /// each of its variations in turn, in its own frame.
+    /// Where copy `i` goes: placed by the run or turn, then changed by each variation in order.
     ///
-    /// The variations are composed on the *inside*, the way the scatter is: a
-    /// shifted brick moves along the row it is in, not across whatever the row
-    /// happens to be turned to, and a spinning copy turns about its own origin
-    /// rather than swinging round the centre of the stage. In order, so a shift
-    /// listed before a spin moves the copy and then turns it where it landed,
-    /// and one listed after it moves the copy along the way it now faces. A
-    /// stage that varies nothing composes nothing, so its copies are bit for bit
-    /// what they were before a stage could vary them.
+    /// Variations compose on the inside, like the scatter: a shift moves along the copy's own row and a
+    /// spin turns about its own origin. A stage without variations is bit for bit what it was before.
     pub fn place(&self, i: u32) -> Xform {
         let n = i as f64;
         let placed = match self.mode {
@@ -177,8 +148,7 @@ impl Stage {
         }
     }
 
-    /// How far along its run copy `i` sits: `i` steps, plus whatever the gap
-    /// variations have added to the gaps before it.
+    /// Copy `i`'s position along its run: `i` steps plus the gap variations before it.
     fn along(&self, i: u32) -> Vec3 {
         let run = self.step * i as f64;
         let length = self.step.length();
@@ -200,7 +170,7 @@ impl Stage {
         self.variations().iter().filter(|v| v.what == Vary::Gap).map(|v| v.amount * v.times(j)).sum()
     }
 
-    /// How many copies it makes. A mirror is always two.
+    /// How many copies it makes; a mirror is always two.
     pub fn copies(&self) -> usize {
         if self.mode == StageMode::Mirror {
             2
@@ -228,8 +198,7 @@ pub fn stage(params: &Params, index: usize) -> Stage {
     }
 }
 
-/// Write one stage back into a pattern's parameters -- its variations too, and
-/// nothing left behind of a longer list it used to have.
+/// Write one stage back, including its variations, clearing any leftovers of a longer list.
 pub fn set_stage(params: &mut Params, index: usize, stage: &Stage) {
     let index = index.min(MAX_STAGES - 1);
     let k = &STAGES[index];

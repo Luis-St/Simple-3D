@@ -1,10 +1,8 @@
-//! What of a step falls in this band, and inside the frame at all.
+//! What part of a step falls in this band and in the frame.
 
 use super::*;
 impl Frame<'_> {
-    /// The run of step indices, out of `0..=steps`, whose sample rows can fall
-    /// inside this band -- widened by one at each end so rounding can never
-    /// drop a sample the band should have drawn.
+    /// Step indices in `0..=steps` whose rows can fall in this band, widened by one each end against rounding.
     pub(super) fn steps_in_band(&self, a: Vertex, b: Vertex, steps: usize) -> (usize, usize) {
         let dy = b.pos.y - a.pos.y;
         if dy == 0.0 {
@@ -22,14 +20,12 @@ impl Frame<'_> {
         (first, last)
     }
 
-    /// Liang-Barsky clip of a segment against the framebuffer rectangle,
-    /// interpolating the depth key along with the position.
+    /// Liang-Barsky clip against the framebuffer, interpolating the depth key too.
     pub(super) fn clip_to_frame(&self, a: Vertex, b: Vertex) -> Option<(Vertex, Vertex)> {
         let (mut t0, mut t1) = (0.0f32, 1.0f32);
         let dx = b.pos.x - a.pos.x;
         let dy = b.pos.y - a.pos.y;
-        // The framebuffer's last addressable pixel centre, with a little slack so
-        // a line exactly on the edge still draws.
+        // The last pixel centre, with slack so a line exactly on the edge still draws.
         let limits = [
             (-dx, a.pos.x - 0.0),
             (dx, (self.width as f32 - 0.001) - a.pos.x),

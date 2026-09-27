@@ -1,6 +1,6 @@
 //! The named viewpoints, and moving the camera to one.
 
-/// The standard view presets (spec section 6.1). Yaw and pitch in degrees.
+/// The standard view presets (spec section 6.1), in degrees.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewPreset {
     Top,
@@ -13,9 +13,7 @@ pub enum ViewPreset {
 }
 
 impl ViewPreset {
-    /// Yaw and pitch that put the camera on the named side. The camera looks
-    /// along `-offset_dir`, so "front" (looking at the XZ plane from -Y) means
-    /// the eye sits at -Y, i.e. yaw = -90 degrees.
+    /// Yaw and pitch for the named side. The camera looks along `-offset_dir`, so "front" is yaw -90.
     pub fn angles(self) -> (f64, f64) {
         match self {
             ViewPreset::Top => (-90.0, 90.0),
@@ -41,9 +39,7 @@ impl ViewPreset {
     }
 }
 
-/// The shortest way round from one yaw to another, in degrees. Turning from
-/// 170 to -170 is twenty degrees, not three hundred and forty: a view cube that
-/// spins the long way round to an adjacent face reads as a glitch.
+/// The shortest turn between two yaws, in degrees; spinning the long way reads as a glitch.
 pub fn shortest_turn(from: f64, to: f64) -> f64 {
     let mut delta = (to - from) % 360.0;
     if delta > 180.0 {
@@ -55,18 +51,15 @@ pub fn shortest_turn(from: f64, to: f64) -> f64 {
     delta
 }
 
-/// The transition curve: ease in and out, so the camera starts and stops rather
-/// than jumping into motion at full speed.
+/// Ease in and out, so the camera starts and stops smoothly.
 pub fn ease(t: f64) -> f64 {
     let t = t.clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
-/// How long a view change takes. The design's number, and short enough that it
-/// reads as the same camera moving rather than as a wait.
+/// How long a view change takes.
 pub const TRANSITION: std::time::Duration = std::time::Duration::from_millis(200);
 
-/// A camera turn in flight.
 #[derive(Clone, Copy, Debug)]
 pub struct CameraMove {
     pub from: (f64, f64),
@@ -75,7 +68,7 @@ pub struct CameraMove {
 }
 
 impl CameraMove {
-    /// Yaw and pitch at this moment, and whether the move is over.
+    /// Yaw and pitch now, and whether the move is over.
     pub fn at(&self, now: std::time::Instant) -> ((f64, f64), bool) {
         let t = now.duration_since(self.started).as_secs_f64() / TRANSITION.as_secs_f64();
         let done = t >= 1.0;

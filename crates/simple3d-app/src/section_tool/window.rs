@@ -1,4 +1,4 @@
-//! The tool's own window.
+//! The section tool's window.
 
 use super::*;
 use crate::app::App;
@@ -12,62 +12,43 @@ use simple3d_core::scene::SectionKeep;
 use simple3d_core::unit::format_length;
 use simple3d_geom::Vec3;
 
-/// The section's window, drawn over the viewport once a frame while the plane
-/// is out (issue 72).
-///
-/// It stands open for exactly as long as the section is on -- there is no
-/// separate switch for the window, because a section with its settings put away
-/// and a section that is off are the same picture. The chevron is what puts the
-/// window out of the way while the cut stays.
+/// The section's window, open exactly while the section is on (issue 72); the chevron folds it
+/// away while the cut stays.
 pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     if !app.scene.settings.section.enabled {
         return;
     }
     let bounds = app.viewport_rect;
-    // A document opened with fewer sections than the last one had.
+    // A document may have fewer sections than the previous one.
     app.section_tab = app.section_tab.min(app.scene.settings.section_count() - 1);
-    // A plane from a file written before its centre was kept, or switched on
-    // before there was a model, is fixed where it stands now -- from here on,
-    // moving a body does not move it.
+    // Pin the centre of a plane from an older file, or enabled before there was a model.
     let bounds_now = app.evaluated.bounds;
     for index in 0..app.scene.settings.section_count() {
         app.scene.settings.section_at_mut(index).pin_centre(bounds_now);
     }
-    // Taken out of the map for the duration, so the popup may hold it mutably
-    // while its contents hold the application.
+    // Taken out of the map so the popup can hold it mutably while the contents hold the app.
     let mut placement = app.popups.remove(KEY).unwrap_or_default();
     let event =
         popup::show(ctx, bounds, &mut placement, PopupSpec { key: KEY, title: "Section", width: WIDTH }, |ui| {
-            // Four rows and a hint is a short window until the rows stack on a
-            // narrow one, and a viewport can be short: the body scrolls rather
-            // than pushing the button off the bottom of the screen.
+            // Scrolls on short viewports rather than pushing the button off screen.
             popup::scrolling_body(ui, bounds, |ui| body(app, ui));
             popup::action_row(ui, |ui| actions(app, ui));
         });
     app.popups.insert(KEY, placement);
-    // The cross means the same thing the button in the row means: the plane is
-    // put away and the model is whole again.
+    // The cross turns the section off, like the row's button.
     if event == PopupEvent::Closed && app.scene.settings.section.enabled {
         app.run(Command::ToggleSection);
     }
 }
 
-/// A turn of the plane about one axis, in degrees: any amount, read back as a
-/// direction in [0, 360) the way a node's rotation is.
+/// A plane turn in degrees, wrapped into [0, 360) like a node's rotation.
 const TILT: ParamKind = ParamKind::Angle { min: 0.0, max: 360.0, wrap: true };
 
-/// A side of the plane's own rectangle: any length but none at all.
+/// A side of the plane's rectangle: any positive length.
 const SIDE: ParamKind = ParamKind::Length { min: 1e-3 };
 
-/// The plane's settings: the axis it stands perpendicular to, where along that
-/// axis it sits, how far it is turned off it, and which side of it is cut away
-/// (issues 71, 72, 109).
-///
-/// The offset is a scalar field like any other, so it can be typed exactly and
-/// scrubbed with the pointer -- and the grips in the viewport slide the same
-/// number. A plane that can only be dragged cannot be put at 12.5 mm, and one
-/// that can only be typed cannot be swept through a part to find where the wall
-/// gets thin.
+/// The plane's settings: axis, offset, tilt and kept side (issues 71, 72, 109). The offset is
+/// an ordinary scalar field, so it can be typed exactly or scrubbed, and the grips drive it too.
 pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     tabs(app, ui);
     let unit = app.unit();
@@ -78,15 +59,11 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
             let section = *app.section();
             let showing = section.axis() == axis;
             if theme::choice(ui, showing, name).clicked() && !(showing && !section.tilted()) {
-                // Picking an axis is picking a plane square to it, so any turn
-                // goes -- which is also the one-click way to straighten a plane
-                // that has been turned, by picking the axis it is already on.
+                // Picking an axis resets the tilt, which is also the one-click way to straighten a plane.
                 app.section_mut().tilt = [0.0; 3];
                 if !showing {
                     app.section_mut().axis = axis;
-                    // The old offset is a place on a different axis, so the
-                    // plane goes back to the middle of the model rather than to
-                    // wherever that number happens to land on this one.
+                    // The old offset is meaningless on the new axis, so the plane goes to the model's middle.
                     let middle = middle_of(app.evaluated.bounds, axis);
                     app.set_section_offset(middle);
                     app.recentre_section();
@@ -103,14 +80,11 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         ui.scope(|ui| {
             ui.set_width(width);
             let field = Scalar { grip: "Section", id, kind: POINT, current: app.section().offset, step };
-            // No undo step: moving the plane is not an edit -- see the module
-            // header.
+            // No undo step: moving the plane is not an edit.
             scalar_field(app, ui, field, |app, mm, _| app.set_section_offset(mm));
         });
     });
-    // Turned about the plane's centre, about each axis in turn, so a
-    // wall that runs at a slant can be cut square to it (issue 109). The same
-    // three chipped fields a node's rotation has, scrubbed by the same step.
+    // Turned about the plane's centre per axis, to cut slanted walls square (issue 109).
     axis_row(app, ui, "Turn (deg)", |app, ui, axis, name| {
         let field = Scalar {
             grip: name,
@@ -119,7 +93,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
             current: app.section().tilt[axis],
             step: app.settings.rotate_snap_deg.max(1.0),
         };
-        // No undo step, for the same reason the offset has none.
+        // No undo step, as for the offset.
         scalar_field(app, ui, field, |app, degrees, _| {
             app.section_mut().tilt[axis] = degrees;
             app.status = crate::app::Status::Info(readout(app));
@@ -127,9 +101,6 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     });
     size_rows(app, ui);
     field_row(ui, "Keeps", "Which side of the plane stays in the picture", |ui| {
-        // Auto keeps the far side from the camera; Below and Above are named by
-        // the coordinate and stay put however the model is orbited; Motion
-        // keeps what lies ahead of the way the plane was last slid.
         for (keep, label, hover) in [
             (SectionKeep::Auto, "Auto", "Cut away the side facing the camera"),
             (SectionKeep::Below, "Below", "Keep what is below the plane"),
@@ -149,9 +120,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// The sections as tabs: which one the fields below are editing, and a way to
-/// add another. Every section cuts at once, whichever is showing -- the tab
-/// only says whose numbers these are.
+/// The sections as tabs, choosing which one the fields edit; all sections cut at once.
 fn tabs(app: &mut App, ui: &mut egui::Ui) {
     let hover = "Which section the fields below edit. Every section cuts at the same time";
     field_row(ui, "Section", hover, |ui| {
@@ -163,7 +132,7 @@ fn tabs(app: &mut App, ui: &mut egui::Ui) {
                 app.status = crate::app::Status::Info(readout(app));
             }
         }
-        // As many as the renderer can cut with at once, and no more.
+        // As many as the renderer can cut with at once.
         let room = count < simple3d_geom::section::MAX_CUTS;
         let add = ui.add_enabled(room, egui::Button::new("+")).on_hover_text("Add a section that cuts as well");
         if add.clicked() {
@@ -172,9 +141,7 @@ fn tabs(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// A new section, standing on the axis after the one showing and in the middle
-/// of the model along it: one on top of the other would cut nothing new and
-/// could not be told apart from it.
+/// A new section on the next axis through the model's middle, so it differs from the current one.
 fn add_section(app: &mut App) {
     let axis = (app.section().axis() + 1) % 3;
     let fresh = simple3d_core::scene::SectionView {
@@ -188,10 +155,7 @@ fn add_section(app: &mut App) {
     app.status = crate::app::Status::Info(readout(app));
 }
 
-/// How big the plane is: through the whole model, or a rectangle of its own
-/// that only the material straight behind is cut away by. The two sides are
-/// only shown while the size is custom -- an automatic plane has no numbers to
-/// set, and two dead fields would be two rows of the model hidden for nothing.
+/// The plane's size: whole model or a custom rectangle; side fields shown only when custom.
 fn size_rows(app: &mut App, ui: &mut egui::Ui) {
     let unit = app.unit();
     let hover = "Auto runs the plane through the whole model; Custom cuts out only the rectangle it is given";
@@ -201,8 +165,7 @@ fn size_rows(app: &mut App, ui: &mut egui::Ui) {
             if theme::choice(ui, showing, label).clicked() && !showing {
                 let bounds = app.evaluated.bounds;
                 let section = app.section_mut();
-                // A first custom size is the frame as it already stands, so
-                // switching over changes nothing on screen until a side is.
+                // The first custom size is the current frame, so switching changes nothing on screen.
                 if custom && section.size.iter().any(|&side| side <= 0.0) {
                     section.size = auto_size(section, bounds);
                 }
@@ -225,7 +188,7 @@ fn size_rows(app: &mut App, ui: &mut egui::Ui) {
                 ui.set_width(width);
                 let current = app.section().size[index];
                 let field = Scalar { grip: name, id, kind: SIDE, current, step };
-                // No undo step, for the same reason the offset has none.
+                // No undo step, as for the offset.
                 scalar_field(app, ui, field, |app, mm, _| {
                     app.section_mut().size[index] = mm;
                     app.status = crate::app::Status::Info(readout(app));
@@ -235,8 +198,7 @@ fn size_rows(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// The buttons along the foot: put the plane away, take the section showing
-/// away while there are others, or stand it back in the middle of the model.
+/// Footer buttons: turn off, remove the shown section, or recentre it.
 pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     if ui::dialog_button(ui, "Done", true).clicked() {
         app.run(Command::ToggleSection);
@@ -249,9 +211,7 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
         app.section_tab = app.section_tab.min(count - 2);
         app.status = crate::app::Status::Info(readout(app));
     }
-    // At the other end of the row, the way the measure tool's Clear is: a plane
-    // swept out past the model shows an uncut shape and no sign of what to do
-    // about it, and orbiting round to find the frame again is the long way back.
+    // Recentre, at the other end like the measure tool's Clear, for a plane swept out of the model.
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
         if ui
             .add(egui::Button::new("Back to the middle"))
@@ -265,8 +225,7 @@ pub(crate) fn actions(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-/// What the plane is doing, for the status line: where it stands, and how far
-/// it is turned when it is.
+/// The plane's status line text: its position, and tilt if any.
 pub fn readout(app: &App) -> String {
     let section = *app.section();
     let unit = app.unit();
@@ -299,11 +258,7 @@ pub fn readout(app: &App) -> String {
     }
 }
 
-/// Put the plane back in the middle of the model, along the axis it is on.
-///
-/// What "on" means for a section that has just been switched on: an offset of
-/// zero cuts nothing at all for a part that does not straddle the origin, and a
-/// section that appears to do nothing reads as a broken one.
+/// The model's middle along `axis`. Used when enabling, since offset zero may cut nothing.
 pub fn middle_of(bounds: Option<(Vec3, Vec3)>, axis: usize) -> f64 {
     match bounds {
         Some((lo, hi)) => (component(lo, axis) + component(hi, axis)) * 0.5,

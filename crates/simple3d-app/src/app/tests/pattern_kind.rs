@@ -4,10 +4,8 @@ use super::*;
 use simple3d_core::keymap::Command;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 
-/// The custom pattern kind creation tool, end to end (issue 67): it makes a
-/// pattern out of what is selected, builds a rule that no fixed kind can
-/// say, keeps it under a name, and puts it back on a different pattern in a
-/// different project.
+/// The custom kind tool end to end (issue 67): wrap the selection, build a rule no fixed kind can
+/// express, save it, and apply it to another pattern in another project.
 #[test]
 pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     let dir = temp_config_dir("pattern-kind");
@@ -16,19 +14,16 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     let shape = app.scene.add_primitive("box", root, 0).unwrap();
     app.select_only(shape);
 
-    // Opening the tool with a shape selected wraps it, which is what makes
-    // this a creation tool rather than an editor of something already there.
+    // Opening the tool with a shape selected wraps it.
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool should have a pattern to work on");
     assert!(app.scene.node(pattern).is_pattern());
-    // The window opens by asking what the rule starts from; a run is the
-    // answer this one builds on.
+    // The window asks what to start from; a run here.
     app.start_rule_from(pattern, 0);
     assert_eq!(app.scene.node(pattern).params().unwrap().int("kind"), simple3d_core::pattern::CUSTOM);
     draw_one_frame(&mut app);
 
-    // A row of three, turned four times about Z: two stages, and twelve
-    // copies that no single fixed kind lays out.
+    // A row of three turned four times about Z: twelve copies no fixed kind lays out.
     let mut stage = simple3d_core::pattern::stage(app.scene.node(pattern).params().unwrap(), 1);
     stage.mode = simple3d_core::pattern::StageMode::Turn;
     stage.count = 4;
@@ -47,7 +42,7 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     app.save_current_kind();
     assert_eq!(app.pattern_kinds.iter().map(|e| e.name.clone()).collect::<Vec<_>>(), vec!["Turned row"]);
 
-    // A second, unrelated pattern in a fresh document takes the same rule.
+    // An unrelated pattern in a fresh document takes the same rule.
     let mut other = app_in(dir);
     let root = other.scene.root();
     let shape = other.scene.add_primitive("cylinder", root, 0).unwrap();
@@ -61,19 +56,12 @@ pub(crate) fn a_custom_pattern_kind_can_be_built_saved_and_used_again() {
     assert_eq!(simple3d_core::pattern::instance_count(&applied).1, 12, "the saved rule did not come back");
     assert_eq!(other.scene.node(other.pattern_tool.unwrap()).name, "Turned row");
 
-    // And it comes off the shelf again when it is deleted.
+    // Deleting it removes it from the shelf.
     other.delete_saved_kind(&saved);
     assert!(other.pattern_kinds.is_empty());
 }
 
-/// Deleting a saved kind is asked about first, and nothing leaves the shelf
-/// until the question is answered (issue 67).
-///
-/// Asked for from the running application. The shelf is a directory: a kind is a
-/// file, deleting one is what the file system does to files, and undo -- which
-/// covers every other thing a click in the tool can do -- does not reach it. The
-/// cross now sits in a list of names, one row from the name above it, which is
-/// exactly where a slip costs a rule that took a while to build.
+/// Deleting a saved kind asks first (issue 67), since it deletes a file undo cannot restore.
 #[test]
 pub(crate) fn a_saved_kind_is_not_deleted_until_the_question_is_answered() {
     let dir = temp_config_dir("pattern-kind-delete");
@@ -88,13 +76,13 @@ pub(crate) fn a_saved_kind_is_not_deleted_until_the_question_is_answered() {
     app.save_current_kind();
     let saved = app.pattern_kinds.first().cloned().expect("the shelf should have the saved kind");
 
-    // The cross on the row asks; it does not delete.
+    // The cross asks; it does not delete.
     app.ask_delete_saved_kind(saved.clone());
     assert_eq!(app.modal, crate::app::Modal::ConfirmDeleteKind, "the cross deleted without asking");
     assert_eq!(app.confirm_delete_kind.as_ref().map(|e| e.name.clone()), Some("Keep me".to_string()));
     assert!(saved.path.exists(), "the file went before the question was answered");
 
-    // Answered "no", the kind stays and the question is put away.
+    // "No" keeps the kind.
     app.dismiss_modal();
     assert_eq!(app.modal, crate::app::Modal::None);
     assert!(app.confirm_delete_kind.is_none(), "the question was left holding the kind it asked about");
@@ -102,7 +90,7 @@ pub(crate) fn a_saved_kind_is_not_deleted_until_the_question_is_answered() {
     app.refresh_pattern_kinds();
     assert_eq!(app.pattern_kinds.len(), 1, "cancelling the question took the kind off the shelf");
 
-    // Answered "yes", it goes -- and the file with it.
+    // "Yes" removes it and its file.
     app.ask_delete_saved_kind(saved.clone());
     app.delete_saved_kind(&saved);
     app.modal = crate::app::Modal::None;
@@ -111,9 +99,7 @@ pub(crate) fn a_saved_kind_is_not_deleted_until_the_question_is_answered() {
     assert!(app.pattern_kinds.is_empty(), "the shelf still offers a kind that has been deleted");
 }
 
-/// The rule the tool builds is an ordinary parameter edit, which is the
-/// whole reason it was built out of parameters: undo covers it, and so does
-/// saving and reloading the project.
+/// The tool's rule is an ordinary parameter edit, so undo and save/reload cover it.
 #[test]
 pub(crate) fn a_custom_rule_survives_undo_and_a_round_trip_through_the_project_file() {
     let mut app = headless_app();

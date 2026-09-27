@@ -14,7 +14,7 @@ pub(crate) fn a_cancelled_export_leaves_no_file_behind() {
     let err = write(&path, &plate(), &Options::default(), &mut cb).unwrap_err();
     assert_eq!(err, ExportError::Cancelled);
     assert!(!path.exists(), "cancelling left a file behind");
-    // And nothing half-written next to it either.
+    // Nor anything half-written beside it.
     let leftovers: Vec<_> = std::fs::read_dir(temp_dir())
         .unwrap()
         .filter_map(|e| e.ok())

@@ -1,5 +1,4 @@
-//! A stage that changes its copies from one to the next, the layouts that
-//! ship ready made, and editing the stack of stages (issue 79).
+//! Stages that vary copies, the ready-made layouts, and editing the stage stack (issue 79).
 
 use super::*;
 use crate::primitive::{ParamValue, Params, ParamsExt};
@@ -19,17 +18,14 @@ fn rule(stages: &[Stage]) -> Params {
     params
 }
 
-/// The planks the issue asked for: rows end to end, every other row moved on
-/// by half a plank. Nothing a stage could say while each copy was a fixed step
-/// further along than the last.
+/// Planks from the issue: rows end to end, every other row offset by half a plank.
 #[test]
 pub(crate) fn a_shift_every_other_copy_staggers_the_rows() {
     let rows = Stage::run(3, Vec3::new(0.0, 4.0, 0.0)).with(Variation::shift(0, 5.0).repeating(2));
     let copies = instances(&rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0)), rows]));
     assert_eq!(copies.len(), 9);
     let at = |index: usize| copies[index].xform.t;
-    // The first row where the run put it, the second half a plank on, the
-    // third back in line with the first.
+    // The second row half a plank on, the third back in line with the first.
     assert!(near(at(0), Vec3::ZERO) && near(at(2), Vec3::new(20.0, 0.0, 0.0)));
     assert!(near(at(3), Vec3::new(5.0, 4.0, 0.0)), "the second row was not shifted: {:?}", at(3));
     assert!(near(at(5), Vec3::new(25.0, 4.0, 0.0)));
@@ -41,8 +37,7 @@ pub(crate) fn a_shift_every_other_copy_staggers_the_rows() {
     assert_eq!(xs, vec![0.0, 3.0, 0.0, 0.0, 3.0]);
 }
 
-/// Each gap of a run wider than the one before it: the copies spread out
-/// rather than standing a fixed step apart.
+/// Each gap wider than the last: copies spread out.
 #[test]
 pub(crate) fn a_growing_gap_spreads_the_copies_out() {
     let run = Stage::run(4, Vec3::new(10.0, 0.0, 0.0)).with(Variation::widen(2.0));
@@ -50,14 +45,13 @@ pub(crate) fn a_growing_gap_spreads_the_copies_out() {
     // Gaps of 10, 12 and 14.
     assert_eq!(xs, vec![0.0, 10.0, 22.0, 36.0]);
 
-    // Along whatever way the run points, not along X.
+    // Along the run's direction, not X.
     let diagonal = Stage::run(3, Vec3::new(3.0, 4.0, 0.0)).with(Variation::widen(2.0));
     let last = instances(&rule(&[diagonal]))[2].xform.t;
     assert!(near(last, Vec3::new(3.0, 4.0, 0.0) * (12.0 / 5.0)), "the growth left the run's line: {last:?}");
 }
 
-/// Spin turns each copy where it stands, further for every copy, and leaves
-/// it where the run put it.
+/// Spin turns each copy in place, further per copy.
 #[test]
 pub(crate) fn spin_turns_each_copy_where_it_stands() {
     let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::spin(2, 30.0));
@@ -70,7 +64,7 @@ pub(crate) fn spin_turns_each_copy_where_it_stands() {
     }
 }
 
-/// Each copy a fixed fraction of the size of the one before it.
+/// Each copy a fixed fraction of the previous one's size.
 #[test]
 pub(crate) fn size_per_copy_multiplies_from_one_copy_to_the_next() {
     let run = Stage::run(3, Vec3::new(10.0, 0.0, 0.0)).with(Variation::resize(ALL_AXES, 0.5));
@@ -83,9 +77,7 @@ pub(crate) fn size_per_copy_multiplies_from_one_copy_to_the_next() {
     assert!(instances(&params).iter().all(|c| !c.mirrored), "a smaller copy is not a reflection");
 }
 
-/// A stage that varies nothing composes nothing: its copies are the plain
-/// run they always were, to the bit -- whatever the cycle says, since a cycle
-/// with no shift to cycle is a number nobody has used.
+/// A stage that varies nothing gives the plain run bit for bit, whatever its cycle says.
 #[test]
 pub(crate) fn a_stage_that_varies_nothing_is_the_run_it_always_was() {
     let run = Stage::run(4, Vec3::new(7.0, 1.0, 0.0)).with(Variation::shift(0, 0.0).repeating(5));
@@ -103,8 +95,7 @@ pub(crate) fn a_stage_that_varies_nothing_is_the_run_it_always_was() {
     );
 }
 
-/// A file from before a stage could vary lays out exactly as it did: every one
-/// of the new numbers comes in as "no change".
+/// A file from before variations lays out exactly as it did.
 #[test]
 pub(crate) fn a_rule_from_before_the_stages_could_vary_lays_out_the_same_copies() {
     let mut old = rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0)), Stage::turning(4, 90.0, 30.0, 0.0, 0.0, 2)]);
@@ -113,14 +104,11 @@ pub(crate) fn a_rule_from_before_the_stages_could_vary_lays_out_the_same_copies(
         old.remove(k.variations);
     }
     assert_eq!(instances(&migrate_params(&old)), laid_out);
-    // And read straight off the map without the migration, a stage with no
-    // variations says so rather than reading slots nobody filled in.
+    // Read without migration, a stage without variations must not read unfilled slots.
     assert_eq!(instances(&old), laid_out, "a stage missing its size shrank its copies");
 }
 
-/// A variation's numbers are offered only while the stage has it, and only the
-/// ones its own kind reads: numbers that mean nothing until another is set are
-/// not on screen until then.
+/// A variation's numbers are offered only while the stage has it, and only those its kind reads.
 #[test]
 pub(crate) fn the_numbers_that_vary_a_stage_are_offered_where_they_mean_something() {
     let shown = |params: &Params| -> Vec<String> {
@@ -150,15 +138,14 @@ pub(crate) fn the_numbers_that_vary_a_stage_are_offered_where_they_mean_somethin
     let mirrored = rule(&[Stage::mirrored(0).with(Variation::spin(2, 5.0))]);
     assert!(!has(&shown(&mirrored), "stage1_var1_angle"), "a mirror was offered something to vary");
 
-    // And every one of them is a key of the rule, so a saved kind carries it.
+    // Each is a rule key, so a saved kind carries it.
     let keys = rule_keys(&shifted);
     for key in variation_keys(0, 1) {
         assert!(keys.contains(&key), "{key} varies a stage but is not one of the rule's keys");
     }
 }
 
-/// The three ready-made layouts: offset rows, sized to what is repeated, and a
-/// custom rule like any other once started from.
+/// The three ready-made layouts: offset rows, sized to the shape, and custom once started.
 #[test]
 pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
     let size = Vec3::new(100.0, 20.0, 10.0);
@@ -172,19 +159,17 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
         assert_eq!(shift.what, Vary::Shift, "{name} does not shift its rows");
         assert!(shift.repeats && shift.every == 2, "{name} does not offset every other row");
         assert!(shift.axis == 0 && shift.amount > 0.0, "{name} does not offset its rows along them");
-        // The first copy of the second row is offset by half the pitch of the
-        // first stage, which is what staggers the joints. Read from the rule
-        // before its scatter: the planks come with one.
+        // The second row's first copy is offset by half the first stage's pitch, staggering the joints.
+        // Read before the scatter the planks come with.
         let pitch = stage(&params, 0).step.x;
         let copies = instances_through(&params, 1);
         let second_row = copies[stage(&params, 0).copies()].xform.t;
         assert!((second_row.x - pitch / 2.0).abs() < 1e-9, "{name}'s second row starts at {second_row:?}");
-        // Clear of each other: copies that touch are welded into one body.
+        // Copies must not touch, or they weld into one body.
         assert!(pitch > size.x, "{name} lays its copies down touching");
     }
 
-    // A hexagon grid's neighbours are all one cell apart, across the row and
-    // between rows alike.
+    // A hexagon grid's neighbours are all one cell apart.
     let mut hex = default_params();
     use_preset(&mut hex, 2, Vec3::new(20.0, 20.0, 5.0));
     let copies = instances(&hex);
@@ -193,7 +178,7 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
     let above = copies[stage(&hex, 0).copies()].xform.t;
     assert!(((above - first).length() - cell).abs() < 1e-9, "a hexagon's neighbour in the next row is off the cell");
 
-    // Planks come with a little scatter, and not so much that two can meet.
+    // Planks come with a little scatter, not enough for two to meet.
     let mut planks = default_params();
     use_preset(&mut planks, 0, size);
     assert!(Noise::of(&planks).wanted(), "the planks came without the randomness they are for");
@@ -202,8 +187,7 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
     use_preset(&mut bricks, 1, size);
     assert!(!Noise::of(&bricks).wanted(), "a brick wall came with a scatter of its own");
 
-    // A scatter set before the layout was picked is the user's, and stays --
-    // on the planks too, which would otherwise bring their own.
+    // A scatter set before picking the layout is the user's and stays.
     for preset in [0, 1] {
         let mut scattered = default_params();
         scattered.insert("noise_x".to_string(), ParamValue::Length(3.0));
@@ -215,8 +199,8 @@ pub(crate) fn every_preset_lays_out_offset_rows_sized_to_the_shape() {
     }
 }
 
-/// A stage added to a rule starts as the next thing the rule is missing:
-/// a run along a free axis, spaced clear of the shape, then a ring.
+/// A new stage is the next thing the rule lacks: a run along a free axis clear of the shape,
+/// then a ring.
 #[test]
 pub(crate) fn a_fresh_stage_runs_along_the_first_free_axis_and_then_turns() {
     let size = Vec3::new(10.0, 20.0, 30.0);
@@ -235,13 +219,13 @@ pub(crate) fn a_fresh_stage_runs_along_the_first_free_axis_and_then_turns() {
     assert_eq!(last.mode, StageMode::Turn, "with every axis run along, the next thing to do is turn");
     assert!(last.radius > 0.0);
 
-    // A blank rule's one stage goes nowhere, so the fresh one takes X.
+    // A blank rule's stage goes nowhere, so the new one takes X.
     let mut blank = default_params();
     clear_stages(&mut blank);
     assert!(near(fresh_stage(&blank, 1, size).step, Vec3::new(15.0, 0.0, 0.0)));
 }
 
-/// Any stage can go, and the ones below it move up; any two can swap.
+/// Any stage can be removed, moving the rest up; any two can swap.
 #[test]
 pub(crate) fn a_stage_can_be_dropped_from_the_middle_and_two_can_trade_places() {
     let (a, b, c) = (
@@ -256,7 +240,7 @@ pub(crate) fn a_stage_can_be_dropped_from_the_middle_and_two_can_trade_places() 
     assert_eq!(stage(&params, 1), c, "the stage below the one dropped did not move up");
     assert_eq!(instances(&params), instances(&rule(&[a.clone(), c.clone()])));
 
-    // The last one left cannot go.
+    // The last one cannot be removed.
     let mut single = rule(std::slice::from_ref(&a));
     remove_stage(&mut single, 0);
     assert_eq!(stage_count(&single), 1);
@@ -272,8 +256,7 @@ pub(crate) fn a_stage_can_be_dropped_from_the_middle_and_two_can_trade_places() 
     assert_eq!(stage(&params, 0), b, "a swap with a stage that is not in use went ahead");
 }
 
-/// What the tool marks while the pointer is over a stage: the copies made by
-/// the end of it, and no further.
+/// Hovering a stage marks the copies made by its end and no further.
 #[test]
 pub(crate) fn the_copies_through_a_stage_are_what_the_stages_above_it_made() {
     let params = rule(&[Stage::run(3, Vec3::new(10.0, 0.0, 0.0)), Stage::run(2, Vec3::new(0.0, 10.0, 0.0))]);

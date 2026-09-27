@@ -1,5 +1,4 @@
-//! The cases that have broken the kernel before: dense meshes, deep
-//! chains, and stack depth.
+//! Cases that broke the kernel before: dense meshes, deep chains, and stack depth.
 
 use super::*;
 use crate::vec3::Vec3;
@@ -7,13 +6,9 @@ use crate::{evaluate_boolean, primitives, BooleanOp};
 
 #[test]
 pub(crate) fn a_boolean_result_is_no_denser_than_the_solid_it_describes() {
-    // A BSP clips against *infinite* planes, so subtracting a 16-segment
-    // cylinder from a plate slices the plate's whole top and bottom face along
-    // sixteen lines that run right across it. Correct, but a plate with a hole,
-    // a slot and a boss used to arrive at ~1500 triangles for a solid ~230
-    // describe. `repair::heal` rebuilds each flat region from its own boundary
-    // to undo that; this pins the budget so a chain of booleans cannot start
-    // compounding again.
+    // BSP clipping by infinite planes slices whole faces; a plate with a hole, slot and boss once
+    // came out at ~1500 triangles for a ~230-triangle solid. `repair::heal` rebuilds flat regions,
+    // and this pins the budget so chained booleans cannot compound again.
     let plate = primitives::box_mesh(40.0, 20.0, 4.0);
     let hole = primitives::cylinder_mesh(6.0, 6.0, 20.0, 16).translated(Vec3::new(-12.0, 0.0, 0.0));
     let slot = primitives::box_mesh(8.0, 5.0, 20.0).translated(Vec3::new(12.0, 0.0, 0.0));
@@ -24,8 +19,7 @@ pub(crate) fn a_boolean_result_is_no_denser_than_the_solid_it_describes() {
     let assembly = evaluate_boolean(BooleanOp::Union, &[drilled, boss]);
     assert_manifold("assembly", &assembly);
 
-    // The dimensions the numbers promise survive the rebuild: the plate is 4mm
-    // thick and the boss, centred on it, is 5mm tall.
+    // The promised dimensions survive: a 4 mm plate with a 5 mm boss centred on it.
     assert_bounds("assembly", &assembly, Vec3::new(40.0, 20.0, 5.0), 1e-9);
     assert!(
         assembly.triangle_count() < 400,
@@ -34,13 +28,8 @@ pub(crate) fn a_boolean_result_is_no_denser_than_the_solid_it_describes() {
     );
 }
 
-/// Evaluation is deterministic (spec section 5.2), and that has to hold across
-/// *processes*, not just within one: the subtree cache key is a content hash,
-/// two runs are meant to be comparable, and an exported file is meant to be the
-/// same file twice. The hull read its horizon edges back out of a `HashMap`,
-/// whose iteration order is seeded randomly per process, so the same two
-/// spheres hulled to the same solid with its triangles in a different order
-/// every time the application was started.
+/// Evaluation is deterministic across processes (spec section 5.2). Regression: the hull read its
+/// horizon edges from a randomly seeded `HashMap`, reordering triangles per run.
 #[test]
 pub(crate) fn a_hull_is_the_same_mesh_every_time_it_is_built() {
     let a = crate::primitives::ellipsoid_mesh(30.0, 30.0, 30.0, 32);
@@ -57,14 +46,9 @@ pub(crate) fn a_hull_is_the_same_mesh_every_time_it_is_built() {
 
 #[test]
 pub(crate) fn a_round_primitive_unions_without_running_out_of_stack() {
-    // The regression this file exists for: raising the segment count of a
-    // sphere or a spherical cap that touches another body killed the whole
-    // application. A convex body defeats the BSP's auto-partition -- every one
-    // of its faces has all the others behind it -- so the tree is a chain one
-    // node per face, and the walks over it used to be recursive.
-    //
-    // A quarter of a megabyte of stack is far less than a chain of two thousand
-    // faces needs to recurse down, and enough for anything that does not.
+    // Regression: a finely segmented sphere touching another body overflowed the stack. A convex
+    // body's BSP is a chain one node per face, and the walks were recursive. A quarter megabyte of
+    // stack is far less than recursing such a chain needs.
     let worker = std::thread::Builder::new()
         .stack_size(256 * 1024)
         .spawn(|| {
@@ -80,11 +64,8 @@ pub(crate) fn a_round_primitive_unions_without_running_out_of_stack() {
 
 #[test]
 pub(crate) fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_solid() {
-    // Both halves of the segment-count regression, on the shape it was reported
-    // on. A spherical cap sunk into a plate at 176 segments used to come back as
-    // 2.7 million triangles -- the T-junction pass cascading into its own budget
-    // -- and non-manifold with it. The same union at 64 segments describes the
-    // same solid, so the two must agree on volume however finely either is cut.
+    // Regression: a 176-segment cap sunk into a plate gave 2.7 million triangles (a cascading
+    // T-junction pass) and was non-manifold. It must match the 64-segment union's volume.
     let plate = || primitives::box_mesh(40.0, 40.0, 4.0);
     let coarse = evaluate_boolean(BooleanOp::Union, &[plate(), primitives::spherical_cap_mesh(20.0, 10.0, 64)]);
     let fine = evaluate_boolean(BooleanOp::Union, &[plate(), primitives::spherical_cap_mesh(20.0, 10.0, 176)]);
@@ -94,9 +75,7 @@ pub(crate) fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_soli
     let (v0, v1) = (volume(&coarse), volume(&fine));
     assert!((v1 - v0).abs() / v0 < 0.01, "volume moved from {v0} to {v1} between tessellations");
 
-    // Eight faces of the cap for every one at 64 segments, so a result that
-    // stays in proportion is at most about ten times the size. The cascade
-    // produced eight hundred times.
+    // About ten times the 64-segment size at most; the cascade produced eight hundred times.
     assert!(
         fine.triangle_count() < coarse.triangle_count() * 10,
         "{} triangles at 176 segments against {} at 64",
@@ -105,21 +84,9 @@ pub(crate) fn a_finely_tessellated_union_is_manifold_and_no_bigger_than_the_soli
     );
 }
 
-/// The nine-holed plate again, forty times over, with every input coordinate
-/// nudged by a few units in the last place.
-///
-/// It exists because a boolean's answer is not a continuous function of its
-/// input. `sin` and `cos` differ by an ULP between one platform's libm and
-/// another's, the BSP amplifies that by nine orders of magnitude where two
-/// surfaces meet at a grazing angle, and a repair sized for the ~1e-12mm noise
-/// of a *single* boolean then leaves a seam a few microns wide. That is exactly
-/// how v0.0.8 built clean on Linux and failed this crate's own manifold check
-/// on Windows: nothing was wrong with the code that ran here, and nothing here
-/// could see it. Jitter can.
-///
-/// Seven of these forty were broken when it was written, and six of forty on
-/// the kernel before that one -- the fragility is older than either. Collapsing
-/// the short edges the weld leaves behind takes it to none.
+/// The nine-holed plate forty times with inputs jittered by a few ULPs. Platform libm differences
+/// get amplified at grazing surfaces into micron seams, which is how v0.0.8 passed on Linux and
+/// failed on Windows; jitter reproduces that. Collapsing the weld's short edges fixed all of them.
 ///
 /// Ignored only because it takes half a minute:
 ///
@@ -166,8 +133,7 @@ pub(crate) fn a_chain_of_booleans_survives_the_last_bits_of_its_input() {
 
 #[test]
 pub(crate) fn a_convex_body_is_recognised_as_splitting_nothing() {
-    // What the one-pass build rests on: no face of a convex solid divides any
-    // other, and a solid with a dent in it has faces that do.
+    // The one-pass build relies on this: no face of a convex solid divides another; a dented one does.
     assert!(crate::csg_bsp::debug_splits_nothing(&primitives::ellipsoid_mesh(20.0, 20.0, 20.0, 64)));
     assert!(crate::csg_bsp::debug_splits_nothing(&primitives::spherical_cap_mesh(20.0, 10.0, 64)));
     assert!(crate::csg_bsp::debug_splits_nothing(&primitives::cylinder_mesh(20.0, 20.0, 20.0, 64.0 as u32)));

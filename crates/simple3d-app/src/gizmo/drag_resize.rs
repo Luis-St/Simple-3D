@@ -11,18 +11,13 @@ impl Drag {
         self.gizmo.drivers[axis]
     }
 
-    /// Whether this axis can be sized at all under the current mode. Resize
-    /// needs a parameter to write; scale needs nothing.
+    /// Whether this axis can be sized in the current mode: resize needs a parameter, scale nothing.
     pub(super) fn sizeable(&self, axis: usize) -> bool {
         self.gizmo.mode == Mode::Scale || self.drivable(axis).is_some()
     }
 
-    /// The node's extent along one of its own axes **in world millimetres** at
-    /// the moment the drag began -- the local extent times every scale between
-    /// it and the world.
-    ///
-    /// World, because that is what a drag measures. The conversion back into a
-    /// dimension, or into a factor, happens in one place, in `size_axis`.
+    /// The node's extent along an own axis in world millimetres at drag start. Converted back to a
+    /// dimension or factor only in `size_axis`.
     pub(super) fn start_extent(&self, axis: usize) -> f64 {
         let local = get_axis(self.start_local_hi, axis) - get_axis(self.start_local_lo, axis);
         local * self.gizmo.axis_scale[axis]
@@ -30,26 +25,8 @@ impl Drag {
 }
 
 impl Drag {
-    /// Grow the given axis by `outward` world millimetres on the given side, and
-    /// return the extent actually achieved.
-    ///
-    /// The two sizing modes part company only in what they write. **Resize**
-    /// solves the driver's `extent = value * factor` for the value that produces
-    /// the extent asked for -- that is the whole of "resize writes dimensions",
-    /// and no scale factor is involved. **Scale** multiplies the node's own
-    /// factor by however much bigger the extent got, which needs nothing of the
-    /// shape underneath and so works on a group too.
-    ///
-    /// Both then shift the node by half the change, in the direction of the face
-    /// being dragged, so the opposite face stays exactly where it was.
-    /// Resize so the face this drag is pulling lands on `target` (issue 68).
-    ///
-    /// The same one-dimensional answer a face handle already gives, with the
-    /// cursor's place along the axis replaced by the snap target's: the face
-    /// moves outward by however far the target is from where the face began, and
-    /// nothing else about the body changes. Returns the extent it reached, or
-    /// `None` when this drag has no single face to place -- a corner moves three
-    /// at once, and there is no one face to put on a point.
+    /// Resize so the pulled face lands on `target` (issue 68): the face moves out by the target's
+    /// distance from its start. `None` for a corner, which moves three faces.
     pub fn resize_face_to(&mut self, scene: &mut Scene, target: Vec3, symmetric: bool) -> Option<f64> {
         let Handle::ResizeFace(axis, positive) = self.handle else { return None };
         let anchor = self.gizmo.own.point(self.gizmo.face_centre(axis, positive));
@@ -57,6 +34,9 @@ impl Drag {
         self.size_axis(scene, axis, outward, symmetric, positive)
     }
 
+    /// Grow `axis` by `outward` world millimetres on one side and return the extent reached. Resize
+    /// solves the driver for the value giving that extent; scale multiplies the own factor. Both
+    /// shift the node by half the change so the opposite face stays put.
     pub(super) fn size_axis(
         &self,
         scene: &mut Scene,
@@ -67,13 +47,11 @@ impl Drag {
     ) -> Option<f64> {
         let scaling = self.gizmo.mode == Mode::Scale;
         let start_extent = self.start_extent(axis);
-        // A dimension cannot go to zero or negative; clamp rather than let the
-        // generator produce inverted geometry.
+        // Clamped so the generator never produces inverted geometry.
         let target_extent = (start_extent + outward * if symmetric { 2.0 } else { 1.0 }).max(MIN_EXTENT);
 
         if scaling {
-            // Nothing to be a factor *of*: an axis with no extent cannot be
-            // scaled into one.
+            // An axis with no extent cannot be scaled into one.
             if start_extent <= MIN_EXTENT {
                 return None;
             }
@@ -96,9 +74,7 @@ impl Drag {
         if symmetric {
             node.position = self.start_position;
         } else {
-            // `position` is in the parent's frame, so the shift is measured
-            // there: the world change divided by whatever the ancestors scale
-            // by, which is everything in `axis_scale` except this node's own.
+            // `position` is in the parent's frame, so divide the world change by the ancestors' scale alone.
             let ancestor = (self.gizmo.axis_scale[axis] / get_axis(self.start_scale, axis)).max(1e-9);
             let change = (target_extent - start_extent) / ancestor;
             let mut local_shift = Vec3::ZERO;
@@ -109,8 +85,7 @@ impl Drag {
         Some(target_extent)
     }
 
-    /// Write a world-space movement back to `Node::position`, which lives in the
-    /// parent's frame.
+    /// Write a world-space movement back to `Node::position`, which lives in the parent's frame.
     pub(super) fn write_position(&self, scene: &mut Scene, world_delta: Vec3) {
         let parent = self.gizmo.parent;
         let target = parent.point(self.start_position) + world_delta;

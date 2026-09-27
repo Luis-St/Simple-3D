@@ -2,9 +2,8 @@
 
 use crate::raster::{Rgba, Vertex};
 
-/// One vertex as the shaders want it: screen position in pixels, depth key,
-/// straight-alpha colour, the body tag, and -- for an axis -- which of its
-/// segments this is, so the shader can look up that segment's own rule.
+/// One vertex as the shaders take it: screen position in pixels, depth key, straight-alpha
+/// colour, body tag, and for an axis the segment index.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(crate) struct GpuVertex {
@@ -30,11 +29,9 @@ layout(location = 3) in uint in_tag;
 layout(location = 4) in uint in_segment;
 
 uniform vec2 u_viewport;
-// Maps the rasterizer's depth key -- larger is nearer -- onto OpenGL's, where
-// smaller is nearer, so `GL_LESS` decides exactly what `key <= stored` decides
-// in the software renderer. `x` is the offset and `y` the scale: the nearest
-// key in the frame lands just inside the front of the buffer and the furthest
-// just inside the back, with room at each end for the depth bias a line gets.
+// Maps the rasterizer's depth key (larger is nearer) onto OpenGL's (smaller is nearer), so
+// `GL_LESS` matches the software renderer's `key <= stored`. `x` is the offset, `y` the scale,
+// with room at each end for line depth bias.
 uniform vec2 u_depth;
 
 out vec4 v_colour;
@@ -43,13 +40,9 @@ flat out uint v_segment;
 out float v_depth;
 
 void main() {
-    // The rasterizer counts rows downwards from the top; OpenGL counts them
-    // upwards from the bottom -- and egui, painting this texture, takes its
-    // first row to be the top of the rect. The two flips cancel, so row 0 goes
-    // to the *bottom* of the framebuffer here and comes out at the top on
-    // screen. Getting this the other way round mirrors the whole viewport,
-    // which reads as a plausible picture until it is measured against the
-    // software renderer's.
+    // The rasterizer counts rows down from the top, OpenGL up from the bottom, and egui takes the
+    // texture's first row as the top. The two flips cancel, so row 0 goes to the bottom here.
+    // Getting this wrong mirrors the viewport in a way that still looks plausible.
     vec2 ndc = vec2(
         (in_pos.x / u_viewport.x) * 2.0 - 1.0,
         (in_pos.y / u_viewport.y) * 2.0 - 1.0
@@ -76,7 +69,7 @@ void main() {
 }
 "#;
 
-/// A full-screen gradient, the same one `Palette::background_at` lays down.
+/// A full-screen gradient, matching `Palette::background_at`.
 pub(crate) const BACKGROUND_VERTEX: &str = r#"#version 330 core
 out vec2 v_uv;
 void main() {
@@ -94,30 +87,19 @@ uniform vec4 u_bottom;
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
 void main() {
-    // Row 0 of the frame -- the top, and the palette's first colour -- is at
-    // the bottom of the framebuffer, so `v_uv.y` of 0 is the palette's top.
+    // Row 0 (the palette's top colour) is at the bottom of the framebuffer, so `v_uv.y` 0 is the top.
     out_colour = mix(u_top, u_bottom, v_uv.y);
     out_tag = 0u;
 }
 "#;
 
-/// What every shader drawing a resident mesh starts with: the projection, as
-/// three rows applied to a stored position, and the step from a screen
-/// position and depth key to OpenGL's clip space.
+/// Common prelude for resident mesh shaders: the projection as three affine rows and the step
+/// from screen position and depth key to clip space.
 ///
-/// The projection is orthographic and so affine: each screen coordinate and
-/// the depth key are a dot product with the vertex plus a constant, and those
-/// rows are worked out on the CPU in double precision once per mesh per frame.
-/// Positions are stored relative to the mesh's own centre, so the
-/// single-precision arithmetic left here is on small numbers. The screen
-/// coordinates are the rasterizer's own, rows counted down from the top -- see
-/// `VERTEX_SOURCE` for why that is the right way up.
-///
-/// A body being dragged is drawn moved (see `render::Live`): `u_model` is the
-/// linear part of the move, put through every stored position before
-/// anything else is done with it, and the rest of the move is in the rows.
-/// `u_hide` is the stretch of vertices of a mesh that is not drawn at all --
-/// the dragged body's part of the scene -- and is empty otherwise.
+/// The rows are computed on the CPU in double precision per mesh per frame, and positions are
+/// stored relative to the mesh's centre, so the single-precision work here is on small numbers.
+/// `u_model` is the linear part of a drag move (the rest is in the rows), and `u_hide` is the
+/// vertex range of the dragged body, not drawn here (see `render::Live`).
 const RESIDENT_COMMON: &str = r#"
 uniform vec2 u_viewport;
 uniform vec2 u_depth;
@@ -145,9 +127,8 @@ vec4 place(vec2 screen, float key) {
 }
 "#;
 
-/// The per-vertex and per-triangle tables a geometry shader reads a mesh's
-/// topology from: positions, the corners of each triangle and the body of each
-/// vertex, laid out in rows of `u_table_width` texels (see `resident.rs`).
+/// Mesh topology tables for geometry shaders: positions, triangle corners and vertex bodies, in
+/// rows of `u_table_width` texels (see `resident.rs`).
 const TABLES_COMMON: &str = r#"
 uniform int u_table_width;
 uniform sampler2D u_positions;
@@ -163,18 +144,12 @@ vec3 position(uint vertex) {
 }
 "#;
 
-/// The sections, asked per pixel. Each cuts away what is past every one of its
-/// walls -- one for a plane through the whole model, five for one cut down to a
-/// rectangle, which takes a box out -- and several of them together cut away
-/// what any of them does. What is left is not a half-space a clip distance can
-/// say, so no clip distance says it. `u_walls` holds every cut's walls one
-/// after another, as distances positive past the wall, the way
-/// `Resident::plane` hands a plane over; `u_cut_walls` says how many are each
-/// cut's.
+/// The sections, tested per pixel. Each cut removes what is past all of its walls (one for a
+/// plane, five for a windowed box), and together they remove what any of them removes, which no
+/// clip distance can express. `u_walls` holds every cut's walls as distances positive past the
+/// wall; `u_cut_walls` says how many belong to each cut.
 ///
-/// `u_within` is for the line round a cut on one face of a box: that face's
-/// crossing runs across its whole plane, and only the part on the face --
-/// inside every other wall of its box, to within `u_cut_slack` -- is the cut's.
+/// `u_within` limits the line round a cut on one box face to that face, within `u_cut_slack`.
 const BOX_COMMON: &str = r#"
 uniform int u_cut_count;
 uniform int u_cut_walls[8];
@@ -204,8 +179,7 @@ bool cut_away(vec3 p) {
 }
 "#;
 
-/// What a resident mesh's lines are coloured with: `SOLID_SOURCE`, with what
-/// the sections cut away asked about each pixel.
+/// Fragment shader for resident mesh lines: `SOLID_SOURCE` plus the per-pixel section test.
 pub(crate) fn line_fragment() -> String {
     format!(
         "#version 330 core\n{BOX_COMMON}\n{}",
@@ -234,13 +208,9 @@ fn resident(stage: &str) -> String {
 
 /// A resident mesh's faces, projected on the card and culled by the pipeline.
 ///
-/// The arithmetic is `push_shaded`'s, `push_ghost`'s and `push_glow`'s,
-/// moved here so that an orbit hands the card a camera rather than a million
-/// projected triangles. Nothing is stored per triangle but its corners: the
-/// face's normal is the one its own pixels span (see `FACE_FRAGMENT`), and a
-/// solid's back faces are dropped by `GL_CULL_FACE`, which under a parallel
-/// projection asks exactly what `push_shaded` asks -- whether the triangle
-/// turns towards the eye.
+/// Same arithmetic as `push_shaded`, `push_ghost` and `push_glow`, moved to the card so an orbit
+/// uploads only a camera. Normals come from the pixels' own derivatives (see `FACE_FRAGMENT`),
+/// and solid back faces are dropped by `GL_CULL_FACE`.
 pub(crate) fn face_vertex() -> String {
     resident(
         r#"
@@ -253,9 +223,8 @@ uniform vec4 u_clip;
 
 out vec3 v_pos;
 flat out uint v_tag;
-// The boolean preview draws the same faces in several programs and compares
-// the depths they land at, which only holds if every program puts a vertex in
-// exactly the same place (`gpu/csg.rs`).
+// The boolean preview compares depths of the same faces across programs, which requires
+// identical vertex placement (`gpu/csg.rs`).
 invariant gl_Position;
 
 void main() {
@@ -263,8 +232,8 @@ void main() {
     vec3 screen = project(pos);
     gl_Position = place(screen.xy, screen.z);
     gl_ClipDistance[0] = dot(u_clip.xyz, pos) + u_clip.w;
-    // A triangle with any corner hidden goes, and a hidden part shares no
-    // corner with anything else -- see `Renderable::parts`.
+    // A triangle with any corner hidden is dropped; hidden parts share no corners with others
+    // (`Renderable::parts`).
     gl_ClipDistance[1] = hidden(uint(gl_VertexID)) ? -1.0 : 1.0;
     v_pos = pos;
     v_tag = min(u_tag_base + in_body + 1u, 65535u);
@@ -273,11 +242,8 @@ void main() {
     )
 }
 
-/// A face's colour. Its normal is the plane its own pixels span -- the cross
-/// product of the position's screen derivatives, which is the same for every
-/// pixel of a flat triangle -- so no normal has to be stored or uploaded for
-/// it. A painted face's colour comes out of the paint table by the triangle's
-/// index.
+/// A face's colour. The normal is the cross product of the position's screen derivatives, so
+/// none is stored; painted faces read their colour from the paint table by triangle index.
 pub(crate) fn face_fragment() -> String {
     format!("#version 330 core\n{BOX_COMMON}\n{FACE_FRAGMENT_BODY}")
 }
@@ -287,13 +253,11 @@ in vec3 v_pos;
 flat in uint v_tag;
 
 uniform vec3 u_forward;
-// The colour a face is drawn in when its own paint does not say otherwise, in
-// bytes: the palette's solid, ghost or glow.
+// Default face colour in bytes: the palette's solid, ghost or glow.
 uniform vec4 u_base;
 // 0 a solid, 1 a ghost, 2 a glow.
 uniform int u_mode;
-// Whether the mesh has any paint, and the table saying which triangle has
-// which: the mesh's own colour tags, one texel per triangle.
+// Whether the mesh has any paint, and the per-triangle colour tag table.
 uniform int u_painted;
 uniform usampler2D u_paint;
 uniform int u_table_width;
@@ -309,8 +273,7 @@ void main() {
     float length_ = length(normal);
     float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
 
-    // A painted face keeps its paint; alpha is the base's either way, exactly
-    // as `triangle_base` hands it to `shade`.
+    // Paint overrides the colour; alpha is always the base's, as in `triangle_base`.
     vec4 base = u_base;
     if (u_mode == 0 && u_painted == 1) {
         ivec2 at = ivec2(gl_PrimitiveID % u_table_width, gl_PrimitiveID / u_table_width);
@@ -322,8 +285,7 @@ void main() {
     if (u_mode == 2) {
         out_colour = base / 255.0;
     } else {
-        // `shade`: a headlight plus a constant fill, truncated to a byte the
-        // way the CPU's `as u8` does.
+        // `shade`: a headlight plus a constant fill, truncated like the CPU's `as u8`.
         float factor = 0.34 + 0.66 * facing;
         out_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), base.a) / 255.0;
     }
@@ -331,10 +293,8 @@ void main() {
 }
 "#;
 
-/// A resident mesh's feature edges, read straight out of the mesh's vertex
-/// buffer by the edge list. The geometry stage sees both ends at once, so the
-/// line gets exactly the bias `line_step` gives it: a fraction of the mean of
-/// its two ends' keys.
+/// A resident mesh's feature edges, read via the edge list. The geometry stage sees both ends,
+/// so the line gets `line_step`'s bias from the mean of their keys.
 pub(crate) fn line_vertex() -> String {
     resident(
         r#"
@@ -403,15 +363,11 @@ void main() {
     )
 }
 
-/// A selected body's outline, found on the card: `push_selection`, one edge
-/// of the surface per point.
+/// A selected body's outline, found on the card (`push_selection`), one edge per point.
 ///
-/// Each point is an edge -- its two ends and the two triangles along it -- and
-/// the geometry stage looks the triangles up in the mesh's tables, asks which
-/// of them face the eye, and draws the edge when the surface turns away across
-/// it, or when it is a corner on the side facing the camera. A silhouette edge
-/// is drawn a second time one pixel out from the shape, which is what makes it
-/// a line rather than a row of dots; `push_selection` says why.
+/// The geometry stage looks up the edge's two triangles and draws it where the surface turns
+/// away across it, or at a corner facing the camera. Silhouette edges are drawn again one pixel
+/// outwards so they form a line rather than dots.
 pub(crate) const OUTLINE_VERTEX: &str = r#"#version 330 core
 layout(location = 0) in uvec4 in_edge;
 
@@ -502,8 +458,7 @@ void main() {
 
     if (edge.z == edge.w || near_faces != far_faces) {
         line(sa, sb, clip_a, clip_b, vec2(0.0), bias, tag);
-        // One pixel out of the shape: perpendicular to the edge on screen and
-        // away from the centre of the face on the shape's own side of it.
+        // One pixel out of the shape: perpendicular to the edge, away from the face centre.
         vec2 along = sb.xy - sa.xy;
         vec2 normal = vec2(-along.y, along.x);
         if (length(normal) < 1e-6) {
@@ -522,15 +477,12 @@ void main() {
     ))
 }
 
-/// Where planes cross a resident mesh's surface, one segment per triangle per
-/// plane: the principal planes' marks, and the edge a section leaves round the
-/// cut. `snap::plane_crossing` and `section::loops` ask the same question of
-/// every triangle on the CPU; asked here, it costs the CPU nothing at all.
+/// Where planes cross a resident mesh, one segment per triangle per plane: principal plane marks
+/// and section cut edges, computed on the card instead of by `snap::plane_crossing` and
+/// `section::loops`.
 ///
-/// A corner counts as lying on a plane within `u_on_plane`, a distance a few
-/// times what single precision loses on this mesh's coordinates: the CPU
-/// tests world positions for exact zeros, which the stored positions -- moved
-/// to the mesh's centre and rounded to single precision -- no longer hit.
+/// A corner counts as on a plane within `u_on_plane`, a few times the single-precision error,
+/// since the recentred, rounded positions no longer hit the CPU's exact zeros.
 pub(crate) fn crossing_vertex() -> String {
     resident(
         r#"
@@ -558,8 +510,7 @@ layout(line_strip, max_vertices = 6) out;
 in vec3 g_pos[];
 flat in int g_hidden[];
 
-// Up to three planes, each a distance from the stored position, and the
-// colour its crossing is drawn in.
+// Up to three planes, each a distance from the stored position, and its colour.
 uniform int u_planes;
 uniform vec4 u_plane[3];
 uniform vec4 u_plane_colour[3];
@@ -586,8 +537,7 @@ void main() {
         if ((d[0] > 0.0 && d[1] > 0.0 && d[2] > 0.0) || (d[0] < 0.0 && d[1] < 0.0 && d[2] < 0.0)) {
             continue;
         }
-        // A triangle lying in the plane has no crossing of its own: its edges
-        // are its neighbours' crossings.
+        // A triangle lying in the plane has no crossing of its own: its edges are its neighbours'.
         if (d[0] == 0.0 && d[1] == 0.0 && d[2] == 0.0) {
             continue;
         }
@@ -627,18 +577,12 @@ void main() {
     )
 }
 
-/// The ground grid, worked out per pixel over one quad on the ground: what
-/// `push_grid` lays down as a few hundred lines, each cut into fading steps.
+/// The ground grid, computed per pixel over one ground quad instead of `push_grid`'s lines.
 ///
-/// A pixel is on a grid line when the line is within half a pixel of it,
-/// measured across the line on screen -- which is what a one-pixel line
-/// rasterized along it covers. The two levels are the ones `grid_levels`
-/// picks, the finer faded in by its strength and the coarser drawn over it
-/// with every tenth line in the major colour; and every pixel fades with its
-/// distance from the middle of the frame, as each step of a CPU grid line
-/// does. The quad is positioned relative to the coarse level's snapped centre,
-/// which is a multiple of both spacings, so the lines are at multiples of the
-/// spacing in its own coordinates.
+/// A pixel is on a line when within half a pixel of it across the line on screen. The two levels
+/// are `grid_levels`' (the finer faded by its strength, every tenth coarse line in the major
+/// colour), and pixels fade with distance from the frame centre. The quad is positioned relative
+/// to the coarse level's snapped centre, a multiple of both spacings.
 pub(crate) fn grid_vertex() -> String {
     resident(
         r#"
@@ -661,24 +605,21 @@ pub(crate) const GRID_FRAGMENT: &str = r#"#version 330 core
 in vec2 v_uv;
 
 uniform vec2 u_viewport;
-// The two spacings, the finer's strength, and how far each level's lines run
-// from the centre.
+// The two spacings, the finer's strength, and each level's reach from the centre.
 uniform float u_fine;
 uniform float u_coarse;
 uniform float u_strength;
 uniform vec2 u_half;
-// Which coarse line through the centre each way is, counted in tens, so the
-// majors fall on the world's own multiples of ten.
+// Which coarse line through the centre each way is, in tens, so majors fall on multiples of ten.
 uniform vec2 u_major;
 uniform vec4 u_minor_colour;
 uniform vec4 u_major_colour;
-// The distance from the middle of the frame, in pixels, at which the grid has
-// faded out.
+// The distance from the frame centre, in pixels, at which the grid has faded out.
 uniform float u_fade;
 
 layout(location = 0) out vec4 out_colour;
 
-// How many pixels from the nearest line at `spacing` the pixel is, across it.
+// Pixels from the nearest line at `spacing`, measured across it.
 float pixels_off(float w, float spacing) {
     float off = abs(w - spacing * round(w / spacing));
     return off / max(length(vec2(dFdx(w), dFdy(w))), 1e-12);
@@ -720,15 +661,11 @@ void main() {
 }
 "#;
 
-/// An arm of an origin axis, and the rule that is not just a depth test --
-/// `push_axis_line` and `Frame::line_through`, asked per pixel.
+/// An origin axis arm with its per-pixel rules (`push_axis_line`, `Frame::line_through`).
 ///
-/// Each vertex carries where it is along its axis, so every pixel knows where
-/// it is too: it fades with the distance from the arm's centre, is left out
-/// wherever the axis runs through material, and where it loses the depth test
-/// is drawn anyway if the body that won the pixel is one the axis is arriving
-/// at. The spans of material come in a table, one row per axis: where each
-/// runs along the axis, and the tag of the body it is in.
+/// Each pixel knows its position along the axis: it fades with distance from the arm's centre,
+/// is dropped inside material, and is drawn despite failing the depth test if the winning body is
+/// one the axis is arriving at. Material spans come from a table, one row per axis.
 pub(crate) fn axis_vertex() -> String {
     resident(
         r#"
@@ -758,12 +695,10 @@ uniform usampler2D u_tag_tex;
 uniform sampler2D u_spans;
 uniform int u_row;
 uniform int u_count;
-// Where along the axis the arm starts, and the distance its fade is measured
-// against.
+// Where along the axis the arm starts, and the distance its fade is measured against.
 uniform float u_start;
 uniform float u_reach;
-// How the axis points relative to the view, which decides which side of a
-// body is the approach to it.
+// The axis direction relative to the view, which decides which side of a body is the approach.
 uniform float u_away;
 uniform vec4 u_colour;
 
@@ -783,9 +718,8 @@ void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
     if (v_depth >= texelFetch(u_depth_tex, at, 0).r) {
         uint owner = texelFetch(u_tag_tex, at, 0).r;
-        // On the eye's side of the whole body, not merely of one of its
-        // stretches: the line in a hole drilled through a body is behind the
-        // body's near wall (`render::body_extents`).
+        // In front of the whole body, not just one stretch, so a line in a drilled hole stays behind
+        // the near wall (`render::body_extents`).
         bool owned = false;
         bool before = true;
         bool after = true;
@@ -806,19 +740,11 @@ void main() {
 }
 "#;
 
-/// The edges of a boolean drawn per pixel: each shape's own feature edges, kept
-/// only where they are edges of the result. `u_done` holds, per pixel, one
-/// past the index of the shape the resolved surface belongs to and that
-/// surface's normal (`CSG_RESOLVE_FRAGMENT`).
+/// A boolean's edges per pixel: each shape's feature edges, kept only where they are edges of
+/// the result. `u_done` holds one past the resolved surface's shape index and its normal.
 ///
-/// Two things are asked. The pixel's surface has to be the edge's own shape's:
-/// an edge of a cutter standing out in the air, or of an operand swallowed by
-/// another, is on no surface of the result. And the result has to turn or end
-/// there -- a neighbouring pixel on a surface facing another way, or on none
-/// of the boolean at all. Without the second, where two shapes' faces are
-/// coplanar -- two boxes side by side, their tops level -- the pixels along an
-/// edge buried under the shared face resolve to either shape by rounding, and
-/// the edge came through as a row of dashes across a flat face.
+/// The pixel's surface must be the edge's own shape's, and the result must turn or end there.
+/// Without the second test, edges buried under coplanar faces showed as dashes.
 pub(crate) const CSG_EDGE_FRAGMENT: &str = r#"#version 330 core
 in vec4 v_colour;
 flat in uint v_tag;
@@ -858,18 +784,14 @@ void main() {
 }
 "#;
 
-/// The boolean preview's layer pass: every face of every shape, keeping at each
-/// pixel the nearest one behind the layer before -- one layer of the shapes'
-/// surfaces, peeled off the front of what is left. What is kept is the face's
-/// colour, worked out as `FACE_FRAGMENT` works out a solid's, and which shape
-/// it belongs to. See `gpu/csg.rs`.
+/// The boolean preview's layer pass: at each pixel, the nearest face behind the previous layer,
+/// with its colour (as in `FACE_FRAGMENT`) and shape. See `gpu/csg.rs`.
 pub(crate) const CSG_PEEL_FRAGMENT: &str = r#"#version 330 core
 in vec3 v_pos;
 
 uniform sampler2D u_previous;
 uniform int u_first;
-// The pixels an earlier layer has found the surface at, and the depth of the
-// rest of the scene: a layer behind it can never be seen.
+// Pixels already resolved, and the rest of the scene's depth: a layer behind it is never seen.
 uniform sampler2D u_done;
 uniform sampler2D u_scene_depth;
 uniform uint u_leaf;
@@ -878,9 +800,8 @@ uniform vec4 u_base;
 uniform int u_painted;
 uniform usampler2D u_paint;
 uniform int u_table_width;
-// The plane marks, in the shape's own coordinates as the crossing pass takes
-// them: a boolean drawn per pixel has no mesh of its own for that pass to cut,
-// so its surface is marked here instead, a pixel wide as a grid line is.
+// Plane marks in the shape's own coordinates: a per-pixel boolean has no mesh for the crossing
+// pass, so its surface is marked here, a pixel wide like a grid line.
 uniform int u_planes;
 uniform vec4 u_plane[3];
 uniform vec4 u_plane_colour[3];
@@ -909,8 +830,7 @@ void main() {
     }
     float factor = 0.34 + 0.66 * facing;
     out_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), 255.0) / 255.0;
-    // The normal turned towards the eye, so two coplanar faces agree however
-    // their triangles wind, a byte a component above the shape's index.
+    // The normal turned towards the eye so coplanar faces agree regardless of winding.
     vec3 towards = length_ > 0.0 ? normal / length_ : vec3(0.0, 0.0, 1.0);
     if (dot(towards, u_forward) > 0.0) {
         towards = -towards;
@@ -920,8 +840,7 @@ void main() {
     for (int k = 0; k < 3; k++) {
         float d = dot(u_plane[k].xyz, v_pos) + u_plane[k].w;
         float across = length(vec2(dFdx(d), dFdy(d)));
-        // A face lying in the plane has no crossing of its own, as in the
-        // crossing pass: its edges are its neighbours' crossings.
+        // A face lying in the plane has no crossing of its own, as in the crossing pass.
         bool lying = length_ > 0.0 && abs(dot(normal / length_, u_plane[k].xyz)) > 0.9999;
         if (k < u_planes && !lying && abs(d) <= 0.5 * across) {
             out_colour = vec4(u_plane_colour[k].rgb, 1.0);
@@ -931,10 +850,8 @@ void main() {
 }
 "#;
 
-/// The boolean preview's counting pass: one shape's faces in front of the
-/// layer, each adding one to that shape's own channel. How many times a ray
-/// from the eye crosses a closed surface before a point says whether the
-/// point is inside it: an odd count is inside.
+/// The boolean preview's counting pass: each face of one shape in front of the layer adds one
+/// to that shape's channel; an odd count means inside.
 pub(crate) const CSG_COUNT_FRAGMENT: &str = r#"#version 330 core
 layout(location = 0) out vec4 out_0;
 layout(location = 1) out vec4 out_1;
@@ -958,10 +875,8 @@ void main() {
 }
 "#;
 
-/// The boolean preview's packing pass, over the whole frame: one group of up
-/// to 32 shapes' counts as the bits of those the layer's point is inside, an
-/// odd count being inside. Written into the group's own channel of the
-/// resolve pass's mask; the other channels are masked off.
+/// The boolean preview's packing pass: up to 32 shapes' counts packed as inside bits into the
+/// group's channel of the resolve mask.
 pub(crate) const CSG_PACK_FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D u_count_0;
 uniform sampler2D u_count_1;
@@ -997,25 +912,19 @@ void main() {
 }
 "#;
 
-/// The boolean preview's resolving pass, over the whole frame: where the
-/// layer's point is on the result's surface -- the expression says one thing
-/// just in front of it and the other just behind, which is its own shape's
-/// count with one more crossing -- the point is drawn, at the layer's depth
-/// and in the layer's colour, and the pixel is marked done so no layer behind
-/// it is drawn there.
+/// The boolean preview's resolving pass: where the layer's point is on the result's surface,
+/// it is drawn at the layer's depth and colour, and the pixel is marked done.
 pub(crate) const CSG_RESOLVE_FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D u_layer;
 uniform usampler2D u_leaf;
 uniform sampler2D u_colour;
 // Which shapes the layer's point is inside, a bit each.
 uniform usampler2D u_inside;
-// The expression in postfix: a leaf by its index, -1 union, -2 difference,
-// -3 intersection.
+// The expression in postfix: a leaf by its index, -1 union, -2 difference, -3 intersection.
 uniform int u_program[256];
 uniform int u_length;
 uniform uint u_tag;
-// The first of the sections' shapes, when there are any: they come last, and
-// are drawn as the cut rather than as the model.
+// The first section shape, if any: sections come last and are drawn as the cut.
 uniform int u_half;
 
 layout(location = 0) out vec4 out_colour;
@@ -1056,8 +965,7 @@ void main() {
     }
     out_colour = texelFetch(u_colour, at, 0);
     out_tag = (u_half >= 0 && int(leaf) >= u_half) ? 0u : u_tag;
-    // Which shape's surface the pixel is, one past its index -- anything
-    // written is done -- and the surface's normal: what the edge pass asks.
+    // One past the surface's shape index (non-zero means done) and its normal, for the edge pass.
     vec3 normal = vec3(float((word >> 8) & 255u), float((word >> 16) & 255u), float(word >> 24)) / 255.0;
     out_done = vec4(float(leaf + 1u) / 255.0, normal);
     gl_FragDepth = depth;

@@ -2,22 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// When a drag snaps to the geometry of other bodies -- their vertices, edge
-/// midpoints and face centres -- rather than only to the grid step (issue 68).
-///
-/// The three answers are the three a modelling tool always ends up wanting:
-/// someone placing parts against each other wants it always on, someone laying
-/// out a field of shapes wants it never on, and most of the time the honest
-/// answer is "when I ask", which is what holding a key gives.
+/// When a drag snaps to other bodies' vertices, edge midpoints and face centres, not only the grid
+/// step (issue 68).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SnapMode {
-    /// Snap only while the snap key is held down.
+    /// Snap only while the snap key is held.
     #[default]
     WhileHeld,
-    /// Always snap to nearby geometry.
     Always,
-    /// Never snap to geometry; the grid step is the only snap.
+    /// Never snap to geometry; only the grid step.
     Never,
 }
 

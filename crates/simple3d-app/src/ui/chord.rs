@@ -2,36 +2,20 @@
 
 use simple3d_core::keymap::Chord;
 
-/// Watches what is being held so that whatever a hand holds down together can be
-/// a binding: a modifier on its own (issue 77), an ordinary combination like
-/// `Q+W+E`, or the two mixed.
-///
-/// The toolkit never reports Ctrl, Shift or Alt as key events -- they only ever
-/// arrive as the modifier state of some *other* key -- so a modifier press has
-/// to be recognised from that state changing. Ordinary keys have the same
-/// problem in reverse: a press cannot be told from the start of a combination
-/// until the hand comes off. So one rule covers both, and it is the one a hand
-/// already performs: everything held down together is the chord, and the chord
-/// is complete when the last of it is released.
-///
-/// The widest set held during one press is what comes out, so pressing Q, adding
-/// W and E and letting all three go is `Q+W+E` rather than whichever happened to
-/// be released last.
+/// Tracks what is held so a modifier alone (issue 77), a combination like `Q+W+E`, or a mix can be
+/// a binding. The toolkit reports modifiers only as state, and a key press cannot be told from a
+/// combination's start until release, so the chord is everything held together, complete when the
+/// last is released; the widest set held during the press is reported.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChordHold {
     pub(super) held: Option<Chord>,
-    /// The pointer was used while this was down, so the hold is part of a mouse
-    /// gesture and not a binding of its own.
+    /// The pointer was used during the hold, making it part of a mouse gesture, not a binding.
     pub(super) interrupted: bool,
 }
 
 impl ChordHold {
-    /// Feed one frame's state. Returns the chord if this frame completed one:
-    /// everything is up again and the pointer was not used along the way.
-    ///
-    /// `keys_down` is every ordinary key currently held, and `interrupted` is a
-    /// mouse button being used -- Ctrl+click picks a second object and must not
-    /// also fire what Ctrl alone is bound to.
+    /// Feed one frame; returns a chord if this frame completed one (all released, pointer unused).
+    /// `keys_down` are held ordinary keys; `interrupted` is mouse use, so Ctrl+click does not fire Ctrl.
     pub fn update<'a>(
         &mut self,
         modifiers: egui::Modifiers,
@@ -63,14 +47,13 @@ impl ChordHold {
         None
     }
 
-    /// Forget a hold in progress: the keyboard has gone somewhere else -- a
-    /// dialog, a text field -- and the release will never be seen here.
+    /// Forget a hold in progress, when the keyboard has gone elsewhere and the release will not be seen.
     pub fn reset(&mut self) {
         *self = ChordHold::default();
     }
 }
 
-/// Every ordinary key held down right now, by the name the keymap stores.
+/// Every ordinary key held now, by keymap name.
 pub fn keys_down(input: &egui::InputState) -> Vec<String> {
     let mut names: Vec<String> = input.keys_down.iter().map(|k| k.name().to_string()).collect();
     names.sort();

@@ -1,9 +1,6 @@
-//! The viewport panel: navigation, picking, the manipulator overlay and the
-//! bounding-box readout (spec sections 6.1, 6.2).
-//!
-//! The shaded image comes from the software rasterizer as a texture; the
-//! manipulator, the bounding box and the drag readout are drawn on top with the
-//! toolkit's 2D painter, so they are always visible and can be hovered.
+//! The viewport panel: navigation, picking, manipulator and bounding-box readout (spec sections 6.1,
+//! 6.2). The rendered image is a texture; overlays are drawn on it with the 2D painter so they stay
+//! visible and hoverable.
 
 mod show;
 pub use show::show;

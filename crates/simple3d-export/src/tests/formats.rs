@@ -16,8 +16,7 @@ pub(crate) fn every_format_writes_a_file_with_the_expected_shape() {
         match format {
             Format::ThreeMf => {
                 assert_eq!(&bytes[0..2], b"PK");
-                // The entry names are in the clear in any zip; the parts
-                // themselves are compressed, so the document is read out.
+                // Entry names are in the clear, the parts compressed, so the document is read out.
                 let names = String::from_utf8_lossy(&bytes);
                 assert!(names.contains("[Content_Types].xml"));
                 assert!(names.contains("3D/3dmodel.model"));
@@ -40,7 +39,7 @@ pub(crate) fn every_format_writes_a_file_with_the_expected_shape() {
                 let text = String::from_utf8(bytes).unwrap();
                 assert_eq!(text.lines().filter(|l| l.starts_with("v ")).count(), welded.positions.len());
                 assert_eq!(text.lines().filter(|l| l.starts_with("f ")).count(), welded.indices.len());
-                // 1-based indices, and none out of range.
+                // 1-based indices, none out of range.
                 for line in text.lines().filter(|l| l.starts_with("f ")) {
                     for field in line[2..].split_whitespace() {
                         let i: usize = field.parse().unwrap();
@@ -68,7 +67,7 @@ pub(crate) fn every_format_writes_a_file_with_the_expected_shape() {
 
 #[test]
 pub(crate) fn the_exported_bounding_box_matches_the_entered_dimensions() {
-    // Spec acceptance criteria 1 and 2, read back out of the written file.
+    // Spec acceptance criteria 1 and 2, read back from the file.
     let path = temp_dir().join("dims.obj");
     let mut cb = no_progress();
     write(&path, &plate(), &Options { format: Format::Obj, ..Default::default() }, &mut cb).unwrap();

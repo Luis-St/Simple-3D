@@ -4,29 +4,14 @@ use super::*;
 use crate::raster::Image;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_geom::{primitives, Vec3};
 
 #[test]
 pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_way_out() {
-    // Issue 47, and the rule the three earlier passes all missed. What
-    // hides an axis on the way *in* is the material it runs through, not
-    // the depth buffer: a shape merely standing in front of the line is no
-    // reason to drop it, or the stretch arriving at that shape goes missing
-    // and only the point where the line meets the surface is left.
-    //
-    // On the way out it is the other way round. Past the far surface the
-    // line has left the solid and is simply behind it, so the depth buffer
-    // is exactly the right question -- and answering it the same way as the
-    // approach drew the arm across the face of a box it had already come
-    // out of, which reads as a line inside the object.
-    //
-    // Sampled at points on the line itself, in the world, and measured as
-    // the difference switching that one axis off makes -- a line is faded
-    // and alpha-blended, so the pixel is never the axis colour exactly, and
-    // counting coloured pixels is what let every earlier version of this
-    // pass while being wrong.
+    // Issue 47: on the way in, an axis is hidden only by the material it runs through, not by the
+    // depth buffer, or the stretch arriving at a shape goes missing. On the way out the line is
+    // behind the solid, and the depth test applies. Measured as the difference switching the axis
+    // off makes, since faded, blended lines never match the axis colour exactly.
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
     req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
@@ -38,12 +23,11 @@ pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_
         without.items = vec![Item { renderable: &prepared, style: Style::Solid }];
         let without = render(&without);
 
-        // Whether this axis put anything on the frame at a point on it.
+        // Whether this axis drew anything at a point on it.
         let drawn_at = |at: f64| {
             let (pos, _) = req.view.project(along(axis, at)).expect("the sample is in front of the camera");
             let (x, y) = (pos.x.round() as usize, pos.y.round() as usize);
-            // A line is a pixel wide and the projection rounds, so the
-            // neighbourhood is what is asked, not the single pixel.
+            // Lines are a pixel wide and projection rounds, so the neighbourhood is checked.
             (y.saturating_sub(1)..=y + 1).any(|y| {
                 (x.saturating_sub(1)..=x + 1).any(|x| {
                     if x >= frame.width || y >= frame.height {
@@ -55,42 +39,32 @@ pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_
             })
         };
 
-        // Which way this axis runs into the frame: the arm on the eye's
-        // side is the one that arrives at a surface, and the other one
-        // leaves through the back.
+        // The arm on the eye's side arrives at a surface; the other leaves through the back.
         let near = -component(req.view.forward(), axis).signum();
 
-        // Inside the box, which spans -15..15: nothing of the line.
+        // Inside the box (-15..15): nothing of the line.
         for at in [-12.0, -6.0, 0.0, 6.0, 12.0] {
             assert!(!drawn_at(at), "axis {axis} drew inside the solid, at {at}");
         }
-        // The near arm is there unbroken right up to the surface it goes
-        // into -- including where it is still over the box's own
-        // silhouette, which is the stretch the depth test used to eat.
+        // The near arm is unbroken up to the surface, including over the box's silhouette.
         for at in [16.0, 18.0, 24.0] {
             assert!(drawn_at(at * near), "axis {axis} left a gap arriving at the solid, at {at}");
         }
-        // The far arm is behind the box, so the box hides it like anything
-        // else: nothing while it is over the silhouette...
+        // The far arm is hidden while behind the box...
         for at in [16.0, 18.0, 22.0] {
             assert!(!drawn_at(at * -near), "axis {axis} drew behind the solid, at {at}");
         }
-        // ...and the line again once it is clear of it.
+        // ...and visible again once clear of it.
         assert!(drawn_at(40.0 * -near), "axis {axis} never came out from behind the solid");
     }
 }
 
 #[test]
 pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else() {
-    // Issue 47, the other half: only the solid an axis actually goes into
-    // is seen through. A shape standing in front of the origin covers the
-    // axes behind it, and a shape a *different* axis runs through covers
-    // them just the same -- the exception is per axis and per solid, which
-    // is why it cannot be one flag on the item.
+    // Issue 47: the see-through exception is per axis and per solid; other solids hide axes normally.
     let mut req = request(Vec::new(), DisplayMode::Shaded);
     req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
-    // Between the eye and the origin, and square in front of it: the axes
-    // cross its silhouette without touching the solid itself.
+    // Between the eye and the origin: the axes cross its silhouette without touching it.
     let between = primitives::box_mesh(30.0, 30.0, 30.0).translated(req.view.offset_dir() * 40.0);
     let prepared = Renderable::prepare(&between);
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
@@ -99,9 +73,7 @@ pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else()
         "the solid was placed on an axis, so this proves nothing"
     );
 
-    // The same request, with or without the solid in the way and with one
-    // axis switched off, so what the axis drew can be measured as the
-    // difference switching it off makes.
+    // With or without the solid and with one axis off, so the axis is measured as a difference.
     let frame = |axes: [bool; 3], in_the_way: bool| {
         let mut this = Request { grid: Grid { axes, ..req.grid }, ..request(Vec::new(), req.mode) };
         this.view = req.view;
@@ -134,9 +106,9 @@ pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else()
         };
 
         for at in [-6.0, -3.0, 3.0, 6.0] {
-            // The control: with nothing in the way the axis draws here...
+            // Control: with nothing in the way the axis draws here...
             assert!(drawn_at(&bare, &without, at), "axis {axis} does not draw at {at} even with nothing in the way");
-            // ...and with the solid in front of it, it does not.
+            // ...and with the solid in front it does not.
             assert!(
                 !drawn_at(&covered, &covered_without, at),
                 "axis {axis} drew through a solid in front of it, at {at}"
@@ -147,16 +119,9 @@ pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else()
 
 #[test]
 pub(crate) fn the_axis_in_a_hole_through_a_body_is_behind_the_wall_in_front_of_it() {
-    // A block drilled straight down, with the X axis running through the hole:
-    // material from 14.3 to 17, the hole to 25, material again to 27.7. One
-    // body, two stretches of it on the line.
-    //
-    // The approach was asked of each stretch on its own, so the piece of the
-    // line in the hole was "on the eye's side" of the far stretch and was drawn
-    // over the solid wall in front of it -- from the front, and from above at an
-    // angle, a red line across the middle of a face with nothing but material
-    // behind it. From straight above the hole is open, and the line in it is
-    // seen through it, as anything in an open hole would be.
+    // A block drilled through, with the X axis in the hole: one body, two stretches of material on
+    // the line. Regression: the hole's stretch was drawn over the near wall; it should show only
+    // where the hole is open to the eye.
     let block = primitives::box_mesh(13.3333, 20.0, 25.0).translated(Vec3::new(21.0, 0.0, 0.0));
     let hole = primitives::cylinder_mesh(8.0, 8.0, 60.0, 32).translated(Vec3::new(21.0, 0.0, 0.0));
     let prepared = Renderable::prepare(&simple3d_geom::csg_bsp::subtract(&block, &hole));
@@ -179,11 +144,9 @@ pub(crate) fn the_axis_in_a_hole_through_a_body_is_behind_the_wall_in_front_of_i
             let o = (y * w + x) * 4;
             with.color[o..o + 4] != without.color[o..o + 4]
         };
-        // The control: the line is there on the way in, on the eye's side of
-        // the block -- +X in all three views.
+        // Control: the line is drawn arriving at the block (+X in all three views).
         assert!(drawn_at(32.0), "no axis arriving at the block at yaw {yaw}, pitch {pitch}");
-        // Before the fix, the front view drew the whole of 18..24 and the
-        // three-quarter view the part of it clear of the plane marks.
+        // Before the fix, the front view drew all of 18..24.
         for at in [19.0, 21.0, 23.0] {
             assert_eq!(
                 drawn_at(at),

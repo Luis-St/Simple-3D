@@ -6,8 +6,7 @@ use eframe::glow::{self, HasContext};
 use std::sync::Arc;
 
 impl Gpu {
-    /// Compile the shaders and make the buffers. Fails, rather than panics, on
-    /// a driver that will not have them -- the caller falls back to the CPU.
+    /// Compile shaders and make buffers; fails rather than panics, so the caller can fall back to the CPU.
     pub fn new(gl: Arc<glow::Context>) -> Result<Gpu, String> {
         unsafe {
             let solid = Program::new(&gl, VERTEX_SOURCE, SOLID_SOURCE)?;
@@ -24,8 +23,7 @@ impl Gpu {
             let csg_pack = Program::new(&gl, BACKGROUND_VERTEX, CSG_PACK_FRAGMENT)?;
             let csg_resolve = Program::new(&gl, BACKGROUND_VERTEX, CSG_RESOLVE_FRAGMENT)?;
             let csg_edges = Program::with_geometry(&gl, &line_vertex(), Some(&line_geometry()), CSG_EDGE_FRAGMENT)?;
-            // As wide as the driver allows, up to a size that keeps a table of
-            // a few thousand entries from being mostly padding.
+            // As wide as the driver allows, capped so a small table is not mostly padding.
             let table_width = gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE).clamp(1024, 8192) as usize;
             let buffer = Buffers::new(&gl)?;
             let ground = GroundBuffers::new(&gl)?;
@@ -62,12 +60,8 @@ impl Gpu {
 }
 
 impl Gpu {
-    /// Draw `request` into the offscreen texture, and return the id egui can
-    /// paint it with.
-    ///
-    /// Nothing is prepared for it on the CPU: the meshes are on the card, and
-    /// the grid, the axes and a tool's preview are drawn by shaders from the
-    /// handful of numbers that decide them (`ground.rs`).
+    /// Draw `request` offscreen and return the texture id for egui. Nothing is prepared on the CPU:
+    /// grid, axes and previews come from shaders (`ground.rs`).
     pub fn render(&mut self, request: &Request<'_>) -> Result<egui::TextureId, String> {
         let [width, height] = request.size;
         let (width, height) = (width.max(1), height.max(1));
@@ -80,8 +74,7 @@ impl Gpu {
         if let Some(lines) = extra.first() {
             plan.overlays.push(resident::LineDraw::preview(lines.id, request.palette.selected));
         }
-        // A boolean drawn per pixel: the shapes it is drawn from, and the
-        // section's half-space as one more (`csg.rs`).
+        // A boolean drawn per pixel from its leaf shapes plus the section half-space (`csg.rs`).
         let leaves = request.live.csg.iter().flat_map(|csg| csg.leaves.iter().map(|(leaf, _)| *leaf));
         extra.extend(leaves.chain(half.iter().flat_map(|(_, shapes)| shapes.iter().map(|(shape, _)| shape))));
         extra.extend(request.live.ready.iter().copied());
@@ -100,7 +93,6 @@ impl Gpu {
             if let Some(targets) = &self.csg_targets {
                 targets.forget();
             }
-            // A drag that is about to be drawn this way finds its targets made.
             if !request.live.ready.is_empty() {
                 unsafe { self.ensure_csg_targets(&gl, width, height)? };
             }

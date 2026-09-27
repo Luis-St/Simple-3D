@@ -23,6 +23,6 @@ pub(crate) fn modifier_snapping_is_what_the_table_in_the_doc_comment_says() {
     assert_eq!(Mods::default().snap(23.0, 10.0), 20.0);
     assert_eq!(Mods { free: true, ..Default::default() }.snap(23.0, 10.0), 23.0);
     assert_eq!(Mods { coarse: true, ..Default::default() }.snap(63.0, 10.0), 100.0);
-    // A zero increment cannot snap, and must not divide by zero.
+    // A zero increment cannot snap and must not divide by zero.
     assert_eq!(Mods::default().snap(23.0, 0.0), 23.0);
 }

@@ -4,10 +4,8 @@ use super::*;
 
 #[test]
 pub(crate) fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() {
-    // The palette's tiles add a shape at the document's insertion point when
-    // they are clicked. Dragged, they carry the shape into the outliner and the
-    // drop says which row it belongs on -- the same gesture, the same slab on
-    // the pointer and the same drop indicator as dragging a row already there.
+    // Clicked, a tile adds at the insertion point; dragged, it carries the shape into the outliner
+    // with the same slab and indicator as a row drag.
     let mut harness = harness("palette-drag");
     let root = harness.state().scene.root();
     let plate = harness.state().primary().expect("the starter shape is selected");
@@ -20,8 +18,7 @@ pub(crate) fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() 
     let tile = rect_of(&harness, crate::panel_primitives::tile_id("sphere")).center();
     press(&mut harness, tile);
     move_to(&mut harness, tile + egui::vec2(0.0, 6.0));
-    // Settled over several frames: a response reports the frame it was drawn
-    // in, so the press only becomes a drag a frame or two after the move.
+    // Several frames, since the press becomes a drag a frame or two after the move.
     for _ in 0..4 {
         harness.step();
     }
@@ -31,8 +28,7 @@ pub(crate) fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() 
         "dragging a tile did not pick the shape up"
     );
 
-    // Over the group, held for several frames, because a response reports the
-    // frame it was drawn in.
+    // Over the group for several frames, since responses report their drawn frame.
     for _ in 0..3 {
         let onto = rect_of(&harness, crate::panel_outliner::row_id(group)).center();
         move_to(&mut harness, onto);
@@ -51,7 +47,7 @@ pub(crate) fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() 
     assert_eq!(app.primary(), Some(landed), "the dropped shape was not left selected");
     assert!(app.outliner_drag.is_none() && app.drop_target.is_none(), "the drag outlived the drop");
 
-    // And it undoes in one step, like every other add.
+    // It undoes in one step, like every add.
     harness.state_mut().run(simple3d_core::keymap::Command::Undo);
     harness.step();
     assert_eq!(harness.state().scene.node(group).children.len(), before);
@@ -59,8 +55,7 @@ pub(crate) fn a_shape_is_dragged_out_of_the_palette_and_dropped_into_the_tree() 
 
 #[test]
 pub(crate) fn a_tile_still_adds_its_shape_when_it_is_merely_clicked() {
-    // The tile answers to both gestures, and teaching it to drag must not have
-    // cost it the click it had before.
+    // Dragging must not have cost the tile its click.
     let mut harness = harness("palette-click");
     let root = harness.state().scene.root();
     let before = harness.state().scene.node(root).children.len();
@@ -76,19 +71,14 @@ pub(crate) fn a_tile_still_adds_its_shape_when_it_is_merely_clicked() {
 
 #[test]
 pub(crate) fn a_dialog_stops_the_mouse_as_well_as_the_keyboard() {
-    // With About open, clicking a tile in the palette still added a shape,
-    // while Ctrl+N did nothing: `handle_shortcuts` returned early on a modal
-    // and nothing stopped the pointer. A dialog left open behind the main
-    // window was an application whose shortcuts had silently stopped while the
-    // document could still be edited by mouse.
+    // Regression: with About open, tile clicks still added shapes while shortcuts were blocked.
     let mut harness = harness("dialog-blocks-pointer");
     let root = harness.state().scene.root();
     let before = harness.state().scene.node(root).children.len();
     let tile = rect_of(&harness, crate::panel_primitives::tile_id("sphere")).center();
 
     harness.state_mut().modal = crate::app::Modal::About;
-    // Two frames: the backdrop has to be drawn once before its layer can win a
-    // hit test, which egui settles at the end of the pass it was drawn in.
+    // Two frames: the backdrop must be drawn once before its layer wins hit tests.
     harness.step();
     harness.step();
 

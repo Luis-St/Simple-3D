@@ -4,13 +4,8 @@ use super::*;
 use simple3d_core::keymap::Command;
 use simple3d_geom::Vec3;
 
-/// Spec acceptance criterion 26, from the command a keypress actually
-/// dispatches: hold an arrow key, every repeat steps by the snap increment,
-/// and the whole run undoes in one.
-///
-/// `gizmo::a_held_nudge_run_steps_by_the_snap_and_undoes_in_one` covers the
-/// arithmetic; this covers the wiring from `App::run` to it, which is the
-/// part a keypress reaches.
+/// Spec acceptance criterion 26 from the dispatched command: held repeats step by the snap and undo
+/// in one. The arithmetic is covered in `gizmo`; this is the wiring from `App::run`.
 #[test]
 pub(crate) fn holding_an_arrow_key_nudges_by_the_snap_and_undoes_in_one_step() {
     const PRESSES: usize = 8;
@@ -21,8 +16,7 @@ pub(crate) fn holding_an_arrow_key_nudges_by_the_snap_and_undoes_in_one_step() {
     assert_eq!(snap, 1.0, "the default step changed; this test's arithmetic assumes it");
     let start = app.scene.node(id).position;
 
-    // Something before the run, so "one undo step" is distinguishable from
-    // "undo emptied the stack".
+    // A step before the run, so "one step" differs from "stack emptied".
     app.run(Command::Rename);
     let before_run = app.history.revision();
 
@@ -45,8 +39,7 @@ pub(crate) fn holding_an_arrow_key_nudges_by_the_snap_and_undoes_in_one_step() {
     assert!((app.scene.node(id).position - start).length() > snap, "redo did not put the run back");
 }
 
-/// Nudging in rotate and resize mode goes through the same key, and a mode
-/// switch mid-way must not be swallowed into the previous run's undo step.
+/// Rotate and resize nudges use the same key, and a mode switch starts a new undo step.
 #[test]
 pub(crate) fn switching_mode_starts_a_new_nudge_undo_step() {
     let mut app = headless_app();
@@ -62,14 +55,13 @@ pub(crate) fn switching_mode_starts_a_new_nudge_undo_step() {
     app.reevaluate_for_test();
     assert_ne!(app.scene.node(id).rotation, Vec3::ZERO, "a rotate-mode nudge did not rotate");
 
-    // One undo takes back the rotation only.
+    // One undo takes back only the rotation.
     app.run(Command::Undo);
     assert_eq!(app.scene.node(id).rotation, Vec3::ZERO);
     assert_eq!(app.scene.node(id).position, moved, "the rotation and the move shared an undo step");
 }
 
-/// Spec acceptance criterion 20's last clause, which is `App`'s to keep: a
-/// pasted copy is left selected, so a nudge or a drag can follow immediately.
+/// Spec acceptance criterion 20: a pasted copy stays selected, so a nudge or drag can follow.
 #[test]
 pub(crate) fn a_pasted_copy_is_left_selected() {
     let mut app = headless_app();
@@ -83,7 +75,7 @@ pub(crate) fn a_pasted_copy_is_left_selected() {
     assert_eq!(app.selection, vec![pasted], "the copy is not the whole selection");
     assert_eq!(app.scene.node(pasted).position, app.scene.node(original).position);
 
-    // And it really is usable straight away: a nudge acts on the copy.
+    // A nudge acts on the copy straight away.
     app.reevaluate_for_test();
     let start = app.scene.node(pasted).position;
     app.run(Command::NudgeRight);

@@ -6,12 +6,8 @@ use simple3d_core::keymap::Command;
 use simple3d_core::pattern;
 use simple3d_core::primitive::{ParamValue, ParamsExt};
 
-/// The six numbers live in a window over the viewport rather than unrolled into
-/// the properties panel, and the panel's Noise row is what puts it up.
-///
-/// Asked for from the running application. In the panel the fields appeared by
-/// pushing everything under them down the page -- to edit something whose whole
-/// effect is in the viewport the panel was now covering less of.
+/// The scatter numbers live in a window over the viewport, opened by the Noise row, instead of
+/// pushing the panel's contents down.
 #[test]
 pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
     let mut harness = harness("noise-popup");
@@ -27,8 +23,7 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
         harness.step();
     }
     assert_eq!(harness.state().noise_popup, Some(id), "the Noise row did not open the window");
-    // A pattern with no noise shows the parts a scatter is built from, not
-    // eight fields at nothing (issue 79). Adding one brings its numbers up.
+    // Without noise, the window shows parts to add rather than zeroed fields (issue 79).
     assert!(jitter_shown(&harness).is_none(), "the window drew fields for a scatter nobody has added");
     let nudge = rect_of(&harness, crate::noise_popup::part_id("", crate::noise_popup::Part::Nudge));
     press(&mut harness, nudge.center());
@@ -41,8 +36,7 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
     assert!(params.num("noise_x") > 0.0, "adding a nudge nudged nothing");
     assert_eq!(pattern::crowding(&params, harness.state().pattern_content_size(id).unwrap()), None);
 
-    // Inside the viewport it floats over, which is what "in place" means: it
-    // cannot be dragged onto the other screen and left there.
+    // Kept inside the viewport it floats over.
     let window = harness
         .ctx
         .memory(|memory| memory.area_rect(egui::Id::new(("in-place-popup", "pattern-noise"))))
@@ -53,9 +47,7 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
         "the window is at {window:?}, outside the {viewport:?} it belongs to"
     );
 
-    // The row's button is an action, not a toggle: pressing it again asks for
-    // the same window, which is already up, and nothing goes away under the
-    // pointer that just asked for it.
+    // The button is an action: pressing it again keeps the open window.
     harness.get_by_label("Configure").click();
     for _ in 0..2 {
         harness.step();
@@ -63,10 +55,7 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
     assert_eq!(harness.state().noise_popup, Some(id), "the Noise button flipped the window shut");
     assert!(jitter_shown(&harness).is_some(), "the numbers went away when the button was pressed again");
 
-    // The window closes the way every in-place popup closes: by its own foot.
-    // Asked of the state rather than of the fields, which is what the tool's own
-    // window test asks: a response the context has already handed out survives
-    // the frame that stops drawing it.
+    // Done closes it, checked on state since a stale response survives the frame that stops drawing it.
     harness.get_by_label("Done").click();
     for _ in 0..2 {
         harness.step();
@@ -74,11 +63,7 @@ pub(crate) fn the_scatter_is_edited_in_a_window_over_the_viewport() {
     assert_eq!(harness.state().noise_popup, None, "Done left the window up");
 }
 
-/// Reset takes the whole scatter off at once, and one undo puts all of it back.
-///
-/// Asked for from the running application: four numbers typed back to zero by
-/// hand was the only way to stop a pattern being scattered, and three of them
-/// left at a tenth of a millimetre is a pattern that still is.
+/// Reset removes the whole scatter at once and one undo restores it.
 #[test]
 pub(crate) fn reset_takes_the_whole_scatter_off_in_one_undo_step() {
     let mut harness = harness("noise-popup-reset");
@@ -92,8 +77,7 @@ pub(crate) fn reset_takes_the_whole_scatter_off_in_one_undo_step() {
         params.insert("noise_seed".to_string(), ParamValue::Count(4));
     }
     harness.state_mut().noise_popup = Some(id);
-    // Two turns are a taller window, which takes a few more frames to settle
-    // where it is going to be.
+    // Two turns make a taller window that takes a few frames to settle.
     for _ in 0..8 {
         harness.step();
     }
@@ -112,8 +96,7 @@ pub(crate) fn reset_takes_the_whole_scatter_off_in_one_undo_step() {
     assert_eq!(params.int("noise_seed"), 1, "Reset put the distances back but left the seed where it was");
     assert!(!harness.state().noise_is_set(id), "Reset left something for itself to do again");
 
-    // One step, not four: a scatter is taken off as a whole, so it comes back as
-    // a whole.
+    // One undo step for the whole scatter.
     harness.state_mut().run(Command::Undo);
     harness.step();
     let params = harness.state().scene.node(id).params().cloned().expect("a pattern");
@@ -123,8 +106,7 @@ pub(crate) fn reset_takes_the_whole_scatter_off_in_one_undo_step() {
     assert_eq!(params.int("noise_seed"), 4);
 }
 
-/// Each part of the scatter comes off by its own cross, leaving the others, and
-/// Shuffle steps the seed on to another scatter of the same size (issue 79).
+/// Each part comes off by its own cross, and Shuffle steps the seed (issue 79).
 #[test]
 pub(crate) fn a_part_comes_off_by_its_own_cross_and_shuffle_steps_the_seed() {
     let mut harness = harness("noise-popup-parts");
@@ -162,17 +144,13 @@ pub(crate) fn a_part_comes_off_by_its_own_cross_and_shuffle_steps_the_seed() {
     assert_eq!(params.num("noise_x"), 2.0, "the turn's cross took the nudge with it");
 }
 
-/// Whether the first jitter's own field is on screen. Asked of the field rather
-/// than of the row's name, which is drawn with its unit in brackets and so reads
-/// as nothing a label query can match.
+/// Whether the first jitter field is shown; queried by field since the row name includes its unit.
 fn jitter_shown(harness: &Harness<'_, App>) -> Option<egui::Response> {
     harness.ctx.read_response(crate::panel_properties::grip_id("Jitter X"))
 }
 
-/// Asked for from the running application: the noise took one turn, about one
-/// axis or all three by the same amount. "+ Turn" now adds a turn about each
-/// axis in turn -- Z, then X, then Y -- and goes once all three have one, and a
-/// turn's own axis chips move it onto an axis that has none.
+/// "+ Turn" adds a turn per axis (Z, X, then Y) until all three have one, and a turn's axis chips
+/// move it onto a free axis.
 #[test]
 pub(crate) fn a_turn_is_added_about_each_axis_and_moved_between_them() {
     let mut harness = harness("noise-popup-turns");
@@ -204,11 +182,11 @@ pub(crate) fn a_turn_is_added_about_each_axis_and_moved_between_them() {
         "the turn chip stayed with every axis already turned"
     );
 
-    // Take X's off, and Z's own chips move it there.
+    // Remove X's turn, and Z's chips move Z's turn there.
     click(&mut harness, crate::noise_popup::drop_part_id("", crate::noise_popup::Part::Turn(0)));
     click(&mut harness, crate::noise_popup::turn_axis_id("", 2, 0));
     assert_eq!(turns(&harness), [true, true, false], "Z's turn did not move onto X");
-    // And not onto Y, which has one of its own.
+    // Not onto Y, which has its own.
     click(&mut harness, crate::noise_popup::turn_axis_id("", 0, 1));
     assert_eq!(turns(&harness), [true, true, false], "a turn moved onto an axis already turned");
 }

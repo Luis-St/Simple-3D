@@ -1,18 +1,15 @@
-//! What can stop an import, in the words the dialog shows.
+//! What can stop an import, in the dialog's words.
 
 use std::fmt;
 
-/// Why an import did not happen. Every variant carries the specific reason:
-/// "the file could not be read" on its own tells a user nothing about a model
-/// somebody else's program wrote.
+/// Why an import failed, always with the specific reason.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportError {
-    /// The name says nothing this crate reads, and neither do the bytes.
+    /// Neither name nor bytes are a readable format.
     Unsupported(String),
-    /// The format was recognised and the content does not hold up. The string
-    /// says where it stopped making sense.
+    /// Recognised format, bad content; the string says where it stopped making sense.
     Malformed(String),
-    /// A file that parsed, and holds no triangles.
+    /// Parsed, but no triangles.
     Empty,
     Cancelled,
     Io(String),
@@ -36,7 +33,6 @@ impl fmt::Display for ImportError {
 
 impl std::error::Error for ImportError {}
 
-/// A parse failure, as the readers report it.
 pub(crate) fn malformed(why: impl Into<String>) -> ImportError {
     ImportError::Malformed(why.into())
 }

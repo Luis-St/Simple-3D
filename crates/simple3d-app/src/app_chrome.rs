@@ -1,5 +1,4 @@
-//! The window furniture: keyboard dispatch, menu bar, status bar and the modal
-//! windows (export, keymap editor, about, errors, quit confirmation).
+//! Window furniture: keyboard dispatch, menu bar, status bar and modal windows.
 
 mod dialog;
 mod dialog_parts;
@@ -21,11 +20,10 @@ mod save_primitive;
 
 use simple3d_core::scene::ExportBody;
 
-/// What the pattern command is called with nothing selected, where it adds an
-/// empty pattern to fill rather than making one of the selection.
+/// The pattern command's label with nothing selected, where it adds an empty pattern.
 pub(crate) const EMPTY_PATTERN: &str = "Add an empty pattern";
 
-/// What one export-body mark is called, in the picker's button and in its menu.
+/// An export-body mark's label, for the picker and its menu.
 fn body_label(body: Option<ExportBody>) -> String {
     match body {
         None => "A body of its own".to_string(),

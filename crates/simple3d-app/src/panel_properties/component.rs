@@ -5,13 +5,8 @@ use crate::app::App;
 use crate::theme::{self, token};
 use simple3d_core::scene::{Body, GroupOp, NodeId};
 
-/// An integration's panel: which component it places, the way into it, and
-/// the one thing about what is inside that it may choose for itself -- the
-/// operation its shapes are combined with.
-///
-/// Everything else about the inside is the component's, and is edited in the
-/// component's own tab; the panel says so rather than offering fields that
-/// could only edit this one place.
+/// An integration's panel: its component, a way in, and the combining operation, the one inner choice
+/// it owns; everything else is edited in the component's tab.
 pub(crate) fn component_body(app: &mut App, ui: &mut egui::Ui, id: NodeId, open: &mut bool) {
     let Body::Component { component, op } = app.scene.node(id).body else { return };
     let Some(name) = app.component_label(component) else {

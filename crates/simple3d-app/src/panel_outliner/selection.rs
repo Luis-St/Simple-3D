@@ -3,7 +3,6 @@
 use crate::app::App;
 use crate::theme::{self, token};
 
-/// How much is selected, if anything.
 pub(crate) fn selection_line(app: &mut App, ui: &mut egui::Ui) {
     if app.selection.is_empty() {
         return;
@@ -15,12 +14,8 @@ pub(crate) fn selection_line(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(2.0);
 }
 
-/// The inline confirmation for deleting a group.
-///
-/// It is a strip in the outliner rather than a dialog over the window because
-/// the question is about the tree, and the answer is easier to give while
-/// still looking at it. The two answers are named for what they do -- neither
-/// of them is "OK".
+/// Inline confirmation for deleting a group: a strip in the tree it is about, with answers named for
+/// what they do rather than "OK".
 pub(crate) fn confirm_strip(app: &mut App, ui: &mut egui::Ui) {
     if app.pending_delete.is_none() {
         return;
@@ -64,8 +59,7 @@ pub(crate) fn confirm_strip(app: &mut App, ui: &mut egui::Ui) {
                 }
             });
         });
-    // Escape is the way out of everything else in this application, so it is
-    // the way out of this too.
+    // Escape leaves everything else, so it leaves this too.
     if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.cancel_delete();
     }

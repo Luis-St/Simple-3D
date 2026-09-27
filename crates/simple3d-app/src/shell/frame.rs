@@ -1,23 +1,17 @@
-//! One frame of the whole application: every window, in the order they are
-//! shown, and the requests they leave behind.
+//! One frame of the whole application: every window in order, then their requests.
 
 use super::*;
 use crate::app::APP_NAME;
 
 impl eframe::App for Shell {
-    /// What is behind the windows' own painting. Asked of the application rather
-    /// than of a window, so it is the first window's answer -- they all give the
-    /// same one.
+    /// The colour behind the windows' painting; all windows give the same answer.
     fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
         self.windows[0].clear_colour(visuals)
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // Asked every frame rather than once at startup, so the setting takes
-        // effect on the next dialog rather than on the next run. It governs the
-        // document windows too: with dialogs embedded there are no viewports to
-        // be had at all, so those windows are folded back into the first one
-        // rather than left drawing nothing where nobody can reach them.
+        // Read every frame so the setting applies to the next dialog. With embedded dialogs there are no
+        // viewports, so extra windows are folded back into the first.
         ctx.set_embed_viewports(self.settings.embed_dialogs);
         if self.settings.embed_dialogs && self.windows.len() > 1 {
             self.fold_windows_together();
@@ -34,10 +28,8 @@ impl eframe::App for Shell {
             window.root_window = false;
             let builder = builder_for(window);
             ctx.show_viewport_immediate(viewport, builder, |ctx, class| {
-                // No viewports to be had after all: the backend has none, or a
-                // dialog turned embedding on between this frame and the last.
-                // Either way this window cannot be seen, so its documents go
-                // back to the window that can be.
+                // No viewports after all (backend or setting changed), so this window's documents go back to
+                // the visible one.
                 if class == egui::ViewportClass::Embedded {
                     window.window_request = Some(WindowRequest::MoveAll(root_id));
                     return;
@@ -56,14 +48,11 @@ impl eframe::App for Shell {
     }
 }
 
-/// The window a document is shown in: the same furniture as the main one, since
-/// it *is* a main one -- there is no lesser kind of document window.
+/// A document window's builder: the same furniture as the main window, since it is one.
 fn builder_for(window: &App) -> egui::ViewportBuilder {
     egui::ViewportBuilder::default()
         .with_title(window.title())
-        // The same application id as the first window, so the desktop groups
-        // them together in the window list and the dock rather than showing one
-        // unnamed window per document.
+        // The same app id, so the desktop groups all windows together.
         .with_app_id("net.simple3d.Simple3D")
         .with_icon(crate::icon::shared_icon())
         .with_inner_size(window.settings.window_size)
@@ -72,14 +61,8 @@ fn builder_for(window: &App) -> egui::ViewportBuilder {
 }
 
 impl Shell {
-    /// Tell every window what the others are, so a tab can be sent to one of
-    /// them by name and dropped onto one by hand.
-    ///
-    /// Where each window *is* comes from the frame it last drew: a window
-    /// reports its own rectangle while it draws, which is one frame of lag on a
-    /// window that is being moved and none at all on the drop that matters --
-    /// the pointer is over the window being dropped on, so that window is not
-    /// the one moving.
+    /// Tell every window about the others, for sending and dropping tabs. Positions come from each
+    /// window's last frame, which lags only while that window moves.
     fn tell_windows_about_each_other(&mut self) {
         let known: Vec<OtherWindow> = self
             .windows
@@ -97,13 +80,8 @@ impl Shell {
         }
     }
 
-    /// Carry a setting changed in one window over to the others.
-    ///
-    /// Every window holds its own `AppSettings` -- the whole application reads
-    /// `app.settings`, and threading one shared copy through all of it would be
-    /// a change to every panel -- and only the first window writes the file. A
-    /// change made in any other window is therefore taken as the new truth here
-    /// and handed to the rest, which is also what gets it written.
+    /// Carry a setting changed in one window to the others. Each window has its own `AppSettings` and
+    /// only the first writes the file, so a change elsewhere is taken as the truth and spread.
     fn share_settings(&mut self) {
         if let Some(changed) = self.windows.iter().find(|window| window.settings != self.settings) {
             self.settings = changed.settings.clone();
@@ -115,8 +93,7 @@ impl Shell {
         }
     }
 
-    /// Put every document back into the first window and close the rest. What
-    /// happens when there are no viewports to show a second window in.
+    /// Put every document into the first window and close the rest, for when no viewports exist.
     pub(super) fn fold_windows_together(&mut self) {
         while self.windows.len() > 1 {
             let documents = self.windows.pop().expect("more than one window").take_all_tabs();

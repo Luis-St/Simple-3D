@@ -3,8 +3,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
-/// A primitive's parameter values, keyed by `ParamSpec::key`. `BTreeMap` so the
-/// project file's key order is stable and diffable.
+/// Parameter values keyed by `ParamSpec::key`; `BTreeMap` for a stable, diffable file order.
 pub type Params = BTreeMap<String, ParamValue>;
 
 pub trait ParamsExt {

@@ -7,7 +7,7 @@ use simple3d_geom::Vec3;
 
 // -- the section plane's grips ------------------------------------------------
 
-/// Where the section plane's grips are drawn right now, on screen.
+/// Where the section grips are drawn now, on screen.
 pub(crate) fn section_grips(harness: &Harness<'_, App>) -> Vec<egui::Pos2> {
     let view = harness.state().current_view();
     let corners = crate::section_tool::frame(&harness.state().scene.settings.section, harness.state().evaluated.bounds);
@@ -16,18 +16,13 @@ pub(crate) fn section_grips(harness: &Harness<'_, App>) -> Vec<egui::Pos2> {
 
 #[test]
 pub(crate) fn every_edge_grip_slides_the_section_plane() {
-    // Four grips on the edges rather than one, because which of them the model
-    // is standing in front of depends entirely on where it has been orbited to
-    // (issue 72). Each one is dragged in turn: a grip that is drawn and does
-    // nothing is worse than no grip.
+    // Four edge grips, so one is reachable from any orbit (issue 72); each is dragged in turn.
     let mut harness = harness("section-edge-grips");
     let plate = harness.state().primary().expect("the fixture puts a plate in");
     harness.state_mut().clear_selection();
     harness.state_mut().run(simple3d_core::keymap::Command::ToggleSection);
     harness.step();
-    // The window is rolled up to its title bar: at the harness's small screen
-    // it stands over the grip on the far edge, and a press on the window is
-    // the window's, which is right in the app and says nothing about the grip.
+    // Roll the window up, since on the harness's small screen it covers the far edge grip.
     harness.state_mut().popups.entry("section-tool").or_default().collapsed = true;
     harness.step();
 
@@ -53,11 +48,8 @@ pub(crate) fn every_edge_grip_slides_the_section_plane() {
 
 #[test]
 pub(crate) fn the_grip_in_the_middle_slides_the_plane_too() {
-    // The fifth grip, which is the one nearest to hand when the plane is being
-    // looked at face-on and its edges are out at the sides of the picture. It
-    // is offered the pointer before the manipulator is, and keeps it: a handle
-    // that lands here is one pointing at the camera, which cannot be dragged in
-    // this view whoever gets the press.
+    // The centre grip, nearest when the plane is face-on; it beats the manipulator, whose handle there
+    // would point at the camera anyway.
     let mut harness = harness("section-middle-grip");
     harness.state_mut().clear_selection();
     harness.state_mut().run(simple3d_core::keymap::Command::ToggleSection);

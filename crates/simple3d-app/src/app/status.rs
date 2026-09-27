@@ -1,8 +1,8 @@
-//! The message in the footer, and how it fades once it has been read.
+//! The footer message, and how it fades once read.
 
 use std::time::Duration;
 
-/// A message for the status bar, and how it should read.
+/// A status bar message and its tone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Status {
     Idle,
@@ -19,13 +19,10 @@ impl Status {
     }
 }
 
-/// How long a message stays at full strength before fading out. Long enough to
-/// read twice, short enough that the bar is not still reporting an export that
-/// finished ten minutes ago.
+/// How long a message stays at full strength: readable twice, gone before it goes stale.
 pub const STATUS_LIFETIME: Duration = Duration::from_secs(6);
 
-/// How readable a message is now: 1 while it is current, falling to 0 over the
-/// second after its lifetime. `Idle` never fades -- "Ready" is a state, not news.
+/// Current readability: 1, falling to 0 over the second after its lifetime. `Idle` never fades.
 pub fn status_opacity(status: &Status, age: Duration) -> f32 {
     if matches!(status, Status::Idle) {
         return 1.0;

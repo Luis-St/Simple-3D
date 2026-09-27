@@ -1,10 +1,5 @@
-//! Where an opened model goes, and what a tab drag would do with the tab
-//! (issue 107).
-//!
-//! The moving itself is the shell's and is tested there; what is checked here is
-//! the half a single window answers -- the setting that says where a model
-//! opens, and the arithmetic that turns a released drag into one of three
-//! outcomes.
+//! Where an opened model goes, and what a released tab drag does (issue 107). Moving itself is
+//! tested in the shell.
 
 use super::*;
 use crate::shell::{OtherWindow, WindowRequest};
@@ -13,9 +8,7 @@ use simple3d_core::config::OpenTarget;
 use simple3d_core::project;
 use simple3d_core::scene::Scene;
 
-/// With "a window of its own" chosen, opening a model asks for a window rather
-/// than quietly taking a tab -- and the window it was opened from keeps what it
-/// had.
+/// With "own window" chosen, opening a model asks for a window and the current one keeps its tabs.
 #[test]
 fn opening_a_model_asks_for_a_window_when_the_setting_says_so() {
     let dir = temp_config_dir("open-target-window");
@@ -33,9 +26,7 @@ fn opening_a_model_asks_for_a_window_when_the_setting_says_so() {
     assert_eq!(app.path.as_deref(), Some(first.as_path()), "the document on screen was replaced");
 }
 
-/// The same setting, but with nothing in the window worth keeping: an untouched,
-/// never-saved document is scratch space, so the file opens in it rather than
-/// leaving an empty window behind.
+/// An untouched scratch document is reused instead of leaving an empty window behind.
 #[test]
 fn a_model_opened_into_an_untouched_window_stays_in_it() {
     let dir = temp_config_dir("open-target-scratch");
@@ -51,8 +42,7 @@ fn a_model_opened_into_an_untouched_window_stays_in_it() {
     assert_eq!(app.path.as_deref(), Some(path.as_path()));
 }
 
-/// A file that is already open in *this* window is shown rather than opened
-/// again, whatever the setting says -- the older rule still holds.
+/// A file already open in this window is shown rather than opened again.
 #[test]
 fn a_file_open_in_this_window_is_shown_rather_than_given_a_window() {
     let dir = temp_config_dir("open-target-already");
@@ -74,14 +64,12 @@ fn strip() -> egui::Rect {
     egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(900.0, 26.0))
 }
 
-/// The window the row is in: the whole of what this window draws.
+/// This window's whole drawn area.
 fn contents() -> egui::Rect {
     egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0))
 }
 
-/// Along the row: the tabs are left as they are. A drag has to mean something
-/// before it does something, and sliding along the row -- or overshooting it on
-/// the way to the close cross -- means nothing.
+/// Along the row: nothing happens, including overshooting on the way to the close cross.
 #[test]
 fn a_drag_that_stays_on_the_row_leaves_the_tabs_alone() {
     let strip = strip();
@@ -95,8 +83,7 @@ fn a_drag_that_stays_on_the_row_leaves_the_tabs_alone() {
     );
 }
 
-/// Off the row: a window of its own. It is the one gesture that needs nothing of
-/// the window system -- which is why it is the one that works everywhere.
+/// Off the row: its own window, the one gesture that works on every window system.
 #[test]
 fn a_tab_pulled_off_the_row_opens_in_a_window_of_its_own() {
     let strip = strip();
@@ -106,9 +93,7 @@ fn a_tab_pulled_off_the_row_opens_in_a_window_of_its_own() {
     assert_eq!(drop_of(above, strip, contents(), None, &[], false), TabDrop::NewWindow);
 }
 
-/// Onto another window's row: into that window. The pointer is in this window's
-/// coordinates and the other window's row is on the desktop, so the two are only
-/// comparable once the window system has said where this window is.
+/// Onto another window's row: into that window, once this window's desktop position is known.
 #[test]
 fn a_tab_dropped_on_another_windows_row_goes_into_that_window() {
     let strip = strip();
@@ -117,22 +102,15 @@ fn a_tab_dropped_on_another_windows_row_goes_into_that_window() {
         name: "other.simple3d".into(),
         strip: Some(egui::Rect::from_min_size(egui::pos2(1000.0, 220.0), egui::vec2(900.0, 26.0))),
     };
-    // This window's contents start at (60, 40) on the desktop, so a pointer at
-    // (1000, 200) in this window is at (1060, 240) on it -- which is on the
-    // other window's row.
+    // Contents at (60, 40) on the desktop, so (1000, 200) here is (1060, 240) there: the other row.
     let origin = Some(egui::pos2(60.0, 40.0));
     let onto = egui::pos2(1000.0, 200.0);
     assert_eq!(drop_of(onto, strip, contents(), origin, std::slice::from_ref(&other), false), TabDrop::Into(7));
-    // The same pointer, but with no idea where this window is: nothing can be
-    // aimed at from here, so the tab is held out instead of being dropped
-    // somewhere it may not have been let go over. Which window takes it is then
-    // the windows' own answer -- see `Shell::resolve_offer`.
+    // With no known position the tab is held out for the windows to claim (`Shell::resolve_offer`).
     assert_eq!(drop_of(onto, strip, contents(), None, std::slice::from_ref(&other), false), TabDrop::Offer);
 }
 
-/// Held out only when there is somewhere for it to go. The last window open has
-/// no one to offer a tab to, so letting it go outside the window means what it
-/// has always meant: a window of its own, with no wait for an answer.
+/// Held out only if another window exists; otherwise it becomes its own window at once.
 #[test]
 fn a_tab_let_go_outside_the_only_window_opens_at_once() {
     let strip = strip();
@@ -140,8 +118,7 @@ fn a_tab_let_go_outside_the_only_window_opens_at_once() {
     assert_eq!(drop_of(outside, strip, contents(), None, &[], false), TabDrop::NewWindow);
 }
 
-/// And where the window system does say where windows are, nothing is held out
-/// at all: the pointer's place on the desktop settles it on the spot.
+/// With known window positions, nothing is held out: the desktop position decides.
 #[test]
 fn a_tab_let_go_over_the_desktop_opens_in_a_window_of_its_own() {
     let strip = strip();
@@ -156,8 +133,7 @@ fn a_tab_let_go_over_the_desktop_opens_in_a_window_of_its_own() {
     assert_eq!(drop_of(nowhere, strip, contents(), origin, std::slice::from_ref(&other), false), TabDrop::NewWindow);
 }
 
-/// A whole window is only ever carried *into* another window: there is nowhere
-/// else to put one, and letting go of it over the desktop leaves it where it is.
+/// A whole window only goes into another window; released over the desktop it stays.
 #[test]
 fn carrying_a_whole_window_off_the_row_does_nothing() {
     let strip = strip();
@@ -165,9 +141,7 @@ fn carrying_a_whole_window_off_the_row_does_nothing() {
     assert_eq!(drop_of(below, strip, contents(), None, &[], true), TabDrop::Stay);
 }
 
-/// Windows overlap, and two windows of one application overlap along their rows
-/// of tabs above all. A drag that never left this window is about this window,
-/// whatever is stacked underneath it.
+/// A drag that never left this window is about this window, whatever overlaps beneath it.
 #[test]
 fn a_window_underneath_this_one_is_not_dropped_on_by_a_drag_that_never_left() {
     let strip = strip();
@@ -176,8 +150,7 @@ fn a_window_underneath_this_one_is_not_dropped_on_by_a_drag_that_never_left() {
         name: "underneath.simple3d".into(),
         strip: Some(egui::Rect::from_min_size(egui::pos2(0.0, 40.0), egui::vec2(900.0, 26.0))),
     };
-    // Exactly over the other window's row, and still inside this window: the
-    // pointer never left, so the tab stays where it is.
+    // Over the other window's row but still inside this window: the tab stays.
     let along = egui::pos2(400.0, strip.center().y);
     let origin = Some(egui::Pos2::ZERO);
     assert_eq!(drop_of(along, strip, contents(), origin, std::slice::from_ref(&under), false), TabDrop::Stay);

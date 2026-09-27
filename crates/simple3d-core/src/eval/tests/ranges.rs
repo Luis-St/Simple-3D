@@ -1,11 +1,10 @@
-//! Which part of the scene's mesh each node's geometry is.
+//! Which part of the scene mesh each node's geometry is.
 
 use super::*;
 use crate::scene::{GroupOp, Scene};
 use simple3d_geom::Vec3;
 
-/// The vertices `range` covers in `mesh`, next to the node's own world mesh:
-/// the two must be the same points in the same order.
+/// The vertices `range` covers must equal the node's own world mesh, in order.
 fn assert_is_its_own(out: &Evaluated, id: NodeId) {
     let range = out.ranges.get(&id).unwrap_or_else(|| panic!("{id:?} has no range"));
     let own = &out.node_meshes[&id];
@@ -31,7 +30,7 @@ pub(crate) fn bodies_that_meet_nothing_are_found_where_they_landed() {
     assert_is_its_own(&out, left);
     assert_is_its_own(&out, right);
     assert_is_its_own(&out, inner);
-    // The group is its one child, and the root is the lot.
+    // The group is its one child; the root is everything.
     assert_eq!(out.ranges[&group], out.ranges[&inner]);
     assert_eq!(out.ranges[&root], 0..out.mesh.positions.len() as u32);
 }
@@ -51,11 +50,10 @@ pub(crate) fn bodies_a_boolean_changed_have_no_range() {
     let cutter = cylinder(&mut scene, cut, 5.0, 50.0);
 
     let out = Evaluator::new().evaluate(&scene, &Cancel::new());
-    // Two plates overlapping are unioned into one shape: neither is itself.
+    // Overlapping plates union into one shape, so neither is itself.
     assert!(!out.ranges.contains_key(&a) && !out.ranges.contains_key(&b));
     assert_is_its_own(&out, far);
-    // A difference that took something away is a new shape; the cutter is
-    // not in it at all.
+    // A difference that removed something is a new shape; the cutter is not in it.
     assert!(!out.ranges.contains_key(&base) && !out.ranges.contains_key(&cutter));
     assert!(out.ranges.contains_key(&cut));
 }

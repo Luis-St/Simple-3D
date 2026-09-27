@@ -46,7 +46,7 @@ impl VaryField {
         }
     }
 
-    /// The field that holds the amount of a variation of `what`.
+    /// The field holding the amount of a `what` variation.
     pub fn amount_of(what: Vary) -> VaryField {
         match what {
             Vary::Shift => VaryField::Shift,
@@ -57,17 +57,13 @@ impl VaryField {
     }
 }
 
-/// The parameter one variation's number is stored under: stage `stage` and slot
-/// `slot`, both from nought.
-///
-/// Built rather than tabled. A stage used to have four variation slots spelled
-/// out as ordinary parameters, and four was therefore as many as it could have.
-/// The names are the same shape for every slot, so they are made when asked for.
+/// The parameter for one variation number of stage `stage`, slot `slot` (zero-based). Built on
+/// demand rather than tabled, so slots are unlimited.
 pub fn vary_key(stage: usize, slot: usize, field: VaryField) -> String {
     format!("stage{}_var{}_{}", stage.min(MAX_STAGES - 1) + 1, slot + 1, field.suffix())
 }
 
-/// Which stage, slot and field a variation's parameter is, from nought.
+/// The zero-based stage, slot and field of a variation parameter.
 pub fn parse_vary_key(key: &str) -> Option<(usize, usize, VaryField)> {
     let rest = key.strip_prefix("stage")?;
     let (stage, rest) = rest.split_once("_var")?;
@@ -79,13 +75,8 @@ pub fn parse_vary_key(key: &str) -> Option<(usize, usize, VaryField)> {
     (slot >= 1).then_some((stage - 1, slot - 1, field))
 }
 
-/// What one variation's parameter is -- its kind, bounds, default and the label
-/// its field answers to -- for any stage and slot.
-///
-/// The property editor, the tool and the migration all want a [`ParamSpec`],
-/// and a spec's key and label are `'static`. They are made the first time a
-/// slot is asked for and kept for the life of the program: a stage with a
-/// dozen variations costs a dozen small entries, once.
+/// A variation parameter's spec for any stage and slot. Specs need `'static` keys and labels, so
+/// they are made on first request and kept.
 pub fn vary_spec(stage: usize, slot: usize, field: VaryField) -> &'static ParamSpec {
     type Specs = HashMap<(usize, usize, VaryField), &'static ParamSpec>;
     static SPECS: OnceLock<Mutex<Specs>> = OnceLock::new();
@@ -114,7 +105,7 @@ pub fn vary_spec(stage: usize, slot: usize, field: VaryField) -> &'static ParamS
     })
 }
 
-/// Any pattern parameter's spec: one from the table, or one of a variation's.
+/// Any pattern parameter's spec: from the table, or a variation's.
 pub fn param_spec(key: &str) -> Option<&'static ParamSpec> {
     PARAMS
         .iter()
@@ -122,10 +113,9 @@ pub fn param_spec(key: &str) -> Option<&'static ParamSpec> {
         .or_else(|| parse_vary_key(key).map(|(stage, slot, field)| vary_spec(stage, slot, field)))
 }
 
-/// Read variation `slot` of stage `stage` out of a pattern's parameters.
+/// Read variation `slot` of stage `stage` from a pattern's parameters.
 pub(crate) fn read_variation(params: &Params, stage: usize, slot: usize) -> Variation {
-    // Read with their defaults in hand, as a stage's own are: a zero size is a
-    // copy shrunk to nothing, not "no change".
+    // Read with defaults, since a zero size shrinks to nothing rather than meaning no change.
     let value = |field: VaryField| {
         let spec = vary_spec(stage, slot, field);
         params.get(spec.key).copied().unwrap_or(spec.default)
@@ -146,8 +136,7 @@ pub(crate) fn read_variation(params: &Params, stage: usize, slot: usize) -> Vari
     }
 }
 
-/// Write variation `slot` of stage `stage` back into a pattern's parameters.
-/// Only the amount its own kind reads is written.
+/// Write variation `slot` of stage `stage`; only its kind's amount is written.
 pub(crate) fn write_variation(params: &mut Params, stage: usize, slot: usize, v: &Variation) {
     let mut put = |field: VaryField, value: ParamValue| {
         params.insert(vary_key(stage, slot, field), value);
@@ -165,14 +154,12 @@ pub(crate) fn write_variation(params: &mut Params, stage: usize, slot: usize, v:
     }
 }
 
-/// Take every parameter of stage `stage`'s variations from slot `from` on out
-/// of the map, so a list that got shorter leaves nothing behind it.
+/// Remove stage `stage`'s variation parameters from slot `from` on, so a shorter list leaves nothing.
 pub(crate) fn clear_variations_from(params: &mut Params, stage: usize, from: usize) {
     params.retain(|key, _| !matches!(parse_vary_key(key), Some((s, slot, _)) if s == stage && slot >= from));
 }
 
-/// Every variation parameter of stage `stage`'s first `used` slots, in slot
-/// order.
+/// Every variation parameter of stage `stage`'s first `used` slots, in order.
 pub fn variation_keys(stage: usize, used: usize) -> Vec<String> {
     (0..used).flat_map(|slot| VaryField::ALL.map(|field| vary_key(stage, slot, field))).collect()
 }

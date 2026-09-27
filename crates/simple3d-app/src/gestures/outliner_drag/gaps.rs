@@ -4,9 +4,7 @@ use super::*;
 
 #[test]
 pub(crate) fn a_long_name_widens_the_outliner_rows_instead_of_wrapping() {
-    // Issue 50. A row is a fixed 22 px, so a name broken over two lines is a
-    // name with its second half cut off. The rows are made as wide as the
-    // longest one and the tree scrolls sideways to reach it.
+    // Issue 50: long names widen the rows and the tree scrolls, rather than wrapping into fixed rows.
     let mut harness = harness("outliner-long-name");
     let plate = harness.state().primary().expect("the starter shape is selected");
     harness.step();
@@ -24,9 +22,7 @@ pub(crate) fn a_long_name_widens_the_outliner_rows_instead_of_wrapping() {
 
 #[test]
 pub(crate) fn the_gap_under_an_open_group_drops_into_it_rather_than_beside_it() {
-    // Issue 49. The gap under a group's row is the gap above its first child,
-    // so what lands there belongs to the group -- it was landing in the
-    // group's parent instead, a level out from where the line was drawn.
+    // Issue 49: the gap under an open group's row lands in the group, not its parent.
     let mut harness = harness("outliner-drop-under-group");
     let root = harness.state().scene.root();
     let plate = harness.state().primary().expect("the starter shape is selected");
@@ -45,7 +41,7 @@ pub(crate) fn the_gap_under_an_open_group_drops_into_it_rather_than_beside_it() 
     }
     assert!(harness.state().outliner_drag.is_some(), "the drag never started");
 
-    // The bottom edge of the group's row: the gap between it and its first child.
+    // The group row's bottom edge: the gap above its first child.
     let at = egui::pos2(row.center().x, row.bottom() - 1.0);
     move_to(&mut harness, at);
     harness.step();
@@ -61,12 +57,7 @@ pub(crate) fn the_gap_under_an_open_group_drops_into_it_rather_than_beside_it() 
 
 #[test]
 pub(crate) fn the_gap_between_two_rows_is_one_drop_position_all_the_way_across() {
-    // Issue 48. The rows are laid out with a gap between them, and a pointer in
-    // that gap is claimed by the rows either side of it -- so both drew the
-    // mark, one under the upper row and one over the lower one, two orange
-    // lines a spacing apart for a single landing place. Checked here both ways:
-    // every step across the gap names the same drop, and the height the two
-    // rows would draw their line at is the same height.
+    // Issue 48: one gap is one drop position with one line, whichever row claims the pointer.
     let mut harness = harness("outliner-drop-gap");
     let root = harness.state().scene.root();
     let plate = harness.state().primary().expect("the starter shape is selected");
@@ -89,8 +80,7 @@ pub(crate) fn the_gap_between_two_rows_is_one_drop_position_all_the_way_across()
     }
     assert!(harness.state().outliner_drag.is_some(), "the drag never started");
 
-    // Up across the gap in small steps, the way a pointer looking for a place
-    // to land actually crosses it.
+    // Across the gap in small steps, as a searching pointer does.
     let x = upper.center().x;
     let mut y = lower.top() + 2.0;
     while y >= upper.bottom() - 2.0 {
@@ -103,8 +93,7 @@ pub(crate) fn the_gap_between_two_rows_is_one_drop_position_all_the_way_across()
         y -= gap / 4.0;
     }
 
-    // Whichever of the two rows draws it, the line lands in the middle of the
-    // gap rather than on that row's own edge, so there is only ever one of it.
+    // Either row draws the line mid-gap, so there is only one.
     let from_above = crate::panel_outliner::gap_line_y(upper, gap, true);
     let from_below = crate::panel_outliner::gap_line_y(lower, gap, false);
     assert_eq!(from_above, from_below, "the two rows either side of the gap drew the drop line at two heights");

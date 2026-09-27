@@ -7,7 +7,7 @@ fn plan() -> Reassemble {
     Reassemble::default()
 }
 
-/// Two meshes standing apart, as one bag of triangles -- an imported assembly.
+/// Two meshes apart as one bag of triangles, like an imported assembly.
 fn beside(a: &Mesh, b: &Mesh, apart: Vec3) -> Mesh {
     let mut out = a.clone();
     out.append(&b.translated(apart));
@@ -18,8 +18,7 @@ fn shapes(assembly: &Assembly) -> Vec<Shape> {
     assembly.parts.iter().map(|part| part.shape).collect()
 }
 
-/// How far the parts really are from what they were called, measured against
-/// the mesh that went in rather than taken from the run's own report.
+/// How far the parts are from the input mesh, measured independently of the run's report.
 fn worst(before: &Mesh, assembly: &Assembly) -> f64 {
     let mut rebuilt = Mesh::new();
     for part in &assembly.parts {
@@ -41,15 +40,12 @@ fn a_box_comes_back_as_a_box() {
 
 #[test]
 fn a_cylinder_keeps_its_segments() {
-    // The count has to survive: rebuilt at the document's default the solid
-    // would be a different width across its corners from the one the triangles
-    // described.
+    // The segment count must survive, or the rebuilt solid's corner width would differ.
     let before = gen::cylinder_mesh(20.0, 20.0, 50.0, 12);
     let found = reassemble(&before, &plan());
     assert_eq!(shapes(&found).len(), 1);
     match found.parts[0].shape {
-        // Twelve sides is a prism rather than a cylinder, and the same solid
-        // either way -- what matters is that the twelve came back.
+        // Twelve sides reads as a prism, the same solid; what matters is the count.
         Shape::Prism { sides, diameter, height } => {
             assert_eq!(sides, 12);
             assert!((diameter - 20.0).abs() < 1e-6, "diameter {diameter}");
@@ -91,8 +87,7 @@ fn a_cone_comes_back_as_a_cone() {
         Shape::Cone { bottom_diameter, top_diameter, height, segments } => {
             assert_eq!(segments, 24);
             assert!((height - 25.0).abs() < 1e-6, "height {height}");
-            // Which end is called the bottom depends on which way round the
-            // axis was guessed, and a cone stood on its head is the same cone.
+            // Which end is the bottom depends on the guessed axis direction.
             let (small, big) = (bottom_diameter.min(top_diameter), bottom_diameter.max(top_diameter));
             assert!((small - 10.0).abs() < 1e-6 && (big - 30.0).abs() < 1e-6, "{small} and {big}");
         }
@@ -107,9 +102,7 @@ fn a_turned_box_comes_back_turned() {
     let before = gen::box_mesh(40.0, 30.0, 10.0).transformed(Vec3::new(5.0, -7.0, 11.0), turn);
     let found = reassemble(&before, &plan());
     assert!(matches!(found.parts[0].shape, Shape::Box { .. }), "{:?}", found.parts[0].shape);
-    // Not the same three angles -- a box has four ways round each axis that
-    // describe it, and any of them is right. What has to hold is that rebuilding
-    // it from what came back puts the surface back where it was.
+    // The angles may differ (a box has several equivalent orientations); the rebuilt surface must match.
     assert!(worst(&before, &found) < 1e-6, "off by {}", worst(&before, &found));
     assert!((found.parts[0].centre - Vec3::new(5.0, -7.0, 11.0)).length() < 1e-6);
 }
@@ -122,13 +115,11 @@ fn separate_bodies_become_separate_parts() {
     assert_eq!(found.parts.len(), 2);
     assert!(found.parts.iter().any(|part| matches!(part.shape, Shape::Box { .. })));
     assert!(found.parts.iter().any(|part| matches!(part.shape, Shape::Sphere { .. })));
-    // Nowhere near each other, so nothing is grouped.
     assert_eq!(found.groups.len(), 2);
 }
 
 #[test]
 fn bodies_that_touch_are_grouped() {
-    // A pin standing on a plate: two bodies, one assembly.
     let plate = gen::box_mesh(40.0, 40.0, 4.0);
     let pin = gen::cylinder_mesh(6.0, 6.0, 20.0, 24).translated(Vec3::new(0.0, 0.0, 12.0));
     let before = beside(&plate, &pin, Vec3::ZERO);
@@ -141,9 +132,7 @@ fn bodies_that_touch_are_grouped() {
 
 #[test]
 fn a_plate_with_a_hole_is_not_a_box() {
-    // The case the whole measurement is shaped around: every *corner* of a
-    // drilled plate sits on the surface of the plate's own bounding box, so a
-    // recognition that looked only at corners would lose the hole.
+    // Every corner of a drilled plate lies on its bounding box, so a corners-only check loses the hole.
     let plate = gen::box_mesh(40.0, 40.0, 6.0);
     let drill = gen::cylinder_mesh(12.0, 12.0, 20.0, 24);
     let before = crate::csg_bsp::subtract(&plate, &drill);
@@ -177,8 +166,7 @@ fn the_cap_keeps_the_biggest_bodies_and_holds_the_rest() {
     assert_eq!(found.parts.len(), 3, "the cap was not held to");
     assert_eq!(found.rest_bodies, 4);
     assert!(found.rest.is_some());
-    // The big one is the one that got a node, which is the whole reason the
-    // bodies are ordered before the cap is applied.
+    // The largest body gets the node, which is why bodies are ordered before the cap.
     match found.parts[0].shape {
         Shape::Box { width, .. } => assert!((width - 40.0).abs() < 1e-6),
         other => panic!("the biggest body came back as {other:?}"),
@@ -195,9 +183,7 @@ fn a_loose_tolerance_does_not_make_a_cylinder_of_a_box() {
 
 #[test]
 fn a_rotation_that_comes_back_is_the_rotation_that_went_in() {
-    // The frame is written down as the three angles a node carries, and read
-    // back by the same rotation the mesh transform performs: the two must agree
-    // for anything the recognition says about a turned body to mean anything.
+    // The written angles must read back as the same rotation the mesh transform performs.
     for turn in [Vec3::ZERO, Vec3::new(90.0, 0.0, 0.0), Vec3::new(17.0, -43.0, 88.0), Vec3::new(0.0, 90.0, 0.0)] {
         let frame = frame::Frame {
             x: Vec3::new(1.0, 0.0, 0.0).rotate_xyz_deg(turn),
@@ -245,12 +231,8 @@ fn a_mesh_of_nothing_comes_back_as_nothing() {
 
 #[test]
 fn a_shape_is_found_however_nearly_it_fits_something_else() {
-    // A slender cylinder is a box to within a fraction of a millimetre from
-    // every direction at once, so the near-miss box fits outnumber the one
-    // exact cylinder fit by ten to one -- and a box is the preferred reading
-    // where two fit equally. Until the fits were kept a few per shape rather
-    // than a few outright, the box fits filled the list, each of them failed,
-    // and the cylinder was never measured at all.
+    // Regression: near-miss box fits of a slender cylinder once filled the list and the cylinder fit
+    // was never measured, until fits were kept per shape.
     let before = gen::cylinder_mesh(6.0, 6.0, 20.0, 24);
     let found = reassemble(&before, &plan());
     assert_eq!(shapes(&found), vec![Shape::Cylinder { diameter: 6.0, height: 20.0, segments: 24 }]);
@@ -275,10 +257,7 @@ fn an_assembly_of_a_plate_and_a_pin_comes_back_as_both() {
 
 #[test]
 fn an_upright_shape_comes_back_unturned() {
-    // Which of a cylinder's two caps is found first is an accident of how the
-    // surface happens to be indexed, and taking it as the shape's Z left an
-    // upright pin described as turned a hundred and eighty degrees about X:
-    // true, and not what anybody would have typed.
+    // Regression: taking whichever cap came first as Z left an upright pin turned 180 degrees about X.
     let before = gen::cylinder_mesh(6.0, 6.0, 20.0, 24).translated(Vec3::new(0.0, 0.0, 12.0));
     let found = reassemble(&before, &plan());
     assert_eq!(found.parts[0].rotation, Vec3::ZERO, "an upright cylinder came back turned");
@@ -287,10 +266,7 @@ fn an_upright_shape_comes_back_unturned() {
 
 #[test]
 fn a_plate_of_pins_comes_back_as_every_pin() {
-    // What an imported assembly really looks like, in miniature: one big body
-    // and a crowd of small ones, every one of them a shape. The crowd is what
-    // the ordering and the cap are there for, and the run has to hold together
-    // over all of them rather than over one.
+    // One big body and many small ones, like a real imported assembly.
     let mut before = gen::box_mesh(200.0, 60.0, 6.0);
     for i in 0..20 {
         let at = Vec3::new(f64::from(i) * 9.0 - 85.0, 0.0, 13.0);
@@ -306,17 +282,8 @@ fn a_plate_of_pins_comes_back_as_every_pin() {
 
 #[test]
 fn a_shape_survives_being_stored_as_f32() {
-    // What a project file does to a mesh: positions are kept as `f32`, because
-    // a stored mesh is the result of a tessellation rather than a dimension
-    // anybody typed. Nothing about the shapes may depend on more precision
-    // than that.
-    //
-    // This is not a hypothetical. A round cap is fanned from a vertex added at
-    // its centre, and that vertex is *exactly* on the axis only in the numbers
-    // a generator produces: stored and read back it is a hundredth of a micron
-    // off, which still points somewhere. Counted as one more side, a hexagonal
-    // prism came back seven-sided -- and a seven-sided prism fits a hexagon so
-    // badly that it was then recognised as nothing at all.
+    // Project files store positions as `f32`. Regression: a cap's centre vertex read back slightly
+    // off-axis was counted as a side, so a hexagonal prism became seven-sided and then nothing.
     let build = || {
         gen::regular_prism_mesh(6, 40.0, 50.0, false)
             .transformed(Vec3::new(0.0, 230.0, 40.0), Vec3::new(-62.0, 30.0, 0.0))

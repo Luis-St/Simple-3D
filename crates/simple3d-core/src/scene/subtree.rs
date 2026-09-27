@@ -1,5 +1,4 @@
-//! A subtree on its own: exported to a document, read back from one, or
-//! put in place of the whole scene.
+//! A subtree on its own: exported, read back, or put in place of the whole scene.
 
 use super::*;
 use crate::mesh_data::{MeshBlob, MeshData};
@@ -8,8 +7,7 @@ use simple3d_geom::tiling::SplitPlan;
 use std::sync::Arc;
 
 impl Scene {
-    /// A group's base child in a difference: the first *visible* one (spec
-    /// section 3.3). The property editor states this plainly.
+    /// A difference group's base: its first visible child (spec section 3.3).
     pub fn difference_base(&self, group: NodeId) -> Option<NodeId> {
         self.nodes.get(&group)?.children.iter().copied().find(|c| self.nodes[c].visible)
     }
@@ -63,27 +61,19 @@ impl Scene {
         })
     }
 
-    /// Insert a portable subtree, giving every node a fresh identity. Unknown
-    /// primitive types are rejected so a corrupt or newer file cannot produce a
-    /// half-loaded scene.
+    /// Insert a portable subtree with fresh ids. Unknown primitive types are rejected, so a corrupt or
+    /// newer file cannot half-load.
     pub fn import_subtree(&mut self, data: &NodeData, parent: NodeId, index: usize) -> Option<NodeId> {
         let body = match data.type_id.as_str() {
             "group" => Body::Group { op: data.op.unwrap_or_default() },
             "pattern" => Body::Pattern { params: crate::pattern::migrate_params(&data.params) },
-            // A mesh whose blob cannot be read is refused rather than loaded as
-            // an empty node: the geometry is the whole of what the node is, and
-            // a silently empty one would be a body quietly missing from a print.
+            // An unreadable mesh blob is refused rather than loaded empty, a body silently missing from a print.
             "mesh" => Body::Mesh { mesh: Arc::new(MeshData::from_blob(data.mesh.as_ref()?)?) },
-            // A split without the object it was made from is refused for the
-            // same reason: what the node *is* is missing. Its pieces would still
-            // draw, but it would be a shape broken apart with no way back, which
-            // is not the node the file says it is.
+            // A split without its original is refused: a broken shape with no way back is not what the file says.
             "split" => {
                 Body::Split { original: Arc::new((**data.original.as_ref()?).clone()), plan: data.tiling.clone() }
             }
-            // An integration without the component it stands for is refused
-            // like a split without its original: it would be a node that is
-            // nothing at all.
+            // An integration without its component is refused: it would be nothing at all.
             "component" => Body::Component { component: data.component?, op: data.op },
             type_id => {
                 let spec = primitive::lookup(type_id)?;
@@ -119,7 +109,7 @@ impl Scene {
         Some(id)
     }
 
-    /// Replace the whole tree from a portable root, used when loading a project.
+    /// Replace the whole tree from a portable root, when loading a project.
     pub fn replace_root(&mut self, data: &NodeData) -> Option<()> {
         let mut fresh = Scene::new();
         fresh.settings = self.settings.clone();

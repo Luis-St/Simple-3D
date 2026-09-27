@@ -14,8 +14,7 @@ impl Gpu {
         gl.draw_arrays(mode, 0, vertices.len() as i32);
     }
 
-    /// Make or remake the offscreen target. The colour texture keeps its
-    /// identity across a resize so egui's texture id stays good.
+    /// Make or remake the offscreen target; the colour texture keeps its identity so egui's id stays valid.
     pub(super) unsafe fn resize(&mut self, gl: &glow::Context, width: usize, height: usize) -> Result<(), String> {
         if let Some(target) = &self.target {
             if target.width == width && target.height == height {
@@ -57,9 +56,7 @@ impl Gpu {
         Ok(())
     }
 
-    /// Make the colour texture, so egui has something to be given. The first
-    /// real frame reallocates it to the viewport's size; the texture object --
-    /// and so egui's id for it -- stays the same.
+    /// Make the colour texture for egui; the first frame resizes it, keeping the same object and id.
     pub fn prepare_texture(&mut self) -> Result<glow::Texture, String> {
         let gl = self.gl.clone();
         unsafe { self.resize(&gl, 1, 1)? };

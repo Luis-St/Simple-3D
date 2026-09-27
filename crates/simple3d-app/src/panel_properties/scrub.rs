@@ -1,4 +1,4 @@
-//! Dragging a label to change the number beside it.
+//! Dragging a field to change its number.
 
 use super::*;
 use crate::app::App;
@@ -7,11 +7,8 @@ use simple3d_core::primitive::ParamKind;
 use simple3d_core::scene::{Node, NodeId};
 use simple3d_core::unit::{wrap_degrees, Unit};
 
-/// One frame of a scrub on a dimension.
-///
-/// `started` is the only frame that takes an undo snapshot. Every frame after
-/// it goes through `touch`, which re-evaluates without recording -- so a drag
-/// across forty pixels is one step to undo, not forty.
+/// One frame of a scrub on a dimension; only `started` snapshots undo, the rest `touch`, so a drag
+/// is one undo step.
 pub(crate) fn scrub_param(
     app: &mut App,
     targets: &[NodeId],
@@ -24,10 +21,8 @@ pub(crate) fn scrub_param(
     if started {
         app.edit(&format!("Scrub {}", param.label), None);
     }
-    // A count is stored whole, and every frame reads the stored value back before
-    // adding this frame's movement to it -- so the fraction of a step each frame
-    // is worth was rounded away rather than added up, and the field either never
-    // moved or ran away from the pointer. The fraction is carried instead.
+    // Counts carry the fraction between frames, since re-reading the rounded value either stalled or
+    // overshot.
     let whole = matches!(kind, ParamKind::Count { .. });
     let carried = if whole { app.scrub.carry } else { 0.0 };
     let mut owed = carried;
@@ -41,9 +36,8 @@ pub(crate) fn scrub_param(
         let next = ui::value_from_display(kind, unit, wanted);
         set_param(app, *target, param.key, next);
         apply_lock(app, *target, param.lock_group, param.key, next);
-        // Measured against what the field actually took rather than against the
-        // rounding alone, so a count sitting on its own limit does not build up a
-        // debt that has to be paid off before the drag can turn round.
+        // Measured against what the field took, so a count at its limit does not build up debt before
+        // the drag can turn round.
         if whole {
             owed = (wanted - ui::param_number(next)).clamp(-1.0, 1.0);
         }
@@ -55,7 +49,7 @@ pub(crate) fn scrub_param(
     app.fields.clear();
 }
 
-/// One frame of a scrub on a position (millimetres) or a rotation (degrees).
+/// One frame of a scrub on a position (millimetres) or rotation (degrees).
 pub(crate) fn scrub_transform(
     app: &mut App,
     targets: &[NodeId],
@@ -82,9 +76,7 @@ pub(crate) fn scrub_transform(
     app.fields.clear();
 }
 
-/// One frame of a scrub on a scale field. The grip steps by 0.05 -- a twentieth
-/// is a visible change on any shape, where a millimetre-sized step would be
-/// nothing on a factor.
+/// One frame of a scrub on a scale field, stepping by 0.05, visible on any shape.
 pub(crate) fn scrub_scale(app: &mut App, targets: &[NodeId], axis: usize, delta: f64, started: bool) {
     if started {
         app.edit("Scrub scale", None);

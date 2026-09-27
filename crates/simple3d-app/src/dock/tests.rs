@@ -22,12 +22,11 @@ fn a_panel_moves_between_docks_and_reorders_within_one() {
     assert!(layout.right.is_empty());
     assert_eq!(layout.side_of(Panel::Properties), Side::Left);
 
-    // Reordering within a dock reads the index after the panel is lifted
-    // out, so this really moves it one place down.
+    // The index is read after the panel is lifted out, so this moves it one place down.
     layout.move_to(Panel::Properties, Side::Left, 1);
     assert_eq!(layout.left, vec![Panel::Outliner, Panel::Properties, Panel::Primitives]);
 
-    // And past the end lands at the end rather than panicking.
+    // Past the end lands at the end, not a panic.
     layout.move_to(Panel::Outliner, Side::Right, 99);
     assert_eq!(layout.right, vec![Panel::Outliner]);
 }
@@ -46,8 +45,7 @@ fn the_filler_is_the_last_panel_that_is_not_rolled_up() {
 
 #[test]
 fn a_layout_that_lost_or_duplicated_a_panel_is_repaired_rather_than_left_unreachable() {
-    // A settings file from another version, or one edited by hand. A panel
-    // that appears nowhere would have no way back.
+    // A foreign or hand-edited settings file; a panel appearing nowhere would have no way back.
     let mut layout = Layout { left: vec![], right: vec![], collapsed: vec![], docks_hidden: false };
     layout.repair();
     for panel in Panel::ALL {

@@ -12,28 +12,23 @@ use simple3d_geom::Vec3;
 #[derive(Clone, Debug)]
 pub struct Gizmo {
     pub mode: Mode,
-    /// Where move and rotate handles centre, in world space: the node's origin,
-    /// or the middle of what a group holds (issue 90) -- a group's origin is
-    /// wherever it was made, which can be nowhere near its children. A rotation
-    /// turns about this point, see `Gizmo::position_keeping_pivot`.
+    /// Where move and rotate handles centre: the node's origin, or a group's contents' middle
+    /// (issue 90), since a group's origin can be far from its children.
     pub origin: Vec3,
     /// The node's own axes in world space, which the handles stand along.
     pub axes: [Vec3; 3],
     /// The node's own frame, for turning local box corners into world points.
     pub own: Xform,
-    /// The parent frame, for writing a dragged world position back to
-    /// `Node::position`, which lives in the parent's coordinates.
+    /// The parent frame, for writing a dragged world position back to `Node::position`.
     pub parent: Xform,
     pub local_lo: Vec3,
     pub local_hi: Vec3,
-    /// Which parameter governs each local extent. `None` means no resize handle
-    /// on that axis, rather than one that silently does nothing.
+    /// Which parameter governs each local extent; `None` means no resize handle on that axis.
     pub drivers: [Option<AxisDriver>; 3],
     /// The node's own scale factors.
     pub own_scale: Vec3,
-    /// How many world millimetres one local millimetre covers along each of the
-    /// node's axes -- its own scale times every ancestor's. What turns a drag
-    /// measured on screen into a change to a dimension.
+    /// World millimetres per local millimetre along each axis (own and ancestors' scale), to turn a
+    /// screen drag into a dimension change.
     pub axis_scale: [f64; 3],
 }
 
@@ -46,11 +41,7 @@ impl Gizmo {
         let parent = *evaluated.node_frames.get(&id)?;
         let own =
             parent.compose(&Xform::from_pos_rot_scale(node.position, node.rotation, Node::sane_scale(node.scale)));
-        // Always the node's own axes. The rail used to carry a switch between
-        // these and the world's, which is gone (issue 100): a handle that does
-        // not point along the thing it is attached to is the surprising one,
-        // and an unrotated node -- which is most of them -- cannot tell the two
-        // frames apart anyway.
+        // Always the node's own axes; the world-axes switch was removed (issue 100).
         let axes = [own.axis(0), own.axis(1), own.axis(2)];
         let (local_lo, local_hi) = evaluated.node_local_bounds.get(&id).copied().unwrap_or((Vec3::ZERO, Vec3::ZERO));
         let drivers = match (node.spec(), node.params()) {
@@ -58,12 +49,8 @@ impl Gizmo {
             _ => [None, None, None],
         };
         let axis_scale = [0, 1, 2].map(|a| own.axis_vector(a).length().max(1e-9));
-        // The middle is measured on the last evaluation, but placed with the
-        // group's transform as it stands now: taken into the frame the group
-        // had when it was measured and back out through the live one. A group
-        // dragged ahead of its evaluation otherwise left its handle behind,
-        // where a shape's handle -- its origin, read straight off the node --
-        // goes with it.
+        // Measured on the last evaluation but placed with the live transform, so a group's handle keeps
+        // up with a drag ahead of its evaluation.
         let origin = match (evaluated.node_world_bounds.get(&id), evaluated.placements.get(&id)) {
             (Some(&(lo, hi)), Some(measured)) if node.is_group() || node.is_split() => {
                 own.point(parent.compose(measured).inverse().point((lo + hi) * 0.5))
@@ -84,9 +71,7 @@ impl Gizmo {
         })
     }
 
-    /// The handles to draw and hit-test, in the order they should be tested --
-    /// the smaller, more specific handles first, so a corner wins over the face
-    /// it sits on.
+    /// The handles to draw and hit-test, smaller and more specific first so corners beat faces.
     pub fn handles(&self, is_group: bool) -> Vec<Handle> {
         match self.mode {
             Mode::Move => {
@@ -95,8 +80,7 @@ impl Gizmo {
                 out
             }
             Mode::Rotate => (0..3).map(Handle::RotateRing).collect(),
-            // Scale asks nothing of the shape underneath it: every axis and
-            // every corner, on a group as readily as on a primitive.
+            // Scale works on every axis and corner, for groups as well as primitives.
             Mode::Scale => {
                 let mut out: Vec<Handle> = CORNERS.iter().map(|c| Handle::ResizeCorner(*c)).collect();
                 for axis in 0..3 {
@@ -106,16 +90,13 @@ impl Gizmo {
                 out
             }
             Mode::Resize => {
-                // Resize handles on groups are out of scope for this version:
-                // scaling a group truthfully means rewriting every descendant's
-                // dimensions and relative positions (spec section 6.2).
+                // No resize handles on groups: resizing one truthfully rewrites every descendant (spec section 6.2).
                 if is_group {
                     return Vec::new();
                 }
                 let mut out = Vec::new();
                 for corner in CORNERS {
-                    // A corner is only offered if at least two of its axes are
-                    // actually drivable; one is a face handle's job.
+                    // A corner needs at least two drivable axes; one is a face handle's job.
                     if (0..3).filter(|&a| self.drivers[a].is_some()).count() >= 2 {
                         out.push(Handle::ResizeCorner(corner));
                     }
@@ -131,8 +112,7 @@ impl Gizmo {
         }
     }
 
-    /// The arm length in millimetres that keeps the handle a constant size on
-    /// screen.
+    /// The arm length in millimetres that keeps handles a constant size on screen.
     pub fn arm(&self, view: &View) -> f64 {
         ARM_PIXELS * view.mm_per_pixel_at(self.origin)
     }
@@ -152,12 +132,8 @@ impl Gizmo {
         }
     }
 
-    /// The `Node::position` that keeps `origin` where it stands once the node
-    /// carries `rotation` and `scale` instead of the ones this gizmo was built
-    /// from. For a node whose handle sits on its own origin that is just its
-    /// position; for a group centred elsewhere it is what makes the ring turn
-    /// the group about the middle it is drawn at, rather than swinging it round
-    /// an origin off to one side.
+    /// The `Node::position` keeping `origin` in place under a new `rotation` and `scale`, so a group
+    /// turns about its drawn middle rather than an off-centre origin.
     pub fn position_keeping_pivot(&self, rotation: Vec3, scale: Vec3) -> Vec3 {
         let pivot_local = self.own.inverse().point(self.origin);
         let turned = Xform::from_pos_rot_scale(Vec3::ZERO, rotation, Node::sane_scale(scale));

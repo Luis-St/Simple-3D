@@ -1,23 +1,17 @@
-//! Keeping a name unique in the tree, and what a copy of one is called.
+//! Keeping a name unique in the tree, and what a copy is called.
 
 use std::collections::HashSet;
 
-/// What a copy of `name` is called before it is numbered: `Box` -> `Box copy`,
-/// and `Box copy` -> `Box copy` again rather than `Box copy copy`.
-///
-/// Duplicating repeatedly is the ordinary way to lay out a row of something, and
-/// each duplicate is of the one just made -- so without the trim the fourth
-/// press of Ctrl+D gives "Box copy copy copy copy". Trimmed, the numbering rule
-/// below takes over and gives "Box copy 2", "Box copy 3".
+/// A copy's base name: `Box` -> `Box copy`, and `Box copy` stays `Box copy`, so repeated duplicates
+/// number up ("Box copy 2") instead of stacking "copy".
 pub fn copy_name(name: &str) -> String {
     let stem = name.trim_end_matches(|c: char| c.is_ascii_digit()).trim_end();
     let stem = stem.strip_suffix(" copy").unwrap_or(name);
     format!("{stem} copy")
 }
 
-/// Whether `name` is one the numbering rule gave out for `base` rather than
-/// one somebody typed: `base` or `base 2`, and the copies of those, `base
-/// copy` and `base copy 2`.
+/// Whether `name` was given by the numbering rule for `base` (`base`, `base 2`, `base copy`,
+/// `base copy 2`) rather than typed.
 pub fn is_default_name(name: &str, base: &str) -> bool {
     let numbered = |name: &str, stem: &str| {
         name == stem
@@ -29,10 +23,7 @@ pub fn is_default_name(name: &str, base: &str) -> bool {
     numbered(name, base) || numbered(name, &format!("{base} copy"))
 }
 
-/// `base`, or `base 2`, `base 3`... -- the first that is not in `taken`.
-///
-/// The one place the numbering rule lives, so a node added, pasted, duplicated
-/// or dropped in from the library all read the same way in the outliner.
+/// `base`, or `base 2`, `base 3`...: the first not in `taken`. The one place the numbering lives.
 pub fn free_name(taken: &HashSet<String>, base: &str) -> String {
     if !taken.contains(base) {
         return base.to_string();

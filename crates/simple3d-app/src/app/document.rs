@@ -1,5 +1,4 @@
-//! The document as a whole: whether it is edited, what it is called, and
-//! the units it is read in.
+//! The document as a whole: edited state, name, and units.
 
 use super::*;
 use simple3d_core::mesh_data::MeshData;
@@ -10,8 +9,7 @@ use std::sync::Arc;
 impl App {
     // -- edits --------------------------------------------------------------
 
-    /// Take an undo snapshot and mark the scene for re-evaluation. Every
-    /// model-mutating path in the application goes through here.
+    /// Take an undo snapshot and mark the scene dirty; every model-mutating path goes through here.
     pub fn edit(&mut self, label: &str, coalesce: Option<&str>) -> bool {
         let lifted = self.lift_preview();
         let coalescing = self.history.record(&self.scene, label, coalesce);
@@ -20,20 +18,9 @@ impl App {
         coalescing
     }
 
-    /// Take a tool's preview out of the document for as long as it takes to
-    /// snapshot it, and give back what has to go in again afterwards
-    /// (issue 106).
-    ///
-    /// The simplify tool shows its result by putting it *in* the document,
-    /// which is what makes the preview the real thing rather than a picture of
-    /// it -- but it is not an edit anybody has made, and an undo step recorded
-    /// over it would be a step back to a simplification nobody accepted.
-    /// Renaming the mesh while the window is open, and then undoing the rename,
-    /// did exactly that.
-    ///
-    /// Inert once the tool has let go of what it is showing, which is how the
-    /// tool's own accept and cancel get their snapshots taken over the mesh
-    /// they mean.
+    /// Lift a tool's preview out of the document while snapshotting (issue 106), returning what to put
+    /// back. The simplify preview lives in the document but is not an edit; an undo step over it would
+    /// restore an unaccepted result. Inert once the tool has let go.
     pub(crate) fn lift_preview(&mut self) -> Option<(NodeId, Arc<MeshData>)> {
         let tool = self.simplify_tool.as_ref()?;
         let showing = tool.shown.as_ref()?.mesh.clone();
@@ -48,15 +35,12 @@ impl App {
         }
     }
 
-    /// Mark the scene for re-evaluation without taking a snapshot, for the
-    /// frames *during* a drag -- the snapshot was taken when the drag began, so
-    /// the whole drag is one undo step.
+    /// Mark the scene dirty without a snapshot, for frames during a drag (one undo step overall).
     pub fn touch(&mut self) {
         self.dirty = true;
     }
 
-    /// Whether the project on screen has changes that are not in its file: in
-    /// the component being edited, or in any other (issue 113).
+    /// Whether the project has unsaved changes, in any component (issue 113).
     pub fn unsaved(&self) -> bool {
         self.history.revision() != self.saved_revision || self.project.unsaved()
     }
@@ -65,7 +49,7 @@ impl App {
         self.status.text().to_string()
     }
 
-    /// Force the viewport image to be rebuilt on the next frame.
+    /// Force the viewport image to be rebuilt next frame.
     pub fn invalidate_image(&mut self) {
         self.image_key = u64::MAX;
     }
@@ -74,7 +58,7 @@ impl App {
         self.scene.settings.unit
     }
 
-    /// The move and resize snap increment, in millimetres (spec section 6.2).
+    /// The move and resize snap increment in millimetres (spec section 6.2).
     pub fn move_snap(&self) -> f64 {
         self.scene.settings.snap_step.max(1e-6)
     }

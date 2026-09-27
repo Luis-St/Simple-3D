@@ -34,13 +34,10 @@ pub(super) const SPHERICAL_CAP: PrimitiveSpec = PrimitiveSpec {
     segmented: true,
     build: |p, seg| gen::spherical_cap_mesh(p.num("diameter"), p.num("cap_height"), seg),
     axes: |p| {
-        // A cap shallower than a hemisphere is widest at its rim, and the
-        // rim diameter depends on both parameters at once -- no single one
-        // governs the X/Y extent, so no handle there.
+        // A shallow cap's rim diameter depends on both parameters, so no X/Y handle.
         let (diameter, cap) = (p.num("diameter"), p.num("cap_height"));
         let d = (cap >= diameter / 2.0).then(|| AxisDriver::direct("diameter"));
-        // The generator clamps the cap height to the sphere's diameter, so
-        // beyond that the Z handle would stop tracking too.
+        // The generator clamps cap height to the diameter, beyond which Z would stop tracking.
         let z = (cap <= diameter).then(|| AxisDriver::direct("cap_height"));
         [d, d, z]
     },
@@ -97,8 +94,7 @@ pub(super) const CAPSULE: PrimitiveSpec = PrimitiveSpec {
     segmented: true,
     build: |p, seg| gen::capsule_mesh(p.num("diameter"), p.num("length"), seg),
     axes: |p| {
-        // A capsule shorter than its own diameter is a sphere: the length
-        // no longer governs the Z extent, the diameter does.
+        // A capsule shorter than its diameter is a sphere; the diameter governs Z then.
         let long_enough = p.num("length") >= p.num("diameter");
         [
             Some(AxisDriver::direct("diameter")),
@@ -119,7 +115,6 @@ pub(super) const TORUS: PrimitiveSpec = PrimitiveSpec {
     ],
     segmented: true,
     build: |p, seg| gen::torus_mesh(p.num("ring_diameter"), p.num("tube_diameter"), p.num("sweep"), seg),
-    // The X and Y extents are ring + tube diameter together, so neither
-    // parameter alone governs them; only the Z handle is offered.
+    // X and Y are ring plus tube diameter together, so only Z has a handle.
     axes: |_p| [None, None, Some(AxisDriver::direct("tube_diameter"))],
 };

@@ -1,7 +1,6 @@
-//! Which dialog is open. One at a time, so the state cannot contradict itself.
+//! Which dialog is open.
 
-/// Which of the modal windows is open. Only one at a time, so the state cannot
-/// contradict itself.
+/// The open modal window; only one at a time, so the state cannot contradict itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Modal {
     #[default]
@@ -9,22 +8,17 @@ pub enum Modal {
     Export,
     Keymap,
     About,
-    /// A failure worth stopping for, shown in a scrollable, copyable window.
+    /// A failure, in a scrollable, copyable window.
     Error,
-    /// Naming a group, or a whole project, to keep on the palette.
+    /// Naming a group or project to keep on the palette.
     SavePrimitive,
-    /// Quitting with unsaved changes.
     ConfirmQuit,
-    /// Emptying a collection of every piece, which turns it into a union group
-    /// and lets go of the object it was made from (issue 82).
+    /// Emptying a collection, which makes it a union group and drops its original (issue 82).
     ConfirmExtractAll,
     /// Closing a tab with unsaved changes (issue 61).
     ConfirmCloseTab,
-    /// Taking a saved pattern kind off the shelf, which is a file on disk and
-    /// not something undo reaches (issue 67).
+    /// Deleting a saved pattern kind, a file undo does not reach (issue 67).
     ConfirmDeleteKind,
-    /// Deleting a component, or undoing the step that made one when that
-    /// throws away work done on it since (issue 113). Neither can be taken
-    /// back.
+    /// Deleting a component, or undoing its creation over later work (issue 113); neither can be undone.
     ConfirmComponent,
 }

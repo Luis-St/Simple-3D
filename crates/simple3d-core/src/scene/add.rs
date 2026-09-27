@@ -56,8 +56,7 @@ impl Scene {
         id
     }
 
-    /// Add a pattern node (issue 67), which repeats whatever children are put
-    /// under it. It starts as a linear pattern with the default numbers.
+    /// Add a pattern node (issue 67), starting as a default linear pattern.
     pub fn add_pattern(&mut self, parent: NodeId, index: usize) -> NodeId {
         let id = self.fresh_id();
         let node = Node {
@@ -82,22 +81,14 @@ impl Scene {
         id
     }
 
-    /// Add a node that owns the geometry it is given (issue 80).
+    /// Add a node owning the given geometry (issue 80).
     pub fn add_mesh(&mut self, name: &str, mesh: MeshData, parent: NodeId, index: usize) -> NodeId {
         let name = self.unique_name(name);
         self.add_mesh_named(name, mesh, parent, index)
     }
 
-    /// The same, taking the name exactly as given (issue 82).
-    ///
-    /// For the pieces of a split, whose names are already unique among
-    /// themselves -- "Box Piece 1" and up, numbered by where they sit in the
-    /// collection. Running them through [`Scene::unique_name`] would do two
-    /// things wrong: every piece would be compared against every name in the
-    /// document, which for ten thousand of them is a hundred million string
-    /// comparisons before the split even lands, and the numbering would be
-    /// answered from the same series the objects use -- eighty pieces called
-    /// "Box 1" to "Box 80" leave the next box a user adds to be called "Box 81".
+    /// The same, with the name taken as given (issue 82). For split pieces: `unique_name` would cost
+    /// a hundred million comparisons for ten thousand pieces and would advance the objects' numbering.
     pub fn add_mesh_named(&mut self, name: String, mesh: MeshData, parent: NodeId, index: usize) -> NodeId {
         let id = self.fresh_id();
         let node = Node {

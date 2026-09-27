@@ -5,9 +5,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_split_stands_where_the_shape_stood_and_gives_it_back_on_request() {
-    // Issue 82: breaking a shape apart must be reversible, so the node the
-    // pieces go under carries the shape itself, and putting it back is one
-    // call rather than a rebuild by hand.
+    // Issue 82: a split carries the shape itself, so restoring it is one call.
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Union, root, 0);
@@ -21,7 +19,7 @@ pub(crate) fn a_split_stands_where_the_shape_stood_and_gives_it_back_on_request(
     scene.remove(group);
     let split = scene.add_split(original, None, root, 0);
     assert!(scene.node(split).is_split());
-    // The shape's own properties came across, name included.
+    // The shape's properties came across, name included.
     assert_eq!(scene.node(split).name, "Bracket");
     assert_eq!(scene.node(split).position, Vec3::new(5.0, 0.0, 0.0));
     assert_eq!(scene.node(split).anchor, Anchor::Base);
@@ -29,8 +27,7 @@ pub(crate) fn a_split_stands_where_the_shape_stood_and_gives_it_back_on_request(
     assert_eq!(scene.node(split).combine_op(), Some(GroupOp::Union), "its pieces stand side by side");
     assert!(scene.can_split_for_export(split), "its pieces are separate solids and an export can say so");
 
-    // Whatever is done to the node afterwards is what the restored shape
-    // wears: the recipe says what it is, the node says where it is.
+    // The restored shape wears the node's later transform: recipe says what, node says where.
     scene.get_mut(split).unwrap().position = Vec3::new(5.0, 0.0, 40.0);
     scene.get_mut(split).unwrap().name = "Bracket, in pieces".into();
     let back = scene.restore_split(split).unwrap();
@@ -67,8 +64,7 @@ pub(crate) fn a_split_survives_the_portable_form_with_its_shape_and_its_pieces()
     assert_eq!(other.node(back).group_op(), Some(GroupOp::Difference));
     assert_eq!(other.node(back).children.len(), 2);
 
-    // A split with no shape behind it is not a split, and is refused the way
-    // a mesh with no geometry is rather than loaded as something else.
+    // A split with no shape behind it is refused, like a mesh without geometry.
     let mut hollow = data.clone();
     hollow.original = None;
     assert!(other.import_subtree(&hollow, other_root, 0).is_none());

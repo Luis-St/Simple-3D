@@ -1,13 +1,11 @@
-//! Extruding an outline along an axis, and closing what that leaves open.
+//! Extruding an outline along an axis, and closing its ends.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
 
-/// Extrude a (possibly tapering) polygon along Z from -h/2 to +h/2, capped at
-/// both ends. `bottom` and `top` must have the same vertex count and are both
-/// assumed centred on (0,0) and convex (or at least star-shaped around the
-/// origin) so a fan cap is valid. Either outline may degenerate to all-zero
-/// points (an apex), which is handled automatically via degenerate triangles.
+/// Extrude a possibly tapering polygon along Z from -h/2 to +h/2, capped at both ends. `bottom` and
+/// `top` need equal vertex counts and must be centred and star-shaped about the origin; either may
+/// collapse to an apex.
 pub fn extrude_frustum_polygon(bottom: &[(f64, f64)], top: &[(f64, f64)], h: f64) -> Mesh {
     debug_assert_eq!(bottom.len(), top.len());
     let n = bottom.len();
@@ -19,9 +17,7 @@ pub fn extrude_frustum_polygon(bottom: &[(f64, f64)], top: &[(f64, f64)], h: f64
         mesh.push_triangle(b[i], b[i2], t[i2]);
         mesh.push_triangle(b[i], t[i2], t[i]);
     }
-    // A tapered end whose outline has collapsed to a point or a line (an
-    // apex, or a wedge's sharp ridge) has zero area and no real cap face to
-    // close -- the side walls already meet there. Only fan a genuine cap.
+    // A collapsed end (apex or ridge) has no area to cap; the walls already meet there.
     let shoelace_area2 = |outline: &[(f64, f64)]| -> f64 {
         let n = outline.len();
         (0..n)
@@ -61,26 +57,14 @@ pub fn extrude_frustum_polygon(bottom: &[(f64, f64)], top: &[(f64, f64)], h: f64
     mesh
 }
 
-/// Whether a cap outline should be fanned from one of its own corners rather
-/// than from a vertex added in the middle of it.
-///
-/// A centre vertex is what keeps a *round* cap's triangles well shaped: fanning
-/// a 448-segment circle from one point on its rim gives 446 slivers, and the
-/// boolean kernel's classification is only as good as the normals it computes
-/// off them. A square has no such problem, and there the centre vertex is pure
-/// noise: a plain box came out 16 triangles and 10 vertices rather than 12 and
-/// 8, and those two invented cap centres travel into every 3MF, STL, OBJ and
-/// PLY the application writes -- of the shape a reader is most likely to open a
-/// file to check.
-///
-/// So: a convex cap of four corners or fewer, which is every flat-sided
-/// extrusion in the library and no curve approximation.
+/// Whether a cap is fanned from a corner rather than an added centre vertex. Round caps need the
+/// centre to avoid slivers; for convex caps of up to four corners it only added vertices to every
+/// export (a box had 16 triangles instead of 12).
 pub(crate) fn flat_cap(outline: &[(f64, f64)]) -> bool {
     if outline.len() < 3 || outline.len() > 4 {
         return false;
     }
-    // Convex: every turn around the outline goes the same way. A dart would
-    // put the fan's triangles outside the shape.
+    // Convex: every turn goes the same way, or the fan would leave the shape.
     let n = outline.len();
     let mut sign = 0.0;
     for i in 0..n {
@@ -99,11 +83,8 @@ pub(crate) fn flat_cap(outline: &[(f64, f64)]) -> bool {
     true
 }
 
-/// Extrude a stack of outlines, each at its own Z, capping the first and the
-/// last. Every outline needs the same vertex count, and they have to be given
-/// in increasing Z. This is [`extrude_frustum_polygon`] generalised to more
-/// than two levels, which is what a horizontally chamfered solid needs: its
-/// wall changes direction twice on the way up.
+/// Extrude a stack of outlines at increasing Z with equal vertex counts, capping the first and last:
+/// [`extrude_frustum_polygon`] for more levels, as a horizontal chamfer needs.
 pub fn extrude_stack(levels: &[(Vec<(f64, f64)>, f64)]) -> Mesh {
     let mut mesh = Mesh::new();
     if levels.len() < 2 {

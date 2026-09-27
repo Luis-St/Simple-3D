@@ -1,4 +1,4 @@
-//! The per-node renderables are kept for as long as their meshes are.
+//! Per-node renderables are kept as long as their meshes are.
 
 use super::*;
 use simple3d_core::eval::{Cancel, Evaluator};
@@ -8,8 +8,7 @@ use std::sync::Arc;
 
 #[test]
 pub(crate) fn a_node_that_did_not_change_is_not_prepared_again() {
-    // Every evaluation during a drag used to re-prepare every selected and
-    // ghosted node on the interface thread, the unchanged ones included.
+    // Regression: every drag evaluation re-prepared every selected and ghosted node on the UI thread.
     let mut scene = Scene::new();
     let root = scene.root();
     let still = scene.add_primitive("plate", root, 0).unwrap();
@@ -20,7 +19,7 @@ pub(crate) fn a_node_that_did_not_change_is_not_prepared_again() {
     let first = evaluator.evaluate(&scene, &Cancel::new());
     let still_before = cache.get(&first, (still, true)).expect("the plate has a renderable");
     let moved_before = cache.get(&first, (moved, true)).expect("the cylinder has a renderable");
-    // Asked again of the same evaluation: the same one.
+    // The same evaluation asked again: the same one.
     assert!(Arc::ptr_eq(&still_before, &cache.get(&first, (still, true)).unwrap()));
 
     scene.get_mut(moved).unwrap().position = Vec3::new(40.0, 0.0, 0.0);
@@ -30,20 +29,18 @@ pub(crate) fn a_node_that_did_not_change_is_not_prepared_again() {
     assert!(!Arc::ptr_eq(&moved_before, &moved_after), "a moved node kept the renderable of where it was");
     assert_ne!(moved_before.mesh.bounds(), moved_after.mesh.bounds());
 
-    // The plain and the outlined renderable of one node are different things.
+    // Plain and outlined renderables of one node differ.
     assert!(cache.get(&second, (still, false)).unwrap().outline.is_empty());
     assert!(!still_before.outline.is_empty());
 
-    // What is no longer drawn is let go of.
+    // No longer drawn, let go.
     cache.retain(&[(moved, true)]);
     assert!(!Arc::ptr_eq(&still_before, &cache.get(&second, (still, true)).unwrap()));
 }
 
 #[test]
 pub(crate) fn the_edge_table_agrees_with_counting_every_edge() {
-    // The feature edges and the outline are read off a table sorted by vertex
-    // rather than a hash map of edges; this holds the two against a count done
-    // the slow way, on a mesh with open boundaries and a three-way junction.
+    // The vertex-sorted edge table, checked against a slow count on a mesh with open edges and a three-way junction.
     let mut mesh = simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0);
     mesh.append(&simple3d_geom::primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(10.0, 0.0, 0.0)));
     mesh.append(&simple3d_geom::primitives::cylinder_mesh(6.0, 6.0, 4.0, 12).translated(Vec3::new(0.0, 20.0, 0.0)));

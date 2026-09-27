@@ -1,22 +1,14 @@
-//! A bounding-box hierarchy over the polygons of one body: how it is built.
+//! A bounding-box hierarchy over one body's polygons: how it is built.
 
 use super::*;
 use crate::vec3::Vec3;
 
-/// A bounding-volume hierarchy over the polygons of one body, answering two
-/// questions the BSP tree itself answers badly.
-///
-/// *Does anything come near this box?* -- so a boolean can tell that a polygon
-/// is nowhere near the other body's surface without walking that body's BSP,
-/// which for a round primitive is a chain thousands of nodes long whose own
-/// bounding box is the whole body and so proves nothing.
-///
-/// *Is every polygon behind this plane?* -- which is what says a plane splits
-/// nothing, and lets `build` chain a convex body's faces in one pass instead of
-/// re-classifying every remaining face at every one of its own planes.
+/// A BVH over one body's polygons, answering what the BSP answers badly: whether anything comes
+/// near a box (a convex body's chain proves nothing), and whether every polygon is behind a plane
+/// (letting `build` chain a convex body in one pass).
 pub(crate) struct BoxTree {
     pub(super) nodes: Vec<BoxNode>,
-    /// Polygon indices, permuted so that each leaf owns a contiguous run.
+    /// Polygon indices, permuted so each leaf owns a contiguous run.
     pub(super) order: Vec<u32>,
     pub(super) boxes: Vec<(Vec3, Vec3)>,
 }
@@ -33,8 +25,7 @@ pub(crate) enum BoxKind {
     Leaf(u32, u32),
 }
 
-/// Below this many polygons a node stops dividing. Testing a handful directly
-/// costs less than the branches to avoid them.
+/// Below this many polygons a node stops dividing.
 pub(crate) const BOX_LEAF: usize = 4;
 
 impl BoxTree {
@@ -49,9 +40,7 @@ impl BoxTree {
         Some(tree)
     }
 
-    /// Divide at the median of the widest axis until each leaf is small.
-    /// Iterative, like every other walk in this file: the input can be a
-    /// hundred thousand faces.
+    /// Divide at the widest axis's median until leaves are small; iterative, for large inputs.
     pub(super) fn split(&mut self) {
         let root = self.push_placeholder();
         let mut stack: Vec<(usize, usize, u32)> = vec![(0, self.order.len(), root)];

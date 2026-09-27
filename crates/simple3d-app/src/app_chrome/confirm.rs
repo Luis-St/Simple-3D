@@ -1,4 +1,4 @@
-//! The questions asked before something cannot be taken back.
+//! Confirmations asked before irreversible actions.
 
 use super::*;
 use crate::app::{App, Modal};
@@ -6,8 +6,7 @@ use crate::theme;
 use crate::ui;
 
 impl App {
-    /// Emptying a collection of every piece, which is where a break stops being
-    /// reversible (issue 82).
+    /// Extracting every piece of a collection, which makes a break irreversible (issue 82).
     pub(super) fn confirm_extract_all_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
@@ -32,11 +31,8 @@ impl App {
         let node = self.scene.node(id);
         let count = node.children.len();
         let name = node.name.clone();
-        // The recipe is named, not merely referred to: "you will lose the
-        // original" is a warning about something the user cannot see, and what
-        // the shape *was* is the thing the user will look for afterwards. The
-        // collection wears the shape's own name, so naming it again would be
-        // the same word twice: it is the kind that says something new.
+        // The original kind is named, since that is what the user will look for; the collection already
+        // carries the shape's own name.
         let made_from = node
             .split_original()
             .map(|original| {
@@ -75,14 +71,8 @@ impl App {
 }
 
 impl App {
-    /// Taking a saved pattern kind off the shelf (issue 67).
-    ///
-    /// Asked because the shelf is not the document: a kind is a file in the
-    /// config directory, deleting it is what the file system does to files, and
-    /// undo -- which covers every other thing a click here can do -- does not
-    /// reach it. The cross sits in a list of names a click away from the name
-    /// above it, which is exactly where a slip costs a rule that took a while
-    /// to build and exists in no project.
+    /// Deleting a saved pattern kind (issue 67). Asked because it deletes a config file that undo
+    /// cannot restore, and the cross sits close to other names.
     pub(super) fn confirm_delete_kind_window(&mut self, ctx: &egui::Context) {
         self.dialog(
             ctx,
@@ -106,8 +96,7 @@ impl App {
         };
         ui.label(format!("Delete \u{201C}{}\u{201D} from the shelf?", entry.name));
         ui.add_space(6.0);
-        // What survives it is said as plainly as what does not: a pattern stores
-        // its own stage numbers, so nothing already laid out comes apart.
+        // Patterns store their own stage numbers, so existing layouts survive.
         ui.label(theme::hint(
             "The rule goes for good -- this is a file, not an edit, so undo does not bring it back. Patterns already \
              built from it keep their numbers and go on laying out exactly as they do now.",
@@ -197,9 +186,8 @@ impl App {
             1 => "This project, and one other open document, have changes that have not been saved.".to_string(),
             n => format!("This project, and {n} other open documents, have changes that have not been saved."),
         });
-        // Quitting takes the other windows with it, so what is unsaved in them
-        // is part of the question (issue 107). Closing one window is not asked
-        // about them at all: they are staying open.
+        // Quitting closes other windows, so their unsaved work is part of the question (issue 107);
+        // closing one window is not.
         if !self.closing_one_window() && self.unsaved_elsewhere {
             ui.add_space(4.0);
             ui.label("Another window has unsaved changes as well.");
@@ -209,9 +197,7 @@ impl App {
     }
 
     pub(super) fn confirm_quit_actions(&mut self, ui: &mut egui::Ui) {
-        // One window is the application, so closing it is quitting and the
-        // buttons say so; with another window open, this one is only a window
-        // (issue 107).
+        // With one window, closing it is quitting; with others open it is only a window (issue 107).
         let (save, leave) = if self.closing_one_window() {
             ("Save and close", "Close without saving")
         } else {
@@ -237,9 +223,8 @@ impl App {
 }
 
 impl App {
-    /// Deleting a component, or undoing the step that made one after it has
-    /// been worked on (issue 113). Neither is a step anything can take back:
-    /// a component is not part of any one component's history.
+    /// Deleting a component, or undoing its creation after it was worked on (issue 113). Neither can
+    /// be undone, since components are outside any one component's history.
     pub(super) fn confirm_component_window(&mut self, ctx: &egui::Context) {
         let title = match self.component_ask {
             Some(crate::components::ComponentAsk::Undo(_)) => "Undo making a component",

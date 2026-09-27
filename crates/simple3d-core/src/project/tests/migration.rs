@@ -17,7 +17,7 @@ pub(crate) fn an_older_file_missing_optional_fields_migrates_silently() {
     let scene = from_str(minimal).expect("minimal file should load");
     let child = scene.node(scene.root()).children[0];
     assert_eq!(scene.node(child).name, "Plate");
-    // Defaults filled in: visible, centre anchor, and every declared parameter.
+    // Defaults filled in: visible, centre anchor, every declared parameter.
     assert!(scene.node(child).visible);
     assert_eq!(scene.node(child).anchor, Anchor::Centre);
     let plate = crate::primitive::lookup("plate").expect("the plate is a declared type");
@@ -27,7 +27,6 @@ pub(crate) fn an_older_file_missing_optional_fields_migrates_silently() {
 
 #[test]
 pub(crate) fn a_scene_nobody_has_grouped_writes_no_export_body_at_all() {
-    // A file written by this version has to diff cleanly against one
-    // written before export bodies existed.
+    // Must diff cleanly against files from before export bodies.
     assert!(!to_string(&sample()).contains("export_body"));
 }

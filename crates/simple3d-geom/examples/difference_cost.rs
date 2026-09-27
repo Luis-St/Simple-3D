@@ -1,10 +1,8 @@
-//! What a difference of many cutters costs, folded one cutter at a time
-//! against subtracting their union once.
+//! Many cutters: folded one at a time versus subtracting their union once.
 //!
 //! `cargo run --release -p simple3d-geom --example difference_cost`
 //!
-//! Reference figures on the machine this was written on: 3.4 s folded against
-//! 0.27 s evaluated for the 200-segment sphere with twenty cutters.
+//! Reference: 3.4 s folded versus 0.27 s for the 200-segment sphere with twenty cutters.
 
 use simple3d_geom::{csg_bsp, evaluate_boolean, primitives, BooleanOp, Mesh, Vec3};
 use std::time::Instant;

@@ -1,8 +1,6 @@
-//! The depth range one frame is drawn into, and the axis bias.
+//! The frame's depth range, and the axis bias.
 
-/// The smallest and largest depth key in the frame, so the whole scene can be
-/// mapped into the depth buffer's range. Everything drawn widens it -- the
-/// meshes by their boxes, the grid by its quad, the axes by their ends.
+/// Min and max depth key in the frame, widened by everything drawn, mapped onto the depth buffer.
 #[derive(Default)]
 pub(crate) struct Passes {
     pub(super) key_range: Option<(f32, f32)>,
@@ -17,5 +15,5 @@ impl Passes {
     }
 }
 
-/// The axis bias, matching `render.rs`'s own.
+/// The axis bias, matching `render.rs`.
 pub(crate) const AXIS_BIAS: f32 = -5.0e-4;

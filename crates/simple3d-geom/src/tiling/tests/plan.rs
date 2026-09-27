@@ -4,15 +4,11 @@ use super::*;
 use crate::primitives::box_mesh;
 use crate::vec3::Vec3;
 
-/// The whole of the second half of the feature: two cuts, on two axes,
-/// leave the blocks their grids come to between them -- and they still add
-/// back up to the shape they were cut from.
+/// Two cuts on two axes leave the blocks both grids make, still adding up to the shape.
 #[test]
 pub(crate) fn two_cuts_leave_the_pieces_both_of_them_make() {
-    // A 30 x 30 x 10 plate in 10 mm squares through Z is nine columns of
-    // 10 x 10 x 10. The second cut runs across the first -- through X, so
-    // its cells lie in the Y-Z plane -- and cuts each of those columns into
-    // the four a 5 mm grid makes of a 10 x 10 face.
+    // A 30 x 30 x 10 plate in 10 mm squares through Z is nine columns; 5 mm cells through X cut each
+    // into four.
     let plan = SplitPlan {
         passes: vec![
             Tiling { size: 10.0, axis: 2, ..Tiling::default() },
@@ -28,8 +24,7 @@ pub(crate) fn two_cuts_leave_the_pieces_both_of_them_make() {
     }
 }
 
-/// A pass that cannot cut what it is given must not lose it: the pieces of
-/// the cut before it come through whole.
+/// A pass that cannot cut its input passes the previous pieces through whole.
 #[test]
 pub(crate) fn a_cut_that_misses_leaves_the_pieces_it_was_given() {
     let plan = SplitPlan {
@@ -44,9 +39,7 @@ pub(crate) fn a_cut_that_misses_leaves_the_pieces_it_was_given() {
     assert!((total - 9000.0).abs() < 1.0);
 }
 
-/// What the two cuts come to between them is what is counted and what is
-/// refused -- one cut that is fine on its own and a second that multiplies
-/// it past the limit is a split nobody can find the pieces of.
+/// The combined count is what is refused: two acceptable cuts can multiply past the limit.
 #[test]
 pub(crate) fn a_plan_is_counted_and_refused_by_what_its_cuts_come_to_together() {
     let bounds = (Vec3::new(-50.0, -50.0, -5.0), Vec3::new(50.0, 50.0, 5.0));
@@ -54,8 +47,7 @@ pub(crate) fn a_plan_is_counted_and_refused_by_what_its_cuts_come_to_together() 
     let plan = SplitPlan { passes: vec![one, Tiling { axis: 0, ..one }] };
     assert!(one.refusal(bounds).is_none(), "one cut this size is fine on its own");
     assert!(plan.refusal(bounds).is_some(), "two of them are far past the limit and were let through");
-    // Progress is measured against every cell that will be tried, which is
-    // the first cut over the shape plus the second over each piece it left.
+    // Progress counts the first cut over the shape plus the second over each piece.
     let pair = SplitPlan {
         passes: vec![
             Tiling { size: 25.0, axis: 2, ..Tiling::default() },
@@ -66,9 +58,7 @@ pub(crate) fn a_plan_is_counted_and_refused_by_what_its_cuts_come_to_together() 
     assert_eq!(pair.work(bounds), first + both, "the bar would run at two speeds");
 }
 
-/// A split written before a split could be cut more than once says its one
-/// tiling as an object, and there is no reason to lose it over a pair of
-/// brackets.
+/// An older single-tiling plan (an object, not a list) still reads.
 #[test]
 pub(crate) fn a_plan_reads_both_a_list_of_cuts_and_the_single_one_that_came_before_it() {
     let plan = SplitPlan { passes: vec![Tiling::default(), Tiling { axis: 0, ..Tiling::default() }] };

@@ -3,27 +3,16 @@
 use super::*;
 use simple3d_geom::section::Plane;
 
-/// What the axes meet in the model: where they run inside it, which solids they
-/// go through, and how far from the origin the model reaches.
+/// What the axes meet in the model: where they run inside it, which solids, and the model's reach.
 pub(crate) struct AxisMaterial {
     /// Per axis, the stretches inside a solid, as coordinates along that axis.
     pub(crate) inside: [Vec<(f64, f64)>; 3],
-    /// Per axis, the bodies it runs through: the stretch inside each one, with
-    /// that body's tag. Per body and per axis both -- a box the Y axis runs
-    /// through is still an ordinary occluder for X and Z, and a box the axes
-    /// never touch is an ordinary occluder for all three, however many other
-    /// shapes it was merged into one mesh with (img2).
-    ///
-    /// The span is kept, not just the tag, because *where* a stretch of the
-    /// line sits relative to it decides whether that body may hide it: only the
-    /// approach, on the eye's side of the material, is drawn over the shape.
+    /// Per axis, the bodies it runs through, each with its stretch and tag. Per body and axis, since a
+    /// box one axis runs through still occludes the others (img2); the span decides where the approach is.
     pub(crate) through: [Vec<(f64, f64, u16)>; 3],
-    /// One past the largest tag in `through`, so a lookup table indexed by tag
-    /// can be sized once.
+    /// One past the largest tag in `through`, for sizing a tag-indexed table.
     pub(crate) tags: usize,
-    /// The distance from the origin to the model's furthest vertex. What an
-    /// origin axis's arms have to be longer than, or a shape standing on the
-    /// origin holds the whole arm and the axis is never seen at all.
+    /// The distance to the model's furthest vertex, which the axis arms must exceed.
     pub(crate) reach: f64,
 }
 
@@ -45,14 +34,8 @@ pub(crate) fn axis_material(items: &[Item<'_>], grid: &Grid, section: &[Plane]) 
     axis_material_live(items, grid, section, &Live::default())
 }
 
-/// The same, for a frame with a body being dragged (see [`Live`]).
-///
-/// The spans were found where the body stood when the scene was evaluated.
-/// Its stretch of the scene is not drawn, so it is not in the axes' way there
-/// any more; and where it is drawn instead, moved, the spans no longer say
-/// where the axes run through it. The body is left out of the axis rule until
-/// the drag ends and the scene is evaluated with it where it now is -- an axis
-/// is drawn through it for the length of the drag.
+/// The same with a dragged body (see [`Live`]): its spans are stale, so it is left out of the axis
+/// rule until the drag ends and the axis is drawn through it meanwhile.
 pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: &[Plane], live: &Live<'_>) -> AxisMaterial {
     let mut material = AxisMaterial {
         inside: [Vec::new(), Vec::new(), Vec::new()],
@@ -62,8 +45,7 @@ pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: &[Pla
     };
     for (item, tag_base) in items.iter().zip(tag_bases(items)) {
         material.reach = material.reach.max(item.renderable.reach);
-        // A ghost is see-through, so the axis inside it is too -- and it never
-        // reaches the depth buffer either way.
+        // A ghost is see-through, so the axis inside it is too.
         if item.style != Style::Solid || live.placed(item.renderable.id).is_some() {
             continue;
         }
@@ -82,17 +64,13 @@ pub(crate) fn axis_material_live(items: &[Item<'_>], grid: &Grid, section: &[Pla
             if !grid.axes[axis] {
                 continue;
             }
-            // Read off the renderable rather than measured again: where an axis
-            // runs through a mesh is a property of the mesh, and the mesh has
-            // not moved since the renderable was made.
+            // Read from the renderable, since the mesh has not moved since it was made.
             for &(span, body) in &item.renderable.axis_spans[axis] {
                 if gone.binary_search(&body).is_ok() {
                     continue;
                 }
                 let tag = body_tag(body, tag_base);
-                // Material the section took away is no longer in the axis's
-                // way: the line is drawn through the space the cut opened, the
-                // way it is drawn through empty space anywhere else.
+                // Material the section removed no longer blocks the axis.
                 let kept = match section.is_empty() {
                     true => vec![span],
                     false => trim_spans(span, axis, section),

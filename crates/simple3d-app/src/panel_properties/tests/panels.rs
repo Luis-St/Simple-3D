@@ -9,8 +9,7 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_whole_scrub_is_one_undo_step() {
-    // Forty snapshots for one drag would make undo useless exactly where it
-    // is needed most.
+    // Forty snapshots per drag would make undo useless.
     let mut app = headless_app();
     let (a, b) = two_plates(&mut app);
     let unit = app.unit();
@@ -57,9 +56,7 @@ pub(crate) fn a_selection_of_one_kind_of_shape_gets_a_dimensions_panel_and_a_mix
 
 #[test]
 pub(crate) fn every_registry_parameter_maps_to_a_field_kind_the_editor_draws() {
-    // The editor has a branch per `ParamKind`; a kind it did not handle would
-    // silently render nothing, so check every declared parameter falls into
-    // one of them.
+    // An unhandled `ParamKind` would render nothing, so every declared parameter must map to one.
     for spec in primitive::REGISTRY {
         for param in spec.params {
             let handled = matches!(

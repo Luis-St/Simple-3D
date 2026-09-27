@@ -2,9 +2,7 @@
 
 use super::*;
 impl Frame<'_> {
-    /// Fill every pixel with one colour and reset the depth buffer. The
-    /// renderer lays a gradient down instead, so this is now only how the
-    /// rasterizer's own tests get a known starting frame.
+    /// Fill with one colour and reset depth; only the rasterizer's tests use it now.
     #[cfg(test)]
     pub fn clear(&mut self, background: Rgba) {
         for pixel in self.color.chunks_exact_mut(4) {
@@ -20,9 +18,7 @@ impl Frame<'_> {
         Frame::band(color, width, height, 0, height)
     }
 
-    /// A frame holding only rows `[row_lo, row_hi)`. Everything drawn into it
-    /// is clipped to those rows; the buffers are sized for them alone, so N
-    /// bands cost between them what one whole frame costs.
+    /// A frame of rows `[row_lo, row_hi)` only, clipped to them and sized for them, so N bands cost one frame.
     pub fn band(color: &mut [u8], width: usize, height: usize, row_lo: usize, row_hi: usize) -> Frame<'_> {
         let rows = row_hi.saturating_sub(row_lo);
         debug_assert_eq!(color.len(), width * rows * 4, "the slice is not this band's rows");
@@ -38,7 +34,6 @@ impl Frame<'_> {
         }
     }
 
-    /// The rows this frame owns.
     pub fn rows(&self) -> std::ops::Range<usize> {
         self.row_lo..self.row_hi
     }

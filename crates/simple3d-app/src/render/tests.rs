@@ -15,8 +15,7 @@ use crate::raster::{Image, Rgba};
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
+// The tests use these modules' internals, not only the renderer's re-exports.
 use super::frame::*;
 use super::renderable::*;
 use simple3d_core::scene::Camera;
@@ -47,15 +46,14 @@ fn count_non_background(frame: &Image, palette: &Palette) -> usize {
     (0..frame.height * frame.width).filter(|&i| !is_background(frame, i, palette)).count()
 }
 
-/// Whether pixel `index` still holds the gradient it was cleared to.
+/// Whether pixel `index` still holds the cleared gradient.
 fn is_background(frame: &Image, index: usize, palette: &Palette) -> bool {
     let offset = index * 4;
     let pixel: Rgba = [frame.color[offset], frame.color[offset + 1], frame.color[offset + 2], frame.color[offset + 3]];
     pixel == palette.background_at(index / frame.width, frame.height)
 }
 
-/// How many pixels of the frame carry the given colour, shaded or not.
-/// A drawn line keeps its colour exactly; only shaded faces are scaled.
+/// Pixels carrying the colour; lines keep it exactly, only faces are shaded.
 fn pixels_of(frame: &Image, colour: Rgba) -> usize {
     (0..frame.width * frame.height)
         .filter(|&i| {
@@ -73,7 +71,7 @@ fn shifted_box(x: f64) -> simple3d_geom::Mesh {
     mesh
 }
 
-/// The scene from straight in front, where every side face is edge-on.
+/// The scene from straight in front, every side face edge-on.
 fn straight_on(items: Vec<Item<'_>>) -> Image {
     let mut req = request(items, DisplayMode::Shaded);
     req.view = View::new(
@@ -87,9 +85,7 @@ fn column_has(frame: &Image, x: usize, colour: Rgba) -> bool {
     rows_of(frame, x, colour, 0..frame.height)
 }
 
-/// Whether a column carries the colour anywhere in the *middle* of the
-/// shape, away from the rows the top and bottom of an outline run along --
-/// a vertical line is only a vertical line if it is there between them.
+/// Whether a column carries the colour between two rows, away from an outline's top and bottom.
 fn column_has_between(frame: &Image, x: usize, colour: Rgba, from: usize, to: usize) -> bool {
     rows_of(frame, x, colour, from..to)
 }
@@ -101,8 +97,7 @@ fn rows_of(frame: &Image, x: usize, colour: Rgba, rows: std::ops::Range<usize>) 
     })
 }
 
-/// How many separate stretches of `colour` a walk over `path` crosses. A
-/// count of the lines met, rather than of the pixels they cover.
+/// Separate stretches of `colour` crossed along `path`: lines met, not pixels.
 fn runs(frame: &Image, colour: Rgba, path: impl Iterator<Item = (usize, usize)>) -> usize {
     let (mut count, mut on) = (0, false);
     for (x, y) in path {
@@ -115,14 +110,13 @@ fn runs(frame: &Image, colour: Rgba, path: impl Iterator<Item = (usize, usize)>)
     count
 }
 
-/// The first and last column carrying the outline's colour.
+/// First and last column carrying the colour.
 fn accent_span(frame: &Image, colour: Rgba) -> (usize, usize) {
     let columns: Vec<usize> = (0..frame.width).filter(|&x| column_has(frame, x, colour)).collect();
     (*columns.first().expect("nothing was outlined at all"), *columns.last().unwrap())
 }
 
-/// The first and last row carrying it, so a test can keep away from the
-/// horizontal parts of the outline.
+/// First and last row carrying it.
 fn accent_rows(frame: &Image, colour: Rgba) -> (usize, usize) {
     let rows: Vec<usize> =
         (0..frame.height).filter(|&y| (0..frame.width).any(|x| rows_of(frame, x, colour, y..y + 1))).collect();

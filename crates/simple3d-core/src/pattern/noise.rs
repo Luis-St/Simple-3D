@@ -1,23 +1,15 @@
 //! A bit of randomness on top of the rule (issue 79).
 //!
-//! A pattern is exact by construction, which is right for bolt holes and wrong
-//! for planks: a deck laid out on a perfect grid reads as wallpaper. This nudges,
-//! turns and resizes each copy a little off where the rule put it, by no more
-//! than the amounts asked for.
-//!
-//! The scatter is *derived*, not drawn: copy `i` of seed `s` always lands in the
-//! same place, so a file laid out today is laid out identically when it is
-//! opened next year, on another machine, in another build. Nothing is stored per
-//! copy -- a handful of numbers describe the whole scatter -- and the seed is
-//! what makes a scatter that happens to look wrong into one the user can simply
-//! step past.
+//! Nudges, turns and resizes each copy within the requested amounts. Derived, not stored: copy
+//! `i` of seed `s` always lands in the same place on any machine or build, and a new seed gives a
+//! new scatter.
 
 use super::*;
 use crate::primitive::{ParamValue, Params, ParamsExt};
 use crate::xform::Xform;
 use simple3d_geom::Vec3;
 
-/// Every parameter the scatter is made of, in the order its window shows them.
+/// Every scatter parameter, in the order its window shows them.
 pub fn noise_keys() -> &'static [&'static str] {
     &[
         "noise_x",
@@ -35,13 +27,8 @@ pub fn noise_keys() -> &'static [&'static str] {
 /// The turn about each axis, by axis.
 pub const NOISE_TURN_KEYS: [&str; 3] = ["noise_turn_x", "noise_turn_y", "noise_turn_z"];
 
-/// Bring an older scatter's turn up to date (issue 79).
-///
-/// A scatter used to have one turn and a choice of what it was about -- X, Y, Z
-/// or all three by the same amount. Each axis now has an amount of its own, so
-/// the one turn becomes the amount about the axis it was about, or about each
-/// of the three. Reads `stored` and writes `out`, for a project's parameters and
-/// a saved kind alike; a scatter that already has the new turns is left alone.
+/// Update an older scatter's single turn with an axis choice into per-axis amounts (issue 79).
+/// Reads `stored` and writes `out`; a scatter already using per-axis turns is left alone.
 pub fn migrate_noise(stored: &Params, out: &mut Params) {
     if NOISE_TURN_KEYS.iter().any(|key| stored.contains_key(*key)) {
         return;
@@ -54,15 +41,14 @@ pub fn migrate_noise(stored: &Params, out: &mut Params) {
     }
 }
 
-/// How far the copies may wander, as read off a pattern's parameters.
+/// How far the copies may wander, read from a pattern's parameters.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Noise {
     /// The most a copy may be nudged along each axis, either way.
     pub offset: Vec3,
     /// The most a copy may be turned about each axis, either way, in degrees.
     pub turn: Vec3,
-    /// The most a copy may be made bigger or smaller, as a fraction: 0.1 is
-    /// anything from a tenth smaller to a tenth bigger.
+    /// The most a copy may scale either way, as a fraction: 0.1 is plus or minus a tenth.
     pub scale: f64,
     pub seed: u32,
     /// Whether the original is left exactly where it is.
@@ -84,20 +70,15 @@ impl Noise {
         }
     }
 
-    /// Whether any is asked for. A pattern with none pays nothing for this.
+    /// Whether any is asked for; a pattern without pays nothing.
     pub fn wanted(&self) -> bool {
         self.offset.length() > 1e-9 || self.turn.length() > 1e-9 || self.scale > 1e-9
     }
 
-    /// Where copy `index` actually goes, in its own frame: resized and turned
-    /// where it stands, then nudged.
+    /// Where copy `index` goes in its own frame: resized and turned in place, then nudged.
     ///
-    /// Each number has a channel of its own, and the four a scatter has always
-    /// had keep theirs, so a file scattered before the turn could be about all
-    /// three axes or the size could change lands every copy where it did. A turn
-    /// about one axis alone draws from the channel the single turn always drew
-    /// from, whichever axis that is, and a turn about several draws a channel
-    /// for each -- which is what the old turn about all three did.
+    /// Each number has its own channel, and the original four keep theirs, so older files land every
+    /// copy where they did. A single-axis turn uses the old turn channel.
     pub fn wobble(&self, index: usize) -> Xform {
         let offset = Vec3::new(
             self.offset.x * self.signed(index, 0),
@@ -121,16 +102,12 @@ impl Noise {
     /// One of this copy's numbers, in -1..1.
     fn signed(&self, index: usize, channel: u32) -> f64 {
         let bits = mix((self.seed as u64) << 40 ^ (index as u64) << 8 ^ channel as u64);
-        // The top 53 bits are the ones a double can hold exactly.
+        // The top 53 bits are the ones a double holds exactly.
         (bits >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
     }
 }
 
-/// Nudge every copy off where the rule put it.
-///
-/// In the copy's own frame, composed on the *inside*: a plank is turned about
-/// its own middle and shifted from where it stands, not swung round the centre
-/// of the whole pattern.
+/// Nudge every copy, composed on the inside: turned about its own middle, not the pattern's centre.
 pub(crate) fn scatter(params: &Params, copies: &mut [Instance]) {
     let noise = Noise::of(params);
     if !noise.wanted() {
@@ -151,17 +128,9 @@ pub struct Crowding {
     pub reach: f64,
 }
 
-/// Whether the scatter can close a gap the rule leaves, for copies of a shape
-/// `size` across (issue 79).
-///
-/// Copies that meet are welded into one body -- a pattern unions its copies --
-/// so a scatter of planks that is a millimetre too generous stops being planks.
-/// This is an estimate rather than a collision test: it asks, for each stage
-/// that lays copies side by side, how far apart two neighbours stand, how much
-/// of that the shape itself fills, and whether the two of them wandering
-/// towards each other at the most the scatter allows could cover the rest.
-/// Neighbours that touch already are left out: that is the rule's doing, and
-/// the scatter only answers for the gaps it can close.
+/// Whether the scatter can close a gap between copies of a shape `size` across (issue 79), which
+/// would weld them. An estimate per side-by-side stage, not a collision test; neighbours already
+/// touching are the rule's doing and ignored.
 pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
     let noise = Noise::of(params);
     if !noise.wanted() {
@@ -179,8 +148,7 @@ pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
                 if length < 1e-9 {
                     continue;
                 }
-                // A run whose gaps shrink is tightest at its far end, and one
-                // whose gaps come round on a cycle at its narrowest gap.
+                // A shrinking or cycling run is tightest at its narrowest gap.
                 let narrowest = (0..stage.count - 1).map(|j| stage.gap_after(j)).fold(0.0, f64::min);
                 (stage.step * (1.0 / length), length + narrowest)
             }
@@ -197,8 +165,7 @@ pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
         if gap <= 1e-9 {
             continue;
         }
-        // Each of the two can come the whole jitter towards the other, grow by
-        // its share of the size jitter, and swing a corner round by its turn.
+        // Each neighbour can come the full jitter closer, grow by its share, and swing a corner round.
         let turn = noise.turn.x.max(noise.turn.y).max(noise.turn.z).min(90.0).to_radians().sin();
         let reach = 2.0 * across(noise.offset) + extent * noise.scale + size.length() * turn;
         if reach > gap && worst.is_none_or(|w| gap < w.gap) {
@@ -208,8 +175,7 @@ pub fn crowding(params: &Params, size: Vec3) -> Option<Crowding> {
     worst
 }
 
-/// SplitMix64's finaliser: a cheap, well-mixed hash, so two copies whose
-/// indices differ by one land nowhere near each other.
+/// SplitMix64's finaliser, so neighbouring indices land far apart.
 fn mix(x: u64) -> u64 {
     let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);

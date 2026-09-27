@@ -1,13 +1,11 @@
-//! The definition of one shape: its parameters, the mesh it builds, and
-//! which parameter each axis handle drives.
+//! One shape's definition: its parameters, the mesh it builds, and which parameter each axis drives.
 
 use super::*;
 pub use registry::REGISTRY;
 use simple3d_geom::Mesh;
 
-/// How one bounding-box axis of a primitive relates to one of its parameters,
-/// so a resize handle can write the real dimension instead of a scale factor
-/// (spec section 6.2). `extent = value * factor`.
+/// How a bounding axis relates to a parameter (`extent = value * factor`), so resize writes the real
+/// dimension (spec section 6.2).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisDriver {
     pub param: &'static str,
@@ -25,25 +23,20 @@ pub struct PrimitiveSpec {
     pub label: &'static str,
     pub category: &'static str,
     pub params: &'static [ParamSpec],
-    /// Whether the scene's default segment count (and a per-node override)
-    /// applies to this type.
+    /// Whether the scene's default segment count (and per-node override) applies.
     pub segmented: bool,
     pub build: fn(&Params, u32) -> Mesh,
-    /// Which parameter governs each of the X, Y and Z bounding extents. `None`
-    /// on an axis means no resize handle is offered there, rather than a handle
-    /// that silently does nothing.
+    /// Which parameter governs each bounding extent; `None` means no resize handle on that axis.
     pub axes: fn(&Params) -> [Option<AxisDriver>; 3],
 }
 
 impl PrimitiveSpec {
-    /// Default parameter values for a freshly added node.
+    /// Default parameter values for a new node.
     pub fn default_params(&self) -> Params {
         self.params.iter().map(|p| (p.key.to_string(), p.default)).collect()
     }
 
-    /// Fill in any parameter the given map is missing and drop any it does not
-    /// recognise. Used when loading an older project file, so a primitive that
-    /// gained a parameter migrates silently (spec section 10).
+    /// Fill missing parameters and drop unknown ones, so older files migrate silently (spec section 10).
     pub fn migrate_params(&self, stored: &Params) -> Params {
         self.params
             .iter()
@@ -62,8 +55,7 @@ impl PrimitiveSpec {
         self.params.iter().find(|p| p.key == key)
     }
 
-    /// Whether a parameter should be shown, given the current values of the
-    /// choice parameters it depends on.
+    /// Whether a parameter is shown, given the choice parameters it depends on.
     pub fn param_visible(&self, spec: &ParamSpec, values: &Params) -> bool {
         match spec.shown_when {
             None => true,

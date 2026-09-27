@@ -1,6 +1,5 @@
-//! The application: window layout, command dispatch, file handling and the
-//! glue that keeps the outliner, property editor and viewport in step
-//! (spec section 7).
+//! The application: layout, command dispatch, files, and keeping outliner, properties and viewport in
+//! step (spec section 7).
 
 mod state;
 pub use state::{App, CubeSpin};
@@ -58,12 +57,9 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub const PROJECT_EXTENSION: &str = "simple3d";
 
-/// An export that has not finished by now has gone wrong; better a clear message
-/// than an indefinite hang (spec section 9).
+/// An unfinished export by now has gone wrong; a clear message beats a hang (spec section 9).
 pub const EXPORT_LIMIT: Duration = Duration::from_secs(120);
 
-/// The same guard on an import (issue 105). The same two minutes: reading a
-/// file is far quicker than verifying and writing one, so a read still going
-/// after this long is a file that is not what it claims to be rather than a
-/// large model.
+/// The same guard on import (issue 105); reading is quicker than exporting, so a read this long is a
+/// bad file, not a large model.
 pub const IMPORT_LIMIT: Duration = Duration::from_secs(120);

@@ -5,14 +5,8 @@ use crate::raster::{Frame, Rgba, Vertex};
 use crate::view::View;
 use simple3d_geom::Vec3;
 
-/// One primitive of the model, already projected into screen space and ready
-/// for any band of the frame to draw.
-///
-/// Everything that does not depend on which rows are being drawn -- projection,
-/// back-face culling, shading, the depth bias a line gets from its own distance
-/// -- is worked out once here rather than once per band. Without that the
-/// parallel path re-derives the whole model for every thread, and a dense mesh
-/// in a small viewport comes out *slower* than drawing it on one core.
+/// One primitive, projected and ready for any band to draw. Band-independent work (projection,
+/// culling, shading, line bias) is done once here, or the parallel path would redo it per thread.
 #[derive(Clone, Copy)]
 pub(crate) enum Step {
     Triangle {
@@ -29,24 +23,16 @@ pub(crate) enum Step {
         tag: u16,
         write_depth: bool,
     },
-    /// A line drawn *over* the model and tested against it, claiming neither
-    /// the depth of a pixel nor its body: a tool's preview, which has to be
-    /// hidden by the solid it is drawn on the far side of and must not hide the
-    /// next loop of itself where two of them cross.
-    ///
-    /// Its own variant rather than a `Line` that writes no depth, because the
-    /// two are told apart by *when* they are drawn and only the software
-    /// renderer keeps the order it was handed: the GPU sorts the primitives
-    /// into passes, and a line that writes no depth used to mean the ground
-    /// grid, which goes under the model.
+    /// A line drawn over the model and depth-tested, writing neither depth nor tag: a tool's preview.
+    /// Its own variant because the GPU sorts primitives into passes, where a no-depth `Line` meant the
+    /// ground grid, drawn under the model.
     Overlay {
         a: Vertex,
         b: Vertex,
         colour: Rgba,
         bias: f32,
     },
-    /// A face blended over whatever is already drawn, depth ignored both ways:
-    /// the glow of a body inside another one.
+    /// A face blended over everything with depth ignored: the glow of a buried body.
     Glow {
         v: [Vertex; 3],
         colour: Rgba,
@@ -54,8 +40,7 @@ pub(crate) enum Step {
 }
 
 impl Step {
-    /// The rows this primitive can reach. A band sharing none of them skips it
-    /// on one comparison, which is what the split is worth.
+    /// The rows this primitive can reach, so bands outside them skip it cheaply.
     pub(super) fn rows(&self) -> (f32, f32) {
         match self {
             Step::Triangle { v, .. } => {
@@ -71,16 +56,9 @@ impl Step {
     }
 }
 
-/// Which of `steps` each band has to draw, as indices into it: for each of a
-/// run of consecutive chunks of the steps, one list per band.
-///
-/// Sorting the primitives into their bands once beats letting every band walk
-/// the whole list: a dense mesh is hundreds of thousands of primitives and a
-/// large frame is a band per core, and the scan alone then costs more than the
-/// fill. The sorting is shared out in chunks, because on one thread it took
-/// longer than every band's drawing together. A band draws its lists in chunk
-/// order, and within one the indices ascend, so it still draws in preparation
-/// order.
+/// Which steps each band draws, as index lists per chunk of steps. Binning once beats every band
+/// scanning everything; binning itself is parallelised by chunk. Chunk order and ascending indices
+/// keep preparation order.
 pub(crate) fn bin_steps(steps: &[Step], ranges: &[(usize, usize)]) -> Vec<Vec<Vec<u32>>> {
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
     let chunks = (steps.len() / 16_384).clamp(1, cores);
@@ -88,13 +66,8 @@ pub(crate) fn bin_steps(steps: &[Step], ranges: &[(usize, usize)]) -> Vec<Vec<Ve
         let mut bins: Vec<Vec<u32>> = ranges.iter().map(|_| Vec::new()).collect();
         for (index, step) in steps[from..to].iter().enumerate() {
             let (top, bottom) = step.rows();
-            // A pixel of slack at each end: a line samples on rounded
-            // coordinates and a triangle's span is widened by one, so a
-            // primitive that only just misses a band's rows can still write to
-            // one of them.
-            //
-            // The ranges are in row order, so the first band the primitive can
-            // reach is found by halving rather than by asking every band.
+            // A pixel of slack each end for rounding and span widening. Ranges are in row order, so the
+            // first band is found by binary search.
             let first = ranges.partition_point(|&(_, hi)| (hi as f32 + 1.0) < top);
             for (bin, &(lo, _)) in bins[first..].iter_mut().zip(&ranges[first..]) {
                 if bottom < lo as f32 - 1.0 {
@@ -117,20 +90,12 @@ pub(crate) fn bin_steps(steps: &[Step], ranges: &[(usize, usize)]) -> Vec<Vec<Ve
     })
 }
 
-/// The frame cut into `bands` stretches of rows holding about the same amount
-/// of work each, rather than the same number of rows.
-///
-/// A model seldom fills the frame: cut into equal heights, the bands across
-/// the middle of it had all the triangles and the rest had the background,
-/// and the frame took as long as its busiest band. Where the cuts fall does
-/// not change the picture -- see `Frame` -- so they can go wherever the work
-/// is. The work of a row is counted as the primitives that reach it, plus a
-/// little for the row itself, so an empty stretch of sky is not all given to
-/// one band.
+/// The frame cut into `bands` row ranges of about equal work rather than equal height, since the
+/// model seldom fills the frame. Cut positions do not affect the picture (see `Frame`). A row's
+/// work is the primitives reaching it plus a little for the row itself.
 pub(crate) fn balanced_ranges(steps: &[Step], height: usize, bands: usize) -> Vec<(usize, usize)> {
     let mut work = vec![0i64; height + 1];
-    // A sample of the steps is as good a guide to where the work is as all of
-    // them, and counting all of a dense mesh's took longer than drawing a band.
+    // A sample of the steps is enough to locate the work; counting all took longer than drawing a band.
     let stride = (steps.len() / 65_536).max(1);
     for step in steps.iter().step_by(stride) {
         let (from, to) = step.rows();
@@ -141,8 +106,7 @@ pub(crate) fn balanced_ranges(steps: &[Step], height: usize, bands: usize) -> Ve
             work[to] -= 1;
         }
     }
-    // From "starts here" and "stops here" to the count per row, and then a
-    // running total, so each cut is where the total passes its share.
+    // Start/stop counts to per-row counts to a running total, cutting where it passes each share.
     let mut running = 0i64;
     let mut total = 0u64;
     let per_row: Vec<u64> = (0..height)
@@ -171,8 +135,7 @@ pub(crate) fn balanced_ranges(steps: &[Step], height: usize, bands: usize) -> Ve
     ranges
 }
 
-/// Draw the prepared primitives listed for this band, in the order they were
-/// prepared -- which is the order the single-threaded renderer drew them in.
+/// Draw this band's listed primitives in preparation order, as the single-threaded renderer did.
 pub(crate) fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[&[u32]]) {
     for &index in mine.iter().flat_map(|part| part.iter()) {
         match steps[index as usize] {
@@ -197,17 +160,16 @@ pub(crate) fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[&[u32]]) {
     }
 }
 
-/// A world-space line, projected and given the depth bias its own distance
-/// earns it. The counterpart of `draw_world_line`, for the prepared path.
+/// A world-space line, projected, with its distance-based depth bias; the prepared counterpart
+/// of `draw_world_line`.
 pub(crate) fn line_step(view: &View, a: Vec3, b: Vec3, colour: Rgba, bias: f32, tag: u16, write_depth: bool) -> Step {
-    // Nothing is clipped: a parallel projection maps a point behind the eye to
-    // its true screen position, and the depth key puts it behind everything
-    // else on its own.
+    // No clipping: a parallel projection maps points behind the eye correctly, and the depth key
+    // puts them behind everything.
     let (a, b) = (to_vertex(view, view.to_view(a)), to_vertex(view, view.to_view(b)));
     projected_line_step(a, b, colour, bias, tag, write_depth)
 }
 
-/// The same, for two ends that have been projected already.
+/// The same, for already projected ends.
 pub(crate) fn projected_line_step(a: Vertex, b: Vertex, colour: Rgba, bias: f32, tag: u16, write_depth: bool) -> Step {
     let scale = (a.key.abs() + b.key.abs()) * 0.5;
     Step::Line { a, b, colour, bias: bias * scale, tag, write_depth }

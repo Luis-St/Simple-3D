@@ -3,8 +3,7 @@
 use crate::view::View;
 use simple3d_geom::Vec3;
 
-/// Put the corners of a face in ring order around its centre, so the quad drawn
-/// from them is the face and not a bow tie.
+/// Order a face's corners around its centre, so the quad is not a bow tie.
 pub(crate) fn sort_ring(mut points: Vec<egui::Pos2>, centre: egui::Pos2) -> Vec<egui::Pos2> {
     points.sort_by(|a, b| {
         let angle = |p: &egui::Pos2| (p.y - centre.y).atan2(p.x - centre.x);
@@ -31,8 +30,7 @@ pub(crate) fn draw_box(painter: &egui::Painter, view: &View, lo: Vec3, hi: Vec3,
     }
 }
 
-/// The bounding box's dimensions, numerically -- the fastest way to answer "will
-/// this fit" (spec section 6.1).
+/// The bounding box dimensions as numbers, for "will this fit" (spec section 6.1).
 pub(crate) fn label_box(
     painter: &egui::Painter,
     ui: &egui::Ui,

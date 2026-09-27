@@ -1,18 +1,12 @@
-//! Reaching the tool from a fixed kind, and what pointing at a stage shows
-//! (issue 79).
+//! Reaching the tool from a fixed kind, and what pointing at a stage shows (issue 79).
 
 use super::*;
 use simple3d_core::keymap::Command;
 use simple3d_core::pattern;
 use simple3d_core::primitive::ParamsExt;
 
-/// A pattern of a fixed kind offers the tool too -- as "Customise", which opens
-/// it on the question of what to start from and writes nothing until that is
-/// answered, so the Kind row stays the one place a kind is chosen.
-///
-/// Before, the only way to start a rule from a fixed kind a second time was to
-/// set the Kind row back to it and go through Add > Custom pattern with the
-/// pattern selected.
+/// A fixed-kind pattern offers "Customise", opening the start question and writing nothing until
+/// answered.
 #[test]
 pub(crate) fn a_fixed_kind_opens_the_tool_from_customise_without_changing_kind() {
     use egui_kittest::kittest::Queryable;
@@ -43,9 +37,7 @@ pub(crate) fn a_fixed_kind_opens_the_tool_from_customise_without_changing_kind()
     }
 }
 
-/// Pointing at a stage in the tool marks, in the viewport, the copies the rule
-/// has made by the end of that stage -- which is what "each stage repeats what
-/// the ones above it made" looks like.
+/// Hovering a stage marks the copies made by its end.
 #[test]
 pub(crate) fn pointing_at_a_stage_marks_the_copies_made_by_the_end_of_it() {
     let mut harness = harness("pattern-stage-hover");
@@ -68,7 +60,7 @@ pub(crate) fn pointing_at_a_stage_marks_the_copies_made_by_the_end_of_it() {
     harness.step();
     assert_eq!(harness.state().pattern_tool_hover, Some(0));
 
-    // And its heading folds it: the fields go and the stage stays.
+    // Its heading folds it: the fields go, the stage stays.
     press(&mut harness, first.center());
     release(&mut harness, first.center());
     harness.step();
@@ -79,11 +71,8 @@ pub(crate) fn pointing_at_a_stage_marks_the_copies_made_by_the_end_of_it() {
     );
 }
 
-/// The saved kinds are offered in the start question through the same dropdown
-/// the properties panel uses, and picking one from it answers the question.
-///
-/// Asked for from the running application: the question listed them as chips,
-/// while the panel's Rule row offered the very same shelf as a dropdown.
+/// Saved kinds appear in the start question through the panel's same dropdown, and picking one
+/// answers the question.
 #[test]
 pub(crate) fn the_start_question_offers_saved_kinds_in_the_panels_dropdown() {
     use egui_kittest::kittest::Queryable;

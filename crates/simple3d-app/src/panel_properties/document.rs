@@ -9,22 +9,18 @@ use simple3d_core::primitive::ParamKind;
 use simple3d_core::scene::{AxisStyle, PreviewViewport};
 use simple3d_core::unit::Unit;
 
-/// With nothing selected the dock shows the document, not a set of disabled
-/// fields: units, grid, the default that governs every curved surface, and how
-/// big the scene has become.
+/// With nothing selected the dock shows the document: units, grid, segment default and scene size.
 pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
     section(ui, "Document", |ui| {
         let unit = app.unit();
         field_row(ui, "Unit", "", |ui| {
-            // Every fixed width here is a ceiling, not a size: the control gives
-            // up width with the panel rather than pushing past its edge (issue 51).
+            // Fixed widths are ceilings, shrinking with the panel (issue 51).
             egui::ComboBox::from_id_salt("doc-unit")
                 .selected_text(theme::value(unit.suffix()))
                 .width(fits(ui, 72.0))
                 .show_ui(ui, |ui| {
                     for option in Unit::ALL {
-                        // Switching never rescales the model: the unit only
-                        // changes what the fields read (spec section 4).
+                        // Switching never rescales the model, only what the fields read (spec section 4).
                         if ui.selectable_label(unit == option, option.suffix()).clicked() {
                             app.scene.settings.unit = option;
                             app.fields.clear();
@@ -48,10 +44,7 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
         });
         step_row(app, ui);
         rotate_step_row(app, ui);
-        // Where a new shape lands. It is a document question -- the same one the
-        // grid, the step and the segment default answer -- and it used to sit
-        // under the palette, where it read as part of the shapes rather than as
-        // a setting. The palette still says which answer is in force.
+        // Where new shapes land, a document question moved here from under the palette.
         field_row(ui, "Add at", "Where a shape from the palette or the Add menu lands", |ui| {
             egui::ComboBox::from_id_salt("doc-placement")
                 .selected_text(theme::value(app.settings.placement.label()))
@@ -62,13 +55,9 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
         });
-        // When a drag snaps to another body's vertices, edge midpoints and face
-        // centres rather than only to the grid step (issue 68). The hint names
-        // the current hold key so the "while held" mode is not a mystery.
+        // When drags snap to other bodies' features (issue 68).
         let snap_key = app.keymap.shortcut_text(simple3d_core::keymap::Command::SnapToGeometry);
-        // The hold names itself on the closed box too, not only in the open
-        // list: the mode a user is *in* is the one they need the key for, and
-        // "while a key is held" without saying which is a riddle.
+        // The closed box names the hold key too, since "while a key is held" alone is a riddle.
         let snap_label = |mode: simple3d_core::config::SnapMode| {
             if mode == simple3d_core::config::SnapMode::WhileHeld && !snap_key.is_empty() {
                 format!("{} ({snap_key})", mode.label())
@@ -91,12 +80,9 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
                     });
             },
         );
-        // The 3D cursor, as three numbers. Shift+right-click in the viewport
-        // puts it roughly where it is wanted; this is where it is given the
-        // exact place (issue 42).
+        // The 3D cursor as exact numbers (issue 42).
         cursor_rows(app, ui);
-        // And the other place in space the document works from: what the camera
-        // is looking at.
+        // And what the camera is looking at.
         view_centre_rows(app, ui);
         field_row(ui, "Axes", "", |ui| {
             for (axis, name) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -139,12 +125,7 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
                     });
             },
         );
-        // The section plane is not here: it is switched on from the tool rail,
-        // the View menu or its key, and everything about it -- the axis, the
-        // offset and which side is kept -- lives in the window that stands over
-        // the viewport while it is out (issue 72). It had a group of rows here
-        // when it was new, which put the settings for a plane drawn in the
-        // picture on the other side of the application from the picture.
+        // The section plane's settings live in its own window over the viewport (issue 72), not here.
         field_row(
             ui,
             "Plane marks",

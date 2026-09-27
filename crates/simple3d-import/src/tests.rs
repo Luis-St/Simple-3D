@@ -17,15 +17,12 @@ fn no_progress() -> impl FnMut(f32) -> bool {
     |_| true
 }
 
-/// The format a file of this kind would be *named* as, which is how the
-/// application knows an OBJ: it has no header to be recognised by.
+/// The format a file of this kind would be named as, which is how OBJ is known.
 fn named_as(format: simple3d_export::Format) -> Option<Format> {
     Format::from_path(std::path::Path::new(&format!("model.{}", format.extension())))
 }
 
-/// Read bytes that are not going through a file, which is most of these tests:
-/// what a reader has to cope with is a file's *content*, and writing each one
-/// to disk first would only test the filesystem.
+/// Read bytes directly, since readers deal with content and disk would only test the filesystem.
 fn read_all(bytes: &[u8], named: Option<Format>) -> Result<Model, ImportError> {
     read_bytes(bytes, named, &mut no_progress())
 }
@@ -44,7 +41,7 @@ fn exported(mesh: &Mesh, format: simple3d_export::Format) -> Vec<u8> {
     std::fs::read(&path).unwrap()
 }
 
-/// The same for an export of several named bodies, which only 3MF keeps apart.
+/// The same for several named bodies, which only 3MF keeps apart.
 fn exported_parts(parts: &[(&str, Mesh)], format: simple3d_export::Format) -> Vec<u8> {
     let dir = std::env::temp_dir().join(format!(
         "simple3d-import-test-{}-{:?}",
@@ -61,17 +58,14 @@ fn exported_parts(parts: &[(&str, Mesh)], format: simple3d_export::Format) -> Ve
     std::fs::read(&path).unwrap()
 }
 
-/// How far apart two boxes' corners are, for comparing a mesh with the mesh it
-/// was written from.
+/// How far apart two meshes' bounding box corners are.
 fn bounds_differ(a: &Mesh, b: &Mesh) -> f64 {
     let (alo, ahi) = a.bounds().expect("the first mesh is empty");
     let (blo, bhi) = b.bounds().expect("the second mesh is empty");
     (alo - blo).length().max((ahi - bhi).length())
 }
 
-/// A zip entry whose data is deflated, built without a compressor: a DEFLATE
-/// stream may carry a *stored* block, which is a length, its complement and the
-/// bytes -- so a valid compressed entry can be written by hand.
+/// A deflated zip entry built by hand from a stored DEFLATE block (length, complement, bytes).
 fn deflate_stored(data: &[u8]) -> Vec<u8> {
     let mut out = vec![0x01];
     out.extend_from_slice(&(data.len() as u16).to_le_bytes());
@@ -80,13 +74,8 @@ fn deflate_stored(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A zip archive whose entries are written with method 8, which is what every
-/// 3MF from another program is and what the export crate's own writer -- store
-/// only -- cannot produce.
-///
-/// The CRC is left at zero: nothing in the reader checks it, deliberately, since
-/// a 3MF's geometry is verified by the model it parses into rather than by a
-/// checksum of the bytes.
+/// A zip archive with method 8 (deflated) entries, as 3MFs from other programs are. The CRC is
+/// zero, since the reader deliberately does not check it; the parsed model verifies the geometry.
 fn deflated_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let mut directory: Vec<u8> = Vec::new();
@@ -148,8 +137,7 @@ fn package(model: &str) -> Vec<u8> {
     ])
 }
 
-/// A 3MF model document holding one tetrahedron, so the vertices and triangles
-/// of a test are four and four rather than a page of them.
+/// A 3MF model holding one tetrahedron: four vertices and four triangles.
 fn tetrahedron_model(unit: &str, object_attributes: &str, item_attributes: &str) -> String {
     format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\

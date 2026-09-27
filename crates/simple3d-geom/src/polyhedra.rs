@@ -1,8 +1,5 @@
-//! The four regular polyhedra. Each is built as a "unit" construction
-//! centred on the origin, then uniformly scaled so its measured circumsphere
-//! diameter or edge length matches what the user asked for -- computed
-//! numerically (rather than from memorised closed-form ratios) to avoid
-//! transcription errors.
+//! The regular polyhedra: unit constructions scaled to the requested circumdiameter or edge, measured
+//! numerically to avoid transcribed closed-form ratios.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
@@ -121,9 +118,7 @@ pub fn icosahedron_mesh(size: f64, mode: SizeMode) -> Mesh {
     build_polyhedron(&v, &faces)
 }
 
-/// Built as the dual of the icosahedron: a dodecahedron vertex sits at each
-/// icosahedron face centroid, and a dodecahedron (pentagonal) face surrounds
-/// each icosahedron vertex, fan-triangulated into 3 triangles.
+/// The icosahedron's dual: a vertex per icosahedron face centroid, a pentagon (fanned into 3) per vertex.
 pub fn dodecahedron_mesh(size: f64, mode: SizeMode) -> Mesh {
     let (ico_v, ico_f) = icosahedron_unit();
     let dode_v: Vec<Vec3> =

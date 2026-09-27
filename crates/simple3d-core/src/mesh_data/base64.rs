@@ -2,8 +2,7 @@
 
 pub(crate) const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-/// Standard base64, written here rather than taken as a dependency: it is
-/// twenty lines, and the shipped binary is deliberately self-contained.
+/// Standard base64, hand-written to keep the binary dependency-light: it is twenty lines.
 pub(crate) fn encode(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {

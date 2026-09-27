@@ -7,6 +7,8 @@ use simple3d_core::config::DisplayMode;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
+/// The selected shape's outline: edges its surface turns away from the camera across, plus edges
+/// with no far side. Feature edges drew nothing on a smooth sphere and rings all over a torus.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn push_selection(
     steps: &mut Vec<Step>,
@@ -17,30 +19,14 @@ pub(crate) fn push_selection(
     mode: DisplayMode,
     section: &[Plane],
 ) {
-    // Drawn a second time, one pixel out from the shape, and that is what makes
-    // it a line rather than a row of dots.
-    //
-    // A silhouette edge is the one line in the frame a depth test cannot draw.
-    // It lies exactly where the surface turns away from the eye, so the face
-    // beside it is nearly edge-on and its depth changes by more across a single
-    // pixel than a bias can cover: measured on a 32-segment sphere, seventeen of
-    // a hundred and eighty two-degree sectors of the rim had nothing drawn at
-    // all, and raising the bias tenfold -- past where a mark starts showing
-    // through the far side of a solid -- still left six. It is not an epsilon
-    // problem, and the pixel just outside the silhouette is not covered by the
-    // shape at all, so nothing there has to be won from.
-    //
-    // The offset is perpendicular to the edge on screen and away from the front
-    // face's own centre, which for a silhouette edge is out of the shape. It
-    // does not thicken the line where it is already drawn -- the two passes land
-    // on the same pixel for a nearly-vertical edge -- so a selection still reads
-    // as a hairline and not as a halo.
+    // Silhouette edges are drawn a second time one pixel outwards, since a depth test cannot draw
+    // them: the face beside them is nearly edge-on (on a 32-segment sphere 17 of 180 rim sectors were
+    // missing, and no bias fixed it). The offset is perpendicular to the edge and away from the front
+    // face's centre, and does not thicken the line where it is already drawn.
     let mut push = |edge: [u32; 2], away: Option<Vec3>| {
         let a = item.mesh.positions[edge[0] as usize];
         let b = item.mesh.positions[edge[1] as usize];
-        // The outline is cut with the shape it outlines: an accent line left
-        // hanging in the air where the model has been cut away says the
-        // selection is somewhere it no longer is.
+        // The outline is cut with the shape, so it never hangs where the model was cut away.
         for (a, b) in kept_line(section, a, b).iter().copied() {
             let tag = item.body_tag(edge[0] as usize, tag_base);
             steps.push(line_step(view, a, b, colour, SELECTION_BIAS, tag, true));
@@ -51,8 +37,7 @@ pub(crate) fn push_selection(
             if normal.length() < 1e-6 {
                 continue;
             }
-            // Which way along that perpendicular leads out of the shape, decided in
-            // screen space so a foreshortened face cannot get it backwards.
+            // Outward is decided in screen space, so a foreshortened face cannot get it backwards.
             let inward = to_vertex(view, view.to_view(away)).pos - va.pos;
             let normal = normal / normal.length();
             let out = if egui::vec2(normal.x, normal.y).dot(inward) > 0.0 { -normal } else { normal };
@@ -68,34 +53,20 @@ pub(crate) fn push_selection(
         }
     };
     if item.outline.is_empty() {
-        // Prepared without the adjacency -- the creases are what there is, and a
-        // crease has an inside on both sides, so no outward pass for it.
+        // Without adjacency only creases are available; they have the shape on both sides, so no outward pass.
         for &edge in &item.edges {
             push(edge, None);
         }
         return;
     }
     let towards = view.forward();
-    // The normals come off the renderable: they are the mesh's own, and working
-    // them out here again cost a normalisation per triangle and a
-    // several-megabyte vector on every frame of an orbit. Which of them face
-    // the eye is the camera's question, so that one is still asked per frame.
+    // Normals come from the renderable rather than being recomputed every frame.
     let normals = &item.normals;
-    // Edge-on counts as turned away, and by a margin. A face exactly
-    // perpendicular to the view -- every side face of a box seen straight on --
-    // has a dot product of zero, and which side of zero the arithmetic lands on
-    // is noise: the two triangles of one face can disagree, and neighbouring
-    // faces of the same box certainly do. Tested against plain zero, a box in
-    // the front view had the right-hand side face come out as facing the eye,
-    // which made the front face's own right edge no silhouette at all and the
-    // *back* face's right edge one instead -- so the line was drawn at the far
-    // side of the box, lost the depth test against the box's own front face,
-    // and the shape came back outlined on three sides out of four.
+    // Edge-on counts as turned away, by a margin: exactly perpendicular faces land either side of
+    // zero by noise, which once outlined the back of a box and left it outlined on three sides.
     let front: Vec<bool> = normals.iter().map(|normal| normal.dot(towards) < -EDGE_ON).collect();
     let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
-    // Whether the surface really turns a corner across an edge, measured from
-    // the faces themselves rather than read out of the feature edges the edge
-    // pass draws -- those are a different question asked at a different angle.
+    // Corners are measured from the faces, not taken from the feature edges, which use another angle.
     let cos_limit = SELECTION_CREASE.to_radians().cos();
     let is_corner = |a: u32, b: u32| match (normals.get(a as usize), normals.get(b as usize)) {
         (Some(a), Some(b)) => a.dot(*b) < cos_limit,
@@ -110,30 +81,9 @@ pub(crate) fn push_selection(
                 / 3.0,
         )
     };
-    // The creases inside the contour, in the accent as well (issue 89).
-    //
-    // The silhouette says where a shape ends; on anything with corners it is
-    // the edges *within* that contour -- the three meeting at the near corner
-    // of a box -- that say which shape it is, and they stayed in the ordinary
-    // edge colour, so a selected box read as an orange ring drawn around a grey
-    // box rather than as an orange box.
-    //
-    // Only the ones facing the camera. The three creases at the *far* corner of
-    // a box project inside the same contour, and drawing those is how an
-    // earlier attempt at this scribbled a cage over the model: what is hidden
-    // by the shape is not part of what the shape looks like. Wireframe is the
-    // exception -- it shows the far side of everything on purpose, so a
-    // selection that stopped at the near side would be orange in front and grey
-    // behind.
-    //
-    // Every mode, not only the ones that draw edges. In plain shaded the body
-    // has no lines of its own and these are the only ones on it, which is
-    // exactly the point: they say which shape is selected. In shaded-with-edges
-    // they are the very edges already on screen, recoloured.
-    //
-    // A crease inside the contour gets no outward pass: it has the shape on
-    // both sides, so there is no "out" to step to, and stepping either way
-    // would only thicken it.
+    // Creases inside the contour are accented too (issue 89), so a selected box reads as an orange
+    // box. Only those facing the camera, except in wireframe, which shows the far side on purpose;
+    // drawing hidden ones once scribbled a cage over the model. In every mode, and with no outward pass.
     let creases = if mode == DisplayMode::Wireframe { Creases::All } else { Creases::Facing };
     for edge in &item.outline {
         if edge.junction {
@@ -141,8 +91,7 @@ pub(crate) fn push_selection(
         }
         let [near, far] = edge.faces;
         if near == far || faces_the_eye(near) != faces_the_eye(far) {
-            // The face on the shape's own side of this edge, whose centre says
-            // which way is inward.
+            // The face on the shape's side of the edge, whose centre says which way is inward.
             let inside = if faces_the_eye(near) { near } else { far };
             push(edge.ends, centroid(inside));
         } else if creases.wanted(faces_the_eye(near)) && is_corner(near, far) {
@@ -151,8 +100,7 @@ pub(crate) fn push_selection(
     }
 }
 
-/// Which of a selected shape's creases the highlight takes, which is decided by
-/// the display mode -- see [`push_selection`].
+/// Which of a selected shape's creases the highlight takes, by display mode (see [`push_selection`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Creases {
     /// Only those on the side facing the camera.
@@ -176,10 +124,8 @@ pub(crate) fn push_wireframe(
 ) {
     extend_in_order(steps, item.edges.len(), |range, out| {
         for edge in &item.edges[range] {
-            // No depth bias and no filled faces, so the whole wireframe is
-            // visible including the far side -- which is the point of
-            // wireframe. The tag is the wireframe's own: nothing is filled, so
-            // nothing owns a pixel's depth in a way an axis has to see through.
+            // No depth bias and no fill, so the far side shows, as wireframe intends; nothing owns a pixel's
+            // depth, so the wireframe tag is used.
             push_edge(out, view, item, screen, *edge, section, |a, b| projected_line_step(a, b, colour, 0.0, 0, true));
         }
     });

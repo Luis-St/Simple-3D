@@ -19,17 +19,13 @@ pub(crate) fn push_shaded(
     section: &[Plane],
 ) {
     let forward = view.forward();
-    // Back-face culling in world space, where it means something: for a
-    // closed solid the far side is never visible, so this halves the work.
-    // The projection is parallel, so the direction to the eye is one
-    // direction for the whole frame.
+    // Back-face culling: a closed solid's far side is never visible. Parallel projection gives one
+    // eye direction for the whole frame.
     let eye = to_eye(view, Vec3::ZERO);
     extend_in_order(steps, item.mesh.indices.len(), |range, out| {
         for index in range {
             let tri = item.mesh.indices[index];
-            // The normal was worked out when the renderable was made: it is the
-            // surface's, not the camera's, and `Vec3::ZERO` is what a triangle
-            // too degenerate to have one comes back as.
+            // Precomputed with the renderable; `Vec3::ZERO` for a degenerate triangle.
             let normal = item.normals[index];
             if normal == Vec3::ZERO || normal.dot(eye) <= 0.0 {
                 continue;
@@ -41,9 +37,8 @@ pub(crate) fn push_shaded(
     });
 }
 
-/// One triangle as steps: straight from the projected vertices while there is
-/// no section, and through the plane when there is -- the pieces it leaves are
-/// new points, which have to be projected for themselves.
+/// One triangle as steps: from the projected vertices, or clipped by the section, projecting the
+/// new points.
 pub(crate) fn push_faces(
     out: &mut Vec<Step>,
     view: &View,
@@ -63,17 +58,9 @@ pub(crate) fn push_faces(
     }
 }
 
-/// The cap: the cut filled in, so that a sectioned solid still reads as solid
-/// and the thickness of a wall can be seen (issue 71).
-///
-/// Drawn without back-face culling. The cap faces the material that went away,
-/// which is where the camera usually is, but a shell can be looked into from
-/// the other side as well and a cap that vanished there would put a hole back
-/// in the picture the cut was made to remove.
-///
-/// A cut the geometry cannot close contributes nothing rather than a guess: the
-/// section then reads as it did before caps existed, which is a fair way to
-/// fail and never a wrong wall.
+/// The section cap, so a cut solid still reads as solid (issue 71). Not back-face culled, since a
+/// shell can be looked into from either side. A cut that cannot be closed gets no cap rather than
+/// a wrong one.
 pub(crate) fn push_cap(
     steps: &mut Vec<Step>,
     view: &View,
@@ -82,9 +69,7 @@ pub(crate) fn push_cap(
     section: &[Plane],
     mode: DisplayMode,
 ) {
-    // Each section is capped on its own, and what another section cuts away
-    // is cut away from its caps too: two planes crossing inside a part show
-    // the corner they leave, not one cap reaching through the other's opening.
+    // Each section is capped separately, with other sections' cuts removed from its caps.
     for (index, plane) in section.iter().enumerate() {
         let others: Vec<Plane> =
             section.iter().enumerate().filter(|&(other, _)| other != index).map(|(_, p)| *p).collect();
@@ -102,17 +87,13 @@ fn push_cap_of(
     others: &[Plane],
     mode: DisplayMode,
 ) {
-    // One cap per face the cut opens: the plane alone, or -- cut down to a
-    // rectangle -- its front and the four sides of the box behind it, each
-    // capped as a whole plane and then trimmed to its own face.
+    // One cap per face the cut opens: the plane, or a window's front and box sides, each trimmed to its face.
     for face in section::faces(plane) {
         let outlines = section::loops(&item.mesh, &face.plane);
         if outlines.is_empty() {
             continue;
         }
-        // Filled in every mode that fills anything. Wireframe fills nothing,
-        // so there the cut is its outline alone -- without which a wireframe
-        // section is a shape that stops for no stated reason.
+        // Filled in every mode that fills; in wireframe the cut is its outline alone.
         if mode != DisplayMode::Wireframe {
             let colour = shade(palette.cut, face.plane.normal, view.forward(), 255);
             for piece in section::fill(&outlines, face.plane.normal) {
@@ -123,9 +104,7 @@ fn push_cap_of(
                         steps.push(Step::Triangle {
                             v: kept.map(|at| to_vertex(view, view.to_view(at))),
                             colour,
-                            // No body: the cap is not a solid an origin axis
-                            // can be inside of, and the axis rule is asked
-                            // about the model, not the cut.
+                            // No body: the cap is not a solid an axis can be inside.
                             tag: 0,
                             write_depth: true,
                         });
@@ -133,9 +112,7 @@ fn push_cap_of(
                 }
             }
         }
-        // The line round the cut wherever the mode draws the model's own
-        // lines: the edge the cut made is one of them, and the only one with no
-        // crease behind it for the edge pass to find.
+        // The cut's edge line wherever the model's lines are drawn; no crease exists there for the edge pass.
         if mode == DisplayMode::Shaded {
             continue;
         }
@@ -155,8 +132,7 @@ fn push_cap_of(
     }
 }
 
-/// Ghosts are drawn without back-face culling and without writing depth, so a
-/// hidden tool body reads as a translucent volume rather than a flat patch.
+/// Ghosts: no culling and no depth writes, so a hidden tool body reads as a translucent volume.
 pub(crate) fn push_ghost(
     steps: &mut Vec<Step>,
     view: &View,
@@ -173,9 +149,7 @@ pub(crate) fn push_ghost(
                 continue;
             }
             let colour = shade(base, normal, forward, base[3]);
-            // A ghost writes no depth, so the tag it would have written is
-            // never read; it carries the one a solid would have had for form's
-            // sake.
+            // A ghost writes no depth, so its tag is never read.
             let step = |v| Step::Triangle { v, colour, tag: 0, write_depth: false };
             push_faces(out, view, item, screen, item.mesh.indices[index], section, step);
         }

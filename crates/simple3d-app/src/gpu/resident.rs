@@ -1,19 +1,8 @@
-//! The meshes the GPU renderer keeps on the card between frames.
+//! Meshes the GPU renderer keeps on the card between frames.
 //!
-//! A renderable is uploaded the first time it is drawn and then left where it
-//! is: an orbit, a zoom or a pan changes only the handful of numbers the
-//! shaders project it with. Everything a mesh is drawn with that does not
-//! depend on the camera -- its faces, its edges, its outline, where a plane
-//! crosses it, the cap a section leaves -- is worked out on the card from what
-//! is uploaded here, so a frame hands the card a camera and nothing per
-//! triangle at all.
-//!
-//! What is uploaded is the mesh as it is: one position per welded vertex, the
-//! triangles and the edges as index lists straight out of the renderable, and
-//! the body of each vertex. Only the positions are rewritten on the way, into
-//! single precision relative to the mesh's centre. Each part is made the
-//! first time a frame asks for it, so a body that is only ever outlined never
-//! has its faces uploaded, and one that is only drawn never has its outline.
+//! Uploaded once and projected per frame from the camera alone; everything camera-independent
+//! (faces, edges, outlines, crossings, caps) is derived on the card. Positions are stored in
+//! single precision relative to the mesh's centre, and each part is uploaded only when first needed.
 
 use super::*;
 use crate::raster::Rgba;
@@ -36,28 +25,23 @@ pub(super) struct Batch {
     pub(super) count: i32,
 }
 
-/// The mesh's vertices: position and body, one of each per welded vertex.
+/// The mesh's vertices: position and body per welded vertex.
 struct Vertices {
     positions: glow::Buffer,
     bodies: glow::Buffer,
 }
 
-/// The mesh laid out in textures, for a geometry stage that has to look up a
-/// triangle other than the one it was handed -- the outline, which asks about
-/// both faces along an edge. See `TABLES_COMMON`.
+/// The mesh laid out in textures, for stages that look up neighbouring triangles (the outline).
 struct Tables {
     positions: glow::Texture,
     triangles: glow::Texture,
     bodies: glow::Texture,
 }
 
-/// One renderable, on the card.
 pub(crate) struct Resident {
-    /// What the positions are stored relative to: the middle of the mesh, so
-    /// the single-precision numbers on the card stay small.
+    /// Mesh centre the positions are stored relative to, keeping single-precision values small.
     origin: Vec3,
-    /// The mesh's extent, relative to `origin`: what the frame's depth range is
-    /// sized from, since the card never reports the keys it worked out.
+    /// Mesh extent relative to `origin`, used to size the depth range.
     lo: Vec3,
     hi: Vec3,
     vertices: Option<Vertices>,
@@ -77,9 +61,7 @@ pub(super) struct Needs {
     outline: bool,
 }
 
-/// Where a resident is drawn this frame: moved by a drag, and with a
-/// stretch of its vertices left out -- see [`crate::render::Live`]. Neither,
-/// for everything that is not being dragged.
+/// Where a resident is drawn this frame: moved by a drag, with a vertex range hidden.
 #[derive(Clone, Copy)]
 pub(super) struct Placing {
     xform: Xform,
@@ -87,10 +69,8 @@ pub(super) struct Placing {
 }
 
 impl Placing {
-    /// Where it stands, all of it.
     pub(super) const NONE: Placing = Placing { xform: Xform::IDENTITY, hide: [0, 0] };
 
-    /// Moved by `xform`, or where it stands.
     pub(super) fn moved(xform: Option<Xform>) -> Placing {
         Placing { xform: xform.unwrap_or(Xform::IDENTITY), hide: [0, 0] }
     }
@@ -103,7 +83,7 @@ impl Placing {
     }
 }
 
-/// What one frame asks of the resident meshes, in the passes that draw it.
+/// What one frame asks of the resident meshes.
 #[derive(Default)]
 pub(super) struct Plan {
     pub(super) solids: Vec<FaceDraw>,
@@ -116,15 +96,11 @@ pub(super) struct Plan {
     pub(super) crossings: Vec<CrossingDraw>,
     /// A section's cap, filled where the cut runs through material.
     pub(super) caps: Vec<CapDraw>,
-    /// Lines drawn over the model, tested against it and claiming nothing: a
-    /// tool's preview.
+    /// Tool preview lines drawn over the model, depth-tested but not written.
     pub(super) overlays: Vec<LineDraw>,
-    /// The shapes a boolean preview is drawn from (`csg.rs`), which need
-    /// their faces on the card, and their edges too when the model's lines
-    /// are drawn.
+    /// Shapes a boolean preview is drawn from (`csg.rs`).
     pub(super) csg: Vec<u64>,
-    /// The colour a boolean preview's edges are drawn in, when the display
-    /// mode draws the model's lines at all.
+    /// Edge colour of a boolean preview, when the display mode draws lines.
     pub(super) csg_edges: Option<Rgba>,
 }
 
@@ -145,8 +121,7 @@ pub(super) struct LineDraw {
 }
 
 impl LineDraw {
-    /// A tool's preview loops, kept as lines (`ground::refresh_preview`):
-    /// biased towards the eye as `push_preview` biases them.
+    /// A tool's preview loops, biased towards the eye like `push_preview`.
     pub(super) fn preview(id: u64, colour: Rgba) -> LineDraw {
         LineDraw { id, placing: Placing::NONE, colour, bias: PREVIEW_BIAS, tag_base: None }
     }
@@ -166,12 +141,10 @@ pub(super) struct CrossingDraw {
     placing: Placing,
     /// Each plane, and the colour its crossing is drawn in.
     planes: Vec<(Plane, Rgba)>,
-    /// The sections that cut the crossing like everything on the model. The
-    /// edge round a cut lies in that cut's own plane, where its own test would
-    /// only fray it, so it is cut by the others alone.
+    /// Sections that cut the crossing. A cut's own edge is cut only by the others,
+    /// since its own plane test would fray it.
     cuts: Vec<Plane>,
-    /// The other walls of the box whose face the line is the edge of: only the
-    /// part on that face is drawn (`BOX_COMMON`'s `u_within`).
+    /// The other walls of the box whose face the line lies on (`BOX_COMMON`'s `u_within`).
     within: Vec<Plane>,
 }
 
@@ -179,15 +152,12 @@ pub(super) struct CapDraw {
     id: u64,
     placing: Placing,
     pub(super) plane: Plane,
-    /// The other walls of a windowed section's box: the cap is only filled
-    /// where every one of them has a depth of at least zero. Empty for a plane
-    /// that cuts everywhere.
+    /// The other walls of a windowed section's box; empty for an unbounded plane.
     pub(super) bounds: Vec<Plane>,
-    /// The other sections, whose cuts are taken out of this one's cap.
+    /// Other sections, whose cuts are taken out of this cap.
     pub(super) others: Vec<Plane>,
     pub(super) colour: Rgba,
-    /// The polygon the plane leaves in the mesh's box, projected: the cap is
-    /// this, wherever the cut runs through material.
+    /// The plane's polygon within the mesh's box, projected.
     pub(super) fill: Vec<GpuVertex>,
 }
 
@@ -195,8 +165,7 @@ const SOLID: i32 = 0;
 const GHOST: i32 = 1;
 const GLOW: i32 = 2;
 
-/// Which resident draws a frame needs: the same choices `render::prepare_with`
-/// makes for the steps it leaves out under [`crate::render::Geometry::Resident`].
+/// Which resident draws a frame needs, mirroring `render::prepare_with`.
 pub(super) fn plan(request: &Request<'_>) -> Plan {
     let palette: &Palette = &request.palette;
     let mut plan = Plan::default();
@@ -225,17 +194,8 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
                         });
                     }
                 }
-                // The cut filled in wherever the mode fills anything, and the
-                // line round it wherever the mode draws the model's lines --
-                // `push_cap`'s two rules.
-                //
-                // One of each per face the cut opens: the plane, or a window's
-                // rectangle and the sides of the box behind it. A side's cap is
-                // only seen from inside the box, so one facing away from the
-                // camera is not filled -- which is also what the cap's winding
-                // count needs, since it counts from the eye through the
-                // opening. Its line is drawn all the same: where that side
-                // meets the surface is the near rim of the opening.
+                // One cap per face the cut opens. A box side facing away from the camera is not filled,
+                // which the winding count also needs; its line is still drawn as the opening's near rim.
                 let forward = request.view.forward();
                 for (cut, section) in request.section.iter().enumerate() {
                     let others: Vec<Plane> =
@@ -276,8 +236,7 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
                 if item.style == Style::Glow {
                     plan.glows.push(FaceDraw { id, placing, mode: GLOW, base: palette.glow, tag_base: 0 });
                 }
-                // Prepared without the adjacency, a body has only its creases
-                // to be outlined by -- `push_selection`'s fallback.
+                // Without adjacency only creases can outline a body (`push_selection`'s fallback).
                 if item.renderable.outline.is_empty() {
                     plan.lines.push(LineDraw {
                         id,
@@ -315,9 +274,7 @@ pub(super) fn plan(request: &Request<'_>) -> Plan {
     plan
 }
 
-/// The principal planes whose marks this frame draws, each in its colour:
-/// `push_plane_marks`' choice. Shared with the boolean preview, which marks
-/// the surface it finds itself (`gpu/csg.rs`).
+/// The principal planes whose marks this frame draws, with colours.
 pub(super) fn mark_planes(request: &Request<'_>) -> Vec<(Plane, Rgba)> {
     if !request.grid.plane_marks || request.mode == DisplayMode::Wireframe {
         return Vec::new();
@@ -330,7 +287,6 @@ pub(super) fn mark_planes(request: &Request<'_>) -> Vec<(Plane, Rgba)> {
 }
 
 impl Plan {
-    /// What each resident has to have on the card for this plan.
     fn needs(&self) -> std::collections::HashMap<u64, Needs> {
         let mut needs: std::collections::HashMap<u64, Needs> = std::collections::HashMap::new();
         let faces = self.solids.iter().chain(&self.ghosts).chain(&self.glows).map(|draw| draw.id);
@@ -354,8 +310,7 @@ impl Plan {
     }
 }
 
-/// A solid is drawn opaque whatever alpha the palette gives it, as
-/// `push_shaded` asks `shade` for.
+/// A solid is drawn opaque regardless of palette alpha, as in `push_shaded`.
 fn opaque(colour: Rgba) -> Rgba {
     [colour[0], colour[1], colour[2], 255]
 }
@@ -423,9 +378,7 @@ impl Resident {
                     bodies: table(gl, width, Format::U16, bytes_of(&item.bodies), item.bodies.len())?,
                 });
             }
-            // A junction is inside the shape, never on its outline -- see
-            // `BorderEdge::junction` -- so it is left behind here rather than
-            // asked about on every frame.
+            // Junctions are never on the outline (`BorderEdge::junction`), so they are dropped here.
             let edges: Vec<[u32; 4]> = item
                 .outline
                 .iter()
@@ -462,27 +415,20 @@ impl Resident {
         }
     }
 
-    /// The rows the shaders project this mesh with: screen x, screen y and the
-    /// depth key, each a dot product with the stored position plus a constant.
-    /// Exactly `View::to_view` followed by `to_vertex`, folded together with
-    /// the offset the positions are stored at, in double precision.
-    ///
-    /// Moved, the rows are for the moved origin, and are applied to the stored
-    /// position after `u_model` -- the move's linear part -- has been.
+    /// The projection rows (screen x, screen y, depth key) for this mesh, folded with the
+    /// storage offset in double precision. When moved, they apply after `u_model`.
     fn rows(&self, view: &View, placing: &Placing) -> [[f32; 4]; 3] {
         rows_at(view, placing.xform.point(self.origin))
     }
 
-    /// A plane as the shaders test it: a distance from the stored position,
-    /// moved, that is positive where `Plane::depth` is.
+    /// A plane as the shaders test it, positive where `Plane::depth` is.
     pub(super) fn plane(&self, plane: &Plane, placing: &Placing) -> [f32; 4] {
         let n = plane.normal;
         let origin = placing.xform.point(self.origin);
         [n.x as f32, n.y as f32, n.z as f32, (n.dot(origin) - plane.offset) as f32]
     }
 
-    /// The section plane as the shaders clip with it: positive where the model
-    /// is kept, which is where `Plane::depth` is negative.
+    /// The section plane as a clip distance: positive where the model is kept.
     fn clip(&self, section: Option<Plane>, placing: &Placing) -> [f32; 4] {
         match section {
             Some(plane) => self.plane(&plane, placing).map(|value| -value),
@@ -490,9 +436,7 @@ impl Resident {
         }
     }
 
-    /// Every cut's walls as `BOX_COMMON` takes them, and how many are each
-    /// cut's. Past the shaders' room, the rest are left out rather than read
-    /// past the end of the array.
+    /// Every cut's walls for `BOX_COMMON`, and how many belong to each; cuts past the shader limit are dropped.
     fn cuts(&self, cuts: &[Plane], placing: &Placing) -> (Vec<i32>, Vec<[f32; 4]>) {
         let (mut counts, mut walls) = (Vec::new(), Vec::new());
         for cut in cuts.iter().take(simple3d_geom::section::MAX_CUTS) {
@@ -503,15 +447,14 @@ impl Resident {
         (counts, walls)
     }
 
-    /// The largest coordinate a stored position has, which is what single
-    /// precision loses its last bits relative to.
+    /// The largest stored coordinate, which single-precision error is relative to.
     fn extent(&self) -> f64 {
         let lo = self.lo.x.abs().max(self.lo.y.abs()).max(self.lo.z.abs());
         let hi = self.hi.x.abs().max(self.hi.y.abs()).max(self.hi.z.abs());
         lo.max(hi)
     }
 
-    /// The mesh's box in world space, moved as `placing` moves it.
+    /// The mesh's world-space box, moved by `placing`.
     pub(super) fn world_box(&self, placing: &Placing) -> (Vec3, Vec3) {
         let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
         let mut hi = -lo;
@@ -528,7 +471,7 @@ impl Resident {
         (lo, hi)
     }
 
-    /// The depth keys this mesh can reach under `view`: its box's corners.
+    /// The depth keys of this mesh's box corners under `view`.
     pub(super) fn keys(&self, view: &View, placing: &Placing) -> impl Iterator<Item = f32> {
         let [_, _, key] = self.rows(view, placing);
         let (lo, hi, xform) = (self.lo, self.hi, placing.xform);
@@ -541,10 +484,8 @@ impl Resident {
         })
     }
 
-    /// The polygon `plane` leaves in this mesh's box, in world space and in
-    /// order round it: everything the cap can cover. The box is taken a hair
-    /// larger than the mesh, so a cut lying exactly on one of its faces -- a
-    /// section at the base of a shape standing on the ground -- still meets it.
+    /// The polygon `plane` leaves in this mesh's box, in order. The box is slightly enlarged so a
+    /// cut lying exactly on a box face still meets it.
     pub(super) fn cap_polygon(&self, plane: &Plane, placing: &Placing) -> Vec<Vec3> {
         let margin = Vec3::new(1.0, 1.0, 1.0) * (self.extent() * 1e-3 + 1e-6);
         let (lo, hi) = (self.origin + self.lo - margin, self.origin + self.hi + margin);
@@ -604,10 +545,8 @@ impl Format {
     }
 }
 
-/// `count` texels of `bytes` as a texture `width` texels wide, filled row by
-/// row: what a shader reads by index with `cell`. The rows are handed over
-/// straight from the slice, the last, short one on its own, so nothing is
-/// copied to pad it out.
+/// `count` texels as a texture `width` texels wide, filled row by row. The short last row is
+/// uploaded separately so nothing needs padding.
 unsafe fn table(
     gl: &glow::Context,
     width: usize,
@@ -656,7 +595,6 @@ unsafe fn table(
     Ok(texture)
 }
 
-/// A buffer filled with `bytes`, left bound to `target`.
 unsafe fn buffer(gl: &glow::Context, target: u32, bytes: &[u8]) -> Result<glow::Buffer, String> {
     let buffer = gl.create_buffer()?;
     gl.bind_buffer(target, Some(buffer));
@@ -664,8 +602,7 @@ unsafe fn buffer(gl: &glow::Context, target: u32, bytes: &[u8]) -> Result<glow::
     Ok(buffer)
 }
 
-/// A vertex array over the mesh's vertices, drawing the elements in
-/// `indices`.
+/// A vertex array over the mesh's vertices, drawing `indices`.
 unsafe fn indexed(gl: &glow::Context, vertices: &Vertices, indices: &[u8], count: i32) -> Result<Batch, String> {
     let array = gl.create_vertex_array()?;
     gl.bind_vertex_array(Some(array));
@@ -687,10 +624,8 @@ fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
 }
 
 impl Gpu {
-    /// Upload whatever `plan` draws that is not on the card yet, and let go of
-    /// what the frame no longer draws -- a renderable that has been replaced
-    /// will not be asked for again, and holding on to it would hold its whole
-    /// mesh in video memory.
+    /// Upload what `plan` draws and free what it no longer draws, so replaced meshes do not
+    /// linger in video memory.
     pub(super) unsafe fn keep_resident(
         &mut self,
         gl: &glow::Context,
@@ -717,8 +652,7 @@ impl Gpu {
         Ok(())
     }
 
-    /// Put the section's half-space for a boolean preview on the card, made
-    /// after the rest because its size comes from theirs (`csg.rs`).
+    /// Upload the section's half-space for a boolean preview; sized from the other shapes (`csg.rs`).
     pub(super) unsafe fn keep_half_space(&mut self, gl: &glow::Context) -> Result<(), String> {
         let Some((_, shapes)) = &self.csg_half else { return Ok(()) };
         for (half, _) in shapes {
@@ -728,8 +662,7 @@ impl Gpu {
         Ok(())
     }
 
-    /// Widen the frame's depth range to take in a boolean preview's shapes,
-    /// where they are drawn.
+    /// Widen the depth range to take in a boolean preview's shapes.
     pub(super) fn see_csg(&self, request: &Request<'_>, passes: &mut Passes) {
         let Some(csg) = &request.live.csg else { return };
         let half = self.csg_half.iter().flat_map(|(_, shapes)| shapes.iter().map(|(half, _)| (half, None)));
@@ -741,15 +674,13 @@ impl Gpu {
         }
     }
 
-    /// Work out, for each cap in `plan`, the polygon it is filled over, and
-    /// widen the frame's depth range to take it in.
+    /// Compute each cap's fill polygon and widen the depth range to take it in.
     pub(super) fn place_caps(&self, view: &View, plan: &mut Plan, passes: &mut Passes) {
         for cap in &mut plan.caps {
             let Some(resident) = self.resident.get(&cap.id) else { continue };
             let polygon = simple3d_geom::section::within(&resident.cap_polygon(&cap.plane, &cap.placing), &cap.bounds);
-            // A handful of triangles, cut by the other sections here rather
-            // than per pixel: the fill is drawn in screen space and has no
-            // world position left to ask about.
+            // Cut by the other sections here rather than per pixel: the fill is in screen space and
+            // has no world position to test.
             for index in 1..polygon.len().saturating_sub(1) {
                 let corners = [polygon[0], polygon[index], polygon[index + 1]];
                 for piece in simple3d_geom::section::clip_by_all(&cap.others, corners).triangles() {
@@ -800,9 +731,7 @@ impl Gpu {
             set_i32(gl, program, "u_painted", resident.paint.is_some() as i32);
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, resident.paint);
-            // A solid's far side is never seen, so it is culled -- by the
-            // pipeline, which asks exactly `push_shaded`'s question. A ghost
-            // and a glow show the whole shell.
+            // Solids are back-face culled by the pipeline; ghosts and glows show the whole shell.
             if draw.mode == SOLID {
                 gl.enable(glow::CULL_FACE);
             } else {
@@ -860,7 +789,7 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// Selected and glowing bodies' outlines, found on the card each frame.
+    /// Selected and glowing bodies' outlines.
     pub(super) unsafe fn draw_outlines(
         &self,
         gl: &glow::Context,
@@ -922,8 +851,7 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// Where planes cross the resident meshes: plane marks, and the edge round
-    /// a section's cut.
+    /// Plane marks and section cut edges on the resident meshes.
     pub(super) unsafe fn draw_crossings(
         &self,
         gl: &glow::Context,
@@ -958,8 +886,7 @@ impl Gpu {
             if let Some(at) = program.at("u_plane_colour[0]") {
                 gl.uniform_4_f32_slice(Some(at), colours.as_flattened());
             }
-            // A few times what single precision loses on the largest number in
-            // play: the stored coordinates, and the plane's own offset.
+            // A few times the single-precision error of the largest number in play.
             let offset = planes.iter().fold(0.0_f64, |most, plane| most.max(plane[3].abs() as f64));
             if let Some(at) = program.at("u_on_plane") {
                 gl.uniform_1_f32(Some(at), ((resident.extent() + offset) * 4e-7 + 1e-9) as f32);
@@ -971,18 +898,11 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// A section's caps: for each, the stencil counts how often the cut
-    /// surface winds round each pixel -- every face of the kept part, front
-    /// faces up and back faces down -- and the polygon the plane leaves in the
-    /// mesh's box is filled wherever the count is not zero, which is wherever
-    /// the plane runs through material. `section::loops` and `section::fill`
-    /// find the same region on the CPU by chaining the cut into outlines; the
-    /// winding count needs no outlines, and so no pass over the mesh at all.
+    /// A section's caps. The stencil counts how often the kept surface winds round each pixel
+    /// (front faces up, back faces down), and the plane's box polygon is filled where the count is
+    /// non-zero. Winding rather than parity, so overlapping bodies count as material.
     ///
-    /// Winding rather than parity, as `fill` reads its outlines: two bodies of
-    /// one mesh that overlap are both material, not a hole where they meet.
-    ///
-    /// Expects the model pass's state, and leaves it as it found it.
+    /// Expects the model pass's state, and restores it.
     #[allow(clippy::too_many_arguments)]
     pub(super) unsafe fn draw_caps(
         &self,
@@ -1015,9 +935,8 @@ impl Gpu {
             gl.enable(glow::CLIP_DISTANCE1);
             set2(gl, program, "u_viewport", viewport);
             set2(gl, program, "u_depth", depth);
-            // Counted against the cap's own face, whole, and against nothing
-            // else: a window's box and the other sections are what the cap is
-            // trimmed by afterwards, not what the material is counted in.
+            // Counted against the cap's whole face only: the window box and other sections trim
+            // the cap afterwards.
             set_projection(gl, program, resident, view, &[], &cap.placing);
             if let Some(at) = program.at("u_clip") {
                 gl.uniform_4_f32_slice(Some(at), &resident.clip(Some(cap.plane), &cap.placing));
@@ -1042,8 +961,7 @@ impl Gpu {
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 
-    /// Widen the frame's depth range to take in every resident mesh it draws,
-    /// with room for the largest bias a line on one gets.
+    /// Widen the depth range to take in every resident mesh drawn, plus the largest line bias.
     pub(super) fn see_resident(&self, request: &Request<'_>, plan: &Plan, passes: &mut Passes) {
         let items =
             request.items.iter().map(|item| (item.renderable.id, Placing::of(&request.live, item.renderable.id)));
@@ -1091,8 +1009,7 @@ pub(super) unsafe fn set_projection(
             gl.uniform_4_f32_slice(Some(at), &row);
         }
     }
-    // The sections are asked per pixel (`BOX_COMMON`); the clip distance is
-    // left for the one pass that clips by a single plane, the cap's count.
+    // Sections are tested per pixel (`BOX_COMMON`); the clip distance is only for the cap count pass.
     if let Some(at) = program.at("u_clip") {
         gl.uniform_4_f32_slice(Some(at), &resident.clip(None, placing));
     }
@@ -1112,7 +1029,7 @@ pub(super) unsafe fn set_projection(
         set_within(gl, program, resident, placing, &[]);
     }
     if let Some(at) = program.at("u_model") {
-        // Row by row, and said to be: `Xform` keeps its matrix that way.
+        // Row-major, as `Xform` stores its matrix.
         let m: Vec<f32> = placing.xform.m.as_flattened().iter().map(|&value| value as f32).collect();
         gl.uniform_matrix_3_f32_slice(Some(at), true, &m);
     }
@@ -1121,8 +1038,7 @@ pub(super) unsafe fn set_projection(
     }
 }
 
-/// The walls a line has to stay inside, for `BOX_COMMON`'s `u_within`: none
-/// for most, and the rest of its box for the line round one face of one.
+/// The walls a line must stay inside, for `BOX_COMMON`'s `u_within`.
 pub(super) unsafe fn set_within(
     gl: &glow::Context,
     program: &Program,
@@ -1140,21 +1056,15 @@ pub(super) unsafe fn set_within(
         gl.uniform_4_f32_slice(Some(at), walls.as_flattened());
     }
     if let Some(at) = program.at("u_cut_slack") {
-        // A few times what single precision loses on the numbers in play, as
-        // `u_on_plane` is.
+        // A few times the single-precision error of the numbers in play, as for `u_on_plane`.
         let offset = walls.iter().fold(0.0_f64, |most, wall| most.max(wall[3].abs() as f64));
         gl.uniform_1_f32(Some(at), ((resident.extent() + offset) * 4e-6 + 1e-6) as f32);
     }
 }
 
-/// Which winding faces the eye on the card, for `GL_CULL_FACE` and for the
-/// cap's winding count.
-///
-/// A triangle faces the eye when its corners run counter-clockwise seen from
-/// there, which in the screen's right and up is counter-clockwise -- and the
-/// rows flip up into the rasterizer's downward-counting rows, so on the card
-/// it is clockwise. The basis is asked rather than assumed, so a camera that
-/// ever mirrors the picture culls the right side still.
+/// Which winding faces the eye on the card, for culling and the cap's winding count.
+/// Counter-clockwise on screen becomes clockwise after the row flip; the basis is checked
+/// rather than assumed so a mirrored camera still culls correctly.
 pub(super) fn front_face(view: &View) -> u32 {
     let (right, up) = view.basis();
     if right.cross(up).dot(-view.forward()) > 0.0 {
@@ -1164,10 +1074,7 @@ pub(super) fn front_face(view: &View) -> u32 {
     }
 }
 
-/// The rows that project a position stored relative to `origin`: screen x,
-/// screen y and the depth key, each a dot product with it plus a constant.
-/// Exactly `View::to_view` followed by `to_vertex`, folded together with the
-/// offset, in double precision.
+/// The projection rows for positions stored relative to `origin`, in double precision.
 pub(super) fn rows_at(view: &View, origin: Vec3) -> [[f32; 4]; 3] {
     let (right, up) = view.basis();
     let forward = view.forward();

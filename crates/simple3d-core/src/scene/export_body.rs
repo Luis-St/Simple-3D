@@ -3,28 +3,18 @@
 use super::*;
 
 impl Scene {
-    /// What a node is painted, following the tree upward: its own colour, else
-    /// the nearest painted ancestor's, else nothing at all. This is what makes
-    /// painting a group paint every shape inside it without touching any of
-    /// them, and what a shape painted inside a painted group overrides.
-    /// Whether `id` is a node whose children an export could consider one by
-    /// one. A primitive has no parts, and a boolean that fuses its operands has
-    /// none that survive it. A split's children are separate solids by
-    /// construction -- that is what breaking a shape apart found -- so it always
-    /// can.
+    /// Whether an export could consider `id`'s children one by one: not for primitives or fusing
+    /// booleans; always for a split, whose pieces are separate solids.
     pub fn can_split_for_export(&self, id: NodeId) -> bool {
         self.get(id).and_then(|n| n.combine_op()).is_some_and(GroupOp::separable)
     }
 
-    /// Every export body mark in the scene, by node, in a stable order. Small
-    /// -- a scene nobody has grouped has none -- and it is what tells a cached
-    /// export summary that the grouping has been edited under it.
+    /// Every export body mark by node, in stable order, for invalidating a cached export summary.
     pub fn export_body_marks(&self) -> Vec<(NodeId, ExportBody)> {
         self.nodes.iter().filter_map(|(id, node)| node.export_body.map(|body| (*id, body))).collect()
     }
 
-    /// The largest body number used anywhere, so a picker can offer the next
-    /// one. Zero when nothing is grouped, which makes the first offer "Body 1".
+    /// The largest body number used, so a picker can offer the next; zero when nothing is grouped.
     pub fn highest_export_body(&self) -> u32 {
         self.export_body_marks()
             .into_iter()
@@ -36,10 +26,8 @@ impl Scene {
             .unwrap_or(0)
     }
 
-    /// Give `id` a body mark, clearing anything below it that the mark makes
-    /// unreachable: marking a group as a body of its own leaves the marks
-    /// inside it saying something that is no longer true, and a stale mark that
-    /// springs back when the group is split again is worse than none.
+    /// Give `id` a body mark, clearing marks below it that it makes unreachable, so they cannot spring
+    /// back when the group is split again.
     pub fn set_export_body(&mut self, id: NodeId, body: Option<ExportBody>) {
         if let Some(node) = self.get_mut(id) {
             node.export_body = body;

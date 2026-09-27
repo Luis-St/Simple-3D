@@ -1,15 +1,13 @@
-//! The numbers a reassembly is described by.
+//! The reassembly's numbers.
 
 use super::*;
 use crate::app::App;
 use crate::popup::{label, number};
 
-/// Which fields are this tool's, so a drag handed between two tools' windows
-/// cannot edit the wrong number.
+/// Scopes fields to this tool, so a drag passed between tool windows cannot edit the wrong number.
 const SCOPE: &str = "reassemble-field";
 
-/// How closely to look, how many objects to make, and what to do with what
-/// touches.
+/// Detail, object count, and what to do with touching parts.
 pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut ReassembleTool) {
     let length = format!("({})", app.unit().suffix());
     egui::Grid::new("reassemble-grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {

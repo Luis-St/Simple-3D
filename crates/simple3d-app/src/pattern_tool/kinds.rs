@@ -1,4 +1,4 @@
-//! The saved rules on the shelf: reading, applying and writing one.
+//! The saved rules on the shelf: reading, applying and writing them.
 
 use crate::app::{App, Status};
 use simple3d_core::pattern;
@@ -8,15 +8,12 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
-    /// Re-read the shelf. Done when the tool opens and after it is written to,
-    /// rather than every frame: the shelf is a directory and the window draws
-    /// sixty times a second.
+    /// Re-read the shelf, on tool open and after writes rather than every frame.
     pub(crate) fn refresh_pattern_kinds(&mut self) {
         self.pattern_kinds = pattern_library::list(self.config_dir());
     }
 
-    /// The pattern the tool is working on, if it is still there: the tool is not
-    /// modal, so the outliner behind it can delete what it is working on.
+    /// The pattern the tool works on, if it still exists; the non-modal tool can see it deleted.
     pub(crate) fn pattern_tool_target(&self) -> Option<NodeId> {
         self.pattern_tool.filter(|id| self.scene.get(*id).is_some_and(|n| n.is_pattern()))
     }
@@ -27,8 +24,7 @@ impl App {
 }
 
 impl App {
-    /// Take one stage out of the rule, wherever it is in the stack; the ones
-    /// below it move up and go on repeating what is left above them.
+    /// Remove a stage anywhere in the stack; later ones move up and repeat what remains above.
     pub(crate) fn drop_stage(&mut self, index: usize) {
         let Some(id) = self.pattern_tool_target() else { return };
         if pattern::stage_count(&self.pattern_tool_params()) <= 1 {
@@ -38,13 +34,13 @@ impl App {
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
             pattern::remove_stage(params, index);
         }
-        // The fold of each stage goes with it, not with its slot.
+        // Each stage's fold moves with it, not its slot.
         for below in index..pattern::MAX_STAGES - 1 {
             self.pattern_tool_folded[below] = self.pattern_tool_folded[below + 1];
         }
     }
 
-    /// Move stage `index` one place up the stack, or down.
+    /// Move stage `index` one place up or down.
     pub(crate) fn move_stage(&mut self, index: usize, up: bool) {
         let Some(id) = self.pattern_tool_target() else { return };
         let used = pattern::stage_count(&self.pattern_tool_params());
@@ -58,16 +54,8 @@ impl App {
         self.pattern_tool_folded.swap(index, other);
     }
 
-    /// Add a stage doing `mode` to the end of the rule (issue 79): what the
-    /// builder's "Add a stage" row offers, as the three things a stage can do
-    /// rather than one button whose stage then has to be told what it is for.
-    ///
-    /// A stage that is added starts as the next thing the rule is missing -- a
-    /// run along an axis nothing above it runs along, spaced clear of what the
-    /// pattern repeats -- rather than as whatever its slot last held. The slot
-    /// used to decide: after a grid that was stage 4's stock turn, and after a
-    /// blank rule it was one copy in place, so adding a stage appeared to do
-    /// nothing at all.
+    /// Add a stage doing `mode` at the end (issue 79), starting as the next thing the rule lacks
+    /// (see [`pattern::fresh_stage_doing`]) rather than its slot's old contents.
     pub(crate) fn add_stage_doing(&mut self, mode: pattern::StageMode) {
         let Some(id) = self.pattern_tool_target() else { return };
         let used = pattern::stage_count(&self.pattern_tool_params());
@@ -84,11 +72,8 @@ impl App {
         self.pattern_tool_folded[used] = false;
     }
 
-    /// Add a variation of `what` to the end of stage `index`'s list, at an
-    /// amount that shows what it does (see [`pattern::fresh_variation`]) --
-    /// along another axis or reaching other copies where the stage already has
-    /// one just like it. A stage that has every variation of `what` its copies
-    /// allow asks for nothing, not even an undo step.
+    /// Add a `what` variation to stage `index` at a visible amount ([`pattern::fresh_variation`]);
+    /// nothing, not even an undo step, when none is left.
     pub(crate) fn add_variation(&mut self, index: usize, what: pattern::Vary) {
         let Some(id) = self.pattern_tool_target() else { return };
         let size = self.pattern_content_size(id).unwrap_or(Vec3::ZERO);
@@ -99,7 +84,7 @@ impl App {
         }
     }
 
-    /// Take variation `slot` off stage `index`; the ones after it move up.
+    /// Remove variation `slot` from stage `index`; later ones move up.
     pub(crate) fn drop_variation(&mut self, index: usize, slot: usize) {
         let Some(id) = self.pattern_tool_target() else { return };
         if slot >= pattern::variation_count(&self.pattern_tool_params(), index) {
@@ -111,8 +96,7 @@ impl App {
         }
     }
 
-    /// Put a saved rule on a pattern: the tool's own, from the question it
-    /// opens with, or any custom pattern from the property panel's shelf.
+    /// Put a saved rule on a pattern, from the tool's start question or the property panel's shelf.
     pub(crate) fn apply_saved_kind_to(&mut self, id: NodeId, entry: &pattern_library::Entry) {
         if !self.scene.get(id).is_some_and(|n| n.is_pattern()) {
             return;
@@ -125,17 +109,14 @@ impl App {
         if let Some(params) = self.scene.get_mut(id).and_then(|n| n.params_mut()) {
             pattern_library::apply(params, &kind);
         }
-        // The node takes the kind's name, but only while it still carries the
-        // one it was given automatically: a pattern the user has named
-        // themselves keeps that name.
+        // Renamed to the kind only while it still has its automatic name.
         if self.scene.node(id).name.starts_with("Pattern") {
             if let Some(node) = self.scene.get_mut(id) {
                 node.name = entry.name.clone();
             }
         }
         self.pattern_tool_name = entry.name.clone();
-        // Applied to the rule the tool is open on, it answers the question the
-        // window opens with: the rule now starts from this kind.
+        // On the tool's own pattern, it answers the start question.
         if self.pattern_tool_target() == Some(id) {
             self.pattern_tool_started = true;
             self.pattern_tool_resumable = false;
@@ -145,14 +126,11 @@ impl App {
         self.status = Status::Info(format!("Pattern kind \u{201C}{}\u{201D} applied{with}", entry.name));
     }
 
-    /// Keep the rule the node currently holds on the shelf, under the name in
-    /// the dialog's name field.
+    /// Save the node's current rule to the shelf under the dialog's name.
     pub(crate) fn save_current_kind(&mut self) {
         let params = self.pattern_tool_params();
         let name = simple3d_core::library::sanitise(&self.pattern_tool_name);
-        // The scatter goes with the rule when the tool says to keep it and
-        // there is one to keep (issue 79). A pattern with none saves none, so
-        // applying the kind later leaves the other pattern's own alone.
+        // The scatter is kept when asked and present (issue 79); otherwise applying leaves targets' own.
         let with_noise =
             self.pattern_tool_keep_noise && self.pattern_tool_target().is_some_and(|id| self.noise_is_set(id));
         match pattern_library::save(self.config_dir(), &name, &params, with_noise) {
@@ -165,9 +143,7 @@ impl App {
         }
     }
 
-    /// Put the "delete this one" question up. Nothing is removed until it is
-    /// answered: the shelf is a directory, so this is the one thing a click in
-    /// the pattern tool does that undo cannot take back.
+    /// Ask before deleting a saved kind, which undo cannot restore.
     pub(crate) fn ask_delete_saved_kind(&mut self, entry: pattern_library::Entry) {
         self.confirm_delete_kind = Some(entry);
         self.modal = crate::app::Modal::ConfirmDeleteKind;

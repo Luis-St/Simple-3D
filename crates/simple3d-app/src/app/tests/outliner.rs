@@ -6,7 +6,7 @@ use simple3d_core::scene::GroupOp;
 
 #[test]
 pub(crate) fn deleting_a_group_asks_what_should_happen_to_its_children() {
-    // Two readings of one word, so it is asked rather than guessed.
+    // Deleting a group is ambiguous about its children, so it asks.
     let mut app = headless_app();
     let plate = app.scene.depth_first().into_iter().find(|&id| id != app.scene.root()).unwrap();
     app.select_only(plate);
@@ -24,7 +24,7 @@ pub(crate) fn deleting_a_group_asks_what_should_happen_to_its_children() {
     assert!(app.pending_delete.is_none());
     assert!(app.scene.contains(group) && app.scene.contains(plate));
 
-    // Keeping the children promotes them into the group's own place.
+    // Keeping the children promotes them into the group's place.
     app.select_only(group);
     app.run(Command::Delete);
     app.confirm_delete(true);
@@ -32,7 +32,7 @@ pub(crate) fn deleting_a_group_asks_what_should_happen_to_its_children() {
     assert!(app.scene.contains(plate), "the child was deleted despite being kept");
     assert_eq!(app.scene.node(plate).parent, Some(app.scene.root()), "the child was not promoted");
 
-    // And taking the children takes them.
+    // Taking the children takes them.
     app.select_only(plate);
     app.run(Command::Group);
     let group = app.primary().unwrap();
@@ -40,7 +40,7 @@ pub(crate) fn deleting_a_group_asks_what_should_happen_to_its_children() {
     app.confirm_delete(false);
     assert!(!app.scene.contains(group) && !app.scene.contains(plate));
 
-    // A shape on its own is not a question, so it just goes.
+    // A lone shape just goes.
     let root = app.scene.root();
     let lone = app.scene.add_primitive("sphere", root, 0).unwrap();
     app.select_only(lone);
@@ -51,8 +51,7 @@ pub(crate) fn deleting_a_group_asks_what_should_happen_to_its_children() {
 
 #[test]
 pub(crate) fn moving_among_siblings_moves_everything_that_is_selected() {
-    // Issue 41: with more than one node selected, only the primary used to
-    // move -- which reads as the command doing nothing to the rest.
+    // Issue 41: all selected nodes move, not just the primary.
     let mut app = headless_app();
     let root = app.scene.root();
     let first = app.scene.add_primitive("box", root, 0).unwrap();
@@ -65,8 +64,7 @@ pub(crate) fn moving_among_siblings_moves_everything_that_is_selected() {
     app.run(Command::MoveDown);
     assert_eq!(app.scene.node(root).children, vec![first, plate, second, third]);
 
-    // And the two of them together stop at the end rather than one of them
-    // running past the other.
+    // Together they stop at the end, neither overtaking the other.
     assert!(!app.can_reorder(1));
     app.run(Command::MoveDown);
     assert_eq!(app.scene.node(root).children, vec![first, plate, second, third]);
@@ -87,7 +85,7 @@ pub(crate) fn a_group_can_be_made_empty_and_have_its_operator_set_where_the_tree
     assert!(app.scene.node(group).children.is_empty(), "the new group is empty");
     assert_eq!(app.scene.node(group).parent, Some(app.scene.root()), "beside the node it was made from");
 
-    // Made *inside* a group, since a group is somewhere things can go.
+    // Made inside a group.
     app.add_node_at(group, None, GroupOp::Union);
     let inner = app.primary().unwrap();
     assert_eq!(app.scene.node(inner).parent, Some(group));
@@ -98,8 +96,7 @@ pub(crate) fn a_group_can_be_made_empty_and_have_its_operator_set_where_the_tree
 
 #[test]
 pub(crate) fn dragging_one_row_of_a_multi_selection_moves_the_whole_selection() {
-    // Issue 43: a drag that started on a selected row carries everything
-    // selected, in document order, and leaves it selected where it lands.
+    // Issue 43: a drag from a selected row carries the whole selection in document order and keeps it selected.
     let mut app = headless_app();
     let root = app.scene.root();
     let plate = app.primary().unwrap();
@@ -108,11 +105,9 @@ pub(crate) fn dragging_one_row_of_a_multi_selection_moves_the_whole_selection() 
     let group = app.scene.add_group(GroupOp::Union, root, 3);
 
     app.selection = vec![third, plate];
-    // Grabbed on a row that is part of the selection: all of it travels,
-    // in the order the tree has it rather than the order it was clicked.
+    // Grabbed on a selected row: all of it, in tree order.
     assert_eq!(app.dragged_nodes(third), vec![plate, third]);
-    // Grabbed on a row that is not: that row alone, and the selection is
-    // not what the gesture was about.
+    // Grabbed on an unselected row: that row alone.
     assert_eq!(app.dragged_nodes(second), vec![second]);
 
     app.outliner_drag = Some(Carried::Rows(third));
@@ -123,7 +118,7 @@ pub(crate) fn dragging_one_row_of_a_multi_selection_moves_the_whole_selection() 
     assert!(app.is_selected(plate) && app.is_selected(third), "the load was dropped out of the selection");
     assert_eq!(app.selection.len(), 2);
 
-    // One undo step for the whole drag, and it puts all of it back.
+    // One undo step restores the whole drag.
     app.run(Command::Undo);
     assert_eq!(app.scene.node(root).children, vec![plate, second, third, group]);
 }
@@ -150,8 +145,7 @@ pub(crate) fn a_selection_that_holds_a_group_and_its_child_drags_as_the_group_al
 
 #[test]
 pub(crate) fn the_outliner_can_add_a_group_or_any_primitive_where_the_row_is() {
-    // Issue 44: the row's own Add menu, which puts a new node inside the
-    // group it was opened on and beside anything else.
+    // Issue 44: the row's Add menu puts a node inside a group, beside anything else.
     let mut app = headless_app();
     let plate = app.primary().unwrap();
 
@@ -164,12 +158,12 @@ pub(crate) fn the_outliner_can_add_a_group_or_any_primitive_where_the_row_is() {
     let group = app.primary().unwrap();
     assert_eq!(app.scene.node(group).group_op(), Some(GroupOp::Difference));
 
-    // Into the group, because a group is somewhere things can go.
+    // Into the group.
     app.add_node_at(group, Some("box"), GroupOp::Union);
     let boxed = app.primary().unwrap();
     assert_eq!(app.scene.node(boxed).parent, Some(group));
 
-    // Every shape the palette offers is reachable from the same menu.
+    // Every palette shape is reachable from the same menu.
     for spec in simple3d_core::primitive::REGISTRY.iter() {
         app.add_node_at(group, Some(spec.type_id), GroupOp::Union);
         let added = app.primary().unwrap();
@@ -196,8 +190,7 @@ pub(crate) fn a_collapsed_group_hides_its_children_and_a_selection_opens_it_agai
     assert!(rows.contains(&group), "the group itself is still a row");
     assert!(!rows.contains(&plate), "a collapsed group still drew its children");
 
-    // Selecting something inside it -- from the viewport, say -- has to
-    // bring it back into view.
+    // Selecting something inside, say from the viewport, brings it back into view.
     app.select_only(plate);
     assert!(crate::panel_outliner::visible_rows(&app).contains(&plate));
 }

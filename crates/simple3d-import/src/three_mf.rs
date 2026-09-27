@@ -1,40 +1,25 @@
-//! 3MF: the package, the objects inside it, and what the build places.
+//! 3MF: the package, its objects, and what the build places.
 //!
-//! A 3MF is the one format here with a structure worth keeping. Its objects are
-//! meshes or assemblies of other objects, each placed by the build with a
-//! transform of its own, and it records the unit its numbers are in and the
-//! colours its faces are painted. All four are read: an object becomes a part,
-//! an assembly is flattened into the part that places it, the numbers are
-//! converted to millimetres, and a painted face comes back painted.
+//! Objects become parts, assemblies are flattened into the part that places them, units are
+//! converted to millimetres, and face colours are kept. Components may reach into other model
+//! parts via the Production extension's `p:path` (Bambu Studio and OrcaSlicer put every mesh in
+//! `3D/Objects/object_N.model`), so objects are keyed by part and id.
 //!
-//! An assembly may reach into another model part of the package: the Production
-//! extension's `p:path` on a component names the part its object is declared
-//! in. Bambu Studio and OrcaSlicer write every mesh that way, into
-//! `3D/Objects/object_N.model`, and leave the main part holding nothing but the
-//! assemblies that place them -- so an object is known by the part it is in as
-//! well as by its id, since ids are only unique within one part.
-//!
-//! What is deliberately not read: print tickets, slicer settings, thumbnails
-//! and the other parts a slicer adds to the package. They are not geometry, and
-//! this application has nowhere to put them.
+//! Print tickets, slicer settings and thumbnails are deliberately ignored.
 
 use super::*;
 use simple3d_geom::{colour_tag, Vec3};
 use std::collections::HashMap;
 
-/// A 3MF transform: three basis vectors and a translation, written as twelve
-/// numbers in row-major order. 3MF multiplies a *row* vector by the matrix, so
-/// the translation is the last row rather than the last column.
+/// A 3MF transform: twelve numbers, row-major. 3MF multiplies a row vector by the matrix, so the
+/// translation is the last row.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Transform([f64; 12]);
 
 impl Transform {
     const IDENTITY: Transform = Transform([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]);
 
-    /// Read the `transform` attribute's twelve numbers, `None` when it is
-    /// absent and an error when it is there and is not twelve numbers -- a
-    /// transform nobody can read is a part in the wrong place, which is worse
-    /// than a refusal.
+    /// Parse a `transform` attribute; an unreadable one is an error rather than a misplaced part.
     fn parse(value: &str) -> Result<Transform, ImportError> {
         let numbers: Vec<f64> = value.split_whitespace().filter_map(|word| word.parse::<f64>().ok()).collect();
         if numbers.len() != 12 || !numbers.iter().all(|v| v.is_finite()) {
@@ -54,8 +39,7 @@ impl Transform {
         )
     }
 
-    /// `self` applied first, then `outer` -- which is how a component inside an
-    /// object placed by the build reaches the plate.
+    /// `self` applied first, then `outer`.
     fn then(&self, outer: &Transform) -> Transform {
         let mut out = [0.0; 12];
         for row in 0..3 {
@@ -70,10 +54,8 @@ impl Transform {
         Transform(out)
     }
 
-    /// Whether the transform turns the model inside out. A mirrored object's
-    /// triangles come out wound the other way round, so the winding is flipped
-    /// back -- otherwise the surface is inward-facing and every check
-    /// downstream reports a solid that is inside out.
+    /// Whether the transform mirrors, in which case winding is flipped back to keep the surface
+    /// outward-facing.
     fn mirrors(&self) -> bool {
         let m = &self.0;
         let determinant = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
@@ -82,19 +64,15 @@ impl Transform {
     }
 }
 
-/// Where an object is declared: the model part holding it, as a package path
-/// without its leading slash and in lower case, and its id within that part.
+/// Where an object is declared: its model part (lower case, no leading slash) and its id.
 type Key = (String, usize);
 
-/// A package path as a [`Key`] spells it. Paths in a package are compared
-/// without case, and a `p:path` is written from the package root with a
-/// leading slash that the archive's own names do not carry.
+/// A package path as a [`Key`] spells it: case-insensitive, without `p:path`'s leading slash.
 fn part_key(path: &str) -> String {
     path.trim().trim_start_matches('/').to_lowercase()
 }
 
-/// An object as the resources declare it: either its own mesh, or a list of
-/// other objects placed inside it.
+/// An object as declared: its own mesh, or other objects placed inside it.
 #[derive(Clone, Debug, Default)]
 struct Object {
     name: String,
@@ -113,9 +91,7 @@ struct Parsed {
 
 pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, ImportError> {
     let archive = crate::unzip::Archive::open(bytes).map_err(malformed)?;
-    // The model part is at a fixed place in every 3MF this workspace writes and
-    // in every one written by a slicer; a package that puts it elsewhere is
-    // still read, by taking the first part named like a model.
+    // A package with the model part elsewhere is still read, via the first part named like a model.
     let root_name = archive
         .names()
         .find(|name| name.eq_ignore_ascii_case("3D/3dmodel.model"))
@@ -136,9 +112,7 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
     step(&mut progress, 0.2)?;
     let mut parsed = parse(&text(&part), &root, (0.2, 0.3), &mut progress)?;
 
-    // The parts the assemblies reach into, read once each. A part read this
-    // way may itself name another, so this goes on until nothing new is named;
-    // its own build, if it has one, is not the package's and is not placed.
+    // Read referenced parts until nothing new is named; their own builds are not placed.
     let mut loaded = vec![root];
     loop {
         let wanted: Vec<String> = parsed
@@ -165,24 +139,20 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
     assemble(parsed)
 }
 
-/// Read one model part. `part` is its own [`Key`] path, which every object,
-/// component and build item in it that names no other part belongs to, and
-/// `range` is the stretch of the progress bar its tags are reported across.
+/// Read one model part. `part` is its [`Key`] path, the default for anything naming no other
+/// part, and `range` is its share of the progress bar.
 fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<'_>) -> Result<Parsed, ImportError> {
     let key = |tag: &crate::xml::Tag<'_>, id: usize| -> Key {
         (tag.attr("path").map_or_else(|| part.to_string(), |path| part_key(&path)), id)
     };
     let mut unit = None;
-    // Every colour the resources declare, by the id of the group holding them.
-    // A `<colorgroup>` and a `<basematerials>` are read into the same shape:
-    // both are a list of colours a triangle names by index.
+    // Colour groups by id; `<colorgroup>` and `<basematerials>` are both index-addressed colour lists.
     let mut palettes: HashMap<usize, Vec<[u8; 3]>> = HashMap::new();
     let mut palette_at: Option<usize> = None;
     let mut objects: HashMap<Key, Object> = HashMap::new();
     let mut order: Vec<Key> = Vec::new();
     let mut build: Vec<(Key, Transform)> = Vec::new();
-    // The object being read, its declared colour group, and the vertices its
-    // triangles index into.
+    // The object being read, its declared colour group, and the vertices its triangles index into.
     let mut open: Option<(Key, Object)> = None;
     let mut object_palette: Option<usize> = None;
     let mut vertices: Vec<Vec3> = Vec::new();
@@ -197,9 +167,7 @@ fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<
             step(progress, range.0 + range.1 * (index as f32 / tags.len().max(1) as f32))?;
         }
         if tag.opens("model") {
-            // An unreadable unit is not a reason to refuse the file: the
-            // specification's default is millimetres, which is what everything
-            // here is in anyway.
+            // An unreadable unit falls back to the specification's default, millimetres.
             unit = tag.attr("unit").and_then(|value| Unit::from_3mf(&value));
         } else if tag.opens("colorgroup") || tag.opens("basematerials") {
             palette_at = tag.index("id");
@@ -209,9 +177,7 @@ fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<
         } else if tag.closes("colorgroup") || tag.closes("basematerials") {
             palette_at = None;
         } else if tag.opens("color") || tag.opens("base") {
-            // `<m:color color="#RRGGBB">` in a colour group, `<base
-            // displaycolor="#RRGGBBAA">` in base materials: the same list, read
-            // out of whichever attribute the file uses.
+            // `<m:color color="#RRGGBB">` or `<base displaycolor="#RRGGBBAA">`: the same list either way.
             if let Some(id) = palette_at {
                 let written = tag.attr("color").or_else(|| tag.attr("displaycolor"));
                 if let Some(rgb) = written.as_deref().and_then(colour) {
@@ -219,9 +185,7 @@ fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<
                 }
             }
         } else if tag.opens("object") {
-            // An object left unclosed -- `<object id="1"/>`, which declares
-            // nothing and which some generators emit -- is taken as it stands
-            // rather than dropped when the next one opens.
+            // An unclosed object (`<object id="1"/>`, which some generators emit) is kept, not dropped.
             if let Some((id, object)) = open.take() {
                 order.push(id.clone());
                 objects.insert(id, object);
@@ -252,8 +216,7 @@ fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<
             if v1.max(v2).max(v3) >= vertices.len() {
                 return Err(malformed(format!("a triangle names vertex {} of {}", v1.max(v2).max(v3), vertices.len())));
             }
-            // The colour the triangle names in its own group, or in the one its
-            // object declared.
+            // The colour the triangle names in its own group, or in its object's.
             let group = tag.index("pid").or(object_palette);
             let tag_value = group
                 .and_then(|id| palettes.get(&id))
@@ -291,12 +254,10 @@ fn parse(document: &str, part: &str, range: (f32, f32), progress: &mut Progress<
     Ok(Parsed { unit, objects, order, build })
 }
 
-/// Place what the build places, now every part it reaches into has been read.
+/// Place what the build places, once every referenced part has been read.
 fn assemble(parsed: Parsed) -> Result<Model, ImportError> {
     let Parsed { unit, objects, order, build } = parsed;
-    // A package with no build section still holds its objects, and every
-    // program that writes one writes the build too -- but a file that does not
-    // is read as "everything, where it stands" rather than as empty.
+    // Without a build section, every object is placed where it stands rather than reading as empty.
     let placed: Vec<(Key, Transform)> =
         if build.is_empty() { order.iter().map(|id| (id.clone(), Transform::IDENTITY)).collect() } else { build };
 
@@ -304,9 +265,7 @@ fn assemble(parsed: Parsed) -> Result<Model, ImportError> {
     let mut parts = Vec::with_capacity(placed.len());
     for (id, transform) in &placed {
         let mut mesh = Mesh::new();
-        // A component that places itself, directly or round a ring of other
-        // objects, would recurse forever; the chain of objects already being
-        // placed is what stops it.
+        // The chain of objects being placed stops self-referencing components from recursing forever.
         flatten(&objects, id, transform, &mut Vec::new(), &mut mesh)?;
         if scale != 1.0 {
             for position in mesh.positions.iter_mut() {
@@ -322,14 +281,11 @@ fn assemble(parsed: Parsed) -> Result<Model, ImportError> {
     Ok(Model { format: Format::ThreeMf, unit, parts })
 }
 
-/// The neutral an export writes for a face nobody painted. 3MF has no "no
-/// colour" for a triangle inside a coloured object, so the exporter writes the
-/// colour the viewport would have drawn -- and reading it back as a painted
-/// face would repaint a model in a grey the user never chose.
+/// The neutral an export writes for unpainted faces, since 3MF has no "no colour" inside a
+/// coloured object; read back as unpainted rather than as a grey the user never chose.
 const UNPAINTED: [u8; 3] = [0x9A, 0xA4, 0xB2];
 
-/// Append the object `id` places, and everything it is assembled from, under
-/// `transform`.
+/// Append the object `id` places, and everything it is assembled from, under `transform`.
 fn flatten(
     objects: &HashMap<Key, Object>,
     id: &Key,
@@ -366,8 +322,7 @@ fn flatten(
     Ok(())
 }
 
-/// A colour written as `#RRGGBB` or `#RRGGBBAA`. The alpha is read past: a
-/// node here is opaque, and there is nowhere to keep it.
+/// A colour as `#RRGGBB` or `#RRGGBBAA`; alpha is ignored.
 fn colour(written: &str) -> Option<[u8; 3]> {
     let hex = written.trim().trim_start_matches('#');
     if hex.len() < 6 {

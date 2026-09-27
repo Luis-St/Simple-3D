@@ -1,4 +1,4 @@
-//! The handles of the patterns laid out on straight lines and rings.
+//! Handles of the linear and ring patterns.
 
 use super::*;
 use crate::primitive::{Params, ParamsExt};
@@ -19,8 +19,7 @@ pub(crate) fn linear_grips(params: &Params) -> Vec<Grip> {
         ));
     }
     if length > 1e-9 {
-        // One step past the last copy: drag it out and the run grows a copy at
-        // a time at the spacing already set.
+        // One step past the last copy: dragging grows the run a copy at a time at the set spacing.
         out.push(Grip::slide(
             "Copies",
             dir * (length * count as f64),
@@ -73,9 +72,7 @@ pub(crate) fn circular_grips(params: &Params) -> Vec<Grip> {
         Drive::Length { keys: &["circ_radius"], base: 0.0, per: 1.0, min: POSITIVE },
     )];
     if radius.abs() > 1e-9 {
-        // The span grip rides on a wider circle than the copies do. On the ring
-        // itself a full turn would end where it began, on top of the radius
-        // grip, and neither could be picked out from the other.
+        // On a wider circle, since on the ring a full turn would put it on top of the radius grip.
         let ring = radius * 1.3;
         out.push(Grip {
             label: "Span",
@@ -86,8 +83,6 @@ pub(crate) fn circular_grips(params: &Params) -> Vec<Grip> {
             drive: Drive::Angle { key: "circ_span", axis: ax, per: 1.0 },
         });
     }
-    // A ring has no outward run to drag copies along -- its copies fill the
-    // span evenly however many there are -- so the span grip is what lays it
-    // out and the count stays a number.
+    // A ring spreads its copies over the span, so the span grip lays it out and the count stays a number.
     out
 }

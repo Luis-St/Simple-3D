@@ -4,23 +4,14 @@ use super::*;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
 use simple3d_geom::Vec3;
-// The tests exercise these modules' own workings, not only what the
-// renderer re-exports.
 use simple3d_geom::primitives;
 
-/// Splitting the frame across threads must not change one pixel of it.
-///
-/// This is the whole contract the banded renderer rests on, and it is not
-/// self-evident: the first version of it clipped each line to the band
-/// before stepping along it, which re-spaced the samples and moved every
-/// grid line and feature edge by up to a pixel wherever a band began. The
-/// picture still looked right on its own; it was only wrong against the
-/// picture one thread drew. Every case below fails on that version.
+/// Splitting the frame across threads must not change one pixel. Regression: clipping lines to the
+/// band before stepping moved lines by up to a pixel at band edges.
 #[test]
 pub(crate) fn bands_draw_the_very_same_frame_as_one_thread() {
     let mut mesh = primitives::box_mesh(30.0, 20.0, 14.0);
-    // A round body, so there are many small triangles and many feature
-    // edges landing at every angle to the band boundaries.
+    // A round body, for many small triangles and edges at every angle to the band boundaries.
     mesh.append(
         &primitives::ellipsoid_mesh(18.0, 18.0, 18.0, 24)
             .transformed(simple3d_geom::Vec3::new(22.0, 8.0, 4.0), simple3d_geom::Vec3::ZERO),
@@ -29,8 +20,7 @@ pub(crate) fn bands_draw_the_very_same_frame_as_one_thread() {
     for mode in [DisplayMode::ShadedWithEdges, DisplayMode::Shaded, DisplayMode::Wireframe] {
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
         let mut req = request(items, mode);
-        // The grid, the axes and the plane marks all draw lines that cross
-        // the whole frame, so they cross every band boundary there is.
+        // Grid, axes and plane marks cross every band boundary.
         req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Grid, plane_marks: true };
         let prepared = prepare_frame(&req);
         let one = render_in_bands(&req, &prepared, 1);
@@ -67,9 +57,7 @@ pub(crate) fn a_camera_inside_the_model_does_not_smear_across_the_viewport() {
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
     req.view = req.view.with_camera(Camera { distance: 1.0, ..req.view.camera() });
     let frame = render(&req);
-    // A parallel projection has no near-plane singularity to fall into: the
-    // walls the camera has passed simply land behind the ones it has not, so
-    // this is a partial fill rather than a panic or a screen of garbage.
+    // Parallel projection has no near-plane singularity: passed walls land behind the rest.
     assert_eq!(frame.color.len(), 160 * 120 * 4);
 }
 
@@ -92,19 +80,13 @@ pub(crate) fn nearer_geometry_hides_what_is_behind_it() {
     );
     let with_both = render(&req);
     let only_near = render(&request(vec![Item { renderable: &near, style: Style::Solid }], DisplayMode::Shaded));
-    // The far box is below the near one on screen, so it adds pixels, but at
-    // the centre the near box must still win.
+    // The far box adds pixels below, but at the centre the near box must win.
     let centre = (120 / 2 * 160 + 160 / 2) * 4;
     assert_eq!(with_both.color[centre..centre + 4], only_near.color[centre..centre + 4]);
 }
 
-/// The same, for a mesh dense enough that the steps are sorted into their bands
-/// on several threads at once, each taking a stretch of them, and the bands are
-/// cut where the work is rather than at equal heights.
-///
-/// A band draws the lists the sorting threads made for it one after another,
-/// and the picture depends on that being preparation order: a face drawn
-/// before an edge on it, not after.
+/// The same for a dense mesh binned in parallel with work-balanced bands; bands must still draw in
+/// preparation order.
 #[test]
 pub(crate) fn bands_sorted_on_many_threads_still_draw_the_frame_one_thread_draws() {
     let mut mesh = primitives::box_mesh(100.0, 100.0, 10.0).translated(Vec3::new(0.0, 0.0, -20.0));

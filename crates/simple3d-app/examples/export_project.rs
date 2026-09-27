@@ -1,9 +1,5 @@
-//! Temporary verification harness: writes 3MF files from a project on disk
-//! along the same path the application takes once its save dialog has returned
-//! a filename (evaluate the scene, refuse on evaluation errors, then
-//! `simple3d_export::write`). Used because the application's file dialog is a
-//! desktop portal, which cannot be driven on the nested X server the
-//! verification run uses.
+//! Writes 3MF files from a project along the app's own export path (evaluate, refuse on errors,
+//! `simple3d_export::write`), since the portal file dialog cannot be driven on the nested X server.
 //!
 //! usage: export_project <project.simple3d> <out-dir> [group-name ...]
 
@@ -28,8 +24,7 @@ fn main() {
 
     write_mesh(&out_dir.join("showcase-all.3mf"), &evaluated.mesh);
 
-    // One file per named top-level group, evaluated exactly as "export the
-    // current selection" evaluates a selected subtree.
+    // One file per named top-level group, evaluated like an exported selection.
     for id in scene.node(scene.root()).children.clone() {
         let name = scene.node(id).name.clone();
         if !wanted.is_empty() && !wanted.contains(&name) {
@@ -47,8 +42,6 @@ fn write_mesh(path: &Path, mesh: &Arc<simple3d_geom::Mesh>) {
         scale: 1.0,
         unit: simple3d_export::Unit3mf::Millimeter,
         allow_invalid: false,
-        // One file per group here, so there is never more than one object in a
-        // file to keep apart.
         bodies: simple3d_export::BodyMode::One,
         compress: true,
     };

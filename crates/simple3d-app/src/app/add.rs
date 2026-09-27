@@ -53,6 +53,8 @@ impl App {
         self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
     }
 
+    /// Add a group or primitive where the tree points: inside `at` if it can hold children, else
+    /// beside it, as the outliner's Add menu does (issue 44).
     pub fn add_node_at(&mut self, at: NodeId, type_id: Option<&str>, op: GroupOp) {
         self.edit(if type_id.is_some() { "Add" } else { "Add group" }, None);
         let (parent, index) = self.insertion_from_row(at);

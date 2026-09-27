@@ -24,15 +24,8 @@ impl DisplayMode {
     }
 }
 
-/// Which renderer draws the viewport.
-///
-/// The CPU rasterizer is the default and the fallback, and it is the one the
-/// application's promise rests on: it needs no accelerated graphics and has no
-/// shader to fail to compile (spec section 2.7, acceptance criterion 19). The
-/// GPU renderer draws the same scene through the OpenGL context the window
-/// already has, which costs nothing to have available and is a great deal
-/// faster on a large viewport -- but it can fail on a driver, and when it does
-/// the viewport falls back to the CPU rather than showing nothing.
+/// Which renderer draws the viewport. The CPU rasterizer is the default and fallback, needing no GPU
+/// (spec section 2.7, criterion 19); the faster GPU renderer falls back to it if the driver fails.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RenderEngine {

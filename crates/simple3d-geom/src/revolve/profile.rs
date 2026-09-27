@@ -1,12 +1,11 @@
-//! Revolving a profile about the Y axis.
+//! Revolving a profile about the Z axis.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
 use std::f64::consts::TAU;
 
-/// Revolve an open (radius, z) profile curve fully around Z. Ends whose
-/// radius is ~0 close naturally at the axis; ends with radius > 0 are left
-/// open unless `cap_start` / `cap_end` request a flat disc there.
+/// Revolve an open (radius, z) profile fully around Z. Ends at radius ~0 close at the axis; others stay
+/// open unless `cap_start` / `cap_end` ask for a disc.
 pub fn revolve_open_profile(profile: &[(f64, f64)], segments: u32, cap_start: bool, cap_end: bool) -> Mesh {
     let n = segments.max(3);
     let m = profile.len();
@@ -45,9 +44,7 @@ pub fn revolve_open_profile(profile: &[(f64, f64)], segments: u32, cap_start: bo
     mesh
 }
 
-/// Revolve a *closed* (radius, z) loop (traversed CCW in the (r,z) plane,
-/// e.g. an annulus rectangle or a tube's circular cross-section) around Z.
-/// If `sweep_deg` is short of 360, the two open ends are fan-capped.
+/// Revolve a closed (radius, z) loop, CCW in the (r,z) plane, around Z; a partial sweep fan-caps its ends.
 pub fn revolve_closed_profile(profile: &[(f64, f64)], segments: u32, sweep_deg: f64) -> Mesh {
     let n = segments.max(3);
     let sweep = sweep_deg.to_radians().clamp(0.0, TAU);

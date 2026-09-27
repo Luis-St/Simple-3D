@@ -15,7 +15,7 @@ fn two_boxes() -> Scene {
     part
 }
 
-/// `scene` handed the components it integrates, the way the application does.
+/// `scene` given its integrated components, as the application does.
 fn linked(mut scene: Scene, parts: &[(ComponentId, &Scene)]) -> Scene {
     let map: BTreeMap<ComponentId, &Scene> = parts.iter().copied().collect();
     scene.components = Arc::new(link(&map));
@@ -38,7 +38,7 @@ pub(crate) fn an_integration_is_its_component_placed_where_it_stands() {
     let (lo, _) = result.mesh.bounds().unwrap();
     let (own_lo, _) = own.mesh.bounds().unwrap();
     assert!((lo.y - own_lo.y - 100.0).abs() < 1e-9, "the integration was not placed where it stands");
-    // One node in the tree, and so one mesh to pick.
+    // One node, so one mesh to pick.
     assert!(result.node_meshes.contains_key(&id));
     assert_eq!(result.node_meshes.len(), 1, "the component's own nodes leaked into this scene");
 }
@@ -97,8 +97,7 @@ pub(crate) fn components_nest_and_a_loop_is_left_open_rather_than_followed() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     assert!(result.mesh.triangle_count() > 0, "a component two levels down evaluated to nothing");
 
-    // Two components holding each other, which only a hand-edited file can
-    // say: evaluating either finishes, and says what is missing.
+    // Mutually integrating components (only from a hand-edited file): evaluation finishes and reports it.
     let mut a = Scene::new();
     let a_root = a.root();
     a.add_integration(2, "B", a_root, 0);

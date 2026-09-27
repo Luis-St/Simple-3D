@@ -15,15 +15,8 @@ fn assert_sound(name: &str, mesh: &Mesh) {
     }
 }
 
-/// How far the simplified surface ended up from the original, worked out the
-/// slow and obvious way: every vertex of the original against every triangle of
-/// the result.
-///
-/// The run reports the same number off a grid, and the point of measuring it
-/// twice is that the grid is an optimisation -- a cell size, a ring search and
-/// a rule for triangles too big to bucket -- and an optimisation that quietly
-/// misses the nearest triangle would make the whole deviation figure a
-/// comforting lie. This is the version with nothing in it to get wrong.
+/// The deviation computed the slow, obvious way (every original vertex against every result
+/// triangle), to check the run's grid-based figure.
 fn exact_deviation(original: &Mesh, result: &Mesh) -> f64 {
     original
         .positions
@@ -82,9 +75,7 @@ fn keeps_the_shape() {
     let after = simplify(&before, &Simplify { detail: 20, keep_sharp: false, ..Simplify::default() });
     let (lo, hi) = after.mesh.bounds().expect("there is still a shape");
     let (was_lo, was_hi) = before.bounds().expect("there was a shape");
-    // A sphere simplified to a fifth loses some of its bulge, but it stays a
-    // sphere of about the same size: a result that has walked off its own
-    // bounding box is a result that has gone wrong.
+    // A simplified sphere stays about the same size; leaving its bounding box means something broke.
     for (now, was) in [(lo, was_lo), (hi, was_hi)] {
         for (now, was) in [(now.x, was.x), (now.y, was.y), (now.z, was.z)] {
             assert!((now - was).abs() < 2.0, "the bounds moved from {was} to {now}");
@@ -92,14 +83,8 @@ fn keeps_the_shape() {
     }
 }
 
-/// The budget spent on nothing: no collapse is made, and what comes back is the
-/// mesh as it was.
-///
-/// As it was *welded*, which is not quite the same mesh a generator produces:
-/// welding is the first thing every run does -- edges cannot be found on a
-/// surface whose triangles do not share vertices -- and a sphere's poles are
-/// degenerate triangles that welding takes out. That is not detail being
-/// dropped; a mesh stored on a node has been through the same weld already.
+/// With no budget spent, the mesh comes back as welded. Welding (which drops the poles' degenerate
+/// triangles) always happens first, and stored meshes are already welded.
 #[test]
 fn a_hundred_percent_changes_nothing() {
     let before = sphere();
@@ -108,9 +93,7 @@ fn a_hundred_percent_changes_nothing() {
     assert_eq!(after.deviation, 0.0);
 }
 
-/// A box is twelve triangles and eight corners, and every one of its edges is a
-/// right angle. There is no detail in it to drop, and a simplification that
-/// "succeeded" on it would have taken a corner off the shape.
+/// A box has no detail to drop: every edge is a right angle.
 #[test]
 fn a_box_has_nothing_to_drop() {
     let before = plate_mesh(40.0, 30.0, 10.0);
@@ -119,8 +102,7 @@ fn a_box_has_nothing_to_drop() {
     assert_eq!(after.deviation, 0.0);
 }
 
-/// The same box with the creases no longer treated as features: now it can be
-/// simplified, and what it comes back as is still a closed surface.
+/// Without crease protection the box simplifies and stays closed.
 #[test]
 fn a_box_gives_way_once_its_creases_are_not_kept() {
     let before = plate_mesh(40.0, 30.0, 10.0);
@@ -138,13 +120,11 @@ fn the_deviation_cap_is_honoured() {
     assert_sound("capped sphere", &after.mesh);
     assert!(after.deviation <= 0.2, "reported {} against a cap of 0.2", after.deviation);
     assert!(exact_deviation(&before.weld(), &after.mesh) <= 0.2, "the surface ended up outside the cap");
-    // A cap that tight stops the run long before the budget does, which is the
-    // whole point of having it: the budget asked for a twentieth.
+    // The tight cap stops the run long before the budget (a twentieth) does.
     assert!(after.mesh.triangle_count() > before.triangle_count() / 20);
 }
 
-/// The number the tool puts on screen is a measurement of the result, and this
-/// is the measurement made again by hand.
+/// The deviation the tool shows matches an independent measurement.
 #[test]
 fn the_reported_deviation_is_what_the_surface_actually_did() {
     let before = sphere();
@@ -177,9 +157,7 @@ fn a_tighter_cap_keeps_more() {
     assert!(count(0.05) > count(0.5));
 }
 
-/// An open mesh -- one triangle's worth of surface with a rim -- keeps its rim
-/// exactly where it was, so a part simplified beside another part still meets
-/// it.
+/// An open mesh keeps its rim exactly, so neighbouring parts still meet.
 #[test]
 fn a_boundary_is_kept() {
     let mut before = Mesh::new();
@@ -198,8 +176,7 @@ fn a_boundary_is_kept() {
     assert_eq!((hi.x, hi.y), (60.0, 60.0), "the rim moved in");
 }
 
-/// Every vertex on the line between two differently painted surfaces, which is
-/// the line a seam-keeping run may not move.
+/// Every vertex on the line between two differently painted surfaces.
 fn seam_points(mesh: &Mesh) -> Vec<Vec3> {
     let welded = mesh.weld();
     let mut along: std::collections::HashMap<(u32, u32), Vec<usize>> = std::collections::HashMap::new();
@@ -219,10 +196,7 @@ fn seam_points(mesh: &Mesh) -> Vec<Vec3> {
     points
 }
 
-/// Two colours on one mesh, and the line between them is not to be crossed. The
-/// surface either side of it is simplified; the line itself comes back
-/// vertex for vertex, in the same places, so the paint still ends where it
-/// ended.
+/// A colour seam is kept vertex for vertex while either side is simplified.
 #[test]
 fn a_colour_seam_survives() {
     let mut before = sphere();
@@ -240,9 +214,7 @@ fn a_colour_seam_survives() {
     }
 }
 
-/// Abandoning a run gives back nothing rather than a half-simplified mesh: a
-/// partial answer is not an answer, and the caller that asked for it has
-/// already moved on.
+/// An abandoned run returns nothing rather than a half-simplified mesh.
 #[test]
 fn an_abandoned_run_gives_nothing_back() {
     let before = sphere();

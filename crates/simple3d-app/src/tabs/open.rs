@@ -20,8 +20,7 @@ impl App {
         self.status = Status::Info(format!("Showing {name}"));
     }
 
-    /// Move `delta` tabs along, wrapping at both ends so one key can walk the
-    /// whole row.
+    /// Move `delta` tabs along, wrapping at both ends.
     pub fn cycle_tab(&mut self, delta: isize) {
         let count = self.tabs.len() as isize;
         if count < 2 {
@@ -31,7 +30,7 @@ impl App {
         self.activate_tab(next);
     }
 
-    /// Open `doc` in a tab of its own, after the current one, and show it.
+    /// Open `doc` in its own tab after the current one, and show it.
     pub(super) fn open_tab(&mut self, doc: Document) {
         let current = self.detach();
         self.tabs[self.active] = current;
@@ -48,14 +47,12 @@ impl App {
         self.status = Status::Info("New project".into());
     }
 
-    /// Whether the current document is one nothing has been done to: an empty,
-    /// unsaved, never-saved document is scratch space, and opening a file uses
-    /// it rather than leaving an empty tab behind.
+    /// Whether the current document is untouched scratch space, which opening a file reuses.
     pub(crate) fn active_is_scratch(&self) -> bool {
         self.path.is_none() && !self.unsaved() && self.scene.node(self.scene.root()).children.is_empty()
     }
 
-    /// The tab `path` is already open in, if it is open at all.
+    /// The tab `path` is open in, if any.
     pub(crate) fn tab_for_path(&self, path: &Path) -> Option<usize> {
         (0..self.tabs.len()).find(|index| {
             let held = if *index == self.active { self.path.as_deref() } else { self.tabs[*index].path.as_deref() };
@@ -63,15 +60,8 @@ impl App {
         })
     }
 
-    /// Open a project file, wherever the settings say a model opened while the
-    /// application is already running should go (issue 107).
-    ///
-    /// A file that is already open is shown rather than read a second time,
-    /// whichever window it is open in -- the shell answers that half, since a
-    /// window knows nothing about the others' documents. An untouched,
-    /// never-saved document is scratch space and is opened into rather than
-    /// left behind, which is why choosing "a window of its own" does not put a
-    /// second, empty window on screen when the first one has nothing in it.
+    /// Open a project file where the settings say (issue 107). Already-open files are shown instead
+    /// (the shell checks other windows), and scratch documents are reused.
     pub fn open_path(&mut self, path: &Path) {
         if let Some(index) = self.tab_for_path(path) {
             self.activate_tab(index);
@@ -85,9 +75,8 @@ impl App {
         self.open_path_in_tab(path);
     }
 
-    /// Open a project file in this window: in the current tab if that is still
-    /// scratch space, and otherwise in a tab of its own. What the shell falls
-    /// back to when a window of its own cannot be had.
+    /// Open a project file in this window: the current tab if scratch, else a new tab. The fallback
+    /// when no window can be opened.
     pub(crate) fn open_path_in_tab(&mut self, path: &Path) {
         if !self.active_is_scratch() {
             self.open_tab(Document::empty());

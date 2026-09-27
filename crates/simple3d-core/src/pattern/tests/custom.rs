@@ -1,18 +1,15 @@
-//! A custom rule saying what each built-in kind says.
+//! Custom rules reproducing each built-in kind.
 
 use super::*;
 use crate::primitive::{ParamValue, Params, ParamsExt};
 use simple3d_geom::Vec3;
 
-/// What a stage does, as the choice the parameter holds.
+/// What a stage does, as the parameter's choice value.
 fn mode(mode: StageMode) -> ParamValue {
     ParamValue::Choice(mode.index())
 }
 
-/// A custom rule with one stage set to step along X is a linear pattern.
-/// Not "close to one" -- the same transforms, copy for copy, which is what
-/// says the stage model is the rule the fixed kinds are special cases of
-/// rather than a seventh thing that happens to look similar (issue 67).
+/// A one-stage custom rule stepping along X gives exactly a linear pattern's transforms (issue 67).
 #[test]
 pub(crate) fn one_custom_stage_says_exactly_what_a_linear_pattern_says() {
     let linear = with(&[
@@ -54,8 +51,7 @@ pub(crate) fn two_custom_stages_say_exactly_what_a_grid_says() {
     assert_eq!(instances(&custom), instances(&grid));
 }
 
-/// A stage that turns at a radius is a ring, and a stage that turns while
-/// rising is a helix.
+/// A stage turning at a radius is a ring; turning while rising is a helix.
 #[test]
 pub(crate) fn a_turning_stage_says_what_a_ring_and_a_helix_say() {
     let ring = with(&[
@@ -113,8 +109,7 @@ pub(crate) fn a_growing_stage_says_what_a_spiral_says() {
     assert_eq!(instances(&as_stage), instances(&spiral));
 }
 
-/// A mirror stage is a mirror pattern, and mirroring twice points the faces
-/// back outward rather than leaving them inside out.
+/// A mirror stage is a mirror pattern, and mirroring twice keeps faces pointing outward.
 #[test]
 pub(crate) fn a_mirror_stage_reflects_and_two_of_them_cancel() {
     let mirrored = with(&[("kind", ParamValue::Choice(MIRROR)), ("mirror_axis", ParamValue::Choice(0))]);
@@ -138,9 +133,7 @@ pub(crate) fn a_mirror_stage_reflects_and_two_of_them_cancel() {
     assert_eq!(copies.iter().filter(|c| c.mirrored).count(), 2, "a reflection of a reflection points out again");
 }
 
-/// The point of stages: a later one repeats what the earlier ones *made*.
-/// A row of three, turned four times about Z, is four rows standing round a
-/// centre -- not four copies of the first shape and three of nothing.
+/// A later stage repeats what earlier ones made: a row of three turned four times is four rows.
 #[test]
 pub(crate) fn a_later_stage_repeats_what_the_earlier_ones_made() {
     let params = with(&[
@@ -156,16 +149,14 @@ pub(crate) fn a_later_stage_repeats_what_the_earlier_ones_made() {
     let copies = instances(&params);
     assert_eq!(copies.len(), 12);
     assert_eq!(instance_count(&params), (12, 12));
-    // The row runs out along X; a quarter turn about Z carries it onto Y,
-    // so the far end of the second row is 20 mm up the Y axis.
+    // A quarter turn about Z carries the X row onto Y, so its far end is 20 mm up Y.
     assert!(
         copies.iter().any(|c| (c.xform.t - Vec3::new(0.0, 20.0, 0.0)).length() < 1e-9),
         "the second stage turned the copies rather than the row"
     );
 }
 
-/// Four stages of 512 multiply to more transforms than there is memory for,
-/// so the cap has to bite while the copies are being built.
+/// Four stages of 512 exceed memory, so the cap must apply while building.
 #[test]
 pub(crate) fn a_custom_rule_cannot_ask_for_more_copies_than_anything_can_draw() {
     let mut params = with(&[("kind", ParamValue::Choice(CUSTOM)), ("stages", ParamValue::Count(4))]);
@@ -180,9 +171,8 @@ pub(crate) fn a_custom_rule_cannot_ask_for_more_copies_than_anything_can_draw() 
     assert_eq!(instances(&params).len(), MAX_INSTANCES);
 }
 
-/// Only the stages in use are shown, and a stage shows only the numbers the
-/// thing it does actually needs -- which is what a stage's mode is for
-/// (issue 79). No stage at all is shown for another kind.
+/// Only stages in use are shown, each with only the numbers its mode needs (issue 79); none for
+/// other kinds.
 #[test]
 pub(crate) fn a_stages_fields_are_shown_only_while_that_stage_is_in_use() {
     let shown = |params: &Params| -> Vec<&'static str> {
@@ -209,15 +199,14 @@ pub(crate) fn a_stages_fields_are_shown_only_while_that_stage_is_in_use() {
     }
     assert!(!shown(&turn).contains(&"stage1_step_x"), "a turning stage was offered a run to place");
 
-    // And a mirror is a plane and two copies.
+    // A mirror is a plane and two copies.
     let mirrored = with(&[("kind", ParamValue::Choice(CUSTOM)), ("stage1_mode", mode(StageMode::Mirror))]);
     assert!(shown(&mirrored).contains(&"stage1_axis"), "a mirror stage still chooses its plane");
     assert!(!shown(&mirrored).contains(&"stage1_step_x"), "a mirror stage has no run to place");
     assert!(!shown(&mirrored).contains(&"stage1_count"), "a mirror stage is always two copies");
 }
 
-/// Every key the stage table names has to be a parameter that exists, or a
-/// handle would drive a number nothing shows and nothing saves.
+/// Every key in the stage table must be an existing parameter, or a handle drives an unsaved number.
 #[test]
 pub(crate) fn every_stage_key_is_a_parameter_of_its_own() {
     let known: Vec<&'static str> = PARAMS.iter().map(|p| p.key).collect();
@@ -228,23 +217,18 @@ pub(crate) fn every_stage_key_is_a_parameter_of_its_own() {
     for key in custom_keys() {
         assert!(parse_vary_key(key).is_none(), "{key} is a stage's own and was read as a variation's");
     }
-    // The rule is the stages and nothing else. The scatter can travel on the
-    // shelf with it, but only when it is asked to (see `pattern_library`), so
-    // it is not one of the rule's own keys.
+    // The scatter is not a rule key; it only travels with a saved rule on request (`pattern_library`).
     for key in noise_keys() {
         assert!(!custom_keys().contains(key), "{key} is one of the rule's keys but is the scatter's");
         assert!(known.contains(key), "{key} is named by the noise but is not a parameter");
     }
 }
 
-/// Each of the six fixed kinds can be written out as the stages that say the
-/// same thing, which is what makes them templates for a rule of one's own
-/// (issue 79). Not "something similar" -- the very same copies.
+/// Each fixed kind converts to stages giving the very same copies (issue 79).
 #[test]
 pub(crate) fn every_fixed_kind_can_be_started_from_as_a_template() {
     for kind in 0..CUSTOM {
-        // The kind's own numbers, moved off their defaults so the template is
-        // proved to carry them rather than to happen to agree.
+        // Moved off their defaults so the template is proved to carry them.
         let mut fixed = with(&[
             ("kind", ParamValue::Choice(kind)),
             ("count", ParamValue::Count(4)),
@@ -275,12 +259,10 @@ pub(crate) fn every_fixed_kind_can_be_started_from_as_a_template() {
     }
 }
 
-/// A rule saved or filed before a stage said what it does still lays its
-/// copies down where it always did (issue 79).
+/// A rule from before stage modes still lays its copies where it did (issue 79).
 #[test]
 pub(crate) fn a_rule_from_before_the_stage_modes_lays_out_the_same_copies() {
-    // The old shape of a helix stage: a turn, a radius, and the rise written
-    // as the step along the stage's own axis.
+    // The old helix stage: a turn, a radius, and the rise as a step along the stage's axis.
     let mut old = default_params();
     for key in custom_keys() {
         if key.ends_with("_mode") || key.ends_with("_rise") {
@@ -306,8 +288,7 @@ pub(crate) fn a_rule_from_before_the_stage_modes_lays_out_the_same_copies() {
     ]);
     assert_eq!(instances(&migrated), instances(&helix));
 
-    // And the mirror flag that a stage used to carry becomes the mode that
-    // replaced it.
+    // The old mirror flag becomes the mirror mode.
     let mut old = default_params();
     old.remove("stage1_mode");
     old.insert("stage1_mirror".to_string(), ParamValue::Bool(true));

@@ -1,10 +1,5 @@
-//! The left dock: the outliner (spec section 7.2) over the primitive palette.
-//!
-//! The outliner is the centre of gravity of the application, so it gets the
-//! dock's height and the palette gets a fixed strip under it. One row per node,
-//! 22 px, and the marks that matter -- visibility, the boolean operator, a
-//! failure -- are drawn on every row rather than revealed on hover, because a
-//! mark you have to go looking for cannot be scanned.
+//! The left dock: the outliner (spec section 7.2) over the primitive palette. One 22 px row per node,
+//! with visibility, operator and failure marks always drawn, not revealed on hover, so they can be scanned.
 
 mod tree;
 pub use tree::{show_inside, visible_rows};

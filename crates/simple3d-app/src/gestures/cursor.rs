@@ -1,4 +1,4 @@
-//! Putting the 3D cursor somewhere, and the view centre beside it.
+//! Placing the 3D cursor, and the view centre beside it.
 
 use super::*;
 use simple3d_geom::Vec3;
@@ -43,15 +43,11 @@ pub(crate) fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_or
     button(&mut harness, at, egui::PointerButton::Secondary, false);
     assert!(harness.state().cursor.is_some());
 
-    // Tip the camera under the ground plane and look up at it: from the
-    // starting view, which looks down at the plate, every pixel of the viewport
-    // meets the ground and there would be nowhere empty to click.
+    // Look up from under the ground, since from above every pixel meets the ground plane.
     harness.state_mut().scene.camera.pitch = -20.0;
     harness.step();
 
-    // Somewhere there really is nothing: no geometry, and the ground plane
-    // behind the eye rather than in front of it. The view says where that is,
-    // so the test cannot be clicking at a spot that merely looks empty.
+    // A spot with no geometry and the ground behind the eye, found from the view rather than guessed.
     let view = harness.state().current_view();
     let mesh = harness.state().evaluated.mesh.clone();
     let sky = (0..viewport.height() as usize)
@@ -72,18 +68,8 @@ pub(crate) fn shift_right_click_on_empty_space_puts_the_3d_cursor_back_at_the_or
 
 // -- the view centre ----------------------------------------------------------
 
-/// The Document section says what the camera is looking at, and takes a new
-/// answer.
-///
-/// Pan and the wheel move that point but no gesture states it, and once the view
-/// has wandered there was nothing that said "back to the origin" -- Frame is the
-/// nearest, and it re-frames the model rather than re-centring the view. The
-/// three fields read the camera live and write it, and the button re-centres it
-/// without touching the angle or the distance it looks from.
-///
-/// The Document section is drawn only with nothing selected, so the test clears
-/// the selection first, the way reaching those rows in the running application
-/// does.
+/// The Document section shows and edits the camera's target live, and a button re-centres it
+/// without changing angle or distance. Drawn only with nothing selected, so the test clears it.
 #[test]
 pub(crate) fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     use egui_kittest::kittest::Queryable;
@@ -91,7 +77,7 @@ pub(crate) fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     let mut harness = harness("view-centre");
     let rect = harness.state().viewport_rect;
 
-    // Carry the view off the origin with the middle drag a user would use.
+    // Carry the view off the origin with a middle drag.
     let from = rect.center() + egui::vec2(-120.0, 40.0);
     drag_button(&mut harness, egui::PointerButton::Middle, from, from + egui::vec2(140.0, 90.0), 6);
     let moved = harness.state().scene.camera.target;
@@ -100,11 +86,11 @@ pub(crate) fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     harness.state_mut().selection.clear();
     harness.step();
 
-    // The field holds what the drag left, and takes a number over it.
+    // The field holds what the drag left, and takes a typed number.
     let field = rect_of(&harness, crate::panel_properties::grip_id("View centre:0"));
     press(&mut harness, field.center());
     release(&mut harness, field.center());
-    // The frame after the click is the one that opens the text field.
+    // The frame after the click opens the text field.
     harness.step();
     text(&mut harness, "25");
     key(&mut harness, egui::Key::Enter);
@@ -114,8 +100,7 @@ pub(crate) fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     assert!((typed.x - 25.0).abs() < 1e-9, "typing 25 into the X field left the camera looking at {typed:?}");
     assert_eq!((typed.y, typed.z), (moved.y, moved.z), "typing the X moved the other two axes with it");
 
-    // And the button puts it back on the origin, from the same angle and the
-    // same distance -- re-centring a view is not re-framing it.
+    // The button re-centres from the same angle and distance; re-centring is not re-framing.
     let before = harness.state().scene.camera;
     harness.get_by_label("Reset to origin").click();
     harness.step();
@@ -128,14 +113,8 @@ pub(crate) fn the_document_section_reads_and_sets_what_the_camera_looks_at() {
     );
 }
 
-/// Locked, the view centre is the point the camera turns about and nothing
-/// moves it.
-///
-/// It is one setting read in three places -- the panel's fields, the viewport's
-/// pan and wheel, and framing -- so the test drives all three. Orbit and the
-/// zoom itself must go on working: pinning the point is what they are pinned
-/// *for*, and a lock that stopped the camera moving at all would be a lock on
-/// the view, not on its centre.
+/// Locked, the view centre stays put for the panel fields, pan, wheel and framing, while orbit
+/// and zoom keep working.
 #[test]
 pub(crate) fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
     use egui_kittest::kittest::Queryable;
@@ -143,7 +122,7 @@ pub(crate) fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
     let mut harness = harness("view-centre-lock");
     let rect = harness.state().viewport_rect;
     harness.state_mut().selection.clear();
-    // Off the origin to begin with, so a lock that quietly re-centred would show.
+    // Off the origin first, so a lock that re-centred would show.
     harness.state_mut().scene.camera.target = Vec3::new(12.0, -8.0, 3.0);
     harness.step();
 
@@ -158,8 +137,7 @@ pub(crate) fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
     drag_button(&mut harness, egui::PointerButton::Middle, from, from + egui::vec2(140.0, 90.0), 6);
     assert_eq!(harness.state().scene.camera.target, pinned, "a pan moved a locked view centre");
 
-    // The wheel still zooms; what it no longer does is walk the centre towards
-    // the pointer on the way.
+    // The wheel still zooms but no longer walks the centre towards the pointer.
     wheel(&mut harness, from, egui::vec2(0.0, 60.0));
     let zoomed = harness.state().scene.camera;
     assert_eq!(zoomed.target, pinned, "the wheel walked a locked view centre towards the pointer");
@@ -169,15 +147,14 @@ pub(crate) fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
     assert_ne!(harness.state().scene.camera.yaw, before.yaw, "locking the view centre stopped the orbit");
     assert_eq!(harness.state().scene.camera.target, pinned, "the orbit moved the locked view centre");
 
-    // Framing is the one command whose job is to move the centre. It fits the
-    // zoom and leaves the centre where it is.
+    // Framing fits the zoom and leaves the centre where it is.
     let distance = harness.state().scene.camera.distance;
     harness.state_mut().frame_all();
     harness.step();
     assert_eq!(harness.state().scene.camera.target, pinned, "framing moved a locked view centre");
     assert_ne!(harness.state().scene.camera.distance, distance, "framing did not fit the zoom either");
 
-    // And the fields are a readout: they take no number while it is locked.
+    // The fields are a readout while locked.
     let field = rect_of(&harness, crate::panel_properties::grip_id("View centre:0"));
     press(&mut harness, field.center());
     release(&mut harness, field.center());
@@ -187,7 +164,7 @@ pub(crate) fn a_locked_view_centre_is_the_one_thing_that_does_not_move() {
     harness.step();
     assert_eq!(harness.state().scene.camera.target, pinned, "a locked field still took a number");
 
-    // Unlocked, the pan is given back.
+    // Unlocked, pan works again.
     harness.get_by_label("Lock").click();
     harness.step();
     assert!(!harness.state().settings.lock_view_centre, "the Lock button did not unlock");

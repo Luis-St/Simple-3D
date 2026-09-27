@@ -1,5 +1,4 @@
-//! 3D convex hull via randomized incremental construction (Berg et al.,
-//! "Computational Geometry", ch. 11). Used for the group Hull operation.
+//! 3D convex hull by randomized incremental construction (Berg et al., ch. 11), for the group Hull.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
@@ -32,8 +31,7 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
     };
     let eps = bounds_diag * 1e-9;
 
-    // Initial tetrahedron: extreme point, farthest from it, farthest from that
-    // line, farthest from that plane.
+    // Initial tetrahedron: extreme point, farthest from it, farthest from that line, then that plane.
     let p0 = 0usize;
     let p1 = (0..pts.len())
         .max_by(|&a, &b| (pts[a] - pts[p0]).length().partial_cmp(&(pts[b] - pts[p0]).length()).unwrap())
@@ -50,7 +48,7 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
         .unwrap();
     let plane_n = (pts[p1] - pts[p0]).cross(pts[p2] - pts[p0]);
     if plane_n.length() < eps {
-        // Degenerate (collinear) input; nothing sane to hull.
+        // Collinear input: nothing to hull.
         return Mesh::new();
     }
     let plane_n = plane_n.normalized();
@@ -62,8 +60,7 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
         })
         .unwrap();
     if (pts[p3] - pts[p0]).dot(plane_n).abs() < eps {
-        // All points coplanar; a proper hull would be a flat polygon. Not a
-        // solid, so we return nothing rather than a degenerate zero-volume mesh.
+        // Coplanar input would hull to a flat polygon, not a solid, so nothing is returned.
         return Mesh::new();
     }
 
@@ -98,11 +95,8 @@ pub fn convex_hull(points: &[Vec3]) -> Mesh {
             continue;
         }
 
-        // A `BTreeMap`, not a `HashMap`: the horizon is read back by iterating
-        // this, and `HashMap`'s order is seeded randomly per process -- which
-        // made the same scene hull to the same solid with its triangles in a
-        // different order on every run, so no two exports of a hull were ever
-        // byte-identical (spec section 5.2: evaluation is deterministic).
+        // `BTreeMap`, not `HashMap`: the horizon is read by iteration, and random hash order made exports of
+        // the same hull differ run to run (spec section 5.2: deterministic).
         let mut edge_count: BTreeMap<(usize, usize), i32> = BTreeMap::new();
         for &fi in &visible {
             let v = faces[fi].v;

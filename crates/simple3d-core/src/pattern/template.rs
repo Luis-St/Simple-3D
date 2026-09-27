@@ -1,23 +1,14 @@
-//! Starting a custom rule from one of the built-in kinds, or from one of the
-//! layouts that ship ready made (issue 79).
+//! Starting a custom rule from a built-in kind or a ready-made layout (issue 79).
 //!
-//! Every fixed kind is one or two stages spelled out -- that is the check that
-//! the stage model is the rule underneath them rather than a seventh special
-//! case -- so any of them can be written back into the stages that say the same
-//! thing. That turns "Linear", "Grid" and the rest into templates: lay a
-//! pattern out with a kind that nearly does it, open the tool, and start from
-//! the numbers already on screen rather than from a stock 20 mm step.
-//!
-//! Which is also what makes a custom rule reachable at all. The tool used to
-//! open on the stage defaults whatever the pattern was already doing, so the
-//! first thing it did was throw away the layout the user had just made.
+//! Every fixed kind converts to equivalent stages, so the fixed kinds serve as templates starting
+//! from the numbers already on screen. The tool once opened on stage defaults, discarding the
+//! user's layout.
 
 use super::*;
 use crate::primitive::{ParamValue, Params, ParamsExt};
 use simple3d_geom::Vec3;
 
-/// The stages that lay out exactly what `kind` lays out, given the numbers that
-/// kind is currently holding in `params`.
+/// The stages that lay out exactly what `kind` does with its current numbers in `params`.
 pub fn template_stages(params: &Params, kind: u32) -> Vec<Stage> {
     match kind {
         GRID => {
@@ -57,24 +48,14 @@ pub fn template_stages(params: &Params, kind: u32) -> Vec<Stage> {
     }
 }
 
-/// Put `kind`'s layout on the pattern as stages, and switch it to them.
-///
-/// The stages past the ones the template needs are left alone rather than
-/// cleared: they are not in use, so they say nothing, and a stage that is added
-/// afterwards is given fresh numbers of its own (see [`fresh_stage`]).
+/// Put `kind`'s layout on the pattern as stages and switch to them. Unused later stages are left
+/// alone; added stages get fresh numbers ([`fresh_stage`]).
 pub fn use_as_template(params: &mut Params, kind: u32) {
     let stages = template_stages(params, kind);
     write_rule(params, &stages);
 }
 
-/// Start the rule from nothing: one stage that does not move, turn or mirror,
-/// and the other three cleared behind it.
-///
-/// The seventh answer to "what do I start from" (issue 79). The six kinds are
-/// the layouts worth starting from; this is for the rule that is none of them,
-/// and it is a blank sheet rather than the numbers whichever kind the pattern
-/// happened to be holding -- which is the whole difference between it and the
-/// six.
+/// Start the rule from nothing (issue 79): one inert stage, the rest cleared.
 pub fn clear_stages(params: &mut Params) {
     for index in 0..MAX_STAGES {
         set_stage(params, index, &Stage::run(1, Vec3::ZERO));
@@ -83,24 +64,11 @@ pub fn clear_stages(params: &mut Params) {
     params.insert("kind".to_string(), ParamValue::Choice(CUSTOM));
 }
 
-/// The layouts that ship ready made, in the order the tool offers them.
-///
-/// Each is something none of the six fixed kinds can say and the issue that
-/// asked for them named: rows offset against each other. They are rules like
-/// any other once started from -- the numbers are ordinary stage numbers, and
-/// the shift that offsets every other row is on screen to be changed.
+/// The ready-made layouts, in the order the tool offers them: offset rows no fixed kind can do.
 pub const PRESETS: &[&str] = &["Staggered planks", "Brick bond", "Hexagon grid"];
 
-/// Lay `preset` out as stages, sized to a shape of `size`, and switch the
-/// pattern to them.
-///
-/// Sized rather than stock, for the reason a new pattern's step is: a deck of
-/// 1 m planks and a sheet of 10 mm tiles want the same rule at a hundred times
-/// the spacing, and a preset that laid either at the other's would be a set of
-/// numbers to retype rather than a starting point. The joint between two
-/// copies is a twentieth of the shape's smaller side, so the copies stand clear
-/// of each other -- copies that touch are welded into one body -- without the
-/// gap being something anyone would see as a gap.
+/// Lay `preset` out as stages sized to a shape of `size` and switch to them. The joint is a
+/// twentieth of the smaller side, so copies do not touch (and weld) yet show no visible gap.
 pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
     let or_stock = |extent: f64| if extent > 1e-9 { extent } else { 20.0 };
     let (long, wide, tall) = (or_stock(size.x), or_stock(size.y), or_stock(size.z));
@@ -108,20 +76,17 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
     let (pitch, row) = (long + joint, wide + joint);
     let half = |across: f64| Stage::run(1, Vec3::ZERO).with(Variation::shift(0, across / 2.0).repeating(2));
     let stages = match preset {
-        // Planks end to end along X, rows of them across Y, every other row
-        // moved on by half a plank so no two joints line up.
+        // Planks end to end along X, rows across Y, every other row offset by half a plank.
         0 => vec![
             Stage::run(5, Vec3::new(pitch, 0.0, 0.0)),
             Stage { count: 6, step: Vec3::new(0.0, row, 0.0), ..half(pitch) },
         ],
-        // The same half-offset, with the courses stacked up Z: a wall.
+        // The same half-offset with courses stacked up Z: a wall.
         1 => vec![
             Stage::run(6, Vec3::new(pitch, 0.0, 0.0)),
             Stage { count: 8, step: Vec3::new(0.0, 0.0, tall + joint), ..half(pitch) },
         ],
-        // Rows as far apart as the height of the triangle between three
-        // neighbours, every other row moved on by half a cell: each copy then
-        // has six neighbours all the same distance off.
+        // Rows spaced by the triangle height, every other row offset by half: six equidistant neighbours.
         _ => {
             let cell = long.max(wide) + joint;
             vec![
@@ -131,15 +96,11 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
         }
     };
     write_rule(params, &stages);
-    // A scatter the pattern already has is the user's, set in the noise window
-    // before the rule was picked, and a layout is a question about the rule
-    // alone: it is kept, not swapped for the preset's.
+    // A scatter the pattern already has is the user's and is kept.
     if Noise::of(params).wanted() {
         return;
     }
-    // Otherwise the preset brings its own. Planks come with a little -- less
-    // than half the joint either way, so they wander without touching -- and
-    // the two whose whole point is that every copy lines up come with none.
+    // Otherwise the preset brings its own: planks a little (under half the joint), the aligned ones none.
     for key in noise_keys() {
         if let Some(spec) = PARAMS.iter().find(|p| p.key == *key) {
             params.insert((*key).to_string(), spec.default);
@@ -151,7 +112,7 @@ pub fn use_preset(params: &mut Params, preset: usize, size: Vec3) {
     }
 }
 
-/// Write `stages` as the rule the pattern uses, and switch the pattern to it.
+/// Write `stages` as the pattern's rule and switch to it.
 fn write_rule(params: &mut Params, stages: &[Stage]) {
     for (index, stage) in stages.iter().enumerate().take(MAX_STAGES) {
         set_stage(params, index, stage);

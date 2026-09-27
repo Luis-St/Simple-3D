@@ -12,16 +12,13 @@ pub(crate) fn the_view_cube_and_the_view_menu_reach_the_same_camera() {
     for (normal, preset, label) in crate::view::CUBE_FACES {
         app.run(Command::ViewIsometric);
         app.set_view(preset);
-        // The angles may differ by a whole turn -- the camera takes the
-        // short way round, so "left" can arrive at -180 rather than 180 --
-        // so compare where the eye ends up, which is the thing that matters.
+        // Angles may differ by a whole turn (the short way round), so compare where the eye ends up.
         let looking = app.current_view().offset_dir();
         let face = Vec3::new(normal[0] as f64, normal[1] as f64, normal[2] as f64);
         assert!(looking.dot(face) > 0.99, "{label}: the camera ended up at {looking:?}");
     }
 
-    // With motion allowed the camera is on its way rather than already
-    // there, and it gets there.
+    // With motion allowed the camera travels there.
     app.settings.reduce_motion = false;
     app.run(Command::ViewIsometric);
     app.advance_camera();

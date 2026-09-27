@@ -1,19 +1,18 @@
 //! What the modifier keys mean while a handle is dragged.
 
-/// Which modifiers are down. Kept as a plain struct so the drag maths can be
-/// tested without an egui context.
+/// Modifiers held, as a plain struct so drag maths is testable without egui.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Mods {
-    /// Drag freely: no snapping at all.
+    /// No snapping.
     pub free: bool,
-    /// Snap coarsely: ten times the increment.
+    /// Snap at ten times the increment.
     pub coarse: bool,
-    /// Resize about the centre, or preserve proportions on a corner.
+    /// Resize about the centre, or keep proportions on a corner.
     pub symmetric: bool,
 }
 
 impl Mods {
-    /// The increment to snap a value to, or `None` for a free drag.
+    /// The snap increment, or `None` for a free drag.
     pub(super) fn increment(self, base: f64) -> Option<f64> {
         if self.free || base <= 0.0 {
             None
@@ -24,8 +23,7 @@ impl Mods {
         }
     }
 
-    /// Round a dragged distance to the step in force -- also used by the
-    /// pattern spacing handle (issue 67), so it snaps like every other drag.
+    /// Round a dragged distance to the current step; the pattern spacing handle uses it too (issue 67).
     pub(crate) fn snap(self, value: f64, base: f64) -> f64 {
         match self.increment(base) {
             Some(step) => (value / step).round() * step,

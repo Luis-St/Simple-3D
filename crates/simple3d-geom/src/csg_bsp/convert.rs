@@ -8,8 +8,7 @@ pub fn debug_mesh_to_polygons(mesh: &Mesh) -> Vec<Vec<Vec3>> {
     mesh_to_polygons(mesh).into_iter().map(|p| p.vertices).collect()
 }
 
-/// What makes two triangles part of the same face: the plane they lie in and
-/// the body they came from.
+/// What makes two triangles one face: their plane and their body.
 pub(crate) type FaceGroup = ((i64, i64, i64, i64), u32);
 
 pub(crate) fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
@@ -24,8 +23,7 @@ pub(crate) fn mesh_to_polygons(mesh: &Mesh) -> Vec<Polygon> {
             )
         })
         .collect();
-    // Grouped by plane *and* tag: coplanar faces of two different bodies are
-    // not one face, and merging them would lose which body each part came from.
+    // Grouped by plane and tag, so coplanar faces of different bodies keep their origin.
     let mut groups: std::collections::BTreeMap<FaceGroup, Vec<usize>> = std::collections::BTreeMap::new();
     for (i, p) in planes.iter().enumerate() {
         if let Some(pl) = p {
@@ -55,10 +53,8 @@ pub fn debug_roundtrip(mesh: &Mesh) -> Mesh {
     polygons_to_mesh(&mesh_to_polygons(mesh))
 }
 
-/// Whether `build` can chain this mesh's faces instead of classifying every one
-/// of them against every plane -- true exactly when no face's plane divides
-/// another, which is what a convex solid is. Exposed for the test that holds
-/// the shortcut to that meaning.
+/// Whether `build` can chain this mesh's faces: no face plane divides another (a convex solid).
+/// Exposed for the test pinning that meaning.
 pub fn debug_splits_nothing(mesh: &Mesh) -> bool {
     non_splitting_order(&mesh_to_polygons(mesh)).is_some()
 }
@@ -66,21 +62,13 @@ pub fn debug_splits_nothing(mesh: &Mesh) -> bool {
 pub(crate) fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
     let mut mesh = Mesh::new();
     for poly in polys {
-        // Fan-triangulate; every polygon here is convex (a plane-clipped convex
-        // input stays convex, and `try_merge_group` rejects concave merges), so
-        // a fan from vertex 0 is always valid. Start the fan at a vertex that
-        // actually turns: a merged face can carry collinear T-junction vertices,
-        // and fanning from one of those emits zero-area triangles whose edges
-        // then break the manifold check.
+        // Fan-triangulate convex polygons, starting at a real corner: fanning from a collinear
+        // T-junction vertex emits zero-area triangles that break the manifold check.
         let n = poly.vertices.len();
         if n < 3 {
             continue;
         }
-        // A fan from vertex k produces a zero-area triangle whenever k lies on
-        // the supporting line of one of the edges the fan spans. For a convex
-        // loop that happens exactly when k is inside a collinear run or is
-        // adjacent to a vertex that is, so require k and both its neighbours to
-        // be genuine corners.
+        // Require the fan vertex and both neighbours to be real corners, or the fan makes zero-area triangles.
         let turns: Vec<bool> = (0..n)
             .map(|k| {
                 let a = poly.vertices[(k + n - 1) % n];
@@ -105,29 +93,18 @@ pub(crate) fn polygons_to_mesh(polys: &[Polygon]) -> Mesh {
     mesh
 }
 
-/// If no plane of `polygons` divides any of them, the planes grouped by the
-/// order they should be chained in; `None` if any plane splits something and
-/// the general build must do the work.
-///
-/// This is the convex case, and it is not an exotic one: a sphere, a cylinder,
-/// a box, a cap, a prism -- every round primitive the application offers is
-/// convex, and a convex body is the worst case for the classic BSP build. No
-/// face of a sphere divides the others (they are all behind it), so the tree is
-/// a chain, and the general build re-classifies every remaining face at every
-/// level to discover that: quadratic in the face count, and the reason a
-/// spherical cap at 128 segments spent a second of its second inside
-/// `BspNode::build` alone. Proving the same thing through the bounding-volume
-/// hierarchy costs one query per distinct plane.
+/// If no plane of `polygons` divides any of them, the planes grouped in chain order; `None` if the
+/// general build is needed. Every round primitive is convex, the classic build's quadratic worst
+/// case; proving it via the box hierarchy costs one query per plane.
 pub(crate) fn non_splitting_order(polygons: &[Polygon]) -> Option<Vec<Vec<usize>>> {
-    /// Not worth the hierarchy: the general build is already linear here.
+    /// Below this the general build is already cheap.
     const MIN: usize = 64;
     if polygons.len() < MIN {
         return None;
     }
     let tree = BoxTree::new(polygons)?;
 
-    // Grouped by plane, in first-appearance order, so the chain takes the
-    // planes in the order the general build would have taken them.
+    // Grouped by plane in first-appearance order, as the general build would take them.
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut index: std::collections::BTreeMap<(i64, i64, i64, i64), usize> = std::collections::BTreeMap::new();
     for (i, p) in polygons.iter().enumerate() {

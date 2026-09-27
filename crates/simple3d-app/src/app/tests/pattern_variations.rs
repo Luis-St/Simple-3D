@@ -1,5 +1,4 @@
-//! Building a stage's variations and adding stages as what they do, in the
-//! tool (issue 79).
+//! Stage variations and adding stages in the tool (issue 79).
 
 use super::*;
 use simple3d_core::keymap::Command;
@@ -18,9 +17,7 @@ fn params(app: &App, id: simple3d_core::scene::NodeId) -> simple3d_core::primiti
     app.scene.node(id).params().cloned().expect("a pattern has parameters")
 }
 
-/// Asked for from the running application: a stage could only have one "Vary"
-/// section. It now takes a list -- two shifts and a spin here -- each one added
-/// doing something, any one dropped, and each change one step of undo.
+/// A stage takes a list of variations: each added working, removable, and one undo step.
 #[test]
 pub(crate) fn a_stage_takes_several_variations_and_drops_any_of_them() {
     let (mut app, pattern) = with_rule();
@@ -39,10 +36,7 @@ pub(crate) fn a_stage_takes_several_variations_and_drops_any_of_them() {
     assert_eq!(params(&app, pattern), before, "undo did not bring the variation back");
 }
 
-/// Asked for from the running application: a stage stopped at four
-/// variations. It takes as many as are different -- here every shift a stage of
-/// one copy can hold, six -- and the one after that asks for nothing, not even
-/// an undo step.
+/// No four-variation limit: as many as are distinct (six shifts here); the next adds nothing, not even undo.
 #[test]
 pub(crate) fn a_stage_takes_variations_until_every_different_one_is_there() {
     let (mut app, pattern) = with_rule();
@@ -68,8 +62,7 @@ pub(crate) fn a_stage_takes_variations_until_every_different_one_is_there() {
     assert_eq!(params(&app, pattern), full, "the refused shift took an undo step");
 }
 
-/// "Add a stage" offers the three things a stage can do, and the stage comes
-/// in doing it -- sized to the shape rather than as one copy in place.
+/// "Add a stage" offers the three stage modes, each sized to the shape rather than one copy in place.
 #[test]
 pub(crate) fn a_stage_is_added_as_what_it_does() {
     let (mut app, pattern) = with_rule();

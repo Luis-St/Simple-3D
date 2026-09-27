@@ -1,10 +1,9 @@
-//! How the cost of subtracting a hole moves with the size of it.
+//! How hole-subtraction cost moves with hole size.
 
 use super::*;
 use crate::{primitives, BooleanOp};
 
-/// Every hole the audit leaves, as boundary loops with their size, so a repair
-/// is chosen against what is actually there.
+/// Every hole the audit leaves, as sized boundary loops, so a repair fits what is really there.
 #[test]
 #[ignore]
 pub(crate) fn bench_hole_sizes() {
@@ -49,7 +48,6 @@ pub(crate) fn bench_hole_sizes() {
                 if extra > 0 {
                     print!(" ({extra} vertices with more than one)");
                 }
-                // Chain them into loops.
                 let mut seen: std::collections::BTreeSet<u32> = Default::default();
                 let mut loops: Vec<(usize, f64)> = Vec::new();
                 let mut dangling = 0;

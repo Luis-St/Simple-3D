@@ -12,9 +12,7 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
     let unit = app.unit();
     let Some(&primary) = targets.last() else { return };
 
-    // Three columns of numbers, each fronted by its axis colour: the row says
-    // which axis is which without spending a character on saying so. The drag
-    // is on the fields themselves, here as everywhere else in the panel.
+    // Three columns, each fronted by its axis colour; dragging is on the fields themselves.
     axis_row(app, ui, &format!("Position ({})", unit.suffix()), |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "pos", axis));
         let shown =
@@ -53,11 +51,8 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
-    // Read as a direction rather than as a running total: a rotation is brought
-    // into [0, 360) here as well as when it is typed, because the manipulator
-    // and the arrow keys turn a body too and a field that reads 725 after a
-    // couple of turns of the ring is describing the gesture, not the model
-    // (issue 84).
+    // Wrapped into [0, 360) here too, since the ring and arrow keys also turn a body and 725 would describe
+    // the gesture, not the model (issue 84).
     axis_row(app, ui, "Rotation (deg)", |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "rot", axis));
         let shown = ui::shared_text(
@@ -97,9 +92,7 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         }
     });
 
-    // Scale is a factor, not a measurement, so it has no unit and reads in the
-    // same three-column row as the two above it. It is the one control that
-    // resizes a *group*: a group has no dimensions of its own to type into.
+    // Scale is a unitless factor, and the only way to resize a group, which has no dimensions.
     axis_row(app, ui, "Scale (x)", |app, ui, axis, name| {
         let field_id = ui.id().with((primary, "scale", axis));
         let shown = ui::shared_text(

@@ -3,7 +3,7 @@
 use super::*;
 use egui::{CornerRadius, Margin, Stroke, Vec2};
 
-/// Install the palette and the metrics on a context. Called once, at startup.
+/// Install the palette and metrics on a context, once at startup.
 pub fn apply(ctx: &egui::Context) {
     let mut style = (*ctx.style()).clone();
 
@@ -20,9 +20,7 @@ pub fn apply(ctx: &egui::Context) {
     style.spacing.scroll.bar_width = 8.0;
     style.spacing.scroll.floating = false;
     style.spacing.scroll.bar_inner_margin = 2.0;
-    // The handle takes the widget *fill*, not its foreground: egui's default
-    // paints it in the text colour, which puts a bright bar down the side of
-    // every list.
+    // The handle uses the widget fill, not the text colour, which drew a bright bar beside every list.
     style.spacing.scroll.foreground_color = false;
     style.spacing.scroll.bar_outer_margin = 0.0;
 
@@ -46,8 +44,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.window_stroke = Stroke::new(1.0_f32, token::SURFACE_3);
     visuals.window_corner_radius = CornerRadius::same(3);
     visuals.menu_corner_radius = CornerRadius::same(3);
-    // Panels are separated by lines, so nothing needs a shadow to lift off the
-    // surface behind it.
+    // Panels are separated by lines, so nothing needs a shadow.
     visuals.window_shadow = egui::epaint::Shadow::NONE;
     visuals.popup_shadow = egui::epaint::Shadow::NONE;
     visuals.warn_fg_color = token::ACCENT;
@@ -81,8 +78,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.inactive.corner_radius = radius;
     visuals.widgets.inactive.expansion = 0.0;
 
-    // Hover is a surface change, not a tint of the text: the row lights up and
-    // the label stays exactly where it was.
+    // Hover changes the surface, not the text.
     visuals.widgets.hovered.bg_fill = token::SURFACE_3;
     visuals.widgets.hovered.weak_bg_fill = token::SURFACE_3;
     visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -90,8 +86,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.hovered.corner_radius = radius;
     visuals.widgets.hovered.expansion = 0.0;
 
-    // Pressed and active are an accent fill, not a tint -- the design's one
-    // firm rule about the active tool.
+    // Pressed and active are an accent fill: the design's firm rule for the active tool.
     visuals.widgets.active.bg_fill = token::ACCENT;
     visuals.widgets.active.weak_bg_fill = token::ACCENT;
     visuals.widgets.active.bg_stroke = Stroke::NONE;
@@ -99,7 +94,7 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.active.corner_radius = radius;
     visuals.widgets.active.expansion = 0.0;
 
-    // Keyboard focus is always visible: a 1 px accent ring, never suppressed.
+    // Keyboard focus is always visible: a 1 px accent ring.
     visuals.widgets.open.bg_fill = token::SURFACE_2;
     visuals.widgets.open.weak_bg_fill = token::SURFACE_2;
     visuals.widgets.open.bg_stroke = Stroke::new(1.0_f32, token::ACCENT);
@@ -107,14 +102,12 @@ pub fn apply(ctx: &egui::Context) {
     visuals.widgets.open.corner_radius = radius;
     visuals.widgets.open.expansion = 0.0;
 
-    // The scrollbar is furniture, not content: it lives in the divider grey and
-    // only reaches text-lo when it is being dragged.
+    // The scrollbar is furniture: divider grey, text-lo only while dragged.
     visuals.widgets.noninteractive.bg_fill = token::SURFACE_1;
     visuals.disabled_alpha = 0.45;
 
     style.visuals = visuals;
-    // Panels butt against each other; only the dock's own edge is draggable, and
-    // it reads as a line rather than a handle.
+    // Panels butt against each other; only the dock edge is draggable, drawn as a line.
     style.interaction.selectable_labels = false;
     ctx.set_style(style);
 }

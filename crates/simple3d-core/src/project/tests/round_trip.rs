@@ -19,17 +19,14 @@ pub(crate) fn the_file_is_readable_and_diffable() {
     assert!(text.ends_with('\n'), "no trailing newline");
     assert!(text.contains(&format!("\"format\": {PLAIN_FORMAT}")));
     assert!(text.contains("\"Drilled plate\""));
-    // Every value on its own line, so a one-dimension change is a one-line diff.
+    // One value per line, so a one-dimension change is a one-line diff.
     assert!(text.lines().count() > 30);
-    // Saving twice produces the same bytes.
     assert_eq!(text, to_string(&sample()));
 }
 
 #[test]
 pub(crate) fn a_stored_mesh_round_trips_through_the_file() {
-    // Issue 80: a converted body is as much a part of the document as a
-    // box, and a project that loses its geometry on save is worse than one
-    // that never had it.
+    // Issue 80: a converted body must survive saving.
     use crate::mesh_data::MeshData;
 
     let mut scene = sample();
@@ -50,7 +47,7 @@ pub(crate) fn a_stored_mesh_round_trips_through_the_file() {
 
 #[test]
 pub(crate) fn switching_the_display_unit_does_not_rescale_the_stored_model() {
-    // Spec acceptance criterion 6, at the file level: the unit is metadata.
+    // Spec acceptance criterion 6 at the file level: the unit is metadata.
     let mut scene = sample();
     let before = to_string(&scene).replace("\"unit\": \"cm\"", "");
     scene.settings.unit = Unit::Metre;
@@ -58,8 +55,7 @@ pub(crate) fn switching_the_display_unit_does_not_rescale_the_stored_model() {
     assert_eq!(before, after);
 }
 
-/// A project with components writes every one of them, and reads back each
-/// under the id its integrations point at (issue 113).
+/// Every component is written and read back under the id its integrations use (issue 113).
 #[test]
 pub(crate) fn a_project_with_components_round_trips() {
     let root_scene = {
@@ -76,6 +72,6 @@ pub(crate) fn a_project_with_components_round_trips() {
     assert_eq!(back.components.len(), 1);
     assert_eq!(back.components[0].0, 4);
     assert_eq!(fingerprint(&back.components[0].1), fingerprint(&part));
-    // And a build that reads only the root component still reads it.
+    // A root-only reader still reads it.
     assert_eq!(fingerprint(&from_str(&text).unwrap()), fingerprint(&root_scene));
 }

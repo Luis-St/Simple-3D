@@ -79,6 +79,8 @@ pub(crate) struct OnEdge {
     pub(super) vertex: u32,
 }
 
+/// Every mesh vertex strictly inside edge `e` of `tri`, in order along it. Written into `out` so
+/// the walk allocates nothing per triangle.
 pub(crate) fn on_edge_vertices(
     pos: &[Vec3],
     tree: &PointTree,

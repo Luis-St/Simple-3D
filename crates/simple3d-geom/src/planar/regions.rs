@@ -1,5 +1,4 @@
-//! Gathering coplanar triangles into regions and finding the boundary of
-//! each one.
+//! Gathering coplanar triangles into regions and finding their boundaries.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
@@ -15,9 +14,8 @@ pub(crate) fn plane_of(mesh: &Mesh, t: [u32; 3]) -> Option<(Vec3, f64)> {
     Some((n, n.dot(a)))
 }
 
-/// Quantised so two triangles of the same physical face land in the same group
-/// despite last-bit differences in their computed normals. Deliberately
-/// sign-sensitive: two faces back to back are not one region.
+/// Quantised so one face's triangles group despite last-bit normal differences. Sign-sensitive: back
+/// to back faces are not one region.
 pub(crate) fn plane_key(normal: Vec3, w: f64) -> (i64, i64, i64, i64) {
     let s = 1_000_000.0;
     (
@@ -28,14 +26,8 @@ pub(crate) fn plane_key(normal: Vec3, w: f64) -> (i64, i64, i64, i64) {
     )
 }
 
-/// The region's boundary, as closed loops of vertex indices wound the same way
-/// as the triangles that produced them.
-///
-/// An edge interior to the region is used once in each direction by the two
-/// triangles sharing it; a boundary edge is used in one direction only. Returns
-/// `None` if the region is not a clean set of simple loops -- a directed edge
-/// used twice (the region overlaps itself), or a vertex with two outgoing
-/// boundary edges (the boundary pinches there, and which way to turn is a guess).
+/// The region's boundary as loops wound like its triangles: edges used in one direction only. `None`
+/// if a directed edge repeats (overlap) or a vertex has two outgoing boundary edges (pinch).
 pub(crate) fn boundary_loops(mesh: &Mesh, tris: &[usize]) -> Option<Vec<Vec<u32>>> {
     let mut used: BTreeMap<(u32, u32), u32> = BTreeMap::new();
     for &ti in tris {

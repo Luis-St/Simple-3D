@@ -5,9 +5,7 @@ use simple3d_core::keymap::Command;
 
 #[test]
 pub(crate) fn the_pattern_tool_wraps_the_selection_and_the_editor_draws() {
-    // Issue 67: the creation tool wraps what is selected in a pattern node
-    // that repeats it, selects the pattern, and the property editor's Pattern
-    // section draws without panicking.
+    // Issue 67: the tool wraps the selection in a selected pattern, and the editor section draws.
     let mut app = headless_app();
     let plate = app.primary().unwrap();
     app.run(Command::Pattern);
@@ -17,8 +15,7 @@ pub(crate) fn the_pattern_tool_wraps_the_selection_and_the_editor_draws() {
     app.reevaluate_for_test();
     draw_one_frame(&mut app);
 
-    // Turning it into a circular pattern and drawing again exercises the
-    // choice-gated fields the editor shows per kind.
+    // A circular pattern exercises the per-kind gated fields.
     app.scene
         .get_mut(pat)
         .unwrap()
@@ -28,26 +25,20 @@ pub(crate) fn the_pattern_tool_wraps_the_selection_and_the_editor_draws() {
     app.reevaluate_for_test();
     draw_one_frame(&mut app);
 
-    // With nothing selected the tool drops a bare pattern to fill later.
+    // With nothing selected the tool drops a bare pattern.
     app.clear_selection();
     app.run(Command::Pattern);
     assert!(app.scene.node(app.primary().unwrap()).is_pattern());
 }
 
-/// The tool's window has one width and takes whatever height its contents come
-/// to, but the popup it lives in is dragged around a viewport of any size and
-/// its body scrolls -- so what is in it has to fit the room it is given, and go
-/// on fitting well below the width the window actually asks for (issues 67, 96).
-///
-/// The check is that nothing is laid out wider than the room it was given, and
-/// it covers the button row too: that row fills from the right, so what
-/// overflows it runs off the *left* edge, which is where the name field goes.
+/// The tool's contents fit any room they are given, well below the requested width (issues 67,
+/// 96), including the right-to-left button row, which overflows off the left edge.
 #[test]
 pub(crate) fn the_pattern_tool_fits_whatever_width_its_window_is_given() {
     let mut app = headless_app();
     app.open_pattern_tool();
     let pattern = app.pattern_tool.expect("the tool did not open, so this measures nothing");
-    // Past the question the window opens on, so the stages are measured too.
+    // Past the opening question, so the stages are measured too.
     app.start_rule_from(pattern, 0);
     app.reevaluate_for_test();
 
@@ -73,16 +64,13 @@ pub(crate) fn the_pattern_tool_fits_whatever_width_its_window_is_given() {
                 });
             });
         });
-        // Half a pixel of slack: a rule and its spacing are rounded, and this
-        // is looking for columns that do not fit, not for rounding.
+        // Half a pixel of slack for rounding.
         assert!(used <= room + 0.5, "at {room} px of room the tool laid out {used} px of content");
         assert!(row_used <= row_room + 0.5, "at {row_room} px of room the button row took {row_used} px");
     }
 }
 
-/// The split tool's window is resizable too, and it has the same two-column
-/// problem: the numbers beside a picture of the cells, and below the width
-/// both need, the picture is what gives way (issue 82).
+/// The split tool's resizable window has the same two-column problem; the picture gives way (issue 82).
 #[test]
 pub(crate) fn the_split_tool_fits_whatever_width_its_window_is_given() {
     let mut app = headless_app();
@@ -117,7 +105,6 @@ pub(crate) fn the_split_tool_fits_whatever_width_its_window_is_given() {
             assert!(row_used <= row_room + 0.5, "at {row_room} px of room the button row took {row_used} px");
         }
     }
-    // Drawing the tool must not have cut anything: nothing is cut until
-    // Split is pressed.
+    // Drawing the tool cuts nothing; only Split does.
     assert!(app.primary().is_some_and(|id| !app.scene.node(id).is_split()));
 }

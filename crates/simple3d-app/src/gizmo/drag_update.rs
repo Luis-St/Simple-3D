@@ -1,5 +1,4 @@
-//! One step of a drag: where the pointer has reached, and what that means
-//! for the node.
+//! One step of a drag: where the pointer has reached, and what that means for the node.
 
 use super::*;
 use crate::view::View;
@@ -7,9 +6,8 @@ use simple3d_core::scene::Scene;
 use simple3d_core::unit::{format_angle, format_length, wrap_degrees, Unit};
 
 impl Drag {
-    /// Apply the drag for the current cursor position. Called every frame, so the
-    /// property editor tracks the handle live -- one source of truth, both
-    /// directions (spec section 6.2).
+    /// Apply the drag for the current cursor, every frame, so the property editor tracks it live
+    /// (spec section 6.2).
     pub fn update(
         &mut self,
         scene: &mut Scene,
@@ -20,8 +18,7 @@ impl Drag {
         rotate_snap: f64,
         unit: Unit,
     ) {
-        // Everything below is measured in the frame the drag began in, never the
-        // live one -- see the note on `Drag::gizmo`.
+        // Measured in the frame the drag began in, never the live one (see `Drag::gizmo`).
         let gizmo = &self.gizmo.clone();
         match self.handle {
             Handle::MoveAxis(axis) => {
@@ -49,7 +46,7 @@ impl Drag {
             }
             Handle::RotateRing(axis) => {
                 let Some(angle) = ring_angle(gizmo, axis, view, cursor) else { return };
-                // Unwrap across the seam so a full turn keeps counting up.
+                // Unwrap across the seam so a full turn keeps counting.
                 let mut step = angle - self.last_angle;
                 if step > 180.0 {
                     step -= 360.0;
@@ -60,21 +57,13 @@ impl Drag {
                 self.last_angle = angle;
                 let delta = mods.snap(self.turns, rotate_snap);
                 let mut rotation = self.start_rotation;
-                // Where the body ends up, which is a direction and so lives in
-                // one turn (issue 84): the ring counts turns without end, but a
-                // body two and a bit turns round stands where a body a bit round
-                // stands, and that is what the rotation field reads.
+                // The resulting direction lives in one turn (issue 84), as the rotation field reads it.
                 set_axis(&mut rotation, axis, wrap_degrees(get_axis(self.start_rotation, axis) + delta));
                 if let Some(node) = scene.get_mut(self.node) {
                     node.position = gizmo.position_keeping_pivot(rotation, self.start_scale);
                     node.rotation = rotation;
                 }
-                // Through the same wrap the field uses, and not merely stripped
-                // of its whole turns: one rule for what an angle in this
-                // application reads as. A field on a rotation cannot show a
-                // negative, so a turn backwards is 345 here as well -- the
-                // readout and the row it will land in say the same kind of
-                // number, which they did not while this one kept its sign.
+                // Through the field's own wrap, so the readout and the field show the same kind of number.
                 self.readout = format!("{} {}deg", axis_name(axis), format_angle(wrap_degrees(delta)));
             }
             Handle::ResizeFace(axis, positive) => {
@@ -93,9 +82,7 @@ impl Drag {
                 let raw = point - self.grab_point;
                 let mut ratio: Option<f64> = None;
                 if mods.symmetric {
-                    // Preserve proportions: take the axis that moved most, as a
-                    // fraction of its own starting extent, and apply that same
-                    // fraction to the others.
+                    // Preserve proportions: apply the most-moved axis's fractional change to the others.
                     let mut best = 0.0;
                     for axis in 0..3 {
                         if !self.sizeable(axis) {

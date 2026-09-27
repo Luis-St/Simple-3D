@@ -1,10 +1,6 @@
-//! One generator function per primitive type from the spec (section 3.2).
-//! Every shape is generated centred on its own local origin (the default
-//! "centre" anchor); `Mesh::apply_base_anchor` converts to the "base" anchor
-//! afterward. Every shape's stated dimensions are exact outer bounding
-//! dimensions in its own frame, before rotation, per the spec's precision
-//! requirement -- on flat axes exactly, on curved axes to within tessellation
-//! (vertices lie exactly on the circumscribed circle/sphere).
+//! One generator per primitive type (spec section 3.2), centred on its origin (`apply_base_anchor` makes
+//! the base anchor). Stated dimensions are exact outer bounds before rotation: flat axes exactly, curved
+//! axes to tessellation, with vertices on the circumscribed circle or sphere.
 
 mod boxes;
 pub(crate) use boxes::*;

@@ -5,14 +5,11 @@ use crate::app::App;
 use crate::theme::{self, metric, token};
 use simple3d_core::config::{Panel, Side};
 
-/// The header bar: the panel's name, a twisty that says whether it is rolled up,
-/// and the grip the whole bar is. Returns its vertical centre.
+/// The header bar: name, roll-up twisty, and the grip the whole bar is. Returns its vertical centre.
 pub(crate) fn header(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side) -> f32 {
     let collapsed = app.settings.layout.is_collapsed(panel);
     let full = ui.available_width();
-    // The bar's id names the panel rather than being taken from where the bar
-    // happens to sit, so a header keeps its identity across a move -- and so a
-    // test can find the bar it means to drag.
+    // Id from the panel, not its position, so it survives moves and tests can find it.
     let (rect, _) = ui.allocate_exact_size(egui::vec2(full, metric::ROW), egui::Sense::hover());
     let response = ui.interact(rect, header_id(panel), egui::Sense::click_and_drag());
     let dragging = app.dock_drag.panel == Some(panel);
@@ -27,8 +24,7 @@ pub(crate) fn header(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side)
         egui::FontId::proportional(theme::font::HEADER),
         token::TEXT_LO,
     );
-    // The grip dots on the right say the bar can be dragged, in the one place a
-    // pointer would go looking for them.
+    // Grip dots on the right show the bar can be dragged.
     for i in 0..3 {
         let x = rect.right() - 10.0;
         let y = rect.center().y - 4.0 + i as f32 * 4.0;

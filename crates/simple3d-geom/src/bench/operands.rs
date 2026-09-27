@@ -1,14 +1,11 @@
-//! What two operands cost, and what fifty that never touch cost.
+//! What two operands cost, and what fifty disjoint ones cost.
 
 use super::*;
 use crate::{primitives, BooleanOp};
 use std::time::Instant;
 
-/// The case `KNOWN_ISSUES.md` measures: a convex round operand meeting a plate.
-/// Both the cost and whether the result is still a closed solid.
-///
-/// 384 is in the list because it was the one segment count in it that came back
-/// non-manifold, and 448 because it was the one that took two minutes.
+/// A convex round operand meeting a plate: cost and closedness. 384 once came back non-manifold, 448
+/// once took two minutes.
 #[test]
 #[ignore]
 pub(crate) fn bench_cap_union_plate() {
@@ -33,8 +30,7 @@ pub(crate) fn bench_cap_union_plate() {
     }
 }
 
-/// Two dense convex operands actually crossing: the case where both BSP trees
-/// are chains.
+/// Two dense convex operands crossing, where both BSP trees are chains.
 #[test]
 #[ignore]
 pub(crate) fn bench_two_round_operands() {
@@ -53,8 +49,7 @@ pub(crate) fn bench_two_round_operands() {
     }
 }
 
-/// Nothing overlaps: this must stay linear, and says whether the disjoint fast
-/// path is holding.
+/// Nothing overlaps: must stay linear, showing the disjoint fast path holds.
 #[test]
 #[ignore]
 pub(crate) fn bench_many_disjoint() {

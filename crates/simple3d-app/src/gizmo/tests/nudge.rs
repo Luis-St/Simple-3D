@@ -12,7 +12,7 @@ pub(crate) fn the_screen_aligned_axes_are_a_permutation_matched_to_the_view() {
     let mut sorted = [horizontal, vertical, third];
     sorted.sort_unstable();
     assert_eq!(sorted, [0, 1, 2], "not a permutation");
-    // From the default isometric-ish view, Z is the most vertical axis.
+    // From the default view, Z is the most vertical axis.
     assert_eq!(vertical, 2, "expected Z to be the screen-vertical axis");
     let (right, _) = f.view.basis();
     assert!(
@@ -33,13 +33,8 @@ pub(crate) fn a_nudge_left_really_goes_left() {
     assert!((gizmo.axes[vertical] * v_sign).dot(up) > 0.0);
 }
 
-/// Spec acceptance criterion 26: nudge with the arrow keys, hold to repeat,
-/// the step matches the snap increment, and the whole repeat run is a single
-/// undo step.
-///
-/// The run goes through `apply_nudge`, which is the whole of what `App::nudge`
-/// does apart from the status line, so this asserts the real path -- undo
-/// record included -- rather than a re-implementation of it.
+/// Spec acceptance criterion 26: arrow-key nudges repeat when held, step by the snap increment,
+/// and a whole run is one undo step. Tested through `apply_nudge`, the real path.
 #[test]
 pub(crate) fn a_held_nudge_run_steps_by_the_snap_and_undoes_in_one() {
     const SNAP: f64 = 2.5;
@@ -50,12 +45,10 @@ pub(crate) fn a_held_nudge_run_steps_by_the_snap_and_undoes_in_one() {
     let start = f.scene.node(f.node).position;
 
     let mut history = History::new();
-    // Something before the run, so "one step" is distinguishable from
-    // "undo emptied the stack".
+    // A step before the run, so "one step" differs from "stack emptied".
     history.record(&f.scene, "Before", None);
 
-    // Holding the key down: the key repeat delivers the same command over
-    // and over, and each press goes through the whole production path.
+    // Holding the key: each repeat goes through the full path.
     for _ in 0..PRESSES {
         let step = apply_nudge(&mut history, &mut f.scene, &gizmo, &f.view, f.node, Command::NudgeRight, SNAP, 15.0)
             .expect("a nudge command");
@@ -68,8 +61,7 @@ pub(crate) fn a_held_nudge_run_steps_by_the_snap_and_undoes_in_one() {
         assert!((world_delta * (1.0 / SNAP) - gizmo.axes[axis]).length() < 1e-9, "the step left its axis");
     }
 
-    // Every press moved: the run really is a run, not one press repeated
-    // into the same place.
+    // Every press moved.
     let after = f.scene.node(f.node).position;
     let travelled = (gizmo.parent.point(after) - gizmo.parent.point(start)).length();
     assert!(
@@ -78,19 +70,17 @@ pub(crate) fn a_held_nudge_run_steps_by_the_snap_and_undoes_in_one() {
         SNAP * PRESSES as f64
     );
 
-    // ... and all of it undoes at once.
+    // ...and all of it undoes at once.
     assert_eq!(history.undo(&mut f.scene).as_deref(), Some("Nudge"));
     assert_eq!(f.scene.node(f.node).position, start, "one undo did not restore the pre-run position");
     assert_eq!(history.undo_label(), Some("Before"), "the run left more than one undo step behind");
 
-    // Redo puts the whole run back, also in one.
+    // Redo restores the whole run at once.
     assert_eq!(history.redo(&mut f.scene).as_deref(), Some("Nudge"));
     assert_eq!(f.scene.node(f.node).position, after);
 }
 
-/// The coalesce key is what makes the run one step, so what it does and does
-/// not merge is worth pinning down: changing direction mid-run is still one
-/// gesture, but a different node or a different mode starts a new step.
+/// The coalesce key: direction changes stay one gesture, a different node or mode starts a new step.
 #[test]
 pub(crate) fn a_nudge_coalesces_across_directions_but_not_across_nodes_or_modes() {
     let mut f = Fixture::new("box");
@@ -107,12 +97,12 @@ pub(crate) fn a_nudge_coalesces_across_directions_but_not_across_nodes_or_modes(
     let rotate_gizmo = f.gizmo(Mode::Rotate);
     let other_gizmo = Gizmo::build(&f.scene, &f.evaluated, other, Mode::Move).unwrap();
 
-    // Left then right then left: one gesture, whatever the direction.
+    // Left, right, left: one gesture.
     let mut history = History::new();
     for command in [Command::NudgeLeft, Command::NudgeRight, Command::NudgeLeft] {
         apply_nudge(&mut history, &mut f.scene, &move_gizmo, &f.view, f.node, command, 1.0, 15.0).unwrap();
     }
-    // Switching mode, and switching node, each start a step of their own.
+    // Switching mode, and switching node, each start a new step.
     apply_nudge(&mut history, &mut f.scene, &rotate_gizmo, &f.view, f.node, Command::NudgeUp, 1.0, 15.0).unwrap();
     apply_nudge(&mut history, &mut f.scene, &other_gizmo, &f.view, other, Command::NudgeUp, 1.0, 15.0).unwrap();
 
@@ -123,8 +113,7 @@ pub(crate) fn a_nudge_coalesces_across_directions_but_not_across_nodes_or_modes(
     assert_eq!(steps, 3, "expected the three same-key presses to merge and nothing else to");
 }
 
-/// Criterion 26's "step matches the snap increment" for the other two modes:
-/// rotate steps by the rotation snap, resize by the scene step.
+/// Criterion 26's step rule for rotate (rotation snap) and resize (scene step).
 #[test]
 pub(crate) fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
     let mut f = Fixture::new("box");
@@ -137,8 +126,7 @@ pub(crate) fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
     step.apply(&gizmo, &mut f.scene, f.node);
     assert!((get_axis(f.scene.node(f.node).rotation, axis) - (before + degrees)).abs() < 1e-9);
 
-    // A fresh box: the rotation above would leave the world bounds an AABB
-    // around a turned solid, which is not the extent being asserted.
+    // A fresh box, since the rotation above would skew the world bounds.
     let mut f = Fixture::new("box");
     let gizmo = f.gizmo(Mode::Resize);
     let (axis, _) = nudge_axis(&gizmo, &f.view, Command::NudgeRight).unwrap();
@@ -149,23 +137,20 @@ pub(crate) fn a_nudge_steps_by_the_snap_in_rotate_and_resize_too() {
     let before = f.param(driver.param);
     step.apply(&gizmo, &mut f.scene, f.node);
     f.reevaluate();
-    // The box is unrotated, so its local axes are the world ones.
+    // The box is unrotated, so local axes are world axes.
     let (lo, hi) = f.world_bounds();
     let measured = get_axis(hi, axis) - get_axis(lo, axis);
     assert!((measured - (extent + 2.5)).abs() < 1e-6, "the measured extent {measured} did not follow the nudge");
-    // Criterion 24's rule holds for the keyboard too: a dimension changed,
-    // not a scale factor.
+    // Criterion 24 holds for keys too: a dimension changed, not a scale.
     assert!((f.param(driver.param) - (before + 2.5 / driver.factor)).abs() < 1e-9, "resizing wrote no dimension");
 }
 
-/// A resize nudge on an axis no parameter governs reports itself rather than
-/// looking like a dropped keypress -- and changes nothing.
+/// A resize nudge on an ungoverned axis reports itself and changes nothing.
 #[test]
 pub(crate) fn a_resize_nudge_on_an_ungoverned_axis_says_so() {
     let mut f = Fixture::new("sphere");
     let gizmo = f.gizmo(Mode::Resize);
-    // A sphere's one radius drives all three axes, so pick a primitive that
-    // genuinely lacks one if this fixture does not.
+    // Find an axis with no driver, if this primitive has one.
     let ungoverned = (0..3).find(|&a| gizmo.drivers[a].is_none());
     let Some(axis) = ungoverned else { return };
     let before = f.scene.node(f.node).params().unwrap().clone();

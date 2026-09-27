@@ -2,8 +2,7 @@
 //!
 //! `cargo run --release -p simple3d-geom --example union_cost`
 //!
-//! Reference figures on the machine this was written on: 0.30 s for the
-//! 200-segment sphere with twenty bosses, which took 3.4 s merged one at a time.
+//! Reference: 0.30 s for the 200-segment sphere with twenty bosses, 3.4 s merged one at a time.
 
 use simple3d_geom::{evaluate_boolean_traced, primitives, BooleanOp, Vec3};
 use std::time::Instant;
@@ -17,7 +16,7 @@ fn main() {
             let at = Vec3::new(angle.cos() * spacing, angle.sin() * spacing, (i % 3) as f64 * 6.0 - 6.0);
             children.push(primitives::cylinder_mesh(4.0, 4.0, 12.0, 32).translated(at));
         }
-        // And some that meet nothing, which must come through untouched.
+        // Some that meet nothing, which must come through untouched.
         for i in 0..5 {
             children.push(primitives::box_mesh(2.0, 2.0, 2.0).translated(Vec3::new(100.0 + i as f64 * 5.0, 0.0, 0.0)));
         }

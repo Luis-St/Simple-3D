@@ -1,20 +1,12 @@
 //! PLY, text and binary, in either byte order.
 //!
-//! PLY is a self-describing format: the header lists its elements, each
-//! element's properties and each property's type, and the body is exactly
-//! that, in that order. So the reader is written as a reader of the *header* --
-//! the vertex and face elements are found by name among whatever else a file
-//! carries, and every property that is not geometry is stepped over by its
-//! declared width rather than being guessed at.
-//!
-//! That is what makes a file from another program readable: a scanner's PLY
-//! has confidence and intensity per vertex, a renderer's has normals and
-//! colours, and neither changes where the coordinates are.
+//! The reader follows the header: vertex and face elements are found by name, and every other
+//! property is skipped by its declared width, so files with extra per-vertex data still read.
 
 use super::*;
 use simple3d_geom::Vec3;
 
-/// The scalar types PLY defines, under both spellings each has.
+/// The scalar types PLY defines, under both spellings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scalar {
     I8,
@@ -83,8 +75,7 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
     let mut mesh = Mesh::new();
     mesh.positions = positions;
     for face in &faces {
-        // A polygon is fanned, which for the convex faces a solid is made of
-        // is the whole of it.
+        // Polygons are fanned, which suffices for the convex faces of a solid.
         for i in 1..face.len() - 1 {
             let tri = [face[0], face[i], face[i + 1]];
             if tri.iter().any(|&index| index as usize >= mesh.positions.len()) {
@@ -103,14 +94,13 @@ pub(crate) fn read(bytes: &[u8], mut progress: Progress<'_>) -> Result<Model, Im
     Ok(Model { format: Format::Ply, unit: None, parts: vec![Part { name: String::new(), mesh }] })
 }
 
-/// Read the header: the encoding, the elements it declares, and where the body
-/// starts. The header is text in every PLY, whatever the body is.
+/// Read the header: encoding, declared elements, and where the body starts.
 fn header(bytes: &[u8]) -> Result<(Encoding, Vec<Element>, usize), ImportError> {
     const END: &[u8] = b"end_header";
     let end = (0..bytes.len().saturating_sub(END.len()))
         .find(|&at| &bytes[at..at + END.len()] == END)
         .ok_or_else(|| malformed("the header has no end_header line"))?;
-    // Past the keyword and its line ending, wherever the file puts it.
+    // Past the keyword and whatever line ending the file uses.
     let mut body_at = end + END.len();
     while body_at < bytes.len() && (bytes[body_at] == b'\r' || bytes[body_at] == b' ') {
         body_at += 1;
@@ -168,7 +158,7 @@ fn header(bytes: &[u8]) -> Result<(Encoding, Vec<Element>, usize), ImportError> 
     Ok((encoding, elements, body_at))
 }
 
-/// Which of an element's properties are the ones geometry is read out of.
+/// Which of an element's properties hold the coordinates.
 fn coordinate_slots(element: &Element) -> [Option<usize>; 3] {
     let mut slots = [None, None, None];
     for (at, property) in element.properties.iter().enumerate() {
@@ -184,9 +174,8 @@ fn coordinate_slots(element: &Element) -> [Option<usize>; 3] {
     slots
 }
 
-/// The list property a face's vertices are in. `vertex_indices` is the name
-/// the specification gives; `vertex_index` is what several programs write, and
-/// a face element with exactly one list property has no other candidate.
+/// The list property holding a face's vertices: `vertex_indices` per the specification,
+/// `vertex_index` as several programs write, or the only list property.
 fn face_slot(element: &Element) -> Option<usize> {
     let named = element.properties.iter().position(|property| {
         matches!(property, Property::List { name, .. } if name == "vertex_indices" || name == "vertex_index")
@@ -292,9 +281,7 @@ fn ascii_body(
     elements: &[Element],
     progress: &mut Progress<'_>,
 ) -> Result<(Vec<Vec3>, Vec<Vec<u32>>), ImportError> {
-    // One stream of whitespace-separated numbers: the specification lets an
-    // element's properties run over several lines, and a reader that takes one
-    // line per element breaks on the files that do.
+    // One whitespace-separated stream, since an element's properties may span several lines.
     let mut words = body.split_whitespace();
     let mut positions = Vec::new();
     let mut faces = Vec::new();

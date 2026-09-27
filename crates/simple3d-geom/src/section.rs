@@ -1,22 +1,13 @@
 //! Cutting the model with a plane so its inside can be seen (issue 71).
 //!
-//! Nothing here changes a model. A section is a way of *looking* at one: the
-//! material on the far side of a plane is left out of the picture, and the
-//! opening that leaves is closed with a cap, so a wall reads as a wall with a
-//! thickness rather than as a hollow shell seen from inside.
-//!
-//! The two halves of that are here because both are geometry and both have to
-//! answer the same way. [`clip_triangle`] is what the renderer walks the model
-//! with, one triangle at a time; [`loops`] finds the closed outlines the plane
-//! leaves in a mesh and [`cap`] fills them. The outlines are worth having on
-//! their own -- they are a 2D section of the model, in world space -- which is
-//! what pulling a drawing back out of a cut would start from.
+//! A view-only cut: material past the plane is left out of the picture and the opening is capped.
+//! [`clip_triangle`] clips triangles for the renderer; [`loops`] finds the plane's outlines in a
+//! mesh and [`cap`] fills them.
 
 mod clip;
 pub use clip::{clip_by_all, clip_segment, clip_triangle, kept_by_all, kept_segments, Segments};
 
-/// The most sections that cut at once: what the renderer's shaders are sized
-/// for, and so what the interface lets be added.
+/// The most sections that cut at once, as the shaders are sized.
 pub const MAX_CUTS: usize = 8;
 mod cap;
 pub use cap::{cap, fill, loops};
@@ -27,17 +18,10 @@ mod tests;
 
 use crate::vec3::Vec3;
 
-/// The plane the model is cut with, as a half-space: what lies on the `normal`
-/// side of it is not drawn.
+/// The cutting plane as a half-space: what lies on the `normal` side is not drawn.
 ///
-/// `normal` points at the material that goes away, so a plane with a `+Z`
-/// normal takes the top off. It need not be a unit vector for the sign tests to
-/// work, but [`cap`] and the winding rule below take directions from it, so
-/// [`Plane::new`] normalises it once and everything downstream can rely on that.
-///
-/// With a [`Window`] the plane is a rectangle rather than the whole plane, and
-/// only the material straight behind that rectangle goes: what is cut away is
-/// a box, open to infinity on the removed side, and everything round it stays.
+/// [`Plane::new`] normalises `normal`, which [`cap`] and the winding rule rely on. With a
+/// [`Window`], only the material straight behind that rectangle goes: a box open on the removed side.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Plane {
     pub normal: Vec3,
@@ -64,30 +48,25 @@ impl Plane {
             1 => Vec3::new(0.0, 1.0, 0.0),
             _ => Vec3::new(0.0, 0.0, 1.0),
         };
-        // Flipping keeps the plane where it is and swaps which side of it
-        // survives, so the offset is negated with the normal.
+        // Flipping keeps the plane in place and swaps the kept side, so the offset is negated too.
         match flipped {
             true => Plane { normal: -normal, offset: -offset, window: None },
             false => Plane { normal, offset, window: None },
         }
     }
 
-    /// How far past the plane `p` is: negative on the side that is kept, zero
-    /// on the plane itself.
+    /// How far past the plane `p` is: negative on the kept side, zero on the plane.
     pub fn depth(&self, p: Vec3) -> f64 {
         self.normal.dot(p) - self.offset
     }
 
-    /// Whether `p` stays in the picture: in front of the plane, or out to the
-    /// side of its window.
+    /// Whether `p` stays in the picture: in front of the plane, or beside its window.
     pub fn keeps(&self, p: Vec3) -> bool {
         self.walls().iter().any(|wall| wall.depth(p) <= 0.0)
     }
 
-    /// The planes whose far sides together are what is cut away: the plane
-    /// itself, and with a window the four sides of the box behind it, each
-    /// facing into the box. A point is cut away when it is past every one of
-    /// them. Each comes without a window of its own.
+    /// The planes whose far sides together are cut away: the plane, plus with a window the four box
+    /// sides facing inwards. A point is cut when past all of them.
     pub fn walls(&self) -> Walls {
         let mut walls = Walls { planes: [Plane::new(Vec3::ZERO, 0.0); 5], count: 1 };
         walls.planes[0] = Plane { window: None, ..*self };
@@ -103,8 +82,7 @@ impl Plane {
         walls
     }
 
-    /// A point on the plane: the foot of the normal from the origin. What the
-    /// interface hangs the plane's own frame and its grip on.
+    /// The foot of the normal from the origin, where the interface hangs the plane's frame and grip.
     pub fn origin(&self) -> Vec3 {
         self.normal * self.offset
     }
@@ -124,30 +102,20 @@ impl std::ops::Deref for Walls {
     }
 }
 
-/// What is left of one triangle once the plane has had it, and the edge the cut
-/// left behind.
-///
-/// At most two triangles: a triangle with one corner on the kept side comes
-/// back as itself shrunk, and one with two comes back as a quad, which is two.
-/// They are held in an array rather than a `Vec` because this is called once
-/// per triangle of the whole scene on every frame the picture changes, and an
-/// allocation there is the difference between a section costing nothing and
-/// costing the frame.
+/// What is left of one triangle after the cut, and the cut edge. At most two triangles, held in
+/// an array since this runs per triangle per frame and must not allocate.
 pub struct Clipped {
     triangles: [[Vec3; 3]; 2],
     count: usize,
-    /// What a windowed plane leaves, which can be more than two triangles: a
-    /// triangle with the box taken out of its middle is a ring. Empty, and so
-    /// never allocated, for a plane without a window.
+    /// What a windowed plane leaves, possibly more than two triangles (a ring); never allocated
+    /// without a window.
     many: Vec<[Vec3; 3]>,
-    /// The cut edge, wound for the *cap* -- see [`loops`] for what that means
-    /// and why the direction matters.
+    /// The cut edge, wound for the cap (see [`loops`]).
     pub cut: Option<[Vec3; 2]>,
 }
 
 impl Clipped {
-    /// A triangle no section touched, so that a caller drawing with the section
-    /// off and one drawing with it on can walk the same answer.
+    /// A triangle no section touched, so section-on and section-off callers share one path.
     pub fn untouched(world: [Vec3; 3]) -> Clipped {
         Clipped::whole(world)
     }

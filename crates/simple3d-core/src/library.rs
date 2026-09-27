@@ -1,14 +1,7 @@
-//! The saved-primitive library: a group, or a whole project, kept for reuse in
-//! any other project.
+//! The saved-primitive library: groups or whole projects kept for reuse in any project.
 //!
-//! An entry is one file in `library/` under the config directory, holding the
-//! same `Clip` the clipboard uses -- the same schema again as the project file,
-//! so a saved primitive is readable, diffable, and can be handed to someone else
-//! by sending them the file.
-//!
-//! The library is *per user*, not per project: that is the whole point of it.
-//! It is not part of any document, so nothing here is undoable and nothing here
-//! is saved with a scene.
+//! Each entry is a file in `library/` under the config directory holding a clipboard `Clip`, in the
+//! project file's schema. Per user, not per document, so nothing here is undoable.
 
 use crate::clipboard::Clip;
 use std::io;
@@ -17,7 +10,7 @@ use std::path::{Path, PathBuf};
 const DIRECTORY: &str = "library";
 const EXTENSION: &str = "json";
 
-/// One saved primitive: what to call it, and where it lives.
+/// One saved primitive: its name and file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,
@@ -28,8 +21,7 @@ pub fn dir(config_dir: &Path) -> PathBuf {
     config_dir.join(DIRECTORY)
 }
 
-/// Every saved primitive, by name. Anything unreadable is skipped rather than
-/// reported: a stray file in the directory must not stop the palette drawing.
+/// Every saved primitive by name; unreadable files are skipped so the palette still draws.
 pub fn list(config_dir: &Path) -> Vec<Entry> {
     let Ok(entries) = std::fs::read_dir(dir(config_dir)) else { return Vec::new() };
     let mut out: Vec<Entry> = entries
@@ -41,18 +33,17 @@ pub fn list(config_dir: &Path) -> Vec<Entry> {
             Some(Entry { name, path })
         })
         .collect();
-    // Case-insensitively, so a palette of saved shapes reads as a list rather
-    // than as two lists.
+    // Case-insensitive, so the list reads as one.
     out.sort_by_key(|e| e.name.to_lowercase());
     out
 }
 
-/// Whether a name is already taken, so saving can say so before overwriting.
+/// Whether a name is taken, so saving can warn before overwriting.
 pub fn exists(config_dir: &Path, name: &str) -> bool {
     path_for(config_dir, name).exists()
 }
 
-/// Write a clip to the library under `name`, replacing any entry of that name.
+/// Write a clip to the library as `name`, replacing any same-named entry.
 pub fn save(config_dir: &Path, name: &str, clip: &Clip) -> io::Result<PathBuf> {
     let name = sanitise(name);
     if name.is_empty() {
@@ -76,10 +67,8 @@ fn path_for(config_dir: &Path, name: &str) -> PathBuf {
     dir(config_dir).join(format!("{}.{EXTENSION}", sanitise(name)))
 }
 
-/// A name that is safe as a file name on both platforms. The entry is named by
-/// its file, so a name carrying a separator or a Windows-reserved character
-/// would either land somewhere else or fail to save at all -- and a saved
-/// primitive silently going missing is worse than one with a tidied name.
+/// A name safe as a file name on every platform, since separators or reserved characters would
+/// misplace or lose the entry.
 pub fn sanitise(name: &str) -> String {
     let cleaned: String =
         name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '-' } else { c }).collect();
@@ -115,8 +104,7 @@ mod tests {
 
     #[test]
     fn a_saved_primitive_comes_back_as_the_same_subtree() {
-        // The point of the library: what was saved out of one project is what
-        // arrives in the next one, children, positions and all.
+        // What was saved from one project arrives in another intact.
         let dir = temp_dir("round-trip");
         let (_, clip) = a_clip();
         save(&dir, "Bracket", &clip).unwrap();
@@ -155,7 +143,7 @@ mod tests {
         assert_eq!(path.parent().unwrap(), super::dir(&dir), "the name escaped the library directory");
         assert_eq!(list(&dir)[0].name, "part-two- draft-");
 
-        // A name with nothing left in it is refused, not saved as a dotfile.
+        // An empty name is refused, not saved as a dotfile.
         assert!(save(&dir, "   ", &clip).is_err());
         assert!(save(&dir, "...", &clip).is_err());
     }

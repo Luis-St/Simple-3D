@@ -1,15 +1,9 @@
 //! Undo and redo across every model-mutating action (spec section 7.4).
 //!
-//! Snapshots rather than inverse operations. A whole `Scene` for a 200-primitive
-//! model is a few hundred kilobytes, and taking a copy is the only approach that
-//! is *automatically* correct for every edit -- including reparenting, grouping a
-//! multi-selection and cutting a subtree, which are exactly the operations an
-//! inverse-command scheme gets subtly wrong.
-//!
-//! Rapid edits to one field coalesce into a single step: the caller passes a
-//! coalesce key (`"param:7:width"`), and a second edit with the same key inside
-//! the coalesce window reuses the snapshot already taken. A whole drag is one
-//! step because the caller records once, before the drag starts.
+//! Whole-scene snapshots rather than inverse operations: a few hundred kilobytes for 200
+//! primitives, and automatically correct for every edit, including reparenting, grouping and cutting
+//! that inverse schemes get subtly wrong. Edits sharing a coalesce key (`"param:7:width"`) within the
+//! window reuse one snapshot; a drag records once, before it starts.
 
 mod history;
 #[cfg(test)]
@@ -26,9 +20,8 @@ const COALESCE_WINDOW: Duration = Duration::from_millis(900);
 struct Snapshot {
     label: String,
     scene: Scene,
-    /// The components the edit this steps over made (issue 113). A component
-    /// is not part of any one scene, so taking the step back is not enough to
-    /// take it away again: the application asks this, and does the rest.
+    /// The components this step's edit made (issue 113), which the application removes on undo since
+    /// they are not part of any one scene.
     created: Vec<ComponentId>,
 }
 
@@ -38,8 +31,7 @@ pub struct History {
     depth: usize,
     open_key: Option<String>,
     open_at: Option<Instant>,
-    /// Bumped on every recorded edit; the app compares it against the value it
-    /// last saved to decide whether the title bar shows unsaved changes.
+    /// Bumped per recorded edit; compared with the saved value for the unsaved-changes marker.
     revision: u64,
 }
 

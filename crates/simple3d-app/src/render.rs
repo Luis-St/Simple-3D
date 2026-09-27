@@ -1,6 +1,5 @@
-//! Turning the evaluated scene into the viewport image (spec section 6.1):
-//! shaded / shaded-with-edges / wireframe display, the ground grid and origin
-//! axes, the selection highlight and translucent ghosts for hidden nodes.
+//! The evaluated scene to the viewport image (spec section 6.1): display modes, grid and axes,
+//! selection highlight and ghosts for hidden nodes.
 
 mod cache;
 pub use cache::{RenderableCache, Wanted};

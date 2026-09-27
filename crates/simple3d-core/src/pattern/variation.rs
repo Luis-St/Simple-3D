@@ -1,24 +1,11 @@
 //! What changes a stage's copies from one to the next (issue 79).
 //!
-//! A stage places its copies -- a run, a ring -- and a *variation* then changes
-//! each copy where it stands: moves it aside, turns it, resizes it, or opens the
-//! gap before it. A stage holds a list of them, and each says what it changes,
-//! along or about which axis, by how much, and which copies it reaches.
+//! A stage places its copies; each variation in its list then shifts, spins, resizes or opens
+//! the gap before the copies it reaches, chosen by *every* and *starting at*. Building up gives
+//! each reached copy one more step than the last; repeating gives each the same step.
 //!
-//! Which copies is two numbers: *every* how many, *starting at* which. Every one
-//! from the first is all of them, the original too; every other one from the
-//! second is the brick bond. A variation that *builds up* gives the copies it
-//! reaches one step more each time -- the first one reached gets one step, the
-//! next two -- and one that *repeats* gives each of them the same single step.
-//!
-//! A variation used to be a shift vector, a spin, a size and a gap on a cycle
-//! whose first copy was always the original, left alone, and four of them to a
-//! stage. The cap was the slots rather than anything the rule could say, and
-//! "every copy" and "the original as well" were the two answers the cycle could
-//! not give. Now the list is as long as there are different things to say: a
-//! stage takes one variation of each kind, axis and set of copies, and refuses
-//! only a second one identical in all of those -- which would add nothing a
-//! bigger amount on the first does not.
+//! This replaced four fixed slots on a cycle that always skipped the original. A stage now takes
+//! one variation per kind, axis, stepping and reach, refusing only exact duplicates.
 
 use super::*;
 use crate::xform::Xform;
@@ -27,26 +14,23 @@ use simple3d_geom::Vec3;
 /// What a variation changes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Vary {
-    /// Moves the copy aside along one axis, in the frame the stage placed it in.
+    /// Moves the copy along one axis of the stage's frame.
     Shift,
     /// Turns the copy about one of its own axes.
     Spin,
-    /// Makes the copy bigger or smaller along one axis, or all three.
+    /// Scales the copy along one axis, or all three.
     Size,
-    /// Opens the gap before the copy, along the run. A run's only: a turn has
-    /// no gaps, only an angle.
+    /// Opens the gap before the copy along the run; runs only.
     Gap,
 }
 
 /// The kinds in the order a variation's choice holds them.
 pub const VARIES: &[&str] = &["Shift", "Spin", "Size", "Gap"];
 
-/// How a variation's amount steps from one copy it reaches to the next, in the
-/// order its choice holds them.
+/// How a variation's amount steps between reached copies, in choice order.
 pub const STEPS: &[&str] = &["Builds up", "Repeats"];
 
-/// What a variation is along or about. The fourth is a size's only: all three
-/// axes at once, which is what "each copy a tenth smaller" means.
+/// What a variation is along or about; "All" is for size only.
 pub const VARY_AXES: &[&str] = &["X", "Y", "Z", "All"];
 
 /// The index of [`VARY_AXES`]'s "All".
@@ -67,8 +51,7 @@ impl Vary {
         VARIES[self.index() as usize]
     }
 
-    /// Whether a stage doing `mode` has any use for it. A mirror is two copies
-    /// nothing varies, and a turn has no gaps.
+    /// Whether it applies to `mode`: mirrors have nothing to vary, turns have no gaps.
     pub fn fits(self, mode: StageMode) -> bool {
         match mode {
             StageMode::Mirror => false,
@@ -77,8 +60,7 @@ impl Vary {
         }
     }
 
-    /// The axes it can be along or about, in the order they are offered. A gap
-    /// is along the run, and has none to choose.
+    /// The axes it can use, in offer order; a gap has none.
     pub fn axes(self) -> &'static [usize] {
         match self {
             Vary::Shift | Vary::Spin => &[0, 1, 2],
@@ -88,27 +70,24 @@ impl Vary {
     }
 }
 
-/// One thing a stage does to its copies, beyond placing them.
+/// One thing a stage does to its copies beyond placing them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Variation {
     pub what: Vary,
-    /// 0, 1 or 2 -- or [`ALL_AXES`] for a size. Nothing for a gap.
+    /// 0, 1 or 2, or [`ALL_AXES`] for a size; unused for a gap.
     pub axis: usize,
-    /// How much one step is: a distance for a shift and a gap, degrees for a
-    /// spin, and a factor for a size -- 1 is no change, 0.9 a tenth smaller.
+    /// One step: a distance for shift and gap, degrees for spin, a factor for size (1 is no change).
     pub amount: f64,
-    /// Whether every copy it reaches gets the same single step, rather than one
-    /// more than the copy it reached before.
+    /// Whether every reached copy gets the same single step rather than building up.
     pub repeats: bool,
-    /// It reaches every this many copies. One at the least: every copy.
+    /// It reaches every this many copies; at least one.
     pub every: u32,
-    /// The first copy it reaches, counted from one -- the original.
+    /// The first copy it reaches, counted from one (the original).
     pub start: u32,
 }
 
 impl Variation {
-    /// A variation of `what` that changes nothing yet, reaching every copy after
-    /// the original -- for the constructors to fill in.
+    /// A no-op variation of `what`, reaching every copy after the original.
     pub const fn blank(what: Vary) -> Variation {
         let amount = if matches!(what, Vary::Size) { 1.0 } else { 0.0 };
         let axis = if matches!(what, Vary::Size) { ALL_AXES } else { 2 };
@@ -123,8 +102,7 @@ impl Variation {
         Variation { axis: axis.min(2), amount: degrees, ..Variation::blank(Vary::Spin) }
     }
 
-    /// Every copy `factor` times the size of the one before it, along `axis` or
-    /// all three.
+    /// Every copy `factor` times the previous one's size, along `axis` or all three.
     pub fn resize(axis: usize, factor: f64) -> Variation {
         Variation { axis: axis.min(ALL_AXES), amount: factor, ..Variation::blank(Vary::Size) }
     }
@@ -133,29 +111,27 @@ impl Variation {
         Variation { amount: gap, ..Variation::blank(Vary::Gap) }
     }
 
-    /// The same variation, giving every copy it reaches one step rather than
-    /// building up, and reaching every `every` copies from the second: every
-    /// other copy moved on, for two.
+    /// Repeating one step on every `every` copies from the second.
     pub fn repeating(self, every: u32) -> Variation {
         Variation { repeats: true, every: every.clamp(1, MAX_CYCLE), ..self }
     }
 
-    /// The same variation, reaching every `every` copies from copy `start`.
+    /// Reaching every `every` copies from copy `start`.
     pub fn reaching(self, every: u32, start: u32) -> Variation {
         Variation { every: every.clamp(1, MAX_CYCLE), start: start.clamp(1, MAX_CYCLE), ..self }
     }
 
-    /// The first copy it reaches, counted from nought.
+    /// The first copy it reaches, counted from zero.
     fn first(&self) -> u32 {
         self.start.max(1) - 1
     }
 
-    /// Whether it reaches copy `i`, counted from nought.
+    /// Whether it reaches copy `i`, counted from zero.
     pub fn reaches(&self, i: u32) -> bool {
         i >= self.first() && (i - self.first()).is_multiple_of(self.every.max(1))
     }
 
-    /// How many steps of it copy `i` gets.
+    /// How many steps copy `i` gets.
     pub fn times(&self, i: u32) -> f64 {
         if !self.reaches(i) {
             0.0
@@ -166,13 +142,12 @@ impl Variation {
         }
     }
 
-    /// How many steps the copies before copy `i` got between them, which is how
-    /// far along its run a gap variation puts that copy.
+    /// Total steps of the copies before `i`: how far along the run a gap puts copy `i`.
     fn times_before(&self, i: u32) -> f64 {
         if i <= self.first() {
             return 0.0;
         }
-        // The copies it reached before `i`, and the steps they got.
+        // The copies reached before `i`, and the steps they got.
         let reached = ((i - self.first() - 1) / self.every.max(1) + 1) as f64;
         if self.repeats {
             reached
@@ -194,18 +169,15 @@ impl Variation {
         }
     }
 
-    /// What makes it a different variation from another of the same kind: the
-    /// axis, how it steps, and the copies it reaches. Two that agree on all of
-    /// it are one variation with the amounts added up, so a stage holds one.
+    /// What distinguishes it from another of its kind: axis, stepping and reach. Two agreeing on all
+    /// are one variation, so a stage holds only one.
     pub fn combination(&self) -> (Vary, usize, bool, u32, u32) {
         let axis = if self.what == Vary::Gap { 0 } else { self.axis };
         (self.what, axis, self.repeats, self.every.max(1), self.start.max(1))
     }
 
-    /// What it does to copy `i` where it stands, or `None` where that is
-    /// nothing -- a copy it gives no steps to, one it does not change, and any
-    /// copy of a gap, which moves the copy along its run rather than about
-    /// itself (see [`Variation::gap_before`]).
+    /// Its in-place transform for copy `i`, or `None` if nothing (gaps move along the run instead,
+    /// see [`Variation::gap_before`]).
     pub(crate) fn reshape(&self, i: u32) -> Option<Xform> {
         let times = self.times(i);
         if times == 0.0 || !self.changes() {
@@ -215,10 +187,8 @@ impl Variation {
             Vary::Shift => Some(Xform::from_translation(unit(self.axis) * (self.amount * times))),
             Vary::Spin => Some(Xform::from_pos_rot(Vec3::ZERO, rotation_about(self.axis, self.amount * times))),
             Vary::Size => {
-                // Kept above nothing: a hundred copies at 90 % each come out a
-                // few hundred-thousandths of the first, and a copy of no size at
-                // all is a degenerate matrix the rest of the program has no use
-                // for.
+                // Clamped above zero: a hundred copies at 90% shrink to almost nothing, and a zero scale is
+                // a degenerate matrix.
                 let size = self.amount.max(0.01).powf(times).max(1e-4);
                 let scale = match self.axis {
                     ALL_AXES => Vec3::splat(size),
@@ -240,25 +210,17 @@ impl Variation {
     }
 }
 
-/// The furthest apart the copies a variation reaches can be, and the latest
-/// copy it can start at: the most copies a stage makes.
+/// The widest reach spacing and latest start: the most copies a stage makes.
 pub const MAX_CYCLE: u32 = 512;
 
-/// The most variations one stage is written with. Not the limit a stage is
-/// held to -- that is how many different variations its copies allow, see
-/// [`free_variation`] -- but a bound on what a hand-edited file can ask for.
+/// A bound on variations per stage for hand-edited files; the real limit is [`free_variation`].
 pub const MAX_VARIATIONS: u32 = 9999;
 
-/// The variations one variation of the old list comes to (issue 79).
+/// The variations one old-style variation becomes (issue 79).
 ///
-/// The old list reached every copy after the original and, where it repeated,
-/// came round every `every` copies with a *count* of steps -- nought, one, two,
-/// nought -- rather than one step on the copies it reached. `once` is the same
-/// variation as a single step; what is returned lays every copy down where the
-/// old one did. Building up is the same thing in both. Coming round every two
-/// is one step on every other copy from the second. A longer cycle is one
-/// variation for each count of steps it gave, reaching the copies it gave that
-/// many to.
+/// The old list reached every copy after the original and cycled step counts (0, 1, 2, 0).
+/// `once` is the single-step variation; the result places every copy as before. A cycle of two is
+/// one step on every other copy from the second; longer cycles become one variation per step count.
 pub(crate) fn from_cycle(once: Variation, every: Option<u32>) -> Vec<Variation> {
     let Some(every) = every.map(|e| e.clamp(2, 64)) else {
         return vec![once.reaching(1, 2)];
