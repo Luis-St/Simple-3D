@@ -19,6 +19,7 @@ use simple3d_geom::aabb::box_corner;
 use simple3d_geom::section::Plane;
 use simple3d_geom::Vec3;
 
+mod caps;
 mod draw;
 mod plan;
 mod project;
@@ -165,6 +166,8 @@ pub(super) struct CapDraw {
     /// Other sections, whose cuts are taken out of this cap.
     pub(super) others: Vec<Plane>,
     pub(super) colour: Rgba,
+    /// The unpainted cut colour, before shading, for the cap's faces (`draw_caps`).
+    pub(super) base: Rgba,
     /// The plane's polygon within the mesh's box, projected.
     pub(super) fill: Vec<GpuVertex>,
 }
@@ -172,3 +175,4 @@ pub(super) struct CapDraw {
 const SOLID: i32 = 0;
 const GHOST: i32 = 1;
 const GLOW: i32 = 2;
+const CAP: i32 = 3;

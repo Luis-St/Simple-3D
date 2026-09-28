@@ -49,6 +49,7 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
                                 bounds: face.bounds.clone(),
                                 others: others.clone(),
                                 colour,
+                                base: palette.cut,
                                 fill: Vec::new(),
                             });
                         }

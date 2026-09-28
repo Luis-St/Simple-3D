@@ -1,6 +1,7 @@
 #![cfg(test)]
 
 mod boolean_basic;
+mod boolean_colour;
 mod boolean_contact;
 mod boolean_disjoint;
 mod boolean_robust;

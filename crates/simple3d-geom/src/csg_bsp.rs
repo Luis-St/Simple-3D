@@ -32,6 +32,8 @@ mod merge;
 pub(crate) use merge::*;
 mod convert;
 pub(crate) use convert::*;
+mod inherit;
+use inherit::inherit_tags;
 pub use convert::{debug_mesh_to_polygons, debug_roundtrip, debug_splits_nothing};
 
 use crate::mesh::Mesh;
@@ -65,7 +67,8 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
             nb.invert();
             na.invert();
             let mut polys = na.all_polygons();
-            polys.extend(nb.all_polygons().iter().map(Polygon::flip));
+            // The cutter's faces left are the walls of the cut: the base's inside, in its colour (issue 114).
+            polys.extend(inherit_tags(a, nb.all_polygons().iter().map(Polygon::flip)));
             polys
         }
         BoolOp::Intersect => {

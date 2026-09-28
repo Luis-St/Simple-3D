@@ -6,7 +6,8 @@ use simple3d_geom::Vec3;
 
 #[test]
 pub(crate) fn a_colour_follows_each_surface_through_a_difference() {
-    // After a painted cutter drills a painted plate, the hole wall is the cutter's colour, the rest the plate's.
+    // After a painted cutter drills a painted plate, the hole wall is the plate's exposed inside, so
+    // it is the plate's colour too (issue 114; it used to take the cutter's).
     let mut scene = Scene::new();
     let root = scene.root();
     let group = scene.add_group(GroupOp::Difference, root, 0);
@@ -19,7 +20,7 @@ pub(crate) fn a_colour_follows_each_surface_through_a_difference() {
     assert!(result.errors.is_empty(), "{:?}", result.errors);
     let counts = painted(&result.mesh);
     assert!(counts.contains_key(&Some([0x10, 0x20, 0x30])), "the plate lost its colour: {counts:?}");
-    assert!(counts.contains_key(&Some([0xF0, 0xE0, 0xD0])), "the hole wall lost the cutter's: {counts:?}");
+    assert!(!counts.contains_key(&Some([0xF0, 0xE0, 0xD0])), "the hole wall kept the cutter's colour: {counts:?}");
     assert!(!counts.contains_key(&None), "some surface came out unpainted: {counts:?}");
 }
 

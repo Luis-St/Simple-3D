@@ -19,6 +19,7 @@ use simple3d_geom::section::Plane;
 use simple3d_geom::{Mesh, Vec3};
 
 mod half_space;
+mod inherit;
 mod peel;
 
 /// The most layers a frame peels, bounding pathological shapes; peeling stops at the first empty layer.

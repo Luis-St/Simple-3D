@@ -57,6 +57,8 @@ uniform sampler2D u_scene_depth;
 uniform uint u_leaf;
 uniform vec3 u_forward;
 uniform vec4 u_base;
+// A cutter's walls or a section's cap: the colour of what it cuts, when its alpha is set (issue 114).
+uniform vec4 u_inherit;
 uniform int u_painted;
 uniform usampler2D u_paint;
 uniform int u_table_width;
@@ -81,7 +83,9 @@ void main() {
     float length_ = length(normal);
     float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
     vec4 base = u_base;
-    if (u_painted == 1) {
+    if (u_inherit.a > 0.0) {
+        base = vec4(u_inherit.rgb, u_base.a);
+    } else if (u_painted == 1) {
         ivec2 at = ivec2(gl_PrimitiveID % u_table_width, gl_PrimitiveID / u_table_width);
         uint tag = texelFetch(u_paint, at, 0).r;
         if ((tag & 0xFF000000u) != 0u) {

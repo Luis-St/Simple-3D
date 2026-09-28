@@ -35,6 +35,8 @@ impl Gpu {
         }
         let (width, height) = (targets.width as i32, targets.height as i32);
         let marks = resident::mark_planes(request);
+        let firsts: Vec<u32> = leaves.iter().map(|(leaf, _)| leaf.mesh.tag(0)).collect();
+        let inherited = inherit::inherited(&program, &firsts, half_leaf);
 
         gl.disable(glow::CULL_FACE);
         gl.disable(glow::BLEND);
@@ -110,6 +112,7 @@ impl Gpu {
                     gl.uniform_4_f32_slice(Some(at), planes.as_flattened());
                 }
                 set_u32(gl, peel, "u_leaf", index as u32);
+                set4(gl, peel, "u_inherit", &inherited[index].unwrap_or([0.0; 4]));
                 set_i32(gl, peel, "u_painted", resident.paint.is_some() as i32);
                 gl.active_texture(glow::TEXTURE0);
                 gl.bind_texture(glow::TEXTURE_2D, resident.paint);

@@ -72,10 +72,12 @@ in vec3 v_pos;
 flat in uint v_tag;
 
 uniform vec3 u_forward;
-// Default face colour in bytes: the palette's solid, ghost or glow.
+// Default face colour in bytes: the palette's solid, ghost, glow or cut.
 uniform vec4 u_base;
-// 0 a solid, 1 a ghost, 2 a glow.
+// 0 a solid, 1 a ghost, 2 a glow, 3 a section cap: the back faces seen through a cut, shaded as
+// the cut plane and in their body's colour (`draw_caps`, issue 114).
 uniform int u_mode;
+uniform vec3 u_cap_normal;
 // Whether the mesh has any paint, and the per-triangle colour tag table.
 uniform int u_painted;
 uniform usampler2D u_paint;
@@ -88,13 +90,13 @@ void main() {
     if (cut_away(v_pos)) {
         discard;
     }
-    vec3 normal = cross(dFdx(v_pos), dFdy(v_pos));
+    vec3 normal = u_mode == 3 ? u_cap_normal : cross(dFdx(v_pos), dFdy(v_pos));
     float length_ = length(normal);
     float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
 
     // Paint overrides the colour; alpha is always the base's, as in `triangle_base`.
     vec4 base = u_base;
-    if (u_mode == 0 && u_painted == 1) {
+    if ((u_mode == 0 || u_mode == 3) && u_painted == 1) {
         ivec2 at = ivec2(gl_PrimitiveID % u_table_width, gl_PrimitiveID / u_table_width);
         uint tag = texelFetch(u_paint, at, 0).r;
         if ((tag & 0xFF000000u) != 0u) {
@@ -108,7 +110,8 @@ void main() {
         float factor = 0.34 + 0.66 * facing;
         out_colour = vec4(floor(min(base.rgb * factor, vec3(255.0))), base.a) / 255.0;
     }
-    out_tag = v_tag;
+    // A cap is no solid an axis can be inside, as on the CPU.
+    out_tag = u_mode == 3 ? 0u : v_tag;
 }
 "#;
 

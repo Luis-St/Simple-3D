@@ -4,6 +4,7 @@ use super::*;
 use crate::raster::{Rgba, Vertex};
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
+use simple3d_core::scene::Colour;
 use simple3d_geom::section::{self, Plane};
 use simple3d_geom::Vec3;
 
@@ -89,14 +90,19 @@ fn push_cap_of(
 ) {
     // One cap per face the cut opens: the plane, or a window's front and box sides, each trimmed to its face.
     for face in section::faces(plane) {
-        let outlines = section::loops(&item.mesh, &face.plane);
+        let (outlines, tags) = section::tagged_loops(&item.mesh, &face.plane);
         if outlines.is_empty() {
             continue;
         }
         // Filled in every mode that fills; in wireframe the cut is its outline alone.
         if mode != DisplayMode::Wireframe {
-            let colour = shade(palette.cut, face.plane.normal, view.forward(), 255);
             for piece in section::fill(&outlines, face.plane.normal) {
+                // A painted body's inside is its colour (issue 114), the rest the palette's cut colour.
+                let base = match Colour::from_tag(tags.of_triangle(piece)) {
+                    Some(Colour([r, g, b])) => [r, g, b, 255],
+                    None => palette.cut,
+                };
+                let colour = shade(base, face.plane.normal, view.forward(), 255);
                 let piece = section::within(&piece, &face.bounds);
                 for index in 1..piece.len().saturating_sub(1) {
                     let corners = [piece[0], piece[index], piece[index + 1]];

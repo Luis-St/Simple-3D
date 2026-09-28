@@ -203,3 +203,16 @@ fn several_cuts_take_away_what_any_of_them_does() {
     // With no cut, a line is unchanged.
     assert_eq!(kept_by_all(&[], Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)).len(), 1);
 }
+
+#[test]
+fn a_cut_knows_the_colour_of_the_body_it_opens() {
+    // Issue 114: the cap is filled in the colour of the faces its outline was cut from.
+    let red = crate::mesh::colour_tag([200, 30, 30]);
+    let mut mesh = box_mesh();
+    mesh.set_tag(red);
+    let plane = Plane::new(Vec3::new(0.0, 0.0, 1.0), 0.0);
+    let (outlines, tags) = tagged_loops(&mesh, &plane);
+    let cap = fill(&outlines, plane.normal);
+    assert!(!cap.is_empty(), "the box was not capped");
+    assert!(cap.iter().all(|&t| tags.of_triangle(t) == red), "a cap triangle lost the box's colour");
+}

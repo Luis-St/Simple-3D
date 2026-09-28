@@ -10,7 +10,7 @@ pub use clip::{clip_by_all, clip_segment, clip_triangle, kept_by_all, kept_segme
 /// The most sections that cut at once, as the shaders are sized.
 pub const MAX_CUTS: usize = 8;
 mod cap;
-pub use cap::{cap, fill, loops};
+pub use cap::{cap, fill, loops, tagged_loops, CutTags};
 mod window;
 pub use window::{clip_polygon, faces, segment_within, triangle_touches, within, Face, Window};
 #[cfg(test)]

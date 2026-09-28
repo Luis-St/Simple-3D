@@ -10,14 +10,38 @@ use std::collections::HashMap;
 /// about the normal from the removed side, holes the other way. `mesh` should be welded so edge
 /// crossings chain; unclosed stretches are dropped rather than guessed.
 pub fn loops(mesh: &Mesh, plane: &Plane) -> Vec<Vec<Vec3>> {
+    tagged_loops(mesh, plane).0
+}
+
+/// [`loops`], with the colour tag of the face each outline point was cut from, so a cap can take
+/// the colour of the body it cuts through (issue 114).
+pub fn tagged_loops(mesh: &Mesh, plane: &Plane) -> (Vec<Vec<Vec3>>, CutTags) {
     let mut segments: Vec<[Vec3; 2]> = Vec::new();
-    for tri in &mesh.indices {
+    let mut tags = HashMap::new();
+    for (index, tri) in mesh.indices.iter().enumerate() {
         let world = mesh.corners(*tri);
         if let Some(cut) = clip_triangle(plane, world).cut {
+            tags.insert(key(cut[0]), mesh.tag(index));
             segments.push(cut);
         }
     }
-    chain(&segments)
+    (chain(&segments), CutTags(tags))
+}
+
+/// The tag of the face under each point of a cut's outlines ([`tagged_loops`]).
+pub struct CutTags(HashMap<(i64, i64, i64), u32>);
+
+impl CutTags {
+    /// The tag of a cap triangle between outline points: the one most of its corners share, else
+    /// its first corner's, so a body's cap takes its colour up to where it meets another's.
+    pub fn of_triangle(&self, corners: [Vec3; 3]) -> u32 {
+        let [a, b, c] = corners.map(|p| self.0.get(&key(p)).copied().unwrap_or(0));
+        if b == c {
+            b
+        } else {
+            a
+        }
+    }
 }
 
 /// A point's bucket for joining segments, at the welder's 1e-6 mm, since shared-edge crossings may
