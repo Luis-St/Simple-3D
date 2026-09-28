@@ -1,6 +1,8 @@
 mod bounds;
 mod camera;
 mod components;
+mod components_files;
+mod components_undo;
 mod csg;
 mod document;
 mod drag;

@@ -258,39 +258,3 @@ pub(crate) fn every_fixed_kind_can_be_started_from_as_a_template() {
         );
     }
 }
-
-/// A rule from before stage modes still lays its copies where it did (issue 79).
-#[test]
-pub(crate) fn a_rule_from_before_the_stage_modes_lays_out_the_same_copies() {
-    // The old helix stage: a turn, a radius, and the rise as a step along the stage's axis.
-    let mut old = default_params();
-    for key in custom_keys() {
-        if key.ends_with("_mode") || key.ends_with("_rise") {
-            old.remove(key);
-        }
-    }
-    old.insert("kind".to_string(), ParamValue::Choice(CUSTOM));
-    old.insert("stage1_turn".to_string(), ParamValue::Angle(45.0));
-    old.insert("stage1_radius".to_string(), ParamValue::Length(20.0));
-    old.insert("stage1_count".to_string(), ParamValue::Count(5));
-    old.insert("stage1_step_x".to_string(), ParamValue::Length(0.0));
-    old.insert("stage1_step_z".to_string(), ParamValue::Length(4.0));
-
-    let migrated = migrate_params(&old);
-    assert_eq!(migrated.int("stage1_mode"), StageMode::Turn.index(), "an old turning stage was read as a run");
-    assert_eq!(migrated.num("stage1_rise"), 4.0, "the rise did not come across from the step along the axis");
-    let helix = with(&[
-        ("kind", ParamValue::Choice(HELIX)),
-        ("helix_count", ParamValue::Count(5)),
-        ("helix_angle", ParamValue::Angle(45.0)),
-        ("helix_rise", ParamValue::Length(4.0)),
-        ("helix_radius", ParamValue::Length(20.0)),
-    ]);
-    assert_eq!(instances(&migrated), instances(&helix));
-
-    // The old mirror flag becomes the mirror mode.
-    let mut old = default_params();
-    old.remove("stage1_mode");
-    old.insert("stage1_mirror".to_string(), ParamValue::Bool(true));
-    assert_eq!(migrate_params(&old).int("stage1_mode"), StageMode::Mirror.index());
-}

@@ -12,6 +12,7 @@ mod status_bar;
 mod summary;
 pub(crate) use dialog_parts::*;
 mod confirm;
+mod confirm_close;
 mod dialogs;
 mod export_bodies;
 mod export_dialog;

@@ -1,6 +1,7 @@
 mod custom;
 mod grips;
 mod kinds;
+mod migration;
 mod noise;
 mod variations;
 mod vary;

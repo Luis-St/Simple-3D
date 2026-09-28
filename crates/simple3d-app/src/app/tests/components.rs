@@ -2,12 +2,11 @@
 
 use super::*;
 use simple3d_core::keymap::Command;
-use simple3d_core::project;
 use simple3d_core::scene::{GroupOp, NodeId, ROOT_COMPONENT};
 use simple3d_geom::Vec3;
 
 /// A root component with one selected union group of two boxes.
-fn app_with_group(name: &str) -> (App, NodeId) {
+pub(super) fn app_with_group(name: &str) -> (App, NodeId) {
     let mut app = app_in(temp_config_dir(name));
     let root = app.scene.root();
     let group = app.scene.add_group(GroupOp::Union, root, 0);
@@ -23,11 +22,11 @@ fn app_with_group(name: &str) -> (App, NodeId) {
     (app, group)
 }
 
-fn bounds(app: &App) -> (Vec3, Vec3) {
+pub(super) fn bounds(app: &App) -> (Vec3, Vec3) {
     app.evaluated.bounds.expect("the model evaluated to nothing")
 }
 
-fn close(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
+pub(super) fn close(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> bool {
     (a.0 - b.0).length() < 1e-6 && (a.1 - b.1).length() < 1e-6
 }
 
@@ -114,52 +113,6 @@ pub(crate) fn a_component_cannot_be_placed_inside_itself() {
     assert_eq!(app.scene.len(), before, "the refused placement was made anyway");
 }
 
-/// Undo removes a new component and redo restores it, without asking while nothing is lost.
-#[test]
-pub(crate) fn undoing_the_making_takes_the_component_away_and_redo_brings_it_back() {
-    let (mut app, group) = app_with_group("components-undo");
-    app.run(Command::MakeComponent);
-    let component = app.scene.component_of(group).unwrap();
-
-    app.run(Command::Undo);
-    assert_eq!(app.modal, Modal::None, "an untouched component asked before it was taken away");
-    assert!(app.scene.node(group).is_group(), "the undo did not give the group back");
-    assert_eq!(app.scene.node(group).children.len(), 2);
-    assert!(app.project.get(component).is_none(), "the component outlived the undo that took it away");
-    assert!(!app.project.uses_components());
-
-    app.run(Command::Redo);
-    assert!(app.scene.node(group).is_component());
-    assert!(app.project.get(component).is_some(), "the redo did not bring the component back");
-    app.reevaluate_for_test();
-    assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-}
-
-/// Undoing a component that has been worked on asks first.
-#[test]
-pub(crate) fn undoing_the_making_of_an_edited_component_asks_first() {
-    let (mut app, group) = app_with_group("components-undo-edited");
-    app.run(Command::MakeComponent);
-    let component = app.scene.component_of(group).unwrap();
-    app.activate_component(component);
-    let root = app.scene.root();
-    app.edit("Add", None);
-    app.scene.add_primitive("sphere", root, 0).unwrap();
-    app.activate_component(ROOT_COMPONENT);
-
-    app.run(Command::Undo);
-    assert_eq!(app.modal, Modal::ConfirmComponent, "the edited component was thrown away without asking");
-    assert!(app.scene.node(group).is_component(), "the undo happened before it was answered");
-    draw_one_frame(&mut app);
-    app.cancel_component_ask();
-    assert!(app.project.get(component).is_some());
-
-    app.run(Command::Undo);
-    app.confirm_component_ask();
-    assert!(app.scene.node(group).is_group());
-    assert!(app.project.get(component).is_none());
-}
-
 /// Deleting a component removes all its integrations everywhere, after asking.
 #[test]
 pub(crate) fn deleting_a_component_removes_every_integration_of_it() {
@@ -184,80 +137,6 @@ pub(crate) fn deleting_a_component_removes_every_integration_of_it() {
     assert!(app.scene.integrations_of(wheel).is_empty(), "the integration in another component outlived it");
 }
 
-/// A project with components round-trips whole; one without keeps the old file format.
-#[test]
-pub(crate) fn a_project_with_components_saves_and_opens_whole() {
-    let dir = temp_config_dir("components-file");
-    let (mut app, group) = app_with_group("components-file-app");
-    let plain = dir.join("plain.simple3d");
-    app.save_to(&plain);
-    assert!(std::fs::read_to_string(&plain).unwrap().contains(&format!("\"format\": {}", project::PLAIN_FORMAT)));
-
-    app.run(Command::MakeComponent);
-    let component = app.scene.component_of(group).unwrap();
-    // Saving from the component's own tab must not matter.
-    app.activate_component(component);
-    assert!(app.unsaved());
-    let path = dir.join("parts.simple3d");
-    app.save_to(&path);
-    assert!(!app.unsaved(), "saving left the project marked as changed");
-    app.activate_component(ROOT_COMPONENT);
-    assert!(!app.unsaved(), "the root component was not saved with the rest");
-    app.reevaluate_for_test();
-    let before = bounds(&app);
-
-    let mut fresh = app_in(dir);
-    fresh.open_path(&path);
-    assert_eq!(fresh.project.components.len(), 2, "the component did not come back");
-    assert!(fresh.scene.node(fresh.scene.root()).children.iter().any(|&id| fresh.scene.node(id).is_component()));
-    fresh.reevaluate_for_test();
-    assert!(close(before, bounds(&fresh)), "the reopened project evaluates differently");
-    assert!(fresh.evaluated.errors.is_empty(), "{:?}", fresh.evaluated.errors);
-}
-
-/// A saved primitive placed twice gives two unlinked components (issue 113).
-#[test]
-pub(crate) fn every_placed_primitive_is_a_component_of_its_own() {
-    let (mut app, group) = app_with_group("components-primitive");
-    app.select_only(group);
-    app.save_selection_as_primitive();
-    app.confirm_save_primitive();
-    let entry = app.library[0].clone();
-
-    app.add_library_entry(&entry);
-    let first = app.scene.component_of(app.primary().unwrap()).expect("the primitive is not a component");
-    app.add_library_entry(&entry);
-    let second = app.scene.component_of(app.primary().unwrap()).expect("the primitive is not a component");
-    assert_ne!(first, second, "two placements of a primitive share one component");
-    app.reevaluate_for_test();
-    assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-
-    app.run(Command::Undo);
-    assert!(app.project.get(second).is_none());
-}
-
-/// Pasting within a project reuses the component; into another project it brings a copy.
-#[test]
-pub(crate) fn a_pasted_integration_links_here_and_copies_elsewhere() {
-    let (mut app, group) = app_with_group("components-paste");
-    app.run(Command::MakeComponent);
-    let component = app.scene.component_of(group).unwrap();
-    app.select_only(group);
-    app.run(Command::Copy);
-    app.run(Command::Paste);
-    let pasted = app.primary().unwrap();
-    assert_eq!(app.scene.component_of(pasted), Some(component), "a paste in the same project made a copy");
-
-    app.run(Command::New);
-    app.run(Command::Paste);
-    let there = app.primary().expect("nothing was pasted into the other project");
-    let copied = app.scene.component_of(there).unwrap();
-    assert!(app.project.get(copied).is_some(), "the pasted integration arrived without its component");
-    app.reevaluate_for_test();
-    assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-    assert!(app.evaluated.bounds.is_some(), "the pasted component evaluated to nothing");
-}
-
 /// The window draws with the component tab row, an integration selected, and on a component tab.
 #[test]
 pub(crate) fn the_window_draws_with_components() {
@@ -273,77 +152,6 @@ pub(crate) fn the_window_draws_with_components() {
     assert_eq!(app.project.active, ROOT_COMPONENT);
     assert_eq!(app.project.open, vec![ROOT_COMPONENT]);
     assert!(app.project.get(component).is_some(), "closing the tab deleted the component");
-}
-
-/// An undo in the root restores only its own tree, not the components it places.
-#[test]
-pub(crate) fn an_undo_keeps_the_components_as_they_are_now() {
-    let (mut app, group) = app_with_group("components-undo-current");
-    app.run(Command::MakeComponent);
-    let component = app.scene.component_of(group).unwrap();
-    app.select_only(group);
-    app.run(Command::Duplicate);
-    app.activate_component(component);
-    let root = app.scene.root();
-    app.edit("Add", None);
-    let sphere = app.scene.add_primitive("sphere", root, 2).unwrap();
-    app.scene.get_mut(sphere).unwrap().position = Vec3::new(0.0, 0.0, 200.0);
-    app.activate_component(ROOT_COMPONENT);
-
-    app.run(Command::Undo);
-    app.reevaluate_for_test();
-    assert!(bounds(&app).1.z > 150.0, "the undo brought back the component as it was before the sphere");
-    app.run(Command::Redo);
-    app.reevaluate_for_test();
-    assert!(bounds(&app).1.z > 150.0, "the redo brought back the component as it was before the sphere");
-
-    // An integration of a deleted component comes back as gone.
-    app.ask_delete_component(component);
-    app.confirm_component_ask();
-    app.run(Command::Undo);
-    app.reevaluate_for_test();
-    assert!(!app.evaluated.errors.is_empty(), "the integration of a deleted component still evaluated");
-}
-
-/// Undoing a saved primitive placement with a nested component removes both without asking;
-/// redo restores both.
-#[test]
-pub(crate) fn undoing_a_placed_primitive_takes_the_components_inside_it_too() {
-    let (mut app, group) = app_with_group("components-primitive-nested");
-    app.run(Command::MakeComponent);
-    app.select_only(group);
-    app.save_selection_as_primitive();
-    app.confirm_save_primitive();
-    let entry = app.library[0].clone();
-    app.run(Command::New);
-    app.add_library_entry(&entry);
-    assert_eq!(app.project.components.len(), 3, "the placed primitive did not bring its component along");
-    app.reevaluate_for_test();
-    let placed = bounds(&app);
-
-    app.run(Command::Undo);
-    assert_eq!(app.modal, Modal::None, "an untouched primitive asked before it was taken away");
-    assert_eq!(app.project.components.len(), 1, "the undo left components behind");
-
-    app.run(Command::Redo);
-    assert_eq!(app.project.components.len(), 3);
-    app.reevaluate_for_test();
-    assert!(app.evaluated.errors.is_empty(), "{:?}", app.evaluated.errors);
-    assert!(close(placed, bounds(&app)), "the redo did not bring the primitive back whole");
-}
-
-/// Pasting into another project brings the components in, and undo removes them.
-#[test]
-pub(crate) fn undoing_a_paste_from_another_project_takes_its_components_away() {
-    let (mut app, group) = app_with_group("components-paste-undo");
-    app.run(Command::MakeComponent);
-    app.select_only(group);
-    app.run(Command::Copy);
-    app.run(Command::New);
-    app.run(Command::Paste);
-    assert!(app.project.uses_components());
-    app.run(Command::Undo);
-    assert!(!app.project.uses_components(), "the undone paste left its component in the project");
 }
 
 /// A new component with a group selected takes that group, leaves an integration in its place,

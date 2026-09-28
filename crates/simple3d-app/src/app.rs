@@ -26,6 +26,7 @@ mod clipboard;
 mod csg;
 pub(crate) use csg::*;
 mod commands;
+mod csg_plan;
 mod export;
 mod features;
 mod features_line;
