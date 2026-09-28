@@ -136,7 +136,7 @@ pub struct App {
     /// Whether snapping is requested this frame (issue 68).
     pub(crate) snap_requested: bool,
     /// The feature the current drag is snapped onto, for the viewport to mark.
-    pub snap_indicator: Option<Vec3>,
+    pub snap_indicator: Option<crate::snap::SnapMark>,
     /// The plane's offset from the grab point while its grip is dragged (issue 71).
     pub section_grab: Option<f64>,
     /// The section and grip under the pointer, for hover feedback and travel arrows (issue 72).

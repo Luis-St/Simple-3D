@@ -1,6 +1,7 @@
 use super::axis::*;
 use super::body::*;
 use super::feature::*;
+use super::mark::*;
 use super::nearest::*;
 use super::plane::*;
 use simple3d_geom::Vec3;
@@ -190,4 +191,22 @@ fn an_axis_that_is_turned_off_or_misses_the_body_offers_nothing() {
     // A body the axes miss has no crossings.
     let away = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 100.0, 100.0));
     assert!(axis_features(&away, [true, true, true]).is_empty());
+}
+
+#[test]
+fn a_face_centre_carries_the_outline_of_its_face() {
+    // Issue 87: a caught face is shown by its outline, so each centre must name the right one.
+    let mesh = primitives::box_mesh(10.0, 10.0, 10.0);
+    let (features, faces) = features_and_faces(&mesh);
+    let top = features
+        .iter()
+        .find(|f| f.kind == FeatureKind::FaceCentre && (f.point - Vec3::new(0.0, 0.0, 5.0)).length() < 1e-6)
+        .expect("the top face centre");
+    let outline = &faces[top.face.expect("a face centre without its face") as usize];
+    assert_eq!(outline.len(), 4, "the top face is a square, not its two triangles: {outline:?}");
+    assert!(outline.iter().all(|&(a, b)| (a.z - 5.0).abs() < 1e-9 && (b.z - 5.0).abs() < 1e-9));
+
+    // Marked, a face shows its four edges and four corners, each once.
+    let mark = SnapMark::of(top.point, [(top, faces.as_slice())]);
+    assert_eq!((mark.edges.len(), mark.corners.len()), (4, 4));
 }

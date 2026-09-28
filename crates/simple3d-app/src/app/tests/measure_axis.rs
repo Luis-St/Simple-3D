@@ -79,7 +79,7 @@ pub(crate) fn an_axis_is_only_caught_where_it_is_actually_drawn() {
     let middle = (lo + hi) * 0.5;
     let (screen, _) = view.project(middle).unwrap();
     assert!(
-        app.nearest_line_point(&view, screen).is_none_or(|(_, kind, _)| kind != crate::snap::FeatureKind::Axis),
+        app.nearest_line(&view, screen).is_none_or(|(_, kind, _, _)| kind != crate::snap::FeatureKind::Axis),
         "the catch followed an axis into the middle of a body, where no line is drawn"
     );
     let inside = app.measure_point_at(&view, screen).expect("a point under the cursor");

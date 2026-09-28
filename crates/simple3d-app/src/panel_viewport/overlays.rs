@@ -31,16 +31,9 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // The 3D cursor, where the next shape would land.
     draw_cursor(app, &painter, view);
 
-    // A snapped feature (issue 68): a hollow accent square on the caught point.
-    if let Some(at) = app.snap_indicator {
-        if let Some((screen, _)) = view.project(at) {
-            painter.rect_stroke(
-                egui::Rect::from_center_size(screen, egui::Vec2::splat(11.0)),
-                1.0,
-                egui::Stroke::new(1.5_f32, token::ACCENT),
-                egui::StrokeKind::Middle,
-            );
-        }
+    // A snapped feature (issue 68), with the edges and corners of what it caught (issue 87).
+    if let Some(mark) = &app.snap_indicator {
+        draw_snap_mark(&painter, view, mark, token::ACCENT);
     }
 
     // Pattern lay-out grips (issue 67).
@@ -160,4 +153,27 @@ pub(crate) fn draw_gizmo(
         }
     }
     painter.circle_filled(origin, 3.0, ui.visuals().strong_text_color());
+}
+
+/// What a snap caught: its edges as lines, its corners as small squares, and the point it landed on
+/// as a hollow square (issue 87).
+pub(crate) fn draw_snap_mark(painter: &egui::Painter, view: &View, mark: &crate::snap::SnapMark, colour: egui::Color32) {
+    for &(a, b) in &mark.edges {
+        if let (Some((a, _)), Some((b, _))) = (view.project(a), view.project(b)) {
+            painter.line_segment([a, b], egui::Stroke::new(2.0_f32, colour.gamma_multiply(0.8)));
+        }
+    }
+    for &corner in &mark.corners {
+        if let Some((screen, _)) = view.project(corner) {
+            painter.rect_filled(egui::Rect::from_center_size(screen, egui::Vec2::splat(6.0)), 1.0, colour);
+        }
+    }
+    if let Some((screen, _)) = view.project(mark.at) {
+        painter.rect_stroke(
+            egui::Rect::from_center_size(screen, egui::Vec2::splat(11.0)),
+            1.0,
+            egui::Stroke::new(1.5_f32, colour),
+            egui::StrokeKind::Middle,
+        );
+    }
 }

@@ -5,8 +5,8 @@ use super::{resident, TABLES_COMMON};
 /// A selected body's outline, found on the card (`push_selection`), one edge per point.
 ///
 /// The geometry stage looks up the edge's two triangles and draws it where the surface turns
-/// away across it, or at a corner facing the camera. Silhouette edges are drawn again one pixel
-/// outwards so they form a line rather than dots.
+/// away across it, or at a corner facing the camera. Every edge is drawn twice, one whole pixel
+/// apart across its minor axis, so each is an unbroken band two pixels wide (issue 99).
 pub(crate) const OUTLINE_VERTEX: &str = r#"#version 330 core
 layout(location = 0) in uvec4 in_edge;
 
@@ -35,6 +35,10 @@ uniform float u_crease;
 uniform int u_all_creases;
 uniform vec4 u_colour;
 uniform float u_bias;
+// How many pixels of a face's depth slope the line is pulled forward by, and the most that may
+// add as a fraction of its depth (`SELECTION_SLOPE_PIXELS`, `SELECTION_SLOPE_CAP`).
+uniform float u_slope_pixels;
+uniform float u_slope_cap;
 uniform uint u_tag_base;
 uniform vec4 u_clip;
 
@@ -46,7 +50,7 @@ out vec3 v_world;
 vec3 world_a;
 vec3 world_b;
 
-void face(uint index, out vec3 normal, out vec3 centre) {
+void face(uint index, out vec3 normal, out vec3 centre, out float slope) {
     uvec3 corners = texelFetch(u_triangles, cell(index), 0).xyz;
     vec3 a = position(corners.x);
     vec3 b = position(corners.y);
@@ -55,6 +59,16 @@ void face(uint index, out vec3 normal, out vec3 centre) {
     float length_ = length(n);
     normal = length_ > 0.0 ? n / length_ : vec3(0.0);
     centre = (a + b + c) / 3.0;
+    // How fast the face's depth key changes per pixel; nearly edge-on faces change fastest.
+    vec3 pa = project(a);
+    vec3 pb = project(b);
+    vec3 pc = project(c);
+    vec2 e1 = pb.xy - pa.xy;
+    vec2 e2 = pc.xy - pa.xy;
+    float det = e1.x * e2.y - e2.x * e1.y;
+    float k1 = pb.z - pa.z;
+    float k2 = pc.z - pa.z;
+    slope = abs(det) > 1e-6 ? length(vec2(k1 * e2.y - k2 * e1.y, e1.x * k2 - e2.x * k1) / det) : 1e30;
 }
 
 void line(vec3 a, vec3 b, float clip_a, float clip_b, vec2 shift, float bias, uint tag) {
@@ -79,8 +93,9 @@ void main() {
         return;
     }
     vec3 near_normal, near_centre, far_normal, far_centre;
-    face(edge.z, near_normal, near_centre);
-    face(edge.w, far_normal, far_centre);
+    float near_slope, far_slope;
+    face(edge.z, near_normal, near_centre, near_slope);
+    face(edge.w, far_normal, far_centre, far_slope);
     bool near_faces = dot(near_normal, u_forward) < -u_edge_on;
     bool far_faces = dot(far_normal, u_forward) < -u_edge_on;
 
@@ -90,27 +105,39 @@ void main() {
     world_b = b;
     vec3 sa = project(a);
     vec3 sb = project(b);
-    float bias = u_bias * (abs(sa.z) + abs(sb.z)) * 0.5;
+    float scale = (abs(sa.z) + abs(sb.z)) * 0.5;
+    // Pulled forward by the slope of the faces it borders that are drawn, so a pixel of the line
+    // landing on a steep face beside it is not hidden by that face (issue 99).
+    float steepest = max(near_faces ? near_slope : 0.0, far_faces ? far_slope : 0.0);
+    float bias = u_bias * scale + min(steepest * u_slope_pixels, u_slope_cap * scale);
     float clip_a = dot(u_clip.xyz, a) + u_clip.w;
     float clip_b = dot(u_clip.xyz, b) + u_clip.w;
     uint tag = min(u_tag_base + texelFetch(u_bodies, cell(edge.x), 0).r + 1u, 65535u);
 
-    if (edge.z == edge.w || near_faces != far_faces) {
-        line(sa, sb, clip_a, clip_b, vec2(0.0), bias, tag);
-        // One pixel out of the shape: perpendicular to the edge, away from the face centre.
-        vec2 along = sb.xy - sa.xy;
-        vec2 normal = vec2(-along.y, along.x);
-        if (length(normal) < 1e-6) {
-            return;
-        }
-        normal = normalize(normal);
+    bool silhouette = edge.z == edge.w || near_faces != far_faces;
+    bool crease = (u_all_creases == 1 || near_faces) && dot(near_normal, far_normal) < u_crease;
+    if (!silhouette && !crease) {
+        return;
+    }
+    line(sa, sb, clip_a, clip_b, vec2(0.0), bias, tag);
+    // The second copy is a whole pixel over across the minor axis: a unit perpendicular shift left
+    // holes along diagonals and made some edges look thicker than others (issue 99).
+    vec2 along = sb.xy - sa.xy;
+    if (length(along) < 1e-6) {
+        return;
+    }
+    vec2 across = abs(along.x) >= abs(along.y) ? vec2(0.0, 1.0) : vec2(1.0, 0.0);
+    if (silhouette) {
+        // Out of the shape, away from the face centre, since the face beside it is nearly edge-on.
+        // The side is judged across the edge's own direction: against the minor axis alone, a
+        // slanted edge's centre could fall on the wrong side of an end and hide both copies.
         vec3 inside = near_faces ? near_centre : far_centre;
         vec2 inward = project(inside).xy - sa.xy;
+        vec2 normal = vec2(-along.y, along.x);
         vec2 out_ = dot(normal, inward) > 0.0 ? -normal : normal;
-        line(sa, sb, clip_a, clip_b, out_, bias, tag);
-    } else if ((u_all_creases == 1 || near_faces) && dot(near_normal, far_normal) < u_crease) {
-        line(sa, sb, clip_a, clip_b, vec2(0.0), bias, tag);
+        across = dot(across, out_) < 0.0 ? -across : across;
     }
+    line(sa, sb, clip_a, clip_b, across, bias, tag);
 }
 "#
     ))

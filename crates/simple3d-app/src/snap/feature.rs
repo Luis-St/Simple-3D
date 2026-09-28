@@ -35,22 +35,30 @@ impl FeatureKind {
 }
 
 /// One catchable point on a body in world space. An edge feature also carries its ends, so it can
-/// be caught anywhere along it (issue 78).
+/// be caught anywhere along it (issue 78); a face centre names its face's outline, so a snap can
+/// show the face it caught (issue 87).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Feature {
     pub point: Vec3,
     pub kind: FeatureKind,
     pub span: Option<(Vec3, Vec3)>,
+    /// Index into the body's face outlines ([`super::features_and_faces`]).
+    pub face: Option<u32>,
 }
 
 impl Feature {
     /// A feature that is only a point.
     pub fn point(point: Vec3, kind: FeatureKind) -> Feature {
-        Feature { point, kind, span: None }
+        Feature { point, kind, span: None, face: None }
     }
 
     /// An edge, reported at its midpoint and carrying its two ends.
     pub fn edge(a: Vec3, b: Vec3) -> Feature {
-        Feature { point: (a + b) * 0.5, kind: FeatureKind::EdgeMidpoint, span: Some((a, b)) }
+        Feature { point: (a + b) * 0.5, kind: FeatureKind::EdgeMidpoint, span: Some((a, b)), face: None }
+    }
+
+    /// A flat face's centre, with the index of its outline.
+    pub fn face_centre(point: Vec3, face: u32) -> Feature {
+        Feature { point, kind: FeatureKind::FaceCentre, span: None, face: Some(face) }
     }
 }

@@ -33,7 +33,8 @@ pub(crate) fn a_smooth_solid_is_outlined_and_a_creased_one_is_not_scribbled_over
 #[test]
 pub(crate) fn the_selection_outline_goes_all_the_way_round() {
     // Silhouettes need a second pass one pixel out, since depth tests fail at the rim (a single pass
-    // left 17 of 180 sectors empty). Checked sector by sector, since a dotted rim barely changes the
+    // left 17 of 180 sectors empty). Which side is out is judged across the edge: against the shift's
+    // axis alone, the bottom of the rim went bare at bearing 92 (issue 99). Checked sector by sector, since a dotted rim barely changes the
     // pixel count. The frame is large enough for two-degree sectors to be meaningful.
     fn wide<'a>(items: Vec<Item<'a>>) -> Request<'a> {
         Request {

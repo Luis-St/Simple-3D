@@ -10,23 +10,37 @@ impl App {
     /// nearest line, else the surface under the pointer, else the ground; `None` on empty sky.
     /// Exact points win whenever in reach, so aiming at a corner never lands on its edge (issue 78).
     pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
+        self.measure_catch(view, cursor).map(|(point, _)| point)
+    }
+
+    /// [`App::measure_point_at`], with the mark of the vertex, edge or face it caught (issue 87).
+    pub fn measure_catch(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+    ) -> Option<(MeasurePoint, Option<crate::snap::SnapMark>)> {
         // Only what the picture shows can be caught; hidden corners and edges otherwise projected into
         // the face in front of them and snapped out of nowhere.
         let shown = |feature: &crate::snap::Feature, _: &std::sync::Arc<Mesh>| self.shows(view, feature.point);
-        if let Some((feature, _)) = self.nearest_feature_where(view, cursor, &[], shown) {
-            return Some(MeasurePoint { at: feature.point, kind: Some(feature.kind) });
+        if let Some((feature, _, node)) = self.nearest_feature_where(view, cursor, &[], shown) {
+            let point = MeasurePoint { at: feature.point, kind: Some(feature.kind) };
+            return Some((point, Some(self.snap_mark(node, &feature, &[]))));
         }
-        if let Some((at, kind, _)) = self.nearest_line_point(view, cursor) {
-            return Some(MeasurePoint { at, kind: Some(kind) });
+        if let Some((at, kind, _, (a, b))) = self.nearest_line(view, cursor) {
+            // A body edge is shown whole; axes and plane marks are drawn lines already.
+            let edge = crate::snap::Feature::edge(a, b);
+            let mark = (kind == crate::snap::FeatureKind::Edge).then(|| crate::snap::SnapMark::of(at, [(&edge, &[][..])]));
+            return Some((MeasurePoint { at, kind: Some(kind) }, mark));
         }
         if let Some(at) = self.surface_under(view, cursor) {
-            return Some(MeasurePoint { at, kind: None });
+            return Some((MeasurePoint { at, kind: None }, None));
         }
-        view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)).map(|at| MeasurePoint { at, kind: None })
+        let ground = view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))?;
+        Some((MeasurePoint { at: ground, kind: None }, None))
     }
 
-    /// The nearest snap feature of a shown body within the catch radius, for measuring and drag
-    /// snapping; `exclude` drops the bodies being dragged.
+    /// The nearest snap feature of a shown body within the catch radius, with its distance and body,
+    /// for measuring and drag snapping; `exclude` drops the bodies being dragged.
     ///
     /// Only features facing the camera. A drag checks against the target's own body only, since the
     /// scene lags a frame and the dragged body would cover what it is aimed at.
@@ -35,7 +49,7 @@ impl App {
         view: &crate::view::View,
         cursor: egui::Pos2,
         exclude: &[NodeId],
-    ) -> Option<(crate::snap::Feature, f32)> {
+    ) -> Option<(crate::snap::Feature, f32, NodeId)> {
         self.nearest_feature_where(view, cursor, exclude, |feature, mesh| self.faces_the_camera(view, feature, mesh))
     }
 
@@ -67,7 +81,7 @@ impl App {
         cursor: egui::Pos2,
         exclude: &[NodeId],
         accept: impl Fn(&crate::snap::Feature, &std::sync::Arc<Mesh>) -> bool,
-    ) -> Option<(crate::snap::Feature, f32)> {
+    ) -> Option<(crate::snap::Feature, f32, NodeId)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
         let mut near: Vec<(crate::snap::Feature, f32, NodeId)> = Vec::new();
         for (&id, mesh) in &self.evaluated.node_meshes {
@@ -81,7 +95,6 @@ impl App {
         near.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         near.into_iter()
             .find(|(feature, _, id)| self.evaluated.node_meshes.get(id).is_some_and(|mesh| accept(feature, mesh)))
-            .map(|(feature, distance, _)| (feature, distance))
     }
 
     /// Whether nothing solid stands between the eye and a point; a point inside a body fails too.

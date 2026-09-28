@@ -59,11 +59,12 @@ pub(crate) fn the_creases_facing_the_camera_are_part_of_the_selection() {
     );
 
     // Near and far edges project too close to test by pixel, so lines are counted: six silhouette
-    // edges drawn twice plus three near creases; eighteen would mean the far ones were drawn.
+    // edges and three near creases, each drawn twice (issue 99); twenty-four would mean the far ones
+    // were drawn.
     assert!(near.0.abs_diff(far.0) < 8, "the two corners are far enough apart to test by eye after all");
     let lines =
         prepare(&req).iter().filter(|step| matches!(step, Step::Line { colour, .. } if *colour == accent)).count();
-    assert_eq!(lines, 6 * 2 + 3, "the highlight is {lines} lines, not six silhouette edges and three creases");
+    assert_eq!(lines, (6 + 3) * 2, "the highlight is {lines} lines, not six silhouette edges and three creases");
 }
 
 /// A selected round shape shows its contours and nothing across them (issue 89).

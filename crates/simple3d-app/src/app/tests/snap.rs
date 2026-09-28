@@ -114,3 +114,29 @@ pub(crate) fn an_evaluation_has_its_snap_targets_found_in_the_background() {
     app.warm_snaps();
     assert!(app.snap_warming.is_none());
 }
+
+#[test]
+pub(crate) fn a_snap_marks_the_whole_face_two_bodies_meet_on() {
+    // Issue 87: box A flush against B's -X face used to mark one corner; the four corners and edges
+    // of that face are what meets.
+    let (mut app, a, b) = two_boxes("snap-mark", Vec3::new(43.0, 0.0, 0.0));
+    app.scene.get_mut(a).unwrap().position = Vec3::new(23.0, 0.0, 0.0);
+    app.reevaluate_for_test();
+    let moved: Vec<Vec3> = crate::snap::features_of(&app.evaluated.node_meshes[&a]).iter().map(|f| f.point).collect();
+    let (lo, hi) = app.evaluated.node_meshes[&b].bounds().unwrap();
+    let target = crate::snap::Feature::point(Vec3::new(lo.x, lo.y, hi.z), crate::snap::FeatureKind::Vertex);
+
+    let mark = app.snap_mark(b, &target, &moved);
+    assert_eq!(mark.corners.len(), 4, "the face met has four corners: {:?}", mark.corners);
+    assert_eq!(mark.edges.len(), 4, "the face met has four edges: {:?}", mark.edges);
+    let on_face = |p: Vec3| (p.x - lo.x).abs() < 1e-6;
+    assert!(mark.corners.iter().all(|&p| on_face(p)), "a corner off the face met: {:?}", mark.corners);
+    assert!(mark.edges.iter().all(|&(p, q)| on_face(p) && on_face(q)), "an edge off the face met: {:?}", mark.edges);
+
+    // Apart, only the corner caught is marked.
+    app.scene.get_mut(a).unwrap().position = Vec3::ZERO;
+    app.reevaluate_for_test();
+    let moved: Vec<Vec3> = crate::snap::features_of(&app.evaluated.node_meshes[&a]).iter().map(|f| f.point).collect();
+    let mark = app.snap_mark(b, &target, &moved);
+    assert_eq!((mark.corners, mark.edges.len()), (vec![target.point], 0));
+}

@@ -63,7 +63,7 @@ pub(crate) fn a_snapped_drag_never_catches_a_feature_round_the_back_of_its_own_b
     // Pointing at a hidden corner catches something else or nothing, never it.
     for point in hidden {
         let cursor = view.project(point).unwrap().0;
-        if let Some((caught, _)) = app.nearest_feature_excluding(&view, cursor, &[a]) {
+        if let Some((caught, _, _)) = app.nearest_feature_excluding(&view, cursor, &[a]) {
             assert!(
                 (caught.point - point).length() > 1e-6,
                 "a drag caught {point:?}, which is round the back of the body"

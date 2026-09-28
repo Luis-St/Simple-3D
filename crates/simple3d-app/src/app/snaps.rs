@@ -11,6 +11,8 @@ use simple3d_geom::Vec3;
 pub struct BodySnaps {
     pub features: Vec<crate::snap::Feature>,
     pub marks: Vec<(Vec3, Vec3)>,
+    /// Each flat face's outline, indexed by a face centre's [`crate::snap::Feature::face`].
+    pub faces: Vec<Vec<(Vec3, Vec3)>>,
 }
 
 /// One body's snap targets, shared out of the cache without copying.
@@ -23,10 +25,10 @@ pub(crate) type CachedSnaps = ((usize, u8), Snaps);
 /// Everything `mesh` offers a snap: its features, shown world axis crossings (issue 78), and
 /// principal plane marks.
 pub(crate) fn find_snaps(mesh: &simple3d_geom::Mesh, axes: [bool; 3], marked: bool) -> BodySnaps {
-    let mut features = crate::snap::features_of(mesh);
+    let (mut features, faces) = crate::snap::features_and_faces(mesh);
     features.extend(crate::snap::axis_features(mesh, axes));
     let marks = if marked { crate::snap::plane_mark_lines(mesh, axes) } else { Vec::new() };
-    BodySnaps { features, marks }
+    BodySnaps { features, marks, faces }
 }
 
 /// Snap targets being found off-thread for newly evaluated meshes (`App::warm_snaps`).
@@ -145,7 +147,7 @@ impl App {
     }
 
     /// Snap a resize so the pulled face lands on the nearest feature under the pointer (issue 68).
-    /// Returns the caught point, or `None` to keep the grid resize. Face handles only, since a corner
+    /// Returns what was caught, or `None` to keep the grid resize. Face handles only, since a corner
     /// moves three faces.
     pub(super) fn apply_resize_snap(
         &mut self,
@@ -153,13 +155,14 @@ impl App {
         view: &crate::view::View,
         cursor: egui::Pos2,
         mods: gizmo::Mods,
-    ) -> Option<(Vec3, f64)> {
+    ) -> Option<(crate::snap::SnapMark, f64)> {
         let exclude = self.drag_subtree(id);
-        let (target, _) = self.nearest_feature_excluding(view, cursor, &exclude)?;
+        let (target, _, node) = self.nearest_feature_excluding(view, cursor, &exclude)?;
         // Taken out and put back so the drag can write the scene the app owns.
         let mut drag = self.drag.take()?;
         let applied = drag.resize_face_to(&mut self.scene, target.point, mods.symmetric);
         self.drag = Some(drag);
-        applied.map(|extent| (target.point, extent))
+        let extent = applied?;
+        Some((self.snap_mark(node, &target, &[]), extent))
     }
 }

@@ -68,8 +68,11 @@ pub(crate) fn selection_coverage_of(item: &Renderable) -> (usize, usize) {
                 continue;
             }
             drawn += 1;
-            let middling = (x as f32 - frame.width as f32 / 2.0).abs() < frame.width as f32 / 8.0
-                && (y as f32 - frame.height as f32 / 2.0).abs() < frame.height as f32 / 8.0;
+            // An ellipse, not the box around it: the box's corners reach a 40 mm sphere's rim, which
+            // a two-pixel outline (issue 99) then touches without crossing the body.
+            let dx = (x as f32 - frame.width as f32 / 2.0) / (frame.width as f32 / 8.0);
+            let dy = (y as f32 - frame.height as f32 / 2.0) / (frame.height as f32 / 8.0);
+            let middling = dx * dx + dy * dy < 1.0;
             if middling {
                 middle += 1;
             }

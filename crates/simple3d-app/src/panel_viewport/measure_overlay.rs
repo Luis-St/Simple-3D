@@ -42,8 +42,12 @@ pub(crate) fn draw_measure(app: &App, ui: &egui::Ui, painter: &egui::Painter, vi
     if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
         // Only over the viewport itself.
         if painter.clip_rect().contains(cursor) {
-            if let Some(hover) = app.measure_point_at(view, cursor) {
-                mark(hover.at, hover.kind.is_some());
+            if let Some((hover, caught)) = app.measure_catch(view, cursor) {
+                match &caught {
+                    // The whole vertex, edge or face caught, not just the point (issue 87).
+                    Some(caught) => super::overlays::draw_snap_mark(painter, view, caught, colour),
+                    None => mark(hover.at, hover.kind.is_some()),
+                }
                 // Name the caught feature, so a snap is legible.
                 if let (Some(kind), Some((screen, _))) = (hover.kind, view.project(hover.at)) {
                     painter.text(

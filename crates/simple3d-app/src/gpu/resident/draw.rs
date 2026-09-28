@@ -111,6 +111,8 @@ impl Gpu {
         set_f32(gl, program, "u_edge_on", EDGE_ON as f32);
         set_f32(gl, program, "u_crease", SELECTION_CREASE.to_radians().cos() as f32);
         set_f32(gl, program, "u_bias", SELECTION_BIAS);
+        set_f32(gl, program, "u_slope_pixels", SELECTION_SLOPE_PIXELS);
+        set_f32(gl, program, "u_slope_cap", SELECTION_SLOPE_CAP);
         for (unit, name) in ["u_positions", "u_triangles", "u_bodies"].into_iter().enumerate() {
             set_i32(gl, program, name, unit as i32);
         }

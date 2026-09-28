@@ -8,18 +8,19 @@ use simple3d_geom::Vec3;
 impl App {
     /// The point on the nearest line (a body edge, a plane mark, or a world axis) for a pointer near
     /// one but not near a notable point on it (issue 78). Edges come from the feature list; axes and
-    /// plane marks are measurable lines in their own right.
-    pub fn nearest_line_point(
+    /// plane marks are measurable lines in their own right. Also returns the line, so a caught
+    /// edge can be shown whole (issue 87).
+    pub(super) fn nearest_line(
         &self,
         view: &crate::view::View,
         cursor: egui::Pos2,
-    ) -> Option<(Vec3, crate::snap::FeatureKind, f32)> {
+    ) -> Option<(Vec3, crate::snap::FeatureKind, f32, (Vec3, Vec3))> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut near: Vec<(Vec3, crate::snap::FeatureKind, f32)> = Vec::new();
+        let mut near: Vec<(Vec3, crate::snap::FeatureKind, f32, (Vec3, Vec3))> = Vec::new();
         let mut consider = |a: Vec3, b: Vec3, kind: crate::snap::FeatureKind| {
             if let Some((at, distance)) = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
             {
-                near.push((at, kind, distance));
+                near.push((at, kind, distance, (a, b)));
             }
         };
         for (&id, mesh) in &self.evaluated.node_meshes {
@@ -45,7 +46,7 @@ impl App {
         // Nearest first, and the nearest visible one wins; hidden edges, marks and axis stretches once
         // made the tool jump to lines inside the object.
         near.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-        near.into_iter().find(|&(at, kind, _)| match kind {
+        near.into_iter().find(|&(at, kind, _, _)| match kind {
             // Axes keep their own visibility test in every mode, since their stretch inside a body is cut
             // out even in wireframe.
             crate::snap::FeatureKind::Axis => self.in_clear_view(view, at),

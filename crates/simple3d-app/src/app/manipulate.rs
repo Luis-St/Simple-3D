@@ -91,9 +91,10 @@ impl App {
                 // angle or a corner has no single feature to land on.
                 if self.snap_requested && matches!(handle, Handle::ResizeFace(..)) {
                     let caught = self.apply_resize_snap(id, view, cursor, mods);
-                    self.snap_indicator = caught.map(|(at, _)| at);
+                    let extent = caught.as_ref().map(|&(_, extent)| extent);
+                    self.snap_indicator = caught.map(|(mark, _)| mark);
                     // The grid resize's readout describes the extent the snap just overrode.
-                    if let (Some((_, extent)), Handle::ResizeFace(axis, _)) = (caught, handle) {
+                    if let (Some(extent), Handle::ResizeFace(axis, _)) = (extent, handle) {
                         let unit = self.scene.settings.unit;
                         if let Some(drag) = self.drag.as_mut() {
                             drag.readout = format!(

@@ -7,7 +7,11 @@
 mod feature;
 pub use feature::{Feature, FeatureKind};
 mod body;
+pub use body::features_and_faces;
+#[cfg(test)]
 pub use body::features_of;
+mod mark;
+pub use mark::{point_key, SnapMark};
 mod axis;
 pub use axis::{axis_features, axis_lines};
 mod plane;

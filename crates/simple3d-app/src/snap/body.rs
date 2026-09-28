@@ -7,11 +7,17 @@ use std::collections::HashMap;
 /// Every snap feature of a mesh, vertices then edge midpoints then face centres, so index
 /// tie-breaks prefer exact kinds. Welded first; only crease or boundary edges count (not diagonals
 /// within a flat face), only vertices they touch are corners, and each flat face reports one centre.
+#[cfg(test)]
 pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
+    features_and_faces(mesh).0
+}
+
+/// [`features_of`], with each flat face's outline, which its centre's [`Feature::face`] indexes.
+pub fn features_and_faces(mesh: &Mesh) -> (Vec<Feature>, Vec<Vec<(Vec3, Vec3)>>) {
     let welded = mesh.weld();
     let n = welded.indices.len();
     if n == 0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let normals: Vec<Vec3> = welded.indices.iter().map(|&t| welded.triangle_normal(t)).collect();
 
@@ -72,11 +78,27 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
         entry.0 = entry.0 + centroid * area;
         entry.1 += area;
     }
-    let mut centres: Vec<Feature> = sums
-        .values()
-        .filter(|(_, area)| *area > 1e-9)
-        .map(|(sum, area)| Feature::point(*sum * (1.0 / area), FeatureKind::FaceCentre))
-        .collect();
+    let mut centres: Vec<Feature> = Vec::new();
+    let mut face_of_root: HashMap<usize, usize> = HashMap::new();
+    for (&root, (sum, area)) in &sums {
+        if *area > 1e-9 {
+            face_of_root.insert(root, centres.len());
+            centres.push(Feature::face_centre(*sum * (1.0 / area), centres.len() as u32));
+        }
+    }
+    // Each face's outline: the real edges its triangles have.
+    let mut faces: Vec<Vec<(Vec3, Vec3)>> = vec![Vec::new(); centres.len()];
+    for (&(a, b), tris) in &edge_tris {
+        if interior(tris) {
+            continue;
+        }
+        let ends = (welded.positions[a as usize], welded.positions[b as usize]);
+        for &tri in tris {
+            if let Some(&face) = face_of_root.get(&find(&mut parent, tri)) {
+                faces[face].push(ends);
+            }
+        }
+    }
 
     // Deterministic order within each kind, so ties break the same way every run.
     let by_point = |a: &Feature, b: &Feature| {
@@ -91,5 +113,5 @@ pub fn features_of(mesh: &Mesh) -> Vec<Feature> {
     let mut out = vertices;
     out.append(&mut features);
     out.append(&mut centres);
-    out
+    (out, faces)
 }
