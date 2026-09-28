@@ -51,6 +51,8 @@ in vec3 v_pos;
 
 uniform sampler2D u_previous;
 uniform int u_first;
+// `ON_LAYER`: a face this near the previous layer lies on it and was resolved with it.
+uniform float u_on;
 // Pixels already resolved, and the rest of the scene's depth: a layer behind it is never seen.
 uniform sampler2D u_done;
 uniform sampler2D u_scene_depth;
@@ -76,7 +78,7 @@ void main() {
     if (texelFetch(u_done, pixel, 0).r > 0.5 / 255.0 || gl_FragCoord.z >= texelFetch(u_scene_depth, pixel, 0).r) {
         discard;
     }
-    if (u_first == 0 && gl_FragCoord.z <= texelFetch(u_previous, pixel, 0).r) {
+    if (u_first == 0 && gl_FragCoord.z <= texelFetch(u_previous, pixel, 0).r + u_on) {
         discard;
     }
     vec3 normal = cross(dFdx(v_pos), dFdy(v_pos));
@@ -114,9 +116,14 @@ void main() {
 }
 "#;
 
-/// The boolean preview's counting pass: each face of one shape in front of the layer adds one
-/// to that shape's channel; an odd count means inside.
+/// The boolean preview's counting pass: each face of one shape clearly in front of the layer adds
+/// one to that shape's channel, an odd count meaning inside, and each face on the layer adds 64,
+/// so bit 6 says the shape has a face there (`ON_LAYER`). Up to 63 faces in front and three on it
+/// fit a byte without carrying.
 pub(crate) const CSG_COUNT_FRAGMENT: &str = r#"#version 330 core
+uniform sampler2D u_layer;
+uniform float u_on;
+
 layout(location = 0) out vec4 out_0;
 layout(location = 1) out vec4 out_1;
 layout(location = 2) out vec4 out_2;
@@ -127,7 +134,12 @@ layout(location = 6) out vec4 out_6;
 layout(location = 7) out vec4 out_7;
 
 void main() {
-    vec4 one = vec4(1.0 / 255.0);
+    float layer = texelFetch(u_layer, ivec2(gl_FragCoord.xy), 0).r;
+    float depth = gl_FragCoord.z;
+    if (depth > layer + u_on) {
+        discard;
+    }
+    vec4 one = vec4((depth < layer - u_on ? 1.0 : 64.0) / 255.0);
     out_0 = one;
     out_1 = one;
     out_2 = one;
@@ -139,8 +151,8 @@ void main() {
 }
 "#;
 
-/// The boolean preview's packing pass: up to 32 shapes' counts packed as inside bits into the
-/// group's channel of the resolve mask.
+/// The boolean preview's packing pass: up to 32 shapes' counts packed as inside bits, and as bits
+/// for a face on the layer, into the group's channel of the resolve masks.
 pub(crate) const CSG_PACK_FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D u_count_0;
 uniform sampler2D u_count_1;
@@ -153,6 +165,7 @@ uniform sampler2D u_count_7;
 uniform int u_shapes;
 
 layout(location = 0) out uvec4 out_inside;
+layout(location = 1) out uvec4 out_on;
 
 void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
@@ -166,13 +179,18 @@ void main() {
     counts[6] = texelFetch(u_count_6, at, 0);
     counts[7] = texelFetch(u_count_7, at, 0);
     uint inside = 0u;
+    uint on = 0u;
     for (int j = 0; j < u_shapes; j++) {
         uint crossings = uint(round(counts[j / 4][j % 4] * 255.0));
         if ((crossings & 1u) == 1u) {
             inside |= 1u << uint(j);
         }
+        if (((crossings >> 6) & 1u) == 1u) {
+            on |= 1u << uint(j);
+        }
     }
     out_inside = uvec4(inside);
+    out_on = uvec4(on);
 }
 "#;
 
@@ -182,8 +200,9 @@ pub(crate) const CSG_RESOLVE_FRAGMENT: &str = r#"#version 330 core
 uniform sampler2D u_layer;
 uniform usampler2D u_leaf;
 uniform sampler2D u_colour;
-// Which shapes the layer's point is inside, a bit each.
+// Which shapes the point just in front of the layer is inside, and which have a face on it.
 uniform usampler2D u_inside;
+uniform usampler2D u_on;
 // The expression in postfix: a leaf by its index, -1 union, -2 difference, -3 intersection.
 uniform int u_program[256];
 uniform int u_length;
@@ -222,9 +241,11 @@ void main() {
     uvec4 inside = texelFetch(u_inside, at, 0);
     uint word = texelFetch(u_leaf, at, 0).r;
     uint leaf = word & 255u;
-    uvec4 flipped = inside;
-    flipped[leaf / 32u] ^= 1u << (leaf % 32u);
-    if (evaluate(inside) == evaluate(flipped)) {
+    // The point is on the result's surface where the result differs just in front and just behind:
+    // every shape with a face there flips, so two shapes sharing a face agree whichever was peeled.
+    uvec4 on = texelFetch(u_on, at, 0);
+    on[leaf / 32u] |= 1u << (leaf % 32u);
+    if (evaluate(inside) == evaluate(inside ^ on)) {
         discard;
     }
     out_colour = texelFetch(u_colour, at, 0);

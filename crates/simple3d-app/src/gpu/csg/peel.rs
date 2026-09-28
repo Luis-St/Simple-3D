@@ -75,6 +75,7 @@ impl Gpu {
             set2(gl, peel, "u_depth", depth);
             set_forward(gl, peel, view);
             set_i32(gl, peel, "u_first", (layer == 0) as i32);
+            set_f32(gl, peel, "u_on", ON_LAYER);
             set_i32(gl, peel, "u_table_width", self.table_width as i32);
             set_i32(gl, peel, "u_paint", 0);
             set_i32(gl, peel, "u_previous", 1);
@@ -127,12 +128,15 @@ impl Gpu {
                 break;
             }
 
-            // Which shapes the layer's point is inside, 32 at a time: counts per channel, then packed into bits.
+            // Which shapes the layer's point is inside and which have a face on it, 32 at a time:
+            // counts per channel, then packed into bits.
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.pack));
+            gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::COLOR_ATTACHMENT1]);
             gl.clear_buffer_u32_slice(glow::COLOR, 0, &[0; 4]);
+            gl.clear_buffer_u32_slice(glow::COLOR, 1, &[0; 4]);
             for (group, shapes) in drawn.chunks(32).enumerate() {
                 let textures_used = shapes.len().div_ceil(4);
-                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.count[now]));
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(targets.count));
                 let buffers: Vec<u32> =
                     (0..textures_used as u32).map(|index| glow::COLOR_ATTACHMENT0 + index).collect();
                 gl.draw_buffers(&buffers);
@@ -142,10 +146,17 @@ impl Gpu {
                 gl.depth_mask(false);
                 gl.enable(glow::BLEND);
                 gl.blend_func(glow::ONE, glow::ONE);
+                // Against the layer's depth in the shader, not a depth test, so a face on the layer
+                // is told apart from one in front.
+                gl.disable(glow::DEPTH_TEST);
                 let count = &self.csg_count;
                 gl.use_program(Some(count.program));
                 set2(gl, count, "u_viewport", viewport);
                 set2(gl, count, "u_depth", depth);
+                set_f32(gl, count, "u_on", ON_LAYER);
+                set_i32(gl, count, "u_layer", 0);
+                gl.active_texture(glow::TEXTURE0);
+                gl.bind_texture(glow::TEXTURE_2D, Some(targets.depth[now]));
                 for (index, (resident, placing)) in shapes.iter().enumerate() {
                     let Some(faces) = &resident.faces else { continue };
                     for texture in 0..textures_used {
@@ -199,6 +210,7 @@ impl Gpu {
                 ("u_leaf", targets.leaf),
                 ("u_colour", targets.colour),
                 ("u_inside", targets.inside),
+                ("u_on", targets.on),
             ];
             for (unit, (name, texture)) in textures.into_iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);

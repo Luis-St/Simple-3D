@@ -8,8 +8,8 @@
 //!
 //! A section is one more shape: the kept half-space as a box, intersected with the whole.
 //!
-//! Shapes must be closed, and coplanar faces of two shapes resolve to either one: this is only a
-//! preview, and the real evaluation happens on release.
+//! Shapes must be closed. Faces two shapes share lie on the layer together (`ON_LAYER`) and flip
+//! together, so equal boxes cut cleanly; the real evaluation still happens on release.
 
 use super::*;
 use crate::render::{CsgPreview, Renderable, Request};
@@ -31,6 +31,11 @@ pub(crate) const MAX_SHAPES: usize = 128;
 /// The fewest layers a frame peels when not querying as it goes.
 const MIN_LAYERS: usize = 4;
 
+/// How near in depth a face must be to a layer to lie on it rather than in front or behind. Faces
+/// two shapes share, like two equal boxes' tops, meet the layer together; a strict depth test
+/// counted the other one in front or not by rounding, pixel by pixel, and speckled the cut away.
+const ON_LAYER: f32 = 4.0e-6;
+
 /// Frame-sized render targets for the passes.
 pub(crate) struct CsgTargets {
     width: usize,
@@ -44,8 +49,11 @@ pub(crate) struct CsgTargets {
     counts: [glow::Texture; 8],
     /// Inside bits per shape: 32 per channel, one channel per group (`CSG_PACK_FRAGMENT`).
     inside: glow::Texture,
+    /// The same for the shapes with a face on the layer, which flip there.
+    on: glow::Texture,
     peel: [glow::Framebuffer; 2],
-    count: [glow::Framebuffer; 2],
+    /// Without depth: the count compares with the layer's depth itself (`CSG_COUNT_FRAGMENT`).
+    count: glow::Framebuffer,
     pack: glow::Framebuffer,
     /// One occlusion query per layer: whether it had anything in it. See [`LayerPlan`].
     queries: Vec<glow::Query>,
@@ -95,12 +103,15 @@ impl CsgTargets {
         }
         let counts: [glow::Texture; 8] = counts.try_into().expect("eight made");
         let inside = texture(glow::RGBA32UI, glow::RGBA_INTEGER, glow::UNSIGNED_INT)?;
+        let on = texture(glow::RGBA32UI, glow::RGBA_INTEGER, glow::UNSIGNED_INT)?;
         gl.bind_texture(glow::TEXTURE_2D, None);
 
-        let framebuffer = |depth: glow::Texture, colours: &[glow::Texture]| -> Result<glow::Framebuffer, String> {
+        let framebuffer = |depth: Option<glow::Texture>, colours: &[glow::Texture]| -> Result<glow::Framebuffer, String> {
             let framebuffer = gl.create_framebuffer()?;
             gl.bind_framebuffer(glow::FRAMEBUFFER, Some(framebuffer));
-            gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
+            if let Some(depth) = depth {
+                gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::TEXTURE_2D, Some(depth), 0);
+            }
             for (index, &texture) in colours.iter().enumerate() {
                 let attachment = glow::COLOR_ATTACHMENT0 + index as u32;
                 gl.framebuffer_texture_2d(glow::FRAMEBUFFER, attachment, glow::TEXTURE_2D, Some(texture), 0);
@@ -113,16 +124,10 @@ impl CsgTargets {
             }
             Ok(framebuffer)
         };
-        let peel = [framebuffer(depth[0], &[colour, leaf])?, framebuffer(depth[1], &[colour, leaf])?];
-        let count = [framebuffer(depth[0], &counts)?, framebuffer(depth[1], &counts)?];
-        // Only one colour target: a full-frame pass with no depth test.
-        let pack = gl.create_framebuffer()?;
-        gl.bind_framebuffer(glow::FRAMEBUFFER, Some(pack));
-        gl.framebuffer_texture_2d(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::TEXTURE_2D, Some(inside), 0);
-        gl.draw_buffers(&[glow::COLOR_ATTACHMENT0]);
-        if gl.check_framebuffer_status(glow::FRAMEBUFFER) != glow::FRAMEBUFFER_COMPLETE {
-            return Err("the boolean preview's target is not usable".into());
-        }
+        let peel = [framebuffer(Some(depth[0]), &[colour, leaf])?, framebuffer(Some(depth[1]), &[colour, leaf])?];
+        let count = framebuffer(None, &counts)?;
+        // A full-frame pass with no depth test.
+        let pack = framebuffer(None, &[inside, on])?;
         gl.bind_framebuffer(glow::FRAMEBUFFER, None);
         let queries = (0..MAX_LAYERS).map(|_| gl.create_query()).collect::<Result<Vec<_>, _>>()?;
         Ok(CsgTargets {
@@ -133,6 +138,7 @@ impl CsgTargets {
             colour,
             counts,
             inside,
+            on,
             peel,
             count,
             pack,
@@ -142,10 +148,10 @@ impl CsgTargets {
     }
 
     unsafe fn destroy(&self, gl: &glow::Context) {
-        for framebuffer in self.peel.iter().chain(&self.count).chain([&self.pack]) {
+        for framebuffer in self.peel.iter().chain([&self.count, &self.pack]) {
             gl.delete_framebuffer(*framebuffer);
         }
-        let textures = self.depth.iter().chain([&self.leaf, &self.colour, &self.inside]).chain(&self.counts);
+        let textures = self.depth.iter().chain([&self.leaf, &self.colour, &self.inside, &self.on]).chain(&self.counts);
         for texture in textures {
             gl.delete_texture(*texture);
         }
