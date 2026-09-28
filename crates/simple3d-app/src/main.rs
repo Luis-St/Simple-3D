@@ -9,6 +9,7 @@ mod app_chrome;
 mod components;
 mod dock;
 // Pointer gestures, executed. Test-only.
+mod arrange_tool;
 #[cfg(test)]
 mod gestures;
 mod gizmo;

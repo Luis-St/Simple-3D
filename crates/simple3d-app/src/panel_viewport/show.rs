@@ -21,6 +21,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if app.measure.active {
                 let view = app.current_view();
                 measure_interact(app, ui, &response, &view);
+            } else if crate::arrange_tool::wants_pointer(app) {
+                // Spreading along a path, the clicks build the path (issue 70).
+                let view = app.current_view();
+                crate::arrange_tool::interact(app, ui, &response, &view);
             } else {
                 let view = app.current_view();
                 place_cursor(app, ui, &response, &view);
@@ -62,6 +66,10 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     // The simplify wireframe switch is not reflected elsewhere in the key (issue 106).
     if let Some(tool) = app.simplify_tool.as_ref() {
         tool.wireframe.hash(&mut hasher);
+    }
+    // The align tool's templates are not in the scene either (issue 70).
+    if let Some(tool) = app.arrange_tool.as_ref() {
+        tool.hash_preview(&mut hasher);
     }
     // The reassembly overlay is not the mesh, so it needs its own key part (issue 108).
     if let Some(tool) = app.reassemble_tool.as_ref() {

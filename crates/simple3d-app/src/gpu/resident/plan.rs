@@ -95,6 +95,11 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
             }
         }
     }
+    // A tool's templates (issue 70): ghosts carried to where the tool would put them.
+    for (renderable, xform) in &request.templates {
+        let placing = Placing::moved(Some(*xform));
+        plan.ghosts.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base: palette.template, tag_base: 0 });
+    }
     let planes = mark_planes(request);
     if !planes.is_empty() {
         for item in request.items.iter().filter(|item| item.style == Style::Solid) {

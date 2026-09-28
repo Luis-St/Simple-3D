@@ -124,6 +124,13 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut),
         }
     }
+    // Templates of what a tool would place, blended like ghosts (issue 70). The CPU carries each body
+    // there itself; only the GPU draws a renderable moved.
+    for (renderable, xform) in &request.templates {
+        let placed = renderable.placed(xform);
+        let screen = if cut.is_empty() { project_all(&view, &placed.mesh.positions) } else { Vec::new() };
+        push_ghost(&mut steps, &view, &placed, &screen, request.palette.template, cut);
+    }
     // Last, over the finished model: glows for buried bodies, and tool preview cells.
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {
         let screen = if cut.is_empty() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };

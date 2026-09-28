@@ -176,6 +176,8 @@ pub struct App {
     pub import_job: Option<ImportJob>,
     /// The split tool's window and its cutting job (issue 82); see [`crate::split_tool`].
     pub split_tool: Option<crate::split_tool::SplitTool>,
+    /// The align and distribute tool's window (issue 70); see [`crate::arrange_tool`].
+    pub arrange_tool: Option<crate::arrange_tool::ArrangeTool>,
     pub split_job: Option<SplitJob>,
     /// The simplify tool's window (issue 106). Its result goes into the document live, so it keeps
     /// the original mesh for Cancel. See [`crate::simplify_tool`].

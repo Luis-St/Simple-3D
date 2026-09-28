@@ -65,6 +65,7 @@ impl App {
             job.cancel();
         }
         self.split_tool = None;
+        self.arrange_tool = None;
         self.simplify_tool = None;
         self.reassemble_tool = None;
 

@@ -37,6 +37,7 @@ fn request<'a>(items: Vec<Item<'a>>, mode: DisplayMode) -> Request<'a> {
         grid: Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false },
         items,
         preview: Vec::new(),
+        templates: Vec::new(),
         live: Live::default(),
         section: Vec::new(),
     }

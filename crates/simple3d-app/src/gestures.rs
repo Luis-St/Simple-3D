@@ -13,6 +13,7 @@ mod handles;
 mod scrub;
 mod section;
 pub(crate) use camera::*;
+mod arrange_tool;
 mod cursor;
 mod keys;
 mod measure;

@@ -59,6 +59,19 @@ pub(crate) fn number(
     }
 }
 
+/// The painted cross that drops one entry of a list, as the UI font may lack the glyph; `label` names
+/// it for the accessibility tree and the tooltip.
+pub(crate) fn drop_button(ui: &mut egui::Ui, label: &str) -> bool {
+    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
+    let colour = if response.hovered() { crate::theme::token::DANGER } else { crate::theme::token::TEXT_LO };
+    let arm = rect.shrink(3.5);
+    let stroke = egui::Stroke::new(1.4_f32, colour);
+    ui.painter().line_segment([arm.left_top(), arm.right_bottom()], stroke);
+    ui.painter().line_segment([arm.right_top(), arm.left_bottom()], stroke);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.on_hover_text(label).clicked()
+}
+
 /// A field meaningful only while its checkbox is ticked, greyed rather than hidden so the layout
 /// stays put and the value stays visible.
 pub(crate) fn optional(

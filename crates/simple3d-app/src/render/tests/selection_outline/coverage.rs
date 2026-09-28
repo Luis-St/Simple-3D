@@ -54,6 +54,7 @@ pub(crate) fn the_selection_outline_goes_all_the_way_round() {
             },
             items,
             preview: Vec::new(),
+            templates: Vec::new(),
             live: Live::default(),
             section: Vec::new(),
         }

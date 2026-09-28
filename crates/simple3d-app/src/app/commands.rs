@@ -102,6 +102,7 @@ impl App {
             ModeResize => self.pick_transform(Mode::Resize),
             ModeScale => self.pick_transform(Mode::Scale),
             MeasureTool => self.toggle_measure(),
+            AlignDistribute => self.toggle_arrange_tool(),
             // A hold key read live during a drag, so pressing it alone does nothing (issue 68).
             SnapToGeometry => {}
             // The other hold key, read live by the wheel (issue 97).

@@ -27,7 +27,7 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
                 );
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if cuts > 1 && drop_button(ui, index) {
+                if cuts > 1 && crate::popup::drop_button(ui, &format!("Drop cut {}", index + 1)) {
                     drop = Some(index);
                 }
                 // Reset the numbers a new cut starts with (stock size, no turn, offset or layers), keeping the
@@ -72,21 +72,6 @@ pub(crate) fn controls(app: &mut App, ui: &mut egui::Ui, tool: &mut SplitTool) {
             tool.plan.passes.push(next);
         }
     }
-}
-
-/// The painted cross that drops one cut, as the UI font may lack the glyph.
-pub(crate) fn drop_button(ui: &mut egui::Ui, index: usize) -> bool {
-    let (rect, response) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
-    let colour = if response.hovered() { theme::token::DANGER } else { theme::token::TEXT_LO };
-    let arm = rect.shrink(3.5);
-    let stroke = egui::Stroke::new(1.4_f32, colour);
-    ui.painter().line_segment([arm.left_top(), arm.right_bottom()], stroke);
-    ui.painter().line_segment([arm.right_top(), arm.left_bottom()], stroke);
-    // Painted, so it needs an accessible name.
-    let label = format!("Drop cut {}", index + 1);
-    let name = label.clone();
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
-    response.on_hover_text(&label).clicked()
 }
 
 /// One cut: its cell shape, size and direction.

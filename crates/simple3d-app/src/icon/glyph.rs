@@ -9,6 +9,8 @@ pub enum Glyph {
     Resize,
     Scale,
     Measure,
+    /// Squares spread along a curve: the align and distribute tool (issue 70).
+    Arrange,
     Pattern,
     // Object actions.
     Group,

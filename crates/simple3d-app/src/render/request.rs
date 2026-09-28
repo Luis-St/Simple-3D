@@ -88,6 +88,10 @@ pub struct Request<'a> {
     /// by the renderer so they are depth-tested; they write no depth and are biased towards the eye,
     /// since loops on the surface would otherwise lose the tie.
     pub preview: Vec<Vec<Vec3>>,
+    /// Bodies drawn translucent where a tool would put them, as a template of the result: the align
+    /// tool's moved objects and the copies it would make (issue 70). Each is a renderable and the
+    /// world transform carrying it there.
+    pub templates: Vec<(&'a Renderable, Xform)>,
     /// What a drag has moved since the renderables were made; GPU renderer only (see [`Live`]).
     pub live: Live<'a>,
     /// The section planes (issue 71). Everything drawn from the model is cut by them, and the opening

@@ -3,6 +3,7 @@ pub mod csg_bsp;
 pub mod hull;
 pub mod mesh;
 pub mod number;
+pub mod path;
 pub mod planar;
 pub mod polyhedra;
 pub mod primitives;

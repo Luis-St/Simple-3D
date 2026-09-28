@@ -34,11 +34,17 @@ impl Scene {
 
     /// Deep copy with fresh ids, inserted right after the original (spec section 7.2).
     pub fn duplicate(&mut self, id: NodeId) -> Option<NodeId> {
+        self.duplicate_after(id, id)
+    }
+
+    /// The same, inserted right after `after`, a sibling: copies made one after another stay in order
+    /// (issue 70).
+    pub fn duplicate_after(&mut self, id: NodeId, after: NodeId) -> Option<NodeId> {
         if id == self.root {
             return None;
         }
         let parent = self.nodes.get(&id)?.parent?;
-        let index = self.nodes[&parent].children.iter().position(|&c| c == id)? + 1;
+        let index = self.nodes[&parent].children.iter().position(|&c| c == after)? + 1;
         let mut data = self.export_subtree(id)?;
         // Named like a pasted copy: "Box copy", not a second "Box".
         data.name = free_name(&self.taken_names(), &copy_name(&data.name));

@@ -74,7 +74,7 @@ impl App {
         self.on_selection_changed();
     }
 
-    pub(super) fn on_selection_changed(&mut self) {
+    pub(crate) fn on_selection_changed(&mut self) {
         // A half-typed field and piece ticks belong to the previous selection (issue 82).
         self.fields.clear();
         self.piece_ticks.clear();

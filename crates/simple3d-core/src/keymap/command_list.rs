@@ -60,6 +60,7 @@ impl Command {
         Command::ModeResize,
         Command::ModeScale,
         Command::MeasureTool,
+        Command::AlignDistribute,
         Command::SnapToGeometry,
         Command::NudgeLeft,
         Command::NudgeRight,

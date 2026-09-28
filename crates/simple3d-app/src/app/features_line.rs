@@ -3,6 +3,7 @@
 use super::*;
 use simple3d_core::config::SnapMode;
 use simple3d_core::keymap::Command;
+use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
@@ -52,6 +53,37 @@ impl App {
             crate::snap::FeatureKind::Axis => self.in_clear_view(view, at),
             _ => self.shows(view, at),
         })
+    }
+
+    /// The shown body edge nearest the pointer, with its body, for picking a path (issue 70). Only
+    /// real edges: axes and plane marks are not part of a body's outline.
+    pub(crate) fn nearest_body_edge(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+    ) -> Option<(NodeId, (Vec3, Vec3))> {
+        let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
+        let mut near: Vec<(Vec3, f32, NodeId, (Vec3, Vec3))> = Vec::new();
+        for &id in self.evaluated.node_meshes.keys() {
+            if !self.scene.is_shown(id) {
+                continue;
+            }
+            for (a, b) in self.body_edges(id) {
+                if let Some((at, distance)) =
+                    crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
+                {
+                    near.push((at, distance, id, (a, b)));
+                }
+            }
+        }
+        near.sort_by(|a, b| a.1.total_cmp(&b.1));
+        near.into_iter().find(|&(at, ..)| self.shows(view, at)).map(|(_, _, id, edge)| (id, edge))
+    }
+
+    /// Every real edge of a body: its creases and open borders, not the diagonals of flat faces.
+    pub(crate) fn body_edges(&self, id: NodeId) -> Vec<(Vec3, Vec3)> {
+        let Some(mesh) = self.evaluated.node_meshes.get(&id) else { return Vec::new() };
+        self.snaps_of(id, mesh).features.iter().filter_map(|feature| feature.span).collect()
     }
 
     /// Whether geometry snapping is requested now (issue 68): always, never, or while the key is held.

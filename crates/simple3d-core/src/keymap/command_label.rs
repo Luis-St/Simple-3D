@@ -62,6 +62,7 @@ impl Command {
             ModeResize => "Manipulator: resize",
             ModeScale => "Manipulator: scale",
             MeasureTool => "Measure tool",
+            AlignDistribute => "Align and distribute",
             SnapToGeometry => "Snap to geometry (hold)",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
@@ -84,8 +85,8 @@ impl Command {
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
                 Area::View
             }
-            ModeMove | ModeRotate | ModeResize | ModeScale | MeasureTool | SnapToGeometry | NudgeLeft | NudgeRight
-            | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | MeasureTool | AlignDistribute | SnapToGeometry
+            | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }

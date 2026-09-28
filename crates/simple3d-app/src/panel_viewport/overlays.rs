@@ -49,6 +49,9 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
         draw_measure(app, ui, &painter, view);
     }
 
+    // The path objects are spread along (issue 70).
+    crate::arrange_tool::draw(app, ui, &painter, view);
+
     // Only the held tool is shown; projection and handle frame were dropped as they never change
     // (issue 100). The measure tool is named while open.
     let tool = if app.measure.active { "Measure" } else { app.mode.label() };
@@ -157,7 +160,12 @@ pub(crate) fn draw_gizmo(
 
 /// What a snap caught: its edges as lines, its corners as small squares, and the point it landed on
 /// as a hollow square (issue 87).
-pub(crate) fn draw_snap_mark(painter: &egui::Painter, view: &View, mark: &crate::snap::SnapMark, colour: egui::Color32) {
+pub(crate) fn draw_snap_mark(
+    painter: &egui::Painter,
+    view: &View,
+    mark: &crate::snap::SnapMark,
+    colour: egui::Color32,
+) {
     for &(a, b) in &mark.edges {
         if let (Some((a, _)), Some((b, _))) = (view.project(a), view.project(b)) {
             painter.line_segment([a, b], egui::Stroke::new(2.0_f32, colour.gamma_multiply(0.8)));

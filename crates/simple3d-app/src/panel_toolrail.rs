@@ -71,6 +71,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.run(Command::MeasureTool);
         }
 
+        // Align and distribute (issue 70), lit while its window is open.
+        let arranging = app.arrange_tool.is_some();
+        let shortcut = app.keymap.shortcut_text(Command::AlignDistribute);
+        if icon::button(ui, Glyph::Arrange, size, arranging, !app.selection.is_empty() || arranging)
+            .on_hover_text(format!("Align, distribute or spread along a path  {shortcut}"))
+            .clicked()
+        {
+            app.run(Command::AlignDistribute);
+        }
+
         separator(ui);
 
         // Booleans are actions, not modes: dimmed with a reason when the selection cannot be combined.

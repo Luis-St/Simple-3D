@@ -104,6 +104,7 @@ impl App {
             export_job: None,
             import_job: None,
             split_tool: None,
+            arrange_tool: None,
             simplify_tool: None,
             reassemble_tool: None,
             split_job: None,

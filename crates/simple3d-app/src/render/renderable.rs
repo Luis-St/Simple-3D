@@ -143,6 +143,17 @@ impl Renderable {
         Renderable { mesh: welded, normals, edges, bodies, ..Renderable::empty() }
     }
 
+    /// A copy carried by a rigid `xform`, surface only: a tool's template for the software renderer
+    /// (issue 70), which cannot draw a renderable moved.
+    pub(crate) fn placed(&self, xform: &simple3d_core::xform::Xform) -> Renderable {
+        let positions = self.mesh.positions.iter().map(|&p| xform.point(p)).collect();
+        let mesh = Mesh { positions, indices: self.mesh.indices.clone(), tags: self.mesh.tags.clone() };
+        // Rigid, so the normals turn with the body; a degenerate triangle keeps its zero normal.
+        let normals =
+            self.normals.iter().map(|&n| if n == Vec3::ZERO { n } else { xform.vector(n).normalized() }).collect();
+        Renderable { mesh, normals, bodies: self.bodies.clone(), ..Renderable::empty() }
+    }
+
     pub fn empty() -> Renderable {
         Renderable {
             mesh: Mesh::new(),

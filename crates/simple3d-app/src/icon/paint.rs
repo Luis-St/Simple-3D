@@ -36,6 +36,24 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
                 pen.line(&[along, (along.0 + depth, along.1 + depth)]);
             }
         }
+        // Three squares evenly along a rising curve: spread along a path, which plain aligning is a
+        // case of (issue 70). The curve runs between the squares, not through them.
+        Glyph::Arrange => {
+            let (p0, p1, p2) = ((0.2_f32, 0.78_f32), (0.6_f32, 0.8_f32), (0.8_f32, 0.22_f32));
+            let at = |t: f32| {
+                let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+                (a * p0.0 + b * p1.0 + c * p2.0, a * p0.1 + b * p1.1 + c * p2.1)
+            };
+            for (from, to) in [(0.2, 0.33), (0.67, 0.8)] {
+                let points: Vec<(f32, f32)> = (0..=8).map(|i| at(from + (to - from) * i as f32 / 8.0)).collect();
+                pen.line(&points);
+            }
+            for t in [0.0, 0.5, 1.0] {
+                let (cx, cy) = at(t);
+                let h = 0.13;
+                pen.closed(&[(cx - h, cy - h), (cx + h, cy - h), (cx + h, cy + h), (cx - h, cy + h)]);
+            }
+        }
         // A grid of small squares, what a pattern makes of its children.
         Glyph::Pattern => {
             for (cx, cy) in [(0.30, 0.30), (0.70, 0.30), (0.30, 0.70), (0.70, 0.70)] {

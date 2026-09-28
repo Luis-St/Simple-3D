@@ -24,6 +24,9 @@ impl App {
                 }
             }
             ui.separator();
+            // Lining up and spreading out the selection (issue 70).
+            self.command_item(ui, Command::AlignDistribute, !self.selection.is_empty());
+            ui.separator();
             // Geometry snapping's mode (issue 68), here because the document settings only show with nothing
             // selected, while snapping needs a selection; it is manipulator behaviour, not document state.
             let snap_key = self.keymap.shortcut_text(Command::SnapToGeometry);

@@ -29,6 +29,10 @@ impl App {
             self.cancel_split_tool();
             return;
         }
+        if self.arrange_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.close_arrange_tool();
+            return;
+        }
         let (events, modifiers, held, pointer) = ctx.input(|input| {
             // `egui-winit` consumes Ctrl+X/C/V into Cut/Copy/Paste before emitting the key event (0.32.3
             // `lib.rs:766-781`), so the presses are restored to keep the keymap authoritative.

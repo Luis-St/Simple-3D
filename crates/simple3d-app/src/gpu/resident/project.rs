@@ -136,7 +136,10 @@ impl Gpu {
         let items =
             request.items.iter().map(|item| (item.renderable.id, Placing::of(&request.live, item.renderable.id)));
         let overlays = plan.overlays.iter().map(|draw| (draw.id, draw.placing));
-        for (id, placing) in items.chain(overlays) {
+        // Templates are drawn moved, so the depth range must reach where they are drawn (issue 70).
+        let templates =
+            request.templates.iter().map(|(renderable, xform)| (renderable.id, Placing::moved(Some(*xform))));
+        for (id, placing) in items.chain(overlays).chain(templates) {
             let Some(resident) = self.resident.get(&id) else { continue };
             for key in resident.keys(&request.view, &placing) {
                 passes.saw(key);

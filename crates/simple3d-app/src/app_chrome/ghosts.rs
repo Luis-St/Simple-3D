@@ -35,6 +35,7 @@ impl App {
         self.piece_ticks.hash(&mut hasher);
         self.preview_subject().hash(&mut hasher);
         self.ghost_generation().hash(&mut hasher);
+        self.arrange_tool.as_ref().map(|tool| &tool.targets).hash(&mut hasher);
         let key = hasher.finish();
         if key == self.renderable_key {
             return;
@@ -67,6 +68,13 @@ impl App {
         wanted.extend(self.piece_ticks.iter().map(|&id| (id, true)));
         // The previewed object, kept ready since "only what is previewed" draws it as the model (issue 82).
         wanted.extend(self.preview_subject().map(|id| (id, true)));
+        // The align tool's objects, drawn again as templates where they would go (issue 70), even once
+        // the selection has moved on.
+        for &id in self.arrange_tool.iter().flat_map(|tool| &tool.targets) {
+            if !wanted.iter().any(|&(w, _)| w == id) {
+                wanted.push((id, false));
+            }
+        }
         // Every ghost node, so a tool body can be positioned (spec section 6.1); a ghost group is drawn
         // as its children with meshes.
         let mut ghosts: Vec<NodeId> = Vec::new();

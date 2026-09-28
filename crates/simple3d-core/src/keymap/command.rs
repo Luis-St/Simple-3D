@@ -65,6 +65,7 @@ pub enum Command {
     ModeResize,
     ModeScale,
     MeasureTool,
+    AlignDistribute,
     SnapToGeometry,
     NudgeLeft,
     NudgeRight,

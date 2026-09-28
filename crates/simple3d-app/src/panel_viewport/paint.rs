@@ -104,6 +104,11 @@ pub(crate) fn paint_scene(
             }
         }
 
+        // Where the align tool would put things, drawn as templates of its own objects (issue 70).
+        let templates = crate::arrange_tool::templates(app)
+            .into_iter()
+            .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform)))
+            .collect();
         let request = render::Request {
             view,
             size,
@@ -120,6 +125,7 @@ pub(crate) fn paint_scene(
                 plane_marks: app.scene.settings.plane_marks,
             },
             items,
+            templates,
             live,
             // Tool previews (split cells, simplify triangles) are depth-tested by the renderer (issue 82);
             // only one tool is open at a time.
