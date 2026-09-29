@@ -91,10 +91,13 @@ impl Gpu {
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
         self.draw_lines(&gl, &plan.overlays, view, section, viewport, depth);
 
-        // Glows of buried bodies, over everything with no depth test.
-        if !plan.glows.is_empty() {
+        // Glows of buried bodies and tool templates, over everything with no depth test: a template
+        // overlapping a body fought it face for face (issue 70).
+        if !plan.glows.is_empty() || !plan.templates.is_empty() {
             gl.disable(glow::DEPTH_TEST);
             self.draw_faces(&gl, &plan.glows, view, section, viewport, depth);
+            self.draw_faces(&gl, &plan.templates, view, section, viewport, depth);
+            self.draw_lines(&gl, &plan.template_edges, view, section, viewport, depth);
             gl.enable(glow::DEPTH_TEST);
         }
 

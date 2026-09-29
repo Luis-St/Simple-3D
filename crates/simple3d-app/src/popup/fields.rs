@@ -39,11 +39,19 @@ pub(crate) fn number(
         .inner;
     app.scrub = scrub;
     if let Some(scrubbed) = outcome.scrubbed {
+        // Whole numbers carry the fraction between frames, as the properties panel does; rounding each
+        // frame's small movement away made a count need a long drag per step.
+        let whole = matches!(kind, ParamKind::Count { .. });
+        let carried = if whole { app.scrub.carry } else { 0.0 };
         let displayed = match kind {
             ParamKind::Length { .. } => unit.from_mm(*value),
             _ => *value,
         };
-        *value = ui::param_number(ui::value_from_display(kind, unit, displayed + scrubbed.delta));
+        let wanted = displayed + scrubbed.delta + carried;
+        *value = ui::param_number(ui::value_from_display(kind, unit, wanted));
+        if whole {
+            app.scrub.carry = (wanted - *value).clamp(-1.0, 1.0);
+        }
     }
     if let Some(text) = outcome.committed {
         match ui::commit_param(&text, kind, unit, *value) {

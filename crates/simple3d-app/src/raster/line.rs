@@ -14,6 +14,12 @@ impl Frame<'_> {
         self.line_inner(a, b, rgba, bias, write_depth, None);
     }
 
+    /// A line drawn over everything with depth ignored both ways, like `triangle_over`: an infinite
+    /// bias wins every depth test.
+    pub fn line_over(&mut self, a: Vertex, b: Vertex, rgba: Rgba) {
+        self.line_inner(a, b, rgba, f32::INFINITY, false, None);
+    }
+
     /// A line not hidden by the items marked in `through` (indexed by tag); others hide it as usual,
     /// and it writes no depth.
     pub fn line_through(&mut self, a: Vertex, b: Vertex, rgba: Rgba, bias: f32, through: &[bool]) {

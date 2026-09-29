@@ -175,3 +175,16 @@ pub(crate) fn only_the_edges_of_a_cut_shape_that_are_drawn_can_be_picked() {
     }
     assert!(picked >= 5, "only {picked} slanted edges of the cut dodecahedron could be picked");
 }
+
+/// Regression: the count rounded each frame's movement away, so a slow drag needed a long way per step.
+#[test]
+pub(crate) fn a_slow_drag_on_the_count_steps_it_like_every_other_number() {
+    let (mut harness, _) = with_boxes("arrange-count", &[Vec3::new(0.0, 0.0, 0.0)]);
+    let count = |harness: &Harness<'_, App>| harness.state().arrange_tool.as_ref().expect("the tool is open").count;
+    assert_eq!(count(&harness), 5);
+    // 60 px at 6 px per step is ten more, in 30 frames of 2 px, each a third of a step; before the
+    // fix it added nothing. The first few pixels go to egui's drag threshold, so one step may be short.
+    let field = rect_of(&harness, crate::panel_properties::grip_id("arrange-count"));
+    drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 30);
+    assert!((14..=15).contains(&count(&harness)), "a slow 60 px drag added {} rather than ten", count(&harness) - 5);
+}

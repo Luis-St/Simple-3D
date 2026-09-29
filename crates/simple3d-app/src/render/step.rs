@@ -37,6 +37,13 @@ pub(crate) enum Step {
         v: [Vertex; 3],
         colour: Rgba,
     },
+    /// A line drawn over everything with depth ignored: a tool template's edge, so the whole template
+    /// reads as lying on top of a body it overlaps.
+    GlowLine {
+        a: Vertex,
+        b: Vertex,
+        colour: Rgba,
+    },
 }
 
 impl Step {
@@ -47,7 +54,7 @@ impl Step {
                 let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
                 (a.min(b).min(c), a.max(b).max(c))
             }
-            Step::Line { a, b, .. } | Step::Overlay { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
+            Step::Line { a, b, .. } | Step::Overlay { a, b, .. } | Step::GlowLine { a, b, .. } => (a.pos.y.min(b.pos.y), a.pos.y.max(b.pos.y)),
             Step::Glow { v, .. } => {
                 let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
                 (a.min(b).min(c), a.max(b).max(c))
@@ -156,6 +163,7 @@ pub(crate) fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[&[u32]]) {
                 frame.line_with_depth(a, b, colour, bias, false);
             }
             Step::Glow { v, colour } => frame.triangle_over(v, colour),
+            Step::GlowLine { a, b, colour } => frame.line_over(a, b, colour),
         }
     }
 }

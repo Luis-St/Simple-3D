@@ -98,7 +98,8 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
     // A tool's templates (issue 70): ghosts carried to where the tool would put them.
     for (renderable, xform) in &request.templates {
         let placing = Placing::moved(Some(*xform));
-        plan.ghosts.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base: palette.template, tag_base: 0 });
+        plan.templates.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base: palette.template, tag_base: 0 });
+        plan.template_edges.push(LineDraw::template(renderable.id, placing, opaque(palette.template)));
     }
     let planes = mark_planes(request);
     if !planes.is_empty() {
@@ -132,7 +133,8 @@ pub(in crate::gpu) fn mark_planes(request: &Request<'_>) -> Vec<(Plane, Rgba)> {
 impl Plan {
     pub(super) fn needs(&self) -> std::collections::HashMap<u64, Needs> {
         let mut needs: std::collections::HashMap<u64, Needs> = std::collections::HashMap::new();
-        let faces = self.solids.iter().chain(&self.ghosts).chain(&self.glows).map(|draw| draw.id);
+        let faces =
+            self.solids.iter().chain(&self.ghosts).chain(&self.glows).chain(&self.templates).map(|draw| draw.id);
         let faces = faces.chain(self.crossings.iter().map(|draw| draw.id)).chain(self.caps.iter().map(|draw| draw.id));
         let faces = faces.chain(self.csg.iter().copied());
         for id in faces {
@@ -143,7 +145,7 @@ impl Plan {
                 needs.entry(id).or_default().edges = true;
             }
         }
-        for draw in self.lines.iter().chain(&self.overlays) {
+        for draw in self.lines.iter().chain(&self.overlays).chain(&self.template_edges) {
             needs.entry(draw.id).or_default().edges = true;
         }
         for draw in &self.outlines {
