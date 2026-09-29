@@ -62,7 +62,7 @@ fn summary(app: &App, ui: &mut egui::Ui) {
             let copies = placements.iter().filter(|p| p.copy).count();
             match (moving, copies) {
                 (0, 0) => "Everything is already there.".to_string(),
-                (_, 0) => format!("{moving} object{} move, to where the outlines show.", ui::plural(moving)),
+                (_, 0) => format!("{} to where the outlines show.", objects_move(moving)),
                 _ => {
                     let made = format!(
                         "{copies} cop{} {} made beside the originals, in the same groups",
@@ -71,13 +71,21 @@ fn summary(app: &App, ui: &mut egui::Ui) {
                     );
                     match moving {
                         0 => format!("{made}, where the outlines show."),
-                        _ => format!("{moving} object{} move and {made}, where the outlines show.", ui::plural(moving)),
+                        _ => format!("{} and {made}, where the outlines show.", objects_move(moving)),
                     }
                 }
             }
         }
     };
     ui.add(egui::Label::new(theme::hint(text)).selectable(false));
+}
+
+/// "1 object moves", "3 objects move".
+fn objects_move(count: usize) -> String {
+    match count {
+        1 => "1 object moves".to_string(),
+        _ => format!("{count} objects move"),
+    }
 }
 
 fn actions(app: &mut App, ui: &mut egui::Ui) {

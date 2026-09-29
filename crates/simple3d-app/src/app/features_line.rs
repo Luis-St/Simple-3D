@@ -23,11 +23,8 @@ impl App {
                 near.push((at, kind, distance, (a, b)));
             }
         };
-        for (&id, mesh) in &self.evaluated.node_meshes {
-            if !self.scene.is_shown(id) {
-                continue;
-            }
-            let snaps = self.snaps_of(id, mesh);
+        for (id, mesh) in self.snap_bodies(&[]) {
+            let snaps = self.snaps_of(id, &mesh);
             for feature in &snaps.features {
                 if let Some((a, b)) = feature.span {
                     consider(a, b, crate::snap::FeatureKind::Edge);
@@ -70,8 +67,7 @@ impl App {
     }
 
     /// Every real edge of the model as drawn: creases and open borders, not the diagonals of flat
-    /// faces. The evaluated result rather than each shape's own mesh, since a boolean's operands have
-    /// edges the result does not: a cutter's, and those of what it cut away. Found once per evaluation.
+    /// faces, from the snap bodies ([`App::snap_bodies`]). Gathered once per evaluation.
     pub(crate) fn model_edges(&self) -> std::rc::Rc<Vec<(Vec3, Vec3)>> {
         let key = std::sync::Arc::as_ptr(&self.evaluated.mesh) as usize;
         if let Some((held, edges)) = self.model_edges.borrow().as_ref() {
@@ -79,8 +75,14 @@ impl App {
                 return edges.clone();
             }
         }
-        let (features, _) = crate::snap::features_and_faces(&self.evaluated.mesh);
-        let edges = std::rc::Rc::new(features.iter().filter_map(|feature| feature.span).collect::<Vec<_>>());
+        let edges: Vec<(Vec3, Vec3)> = self
+            .snap_bodies(&[])
+            .iter()
+            .flat_map(|(id, mesh)| {
+                self.snaps_of(*id, mesh).features.iter().filter_map(|feature| feature.span).collect::<Vec<_>>()
+            })
+            .collect();
+        let edges = std::rc::Rc::new(edges);
         *self.model_edges.borrow_mut() = Some((key, edges.clone()));
         edges
     }

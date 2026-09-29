@@ -83,18 +83,17 @@ impl App {
         accept: impl Fn(&crate::snap::Feature, &std::sync::Arc<Mesh>) -> bool,
     ) -> Option<(crate::snap::Feature, f32, NodeId)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut near: Vec<(crate::snap::Feature, f32, NodeId)> = Vec::new();
-        for (&id, mesh) in &self.evaluated.node_meshes {
-            if !self.scene.is_shown(id) || exclude.contains(&id) {
-                continue;
-            }
-            let snaps = self.snaps_of(id, mesh);
+        let mut near: Vec<(crate::snap::Feature, f32, usize)> = Vec::new();
+        let bodies = self.snap_bodies(exclude);
+        for (index, (id, mesh)) in bodies.iter().enumerate() {
+            let snaps = self.snaps_of(*id, mesh);
             let found = crate::snap::near_on_screen(&snaps.features, project, cursor, crate::snap::CATCH_PIXELS);
-            near.extend(found.into_iter().map(|(feature, distance)| (*feature, distance, id)));
+            near.extend(found.into_iter().map(|(feature, distance)| (*feature, distance, index)));
         }
         near.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         near.into_iter()
-            .find(|(feature, _, id)| self.evaluated.node_meshes.get(id).is_some_and(|mesh| accept(feature, mesh)))
+            .find(|(feature, _, index)| accept(feature, &bodies[*index].1))
+            .map(|(feature, distance, index)| (feature, distance, bodies[index].0))
     }
 
     /// Whether nothing solid stands between the eye and a point; a point inside a body fails too.

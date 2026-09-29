@@ -58,10 +58,10 @@ impl App {
         moved: &[Vec3],
     ) -> crate::snap::SnapMark {
         use crate::snap::FeatureKind;
-        let Some(mesh) = self.evaluated.node_meshes.get(&node) else {
+        let Some(mesh) = self.body_mesh(node) else {
             return crate::snap::SnapMark::at(target.point);
         };
-        let snaps = self.snaps_of(node, mesh);
+        let snaps = self.snaps_of(node, &mesh);
         // Coincidence to a micrometre, looked up in the neighbouring cells too so rounding at a cell
         // border cannot split two equal points.
         let placed: std::collections::HashSet<(i64, i64, i64)> = moved.iter().map(|&p| crate::snap::point_key(p)).collect();
@@ -101,12 +101,10 @@ impl App {
             screens.push(screen);
         }
         // All near pairs, cheapest first, since the winner must also be visible, which costs a ray cast.
-        let mut pairs: Vec<(f64, Vec3, crate::snap::Feature, NodeId)> = Vec::new();
-        for (&node, mesh) in &self.evaluated.node_meshes {
-            if !self.scene.is_shown(node) || exclude.contains(&node) {
-                continue;
-            }
-            for feature in self.snaps_of(node, mesh).features.iter() {
+        let mut pairs: Vec<(f64, Vec3, crate::snap::Feature, usize)> = Vec::new();
+        let bodies = self.snap_bodies(exclude);
+        for (body, (node, mesh)) in bodies.iter().enumerate() {
+            for feature in self.snaps_of(*node, mesh).features.iter() {
                 let Some((at, _)) = view.project(feature.point) else { continue };
                 let (cx, cy) = ((at.x / cell).floor() as i32, (at.y / cell).floor() as i32);
                 for dx in -1..=1 {
@@ -118,7 +116,7 @@ impl App {
                                 continue;
                             }
                             let correction = constrain(feature.point - sources[index]);
-                            pairs.push((correction.length(), correction, *feature, node));
+                            pairs.push((correction.length(), correction, *feature, body));
                         }
                     }
                 }
@@ -127,10 +125,8 @@ impl App {
         pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
         pairs
             .into_iter()
-            .find(|(_, _, feature, node)| {
-                self.evaluated.node_meshes.get(node).is_some_and(|mesh| self.faces_the_camera(view, feature, mesh))
-            })
-            .map(|(_, correction, feature, node)| (correction, feature, node))
+            .find(|(_, _, feature, body)| self.faces_the_camera(view, feature, &bodies[*body].1))
+            .map(|(_, correction, feature, body)| (correction, feature, bodies[body].0))
     }
 
     /// The snap caught by aiming: the feature under the pointer and whichever carried feature the

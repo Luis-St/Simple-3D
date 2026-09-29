@@ -95,6 +95,7 @@ impl App {
             csg_hulls: std::cell::RefCell::new(std::collections::HashMap::new()),
             snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
             model_edges: std::cell::RefCell::new(None),
+            body_meshes: std::cell::RefCell::new(std::collections::HashMap::new()),
             snap_warming: None,
             pending_delete: None,
             camera_move: None,

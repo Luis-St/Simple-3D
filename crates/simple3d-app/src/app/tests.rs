@@ -37,6 +37,7 @@ mod pattern_edit;
 mod reassemble;
 mod simplify;
 mod snap;
+mod snap_bodies;
 mod snap_resize;
 mod split;
 pub(crate) use split::*;

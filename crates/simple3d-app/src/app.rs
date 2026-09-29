@@ -19,6 +19,7 @@ mod document;
 mod files;
 mod new;
 mod selection;
+mod snap_bodies;
 pub(crate) use files::*;
 mod add;
 mod camera;

@@ -58,15 +58,19 @@ impl App {
     pub(crate) fn warm_snaps(&mut self) {
         let (axes, marked, mask) = self.snap_settings();
         let cached = self.snap_features.borrow();
-        let wanted: Vec<(NodeId, std::sync::Arc<simple3d_geom::Mesh>)> = self
-            .evaluated
-            .node_meshes
-            .iter()
-            .filter(|&(&id, mesh)| {
+        // The bodies as drawn, and each shape on its own for when a drag takes its body apart.
+        let mut every = self.snap_bodies(&[]);
+        for (&id, mesh) in &self.evaluated.node_meshes {
+            if self.scene.is_shown(id) && !every.iter().any(|(held, _)| *held == id) {
+                every.push((id, mesh.clone()));
+            }
+        }
+        let wanted: Vec<(NodeId, std::sync::Arc<simple3d_geom::Mesh>)> = every
+            .into_iter()
+            .filter(|(id, mesh)| {
                 let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
-                self.scene.is_shown(id) && cached.get(&id).is_none_or(|(held, _)| *held != key)
+                cached.get(id).is_none_or(|(held, _)| *held != key)
             })
-            .map(|(&id, mesh)| (id, mesh.clone()))
             .collect();
         drop(cached);
         // Dropping the previous one tells it to stop.
@@ -100,7 +104,7 @@ impl App {
         loop {
             match warming.found.try_recv() {
                 Ok((id, key, snaps)) => {
-                    let current = self.evaluated.node_meshes.get(&id).map(|mesh| std::sync::Arc::as_ptr(mesh) as usize);
+                    let current = self.body_mesh(id).map(|mesh| std::sync::Arc::as_ptr(&mesh) as usize);
                     if current == Some(key.0) {
                         cache.insert(id, (key, std::rc::Rc::new(snaps)));
                     }
@@ -125,10 +129,10 @@ impl App {
     /// tens of milliseconds, so it waits for the first frame that snaps.
     pub(super) fn drag_snap_sources(&self, id: NodeId) -> Option<SnapSources> {
         let frame = self.evaluated.node_frames.get(&id)?;
-        let meshes = self.drag_subtree(id).into_iter();
+        // What the dragged node is as drawn, so a dragged boolean carries its result's corners.
         Some(SnapSources {
             origin: frame.point(self.scene.node(id).position),
-            meshes: meshes.filter_map(|n| Some((n, self.evaluated.node_meshes.get(&n)?.clone()))).collect(),
+            meshes: self.bodies_of(id),
             offsets: None,
         })
     }
