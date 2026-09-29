@@ -157,6 +157,8 @@ pub struct App {
     pub(super) csg_hulls: std::cell::RefCell<std::collections::HashMap<NodeId, HullCache>>,
     /// Each body's snap features, keyed by mesh identity. See `App::snaps_of`.
     pub(super) snap_features: std::cell::RefCell<std::collections::HashMap<NodeId, CachedSnaps>>,
+    /// The drawn model's edges, keyed by its mesh's `Arc` address, for picking a path (issue 70).
+    pub(super) model_edges: std::cell::RefCell<Option<(usize, std::rc::Rc<Vec<(Vec3, Vec3)>>)>>,
     /// Snap features being found off the interface thread (`App::warm_snaps`).
     pub(super) snap_warming: Option<SnapWarming>,
     /// A deletion awaiting the outliner's confirmation.

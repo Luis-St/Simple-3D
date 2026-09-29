@@ -112,14 +112,14 @@ pub(crate) fn clicks_in_the_viewport_draw_the_path_and_a_right_click_takes_one_b
 
 #[test]
 pub(crate) fn clicking_a_box_edge_picks_it_for_the_path_and_clicking_it_again_drops_it() {
-    let (mut harness, ids) = with_boxes("arrange-edges", &[Vec3::new(0.0, 0.0, 0.0)]);
+    let (mut harness, _) = with_boxes("arrange-edges", &[Vec3::new(0.0, 0.0, 0.0)]);
     let view = harness.state().current_view();
     // An edge the picture shows, found the way the pointer would.
-    let edges = harness.state().body_edges(ids[0]);
+    let edges = harness.state().model_edges();
     let target = edges
         .iter()
         .filter_map(|&(a, b)| view.project((a + b) * 0.5).map(|(at, _)| at))
-        .find(|&at| harness.state().nearest_body_edge(&view, at).is_some_and(|(id, _)| id == ids[0]))
+        .find(|&at| harness.state().nearest_model_edge(&view, at).is_some())
         .expect("no edge of the box is in sight");
     press(&mut harness, target);
     release(&mut harness, target);
@@ -132,3 +132,46 @@ pub(crate) fn clicking_a_box_edge_picks_it_for_the_path_and_clicking_it_again_dr
     assert!(harness.state().arrange_tool.as_ref().unwrap().runs.is_empty(), "clicking the edge again kept it");
 }
 
+/// Regression: picking read each shape's own edges, so on a dodecahedron with its top half cut away
+/// by a box the cutter's axis-parallel edges won along the cut, and edges of the removed half could be
+/// picked in thin air (of 14 result edges in sight, 11 caught something, rarely the edge pointed at).
+#[test]
+pub(crate) fn only_the_edges_of_a_cut_shape_that_are_drawn_can_be_picked() {
+    let mut harness = harness_configured("arrange-cut", |app| {
+        let root = app.scene.root();
+        let plate = app.scene.node(root).children[0];
+        app.scene.remove(plate);
+        let group = app.scene.add_group(simple3d_core::scene::GroupOp::Difference, root, 0);
+        app.scene.add_primitive("dodecahedron", group, 0).unwrap();
+        let cutter = app.scene.add_primitive("box", group, 1).unwrap();
+        let node = app.scene.get_mut(cutter).unwrap();
+        node.position = Vec3::new(0.0, 0.0, 25.0);
+        node.scale = Vec3::new(3.0, 3.0, 2.5);
+        app.selection = vec![group];
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+        app.frame_all();
+    });
+    harness.state_mut().run(Command::AlignDistribute);
+    harness.step();
+    let app = harness.state();
+    let view = app.current_view();
+    let edges = app.model_edges();
+    // Every edge of the cut outline, which runs round the dodecahedron at a slant to the axes.
+    let slanted = |&(a, b): &(Vec3, Vec3)| {
+        let d = (b - a).normalized();
+        [d.x, d.y, d.z].iter().all(|c| c.abs() < 0.999)
+    };
+    let mut picked = 0;
+    for &(a, b) in edges.iter() {
+        let middle = (a + b) * 0.5;
+        let Some((at, _)) = view.project(middle) else { continue };
+        if app.nearest_model_edge(&view, at).is_none() {
+            continue;
+        }
+        let edge = app.nearest_model_edge(&view, at).unwrap();
+        // Whatever is caught is part of what is left: nothing above the cut.
+        assert!(edge.0.z < 1e-6 && edge.1.z < 1e-6, "an edge of the cut-away half was picked: {edge:?}");
+        picked += slanted(&edge) as usize;
+    }
+    assert!(picked >= 5, "only {picked} slanted edges of the cut dodecahedron could be picked");
+}

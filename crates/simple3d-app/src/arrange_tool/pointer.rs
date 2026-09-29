@@ -50,11 +50,11 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     }
 }
 
-/// The edges a click at `cursor` would pick: the edge itself, or the smooth run it belongs to.
+/// The edges a click at `cursor` would pick: the model's edge itself, or the smooth run it belongs to.
 pub(crate) fn run_under(app: &App, view: &View, cursor: egui::Pos2) -> Option<Vec<(Vec3, Vec3)>> {
-    let (id, edge) = app.nearest_body_edge(view, cursor)?;
+    let edge = app.nearest_model_edge(view, cursor)?;
     let whole = app.arrange_tool.as_ref().is_some_and(|tool| tool.whole_run);
-    Some(if whole { smooth_run(&app.body_edges(id), edge) } else { vec![edge] })
+    Some(if whole { smooth_run(&app.model_edges(), edge) } else { vec![edge] })
 }
 
 fn same_edge((a, b): (Vec3, Vec3), (c, d): (Vec3, Vec3)) -> bool {

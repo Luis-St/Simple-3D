@@ -94,6 +94,7 @@ impl App {
             csg_leaves: std::cell::RefCell::new(std::collections::HashMap::new()),
             csg_hulls: std::cell::RefCell::new(std::collections::HashMap::new()),
             snap_features: std::cell::RefCell::new(std::collections::HashMap::new()),
+            model_edges: std::cell::RefCell::new(None),
             snap_warming: None,
             pending_delete: None,
             camera_move: None,

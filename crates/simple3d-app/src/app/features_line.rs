@@ -3,7 +3,6 @@
 use super::*;
 use simple3d_core::config::SnapMode;
 use simple3d_core::keymap::Command;
-use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
@@ -55,35 +54,35 @@ impl App {
         })
     }
 
-    /// The shown body edge nearest the pointer, with its body, for picking a path (issue 70). Only
-    /// real edges: axes and plane marks are not part of a body's outline.
-    pub(crate) fn nearest_body_edge(
-        &self,
-        view: &crate::view::View,
-        cursor: egui::Pos2,
-    ) -> Option<(NodeId, (Vec3, Vec3))> {
+    /// The model edge nearest the pointer and in sight, for picking a path (issue 70). Only real
+    /// edges: axes and plane marks are not part of the model's outline.
+    pub(crate) fn nearest_model_edge(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<(Vec3, Vec3)> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut near: Vec<(Vec3, f32, NodeId, (Vec3, Vec3))> = Vec::new();
-        for &id in self.evaluated.node_meshes.keys() {
-            if !self.scene.is_shown(id) {
-                continue;
-            }
-            for (a, b) in self.body_edges(id) {
-                if let Some((at, distance)) =
-                    crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
-                {
-                    near.push((at, distance, id, (a, b)));
-                }
+        let mut near: Vec<(Vec3, f32, (Vec3, Vec3))> = Vec::new();
+        for &(a, b) in self.model_edges().iter() {
+            if let Some((at, distance)) = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
+            {
+                near.push((at, distance, (a, b)));
             }
         }
         near.sort_by(|a, b| a.1.total_cmp(&b.1));
-        near.into_iter().find(|&(at, ..)| self.shows(view, at)).map(|(_, _, id, edge)| (id, edge))
+        near.into_iter().find(|&(at, ..)| self.shows(view, at)).map(|(.., edge)| edge)
     }
 
-    /// Every real edge of a body: its creases and open borders, not the diagonals of flat faces.
-    pub(crate) fn body_edges(&self, id: NodeId) -> Vec<(Vec3, Vec3)> {
-        let Some(mesh) = self.evaluated.node_meshes.get(&id) else { return Vec::new() };
-        self.snaps_of(id, mesh).features.iter().filter_map(|feature| feature.span).collect()
+    /// Every real edge of the model as drawn: creases and open borders, not the diagonals of flat
+    /// faces. The evaluated result rather than each shape's own mesh, since a boolean's operands have
+    /// edges the result does not: a cutter's, and those of what it cut away. Found once per evaluation.
+    pub(crate) fn model_edges(&self) -> std::rc::Rc<Vec<(Vec3, Vec3)>> {
+        let key = std::sync::Arc::as_ptr(&self.evaluated.mesh) as usize;
+        if let Some((held, edges)) = self.model_edges.borrow().as_ref() {
+            if *held == key {
+                return edges.clone();
+            }
+        }
+        let (features, _) = crate::snap::features_and_faces(&self.evaluated.mesh);
+        let edges = std::rc::Rc::new(features.iter().filter_map(|feature| feature.span).collect::<Vec<_>>());
+        *self.model_edges.borrow_mut() = Some((key, edges.clone()));
+        edges
     }
 
     /// Whether geometry snapping is requested now (issue 68): always, never, or while the key is held.
