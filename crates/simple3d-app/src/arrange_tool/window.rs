@@ -39,6 +39,11 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
             }
         }
     });
+    if let Some(group) = tool.inside(&app.scene) {
+        let node = app.scene.node(group);
+        let text = format!("Arranging the {} objects in {}.", node.children.len(), node.name);
+        ui.add(egui::Label::new(theme::hint(text)).selectable(false));
+    }
     ui.add_space(6.0);
     match tool.mode {
         Arrange::Align => align_controls(app, ui, &mut tool),

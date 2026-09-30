@@ -35,7 +35,7 @@ impl App {
         self.piece_ticks.hash(&mut hasher);
         self.preview_subject().hash(&mut hasher);
         self.ghost_generation().hash(&mut hasher);
-        self.arrange_tool.as_ref().map(|tool| &tool.targets).hash(&mut hasher);
+        self.arrange_tool.as_ref().map(|tool| tool.arranged(&self.scene)).hash(&mut hasher);
         let key = hasher.finish();
         if key == self.renderable_key {
             return;
@@ -70,7 +70,7 @@ impl App {
         wanted.extend(self.preview_subject().map(|id| (id, true)));
         // The align tool's objects, drawn again as templates where they would go (issue 70), even once
         // the selection has moved on.
-        for &id in self.arrange_tool.iter().flat_map(|tool| &tool.targets) {
+        for id in self.arrange_tool.iter().flat_map(|tool| tool.arranged(&self.scene)) {
             if !wanted.iter().any(|&(w, _)| w == id) {
                 wanted.push((id, false));
             }

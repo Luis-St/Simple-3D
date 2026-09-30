@@ -188,3 +188,34 @@ pub(crate) fn a_slow_drag_on_the_count_steps_it_like_every_other_number() {
     drag(&mut harness, field.center(), field.center() + egui::vec2(60.0, 0.0), 30);
     assert!((14..=15).contains(&count(&harness)), "a slow 60 px drag added {} rather than ten", count(&harness) - 5);
 }
+
+/// Regression: the group row selected alone was one object, so the tool opened along a path and
+/// aligning did nothing. Lining up now works on what the group holds.
+#[test]
+pub(crate) fn a_group_selected_alone_lines_up_its_contents() {
+    let mut children = Vec::new();
+    let mut harness = harness_configured("arrange-group", |app| {
+        let root = app.scene.root();
+        let group = app.scene.add_group(simple3d_core::scene::GroupOp::Assembly, root, 1);
+        for (index, y) in [0.0, 25.0, -40.0].into_iter().enumerate() {
+            let id = app.scene.add_primitive("box", group, index).unwrap();
+            app.scene.get_mut(id).unwrap().position = Vec3::new(index as f64 * 40.0, y, 0.0);
+            children.push(id);
+        }
+        app.select_only(group);
+        app.evaluated = Evaluator::new().evaluate(&app.scene, &Cancel::new());
+    });
+    harness.state_mut().run(Command::AlignDistribute);
+    for _ in 0..6 {
+        harness.step();
+    }
+    assert_eq!(harness.state().arrange_tool.as_ref().unwrap().mode, crate::arrange_tool::Arrange::Align);
+    assert!(harness.query_by_label("Arranging the 3 objects in Group.").is_some(), "the window does not say so");
+    harness.state_mut().arrange_tool.as_mut().unwrap().align[1] = Some(Side::Min);
+    harness.step();
+    harness.get_by_label("Apply").click();
+    harness.step();
+    harness.step();
+    let ys: Vec<f64> = children.iter().map(|&id| harness.state().scene.node(id).position.y).collect();
+    assert_eq!(ys, vec![-40.0, -40.0, -40.0], "the group's contents were not lined up");
+}

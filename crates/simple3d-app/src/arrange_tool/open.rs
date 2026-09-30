@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::{App, Status};
+use simple3d_core::scene::{Body, Scene};
 use simple3d_core::xform::Xform;
 
 impl ArrangeTool {
@@ -29,6 +30,25 @@ impl ArrangeTool {
     }
 }
 
+impl ArrangeTool {
+    /// The group whose contents are lined up or distributed: the tool was opened on that one group
+    /// alone, and one object has nothing to line up with. Along a path the group is one object.
+    pub fn inside(&self, scene: &Scene) -> Option<NodeId> {
+        let [only] = self.targets[..] else { return None };
+        let node = scene.get(only)?;
+        let holds = matches!(node.body, Body::Group { .. }) && node.children.len() >= 2;
+        (self.mode != Arrange::Path && holds).then_some(only)
+    }
+
+    /// What the tool arranges now: the objects it was opened on, or that lone group's contents.
+    pub fn arranged(&self, scene: &Scene) -> Vec<NodeId> {
+        match self.inside(scene) {
+            Some(group) => scene.node(group).children.clone(),
+            None => self.targets.clone(),
+        }
+    }
+}
+
 impl App {
     /// Open the tool on the selection, or put it away if it is out (issue 70).
     pub fn toggle_arrange_tool(&mut self) {
@@ -47,7 +67,14 @@ impl App {
             self.toggle_measure();
         }
         let key = self.primary().filter(|id| targets.contains(id));
-        self.arrange_tool = Some(ArrangeTool::on(targets, key));
+        let mut tool = ArrangeTool::on(targets, key);
+        // A lone group is most likely meant as what it holds, which is what lining up needs.
+        let alone = tool.mode;
+        tool.mode = Arrange::Align;
+        if tool.inside(&self.scene).is_none() {
+            tool.mode = alone;
+        }
+        self.arrange_tool = Some(tool);
         self.status = Status::Info("Align and distribute: nothing moves until Apply".into());
     }
 
@@ -71,7 +98,7 @@ impl App {
     /// The tool's objects as the plan sees them: those with a shape evaluated, in tree order.
     pub(crate) fn arrange_subjects(&self) -> Vec<Subject> {
         let Some(tool) = self.arrange_tool.as_ref() else { return Vec::new() };
-        tool.targets
+        tool.arranged(&self.scene)
             .iter()
             .filter_map(|&id| {
                 let bounds = *self.evaluated.node_world_bounds.get(&id)?;

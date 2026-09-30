@@ -33,7 +33,16 @@ pub(super) fn align_controls(app: &mut App, ui: &mut egui::Ui, tool: &mut Arrang
             {
                 tool.to_key = false;
             }
-            let key = tool.key.and_then(|id| app.scene.get(id)).map(|node| node.name.clone());
+            // Only one of the objects being lined up can be held still, not a group opened on for its contents.
+            let arranged = tool.arranged(&app.scene);
+            let key = tool
+                .key
+                .filter(|id| arranged.contains(id))
+                .and_then(|id| app.scene.get(id))
+                .map(|node| node.name.clone());
+            if key.is_none() {
+                tool.to_key = false;
+            }
             let named = key.as_deref().map_or("Last selected".to_string(), |name| format!("Last selected ({name})"));
             let response = ui.add_enabled_ui(key.is_some(), |ui| theme::choice(ui, tool.to_key, &named)).inner;
             if response.on_hover_text("Hold the last selected object still and line the others up on it.").clicked() {
