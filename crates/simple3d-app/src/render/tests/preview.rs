@@ -43,25 +43,53 @@ pub(crate) fn a_preview_loop_is_drawn_on_the_solid_and_hidden_behind_it() {
     assert_eq!(drawn(vec![square(-20.0)]), 0, "the cells on the far side of the solid were drawn through it");
 }
 
-/// A template's edges are drawn over a body it is buried in (issue 70), at every corner. Regression:
-/// only its faces were, blended so faintly over the body that the template read as cut off by it.
+/// A template buried in a body shows its edges faintly through it and never solid (issue 70): solid
+/// through the body, they made the body look removed. Regression: they were solid, and before that
+/// missing, so the template looked cut off by the body.
 #[test]
-pub(crate) fn a_template_buried_in_a_body_still_shows_its_edges_over_it() {
+pub(crate) fn a_template_buried_in_a_body_shows_its_edges_faintly_through_it() {
     let solid = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
     let small = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0));
     let lift = simple3d_core::xform::Xform::from_translation(Vec3::new(4.0, -4.0, 5.0));
     let mut req = request(vec![Item { renderable: &solid, style: Style::Solid }], DisplayMode::Shaded);
     let edge = req.palette.template;
-    assert_eq!(pixels_of(&render(&req), edge), 0, "the edge colour is drawn without any template");
+    let bare = render(&req);
     req.templates = vec![(&small, lift)];
     let frame = render(&req);
+    assert_eq!(pixels_of(&frame, edge), 0, "the buried template's edges were drawn solid through the body");
     for &corner in &small.mesh.positions {
         let (at, _) = req.view.project(lift.point(corner)).expect("the corner is in front of the eye");
-        let near = (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (at.x as i32 + dx, at.y as i32 + dy)));
-        let seen = near.into_iter().any(|(x, y)| {
-            let o = (y as usize * frame.width + x as usize) * 4;
-            frame.color[o..o + 3] == edge[..3]
-        });
-        assert!(seen, "no template edge at the corner {corner:?}, at {at:?} inside the body");
+        assert!(changed_near(&bare, &frame, at), "no faint edge at the corner {corner:?}, at {at:?}");
     }
+}
+
+/// A template in front of a body is drawn over it, solid edges and all (issue 70).
+#[test]
+pub(crate) fn a_template_in_front_of_a_body_shows_solid_edges_over_it() {
+    let solid = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
+    let small = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0));
+    let mut req = request(vec![Item { renderable: &solid, style: Style::Solid }], DisplayMode::Shaded);
+    // Between the body and the eye, so the body is behind every corner.
+    let lift = simple3d_core::xform::Xform::from_translation(req.view.forward() * -60.0);
+    req.templates = vec![(&small, lift)];
+    let frame = render(&req);
+    let edge = req.palette.template;
+    for &corner in &small.mesh.positions {
+        let (at, _) = req.view.project(lift.point(corner)).expect("the corner is in front of the eye");
+        assert!(has_near(&frame, at, edge), "no solid template edge at the corner {corner:?}, at {at:?}");
+    }
+}
+
+/// The byte offsets of the pixels round `at`.
+fn near(frame: &Image, at: egui::Pos2) -> impl Iterator<Item = usize> {
+    let width = frame.width as i32;
+    (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| ((at.y as i32 + dy) * width + at.x as i32 + dx) as usize * 4))
+}
+
+fn has_near(frame: &Image, at: egui::Pos2, colour: Rgba) -> bool {
+    near(frame, at).any(|o| frame.color[o..o + 3] == colour[..3])
+}
+
+fn changed_near(before: &Image, after: &Image, at: egui::Pos2) -> bool {
+    near(before, at).any(|o| before.color[o..o + 3] != after.color[o..o + 3])
 }

@@ -138,15 +138,18 @@ fn push_cap_of(
     }
 }
 
-/// A tool's template (issue 70): shaded like a ghost, but blended over everything regardless of depth,
-/// so where it overlaps a body the two do not fight. Its edges are drawn opaque over it, or the faces
-/// alone, faint over a body, read as the template being hidden where it overlaps one.
+/// A tool's template (issue 70): shaded like a ghost and hidden by the bodies in front of it, biased
+/// towards the eye so a face lying on a body's face does not fight it. Its edges are drawn faint over
+/// everything, then solid where they are seen, so the template's extent shows through a body without
+/// the body looking removed; edges drawn solid through it read as a hole where the body was.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn push_template(
     steps: &mut Vec<Step>,
     view: &View,
     item: &Renderable,
     screen: &[Vertex],
     base: Rgba,
+    hidden: Rgba,
     section: &[Plane],
 ) {
     let forward = view.forward();
@@ -157,13 +160,21 @@ pub(crate) fn push_template(
                 continue;
             }
             let colour = shade(base, normal, forward, base[3]);
-            push_faces(out, view, item, screen, item.mesh.indices[index], section, |v| Step::Glow { v, colour });
+            let step = |v: [Vertex; 3]| {
+                let v = v.map(|v| Vertex { key: v.key + PREVIEW_BIAS * v.key.abs(), ..v });
+                Step::Triangle { v, colour, tag: 0, write_depth: false }
+            };
+            push_faces(out, view, item, screen, item.mesh.indices[index], section, step);
         }
     });
-    let colour = [base[0], base[1], base[2], 255];
+    let seen = [base[0], base[1], base[2], 255];
     extend_in_order(steps, item.edges.len(), |range, out| {
         for &edge in &item.edges[range] {
-            push_edge(out, view, item, screen, edge, section, |a, b| Step::GlowLine { a, b, colour });
+            push_edge(out, view, item, screen, edge, section, |a, b| Step::GlowLine { a, b, colour: hidden });
+            push_edge(out, view, item, screen, edge, section, |a, b| {
+                let bias = PREVIEW_BIAS * (a.key.abs() + b.key.abs()) * 0.5;
+                Step::Overlay { a, b, colour: seen, bias }
+            });
         }
     });
 }

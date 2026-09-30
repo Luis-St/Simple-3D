@@ -99,9 +99,10 @@ pub(super) struct Plan {
     pub(super) lines: Vec<LineDraw>,
     pub(super) ghosts: Vec<FaceDraw>,
     pub(super) glows: Vec<FaceDraw>,
-    /// A tool's templates (issue 70): shaded like ghosts, drawn over everything, and their edges.
+    /// A tool's templates (issue 70): shaded like ghosts, and their edges where seen and where hidden.
     pub(super) templates: Vec<FaceDraw>,
     pub(super) template_edges: Vec<LineDraw>,
+    pub(super) template_hidden: Vec<LineDraw>,
     /// Selected and glowing bodies' outlines.
     pub(super) outlines: Vec<OutlineDraw>,
     /// Plane marks and the edge round a section's cut.
@@ -138,9 +139,9 @@ impl LineDraw {
         LineDraw { id, placing: Placing::NONE, colour, bias: PREVIEW_BIAS, tag_base: None }
     }
 
-    /// A tool template's edges, drawn over everything, so no bias is needed.
+    /// A tool template's edges, biased like `preview` since they may lie on a body's face.
     pub(super) fn template(id: u64, placing: Placing, colour: Rgba) -> LineDraw {
-        LineDraw { id, placing, colour, bias: 0.0, tag_base: None }
+        LineDraw { id, placing, colour, bias: PREVIEW_BIAS, tag_base: None }
     }
 }
 
