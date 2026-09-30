@@ -91,22 +91,20 @@ impl Gpu {
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
         self.draw_lines(&gl, &plan.overlays, view, section, viewport, depth);
         // Tool templates (issue 70) like ghosts, pulled towards the eye so a face lying on a body's
-        // face does not fight it.
+        // face does not fight it, and their edges where seen. Nothing of them is drawn through a body:
+        // that made the body look removed.
         gl.enable(glow::POLYGON_OFFSET_FILL);
         gl.polygon_offset(-1.0, -4.0);
         self.draw_faces(&gl, &plan.templates, view, section, viewport, depth);
         gl.disable(glow::POLYGON_OFFSET_FILL);
+        self.draw_lines(&gl, &plan.template_edges, view, section, viewport, depth);
 
-        // Glows of buried bodies, and templates' edges faint where a body hides them, over everything
-        // with no depth test. The edges' seen parts go over them solid; solid through a body, they
-        // made it look removed.
-        if !plan.glows.is_empty() || !plan.template_hidden.is_empty() {
+        // Glows of buried bodies, over everything with no depth test.
+        if !plan.glows.is_empty() {
             gl.disable(glow::DEPTH_TEST);
             self.draw_faces(&gl, &plan.glows, view, section, viewport, depth);
-            self.draw_lines(&gl, &plan.template_hidden, view, section, viewport, depth);
             gl.enable(glow::DEPTH_TEST);
         }
-        self.draw_lines(&gl, &plan.template_edges, view, section, viewport, depth);
 
         // The axes, in the overlay pass where depth and tag buffers are readable.
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(target.overlay));

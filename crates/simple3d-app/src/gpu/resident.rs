@@ -99,10 +99,9 @@ pub(super) struct Plan {
     pub(super) lines: Vec<LineDraw>,
     pub(super) ghosts: Vec<FaceDraw>,
     pub(super) glows: Vec<FaceDraw>,
-    /// A tool's templates (issue 70): shaded like ghosts, and their edges where seen and where hidden.
+    /// A tool's templates (issue 70): shaded like ghosts, and their edges where seen.
     pub(super) templates: Vec<FaceDraw>,
     pub(super) template_edges: Vec<LineDraw>,
-    pub(super) template_hidden: Vec<LineDraw>,
     /// Selected and glowing bodies' outlines.
     pub(super) outlines: Vec<OutlineDraw>,
     /// Plane marks and the edge round a section's cut.

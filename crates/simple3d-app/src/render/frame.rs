@@ -124,13 +124,13 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
             Style::Ghost => push_ghost(&mut steps, &view, item.renderable, screen, request.palette.ghost, cut),
         }
     }
-    // Templates of what a tool would place (issue 70), shaded like ghosts, with their hidden edges faint
-    // over everything. The CPU carries each body there itself; only the GPU draws a renderable moved.
+    // Templates of what a tool would place (issue 70), shaded like ghosts, with their seen edges solid.
+    // The CPU carries each body there itself; only the GPU draws a renderable moved.
     for (renderable, xform) in &request.templates {
         let placed = renderable.placed(xform);
         let screen = if cut.is_empty() { project_all(&view, &placed.mesh.positions) } else { Vec::new() };
         let palette = &request.palette;
-        push_template(&mut steps, &view, &placed, &screen, palette.template, palette.template_hidden, cut);
+        push_template(&mut steps, &view, &placed, &screen, palette.template, cut);
     }
     // Last, over the finished model: glows for buried bodies, and tool preview cells.
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {

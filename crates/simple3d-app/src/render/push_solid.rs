@@ -139,17 +139,14 @@ fn push_cap_of(
 }
 
 /// A tool's template (issue 70): shaded like a ghost and hidden by the bodies in front of it, biased
-/// towards the eye so a face lying on a body's face does not fight it. Its edges are drawn faint over
-/// everything, then solid where they are seen, so the template's extent shows through a body without
-/// the body looking removed; edges drawn solid through it read as a hole where the body was.
-#[allow(clippy::too_many_arguments)]
+/// towards the eye so a face lying on a body's face does not fight it. Its edges are solid where seen
+/// and not drawn where a body hides them: drawn through a body, they made the body look removed.
 pub(crate) fn push_template(
     steps: &mut Vec<Step>,
     view: &View,
     item: &Renderable,
     screen: &[Vertex],
     base: Rgba,
-    hidden: Rgba,
     section: &[Plane],
 ) {
     let forward = view.forward();
@@ -170,7 +167,6 @@ pub(crate) fn push_template(
     let seen = [base[0], base[1], base[2], 255];
     extend_in_order(steps, item.edges.len(), |range, out| {
         for &edge in &item.edges[range] {
-            push_edge(out, view, item, screen, edge, section, |a, b| Step::GlowLine { a, b, colour: hidden });
             push_edge(out, view, item, screen, edge, section, |a, b| {
                 let bias = PREVIEW_BIAS * (a.key.abs() + b.key.abs()) * 0.5;
                 Step::Overlay { a, b, colour: seen, bias }

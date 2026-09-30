@@ -100,7 +100,6 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
         let placing = Placing::moved(Some(*xform));
         plan.templates.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base: palette.template, tag_base: 0 });
         plan.template_edges.push(LineDraw::template(renderable.id, placing, opaque(palette.template)));
-        plan.template_hidden.push(LineDraw::template(renderable.id, placing, palette.template_hidden));
     }
     let planes = mark_planes(request);
     if !planes.is_empty() {
@@ -146,7 +145,7 @@ impl Plan {
                 needs.entry(id).or_default().edges = true;
             }
         }
-        for draw in self.lines.iter().chain(&self.overlays).chain(&self.template_edges).chain(&self.template_hidden) {
+        for draw in self.lines.iter().chain(&self.overlays).chain(&self.template_edges) {
             needs.entry(draw.id).or_default().edges = true;
         }
         for draw in &self.outlines {

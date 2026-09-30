@@ -2,8 +2,8 @@
 
 use super::*;
 use simple3d_core::config::DisplayMode;
-use simple3d_geom::Vec3;
 use simple3d_geom::primitives;
+use simple3d_geom::Vec3;
 
 /// The preview is its own step after the model. Regression: the GPU sorts steps into passes, and a
 /// no-depth line meant the grid under the model, so the preview was hidden while pixel tests passed.
@@ -43,24 +43,20 @@ pub(crate) fn a_preview_loop_is_drawn_on_the_solid_and_hidden_behind_it() {
     assert_eq!(drawn(vec![square(-20.0)]), 0, "the cells on the far side of the solid were drawn through it");
 }
 
-/// A template buried in a body shows its edges faintly through it and never solid (issue 70): solid
-/// through the body, they made the body look removed. Regression: they were solid, and before that
-/// missing, so the template looked cut off by the body.
+/// A template buried in a body is not drawn at all (issue 70): nothing of it shows through the body.
+/// Regression: its edges were drawn through, solid and then faint, and made the body look removed.
 #[test]
-pub(crate) fn a_template_buried_in_a_body_shows_its_edges_faintly_through_it() {
+pub(crate) fn a_template_buried_in_a_body_is_not_drawn_through_it() {
     let solid = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0));
     let small = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0));
     let lift = simple3d_core::xform::Xform::from_translation(Vec3::new(4.0, -4.0, 5.0));
     let mut req = request(vec![Item { renderable: &solid, style: Style::Solid }], DisplayMode::Shaded);
-    let edge = req.palette.template;
     let bare = render(&req);
     req.templates = vec![(&small, lift)];
     let frame = render(&req);
-    assert_eq!(pixels_of(&frame, edge), 0, "the buried template's edges were drawn solid through the body");
-    for &corner in &small.mesh.positions {
-        let (at, _) = req.view.project(lift.point(corner)).expect("the corner is in front of the eye");
-        assert!(changed_near(&bare, &frame, at), "no faint edge at the corner {corner:?}, at {at:?}");
-    }
+    let changed =
+        (0..frame.width * frame.height).filter(|&i| bare.color[i * 4..i * 4 + 3] != frame.color[i * 4..i * 4 + 3]);
+    assert_eq!(changed.count(), 0, "the buried template showed through the body");
 }
 
 /// A template in front of a body is drawn over it, solid edges and all (issue 70).
@@ -88,8 +84,4 @@ fn near(frame: &Image, at: egui::Pos2) -> impl Iterator<Item = usize> {
 
 fn has_near(frame: &Image, at: egui::Pos2, colour: Rgba) -> bool {
     near(frame, at).any(|o| frame.color[o..o + 3] == colour[..3])
-}
-
-fn changed_near(before: &Image, after: &Image, at: egui::Pos2) -> bool {
-    near(before, at).any(|o| before.color[o..o + 3] != after.color[o..o + 3])
 }
