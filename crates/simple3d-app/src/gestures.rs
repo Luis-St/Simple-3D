@@ -9,6 +9,7 @@
 mod camera;
 mod docks;
 mod fields;
+mod fields_tab;
 mod handles;
 mod scrub;
 mod section;

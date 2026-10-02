@@ -19,7 +19,7 @@ impl App {
                 ctx.memory_mut(|memory| memory.surrender_focus(id));
             }
         }
-        if ctx.wants_keyboard_input() {
+        if ctx.wants_keyboard_input() || self.fields.opening_one(ctx) {
             self.shortcut_mods.reset();
             return;
         }

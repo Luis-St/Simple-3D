@@ -14,6 +14,12 @@ pub struct FieldBuffers {
     pub(super) editing: HashSet<egui::Id>,
     /// Fields opened last frame, to be focused once their text field exists.
     pub(super) opening: HashSet<egui::Id>,
+    /// The value fields in drawing order, this pass and the last, for Tab to walk.
+    pub(super) drawn: Vec<egui::Id>,
+    pub(super) drawn_before: Vec<egui::Id>,
+    pub(super) pass: u64,
+    /// The field Tab (or Shift+Tab, `true`) was just pressed in.
+    pub(super) tabbed: Option<(egui::Id, bool)>,
 }
 
 /// What a scrub gesture did this frame.
@@ -47,15 +53,22 @@ impl FieldBuffers {
         step: f64,
         scrub: &mut Scrub,
     ) -> Field {
+        self.drawn_in_order(ui, id);
         let typing = self.editing.contains(&id) || ui.memory(|memory| memory.has_focus(id));
         if typing {
-            let committed = self.field(ui, id, current);
-            if self.opening.remove(&id) {
-                // The text field exists now, so focus it with the whole value selected.
+            let opening = self.opening.remove(&id);
+            if opening {
+                // Focused with the whole value selected before it is drawn, so a key typed this frame
+                // (straight after a Tab) replaces the value.
                 ui.memory_mut(|memory| memory.request_focus(id));
                 select_whole_value(ui, id, self.buffers.get(&id).map_or(current, String::as_str));
-            } else if committed.is_some() || !ui.memory(|memory| memory.has_focus(id)) {
+            }
+            let committed = self.field(ui, id, current);
+            if !opening && (committed.is_some() || !ui.memory(|memory| memory.has_focus(id))) {
                 self.editing.remove(&id);
+            }
+            if let Some((_, backwards)) = self.tabbed.take_if(|&mut (tabbed, _)| tabbed == id) {
+                self.open_neighbour(id, backwards);
             }
             return Field { committed, scrubbed: None };
         }
@@ -138,6 +151,9 @@ impl FieldBuffers {
                 ui.add(
                     egui::TextEdit::singleline(&mut text)
                         .id(id)
+                        // Tab is ours, not egui's: it moved focus to the next widget, which was a value
+                        // box rather than a text field, so the keys typed next reached the keymap.
+                        .lock_focus(true)
                         .desired_width(f32::INFINITY)
                         // Tabular figures, so columns line up and digits do not shift during a scrub.
                         .font(egui::TextStyle::Monospace)
@@ -145,7 +161,16 @@ impl FieldBuffers {
                 )
             })
             .inner;
-        let entered = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        // Tab commits like Enter and hands the keyboard on (`FieldBuffers::open_neighbour`).
+        // Only in a field focused before this frame, or the Tab that opened it would pass it on again.
+        let tab = response.has_focus()
+            && ui.memory(|memory| memory.had_focus_last_frame(id))
+            && ui.input(|i| i.key_pressed(egui::Key::Tab));
+        if tab {
+            self.tabbed = Some((id, ui.input(|i| i.modifiers.shift)));
+            ui.memory_mut(|memory| memory.surrender_focus(id));
+        }
+        let entered = tab || response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
         // Escape abandons the edit and keeps the model's value; egui drops focus on Escape, which would
         // otherwise commit the text.
         let abandoned = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
