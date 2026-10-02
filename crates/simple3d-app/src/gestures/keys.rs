@@ -104,3 +104,17 @@ pub(crate) fn a_modifier_held_over_a_click_is_the_click_not_a_binding() {
     harness.step();
     assert_eq!(harness.state().scene.settings.grid_visible, before, "a Ctrl+click also fired the Ctrl binding");
 }
+
+/// Regression: Align and distribute and Snap to geometry had no marker slot, so their words
+/// started left of the four modes' in the Manipulate menu.
+#[test]
+pub(crate) fn every_manipulate_menu_entry_keeps_the_marker_slot() {
+    use egui_kittest::kittest::Queryable;
+    let mut harness = harness("manipulate-menu");
+    harness.get_by_label("Manipulate").click();
+    harness.step();
+    harness.step();
+    for label in ["* Move", "  Rotate", "  Align and distribute", "  Snap to geometry"] {
+        assert!(harness.query_by_label_contains(label).is_some(), "no entry reads {label:?}");
+    }
+}

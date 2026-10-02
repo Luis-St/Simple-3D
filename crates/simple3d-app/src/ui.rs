@@ -13,7 +13,7 @@ pub(crate) use field::*;
 mod scrub;
 pub use scrub::{scrub_gesture, scrub_increment, Scrub};
 mod menu;
-pub use menu::{dialog_button, key_from_name, menu_entry, menu_label};
+pub use menu::{dialog_button, key_from_name, marked, menu_entry, menu_label};
 mod chord;
 pub use chord::{keys_down, ChordHold};
 mod describe;

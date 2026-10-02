@@ -25,12 +25,17 @@ impl App {
             }
             ui.separator();
             // Lining up and spreading out the selection (issue 70).
-            self.command_item(ui, Command::AlignDistribute, !self.selection.is_empty());
+            // In the marker slot's place too, so it lines up with the modes above.
+            let align = format!("  {}", ui::menu_label(&self.keymap, Command::AlignDistribute));
+            if ui::menu_entry(ui, &align, !self.selection.is_empty()).clicked() {
+                self.run(Command::AlignDistribute);
+                ui.close();
+            }
             ui.separator();
             // Geometry snapping's mode (issue 68), here because the document settings only show with nothing
             // selected, while snapping needs a selection; it is manipulator behaviour, not document state.
             let snap_key = self.keymap.shortcut_text(Command::SnapToGeometry);
-            ui.menu_button("Snap to geometry", |ui| {
+            ui.menu_button(ui::marked(ui, false, "Snap to geometry"), |ui| {
                 for mode in SnapMode::ALL {
                     let name = if mode == SnapMode::WhileHeld && !snap_key.is_empty() {
                         format!("{} ({snap_key})", mode.label())

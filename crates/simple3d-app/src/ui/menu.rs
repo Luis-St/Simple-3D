@@ -19,12 +19,38 @@ pub fn split_menu_label(label: &str) -> (&str, &str) {
     }
 }
 
+/// A menu label's marker slot: "* " for the chosen entry of a set, two spaces for the others and for
+/// any entry that has to line up with them.
+pub fn split_mark(label: &str) -> (Option<bool>, &str) {
+    match (label.strip_prefix("* "), label.strip_prefix("  ")) {
+        (Some(action), _) => (Some(true), action),
+        (_, Some(action)) => (Some(false), action),
+        _ => (None, label),
+    }
+}
+
+/// An action behind its marker slot. The slot is drawn in a fixed-width font: in the menu's own
+/// font a star and two spaces differ in width, so marked and unmarked labels did not line up.
+pub fn marked(ui: &egui::Ui, mark: bool, action: &str) -> egui::WidgetText {
+    let body = egui::TextStyle::Button.resolve(ui.style());
+    let slot = egui::FontId::monospace(body.size);
+    let mut job = egui::text::LayoutJob::default();
+    let format = |font_id| egui::TextFormat { font_id, color: egui::Color32::PLACEHOLDER, ..Default::default() };
+    job.append(if mark { "* " } else { "  " }, 0.0, format(slot));
+    job.append(action, 0.0, format(body));
+    job.into()
+}
+
 /// One menu entry: the action on the left and its binding right-aligned in a keycap outline, so
-/// bindings line up and read as keys.
+/// bindings line up and read as keys. A label in the marker convention (`split_mark`) gets its slot.
 pub fn menu_entry(ui: &mut egui::Ui, label: &str, enabled: bool) -> egui::Response {
     let (action, shortcut) = split_menu_label(label);
     let font = egui::FontId::monospace(crate::theme::font::SMALL);
-    let mut button = egui::Button::new(action);
+    let text = match split_mark(action) {
+        (Some(mark), action) => marked(ui, mark, action),
+        (None, action) => action.into(),
+    };
+    let mut button = egui::Button::new(text);
     if !shortcut.is_empty() {
         button = button.shortcut_text(egui::RichText::new(shortcut).font(font.clone()));
     }

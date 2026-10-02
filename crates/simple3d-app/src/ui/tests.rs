@@ -1,6 +1,7 @@
 mod chord;
 mod commit;
 mod describe;
+mod menu;
 
 use super::chord::*;
 use super::commit::*;
