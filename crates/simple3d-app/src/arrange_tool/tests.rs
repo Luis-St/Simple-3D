@@ -113,3 +113,21 @@ fn a_path_with_no_length_is_refused_with_what_to_do() {
     let why = plan(&tool, &[cube(1, Vec3::ZERO), cube(2, v(20.0, 0.0, 0.0))]).unwrap_err();
     assert!(why.contains("edges"), "{why}");
 }
+
+/// Regression: Apply selected what it placed in document order, so the last selected object, which
+/// the tool and the Properties panel both measure from, became whichever came last in the tree.
+#[test]
+fn applying_keeps_the_last_selected_object_last_selected() {
+    let (mut app, a, b) = crate::app::tests::two_boxes("arrange-keeps-primary", v(40.0, 15.0, 0.0));
+    app.reevaluate_for_test();
+    app.select_only(b);
+    app.toggle_selected(a);
+    assert_eq!(app.primary(), Some(a));
+    app.toggle_arrange_tool();
+    let tool = app.arrange_tool.as_mut().expect("the tool opened on two boxes");
+    tool.align[1] = Some(Side::Min);
+    tool.to_key = true;
+    app.apply_arrange();
+    assert_eq!(app.scene.node(b).position.y, 0.0, "the other box was not lined up on the last selected");
+    assert_eq!(app.primary(), Some(a), "Apply changed which object is last selected");
+}

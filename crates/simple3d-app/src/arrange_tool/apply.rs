@@ -16,6 +16,7 @@ impl App {
                 return;
             }
         };
+        let primary = self.primary();
         self.edit(
             match mode {
                 Arrange::Align => "Align",
@@ -48,6 +49,11 @@ impl App {
         // A copied pattern is sized like a duplicated one.
         self.size_fresh_patterns();
         let moved = placed.len() - copies;
+        // The last selected stays last, since the tool and the Properties panel measure from it.
+        if let Some(at) = primary.and_then(|primary| placed.iter().position(|&id| id == primary)) {
+            let primary = placed.remove(at);
+            placed.push(primary);
+        }
         self.selection = placed;
         self.on_selection_changed();
         self.arrange_tool = None;
