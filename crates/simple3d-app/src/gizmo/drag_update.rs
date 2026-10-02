@@ -70,6 +70,7 @@ impl Drag {
                 let anchor = gizmo.own.point(gizmo.face_centre(axis, positive));
                 let Some(along) = view.ray_axis(cursor, anchor, gizmo.axes[axis]) else { return };
                 let outward = mods.snap(along - self.grab, move_snap) * if positive { 1.0 } else { -1.0 };
+                self.symmetric = mods.symmetric;
                 let applied = self.size_axis(scene, axis, outward, mods.symmetric, positive);
                 self.readout = match applied {
                     Some(extent) => format!("{} {}", axis_name(axis), format_length(extent, unit)),
@@ -99,6 +100,7 @@ impl Drag {
                         }
                     }
                 }
+                self.symmetric = false;
                 let mut parts: Vec<String> = Vec::new();
                 for axis in 0..3 {
                     if !self.sizeable(axis) {

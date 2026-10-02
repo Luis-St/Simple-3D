@@ -31,6 +31,7 @@ impl Drag {
         let Handle::ResizeFace(axis, positive) = self.handle else { return None };
         let anchor = self.gizmo.own.point(self.gizmo.face_centre(axis, positive));
         let outward = (target - anchor).dot(self.gizmo.axes[axis]) * if positive { 1.0 } else { -1.0 };
+        self.symmetric = symmetric;
         self.size_axis(scene, axis, outward, symmetric, positive)
     }
 
@@ -96,6 +97,9 @@ impl Drag {
 
     /// Escape during a drag restores the pre-drag values exactly (spec section 6.2).
     pub fn cancel(&self, scene: &mut Scene) {
+        for other in &self.others {
+            other.cancel(scene);
+        }
         if let Some(node) = scene.get_mut(self.node) {
             node.position = self.start_position;
             node.rotation = self.start_rotation;

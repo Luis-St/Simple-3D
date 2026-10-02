@@ -124,6 +124,10 @@ impl App {
                 } else {
                     self.snap_indicator = None;
                 }
+                // The rest of the selection follows, after any snap so it is carried too.
+                if let Some(drag) = self.drag.as_ref() {
+                    drag.carry(&mut self.scene);
+                }
                 // The property editor tracks the handle live, and the preview follows.
                 self.fields.clear();
                 self.touch();
@@ -141,6 +145,17 @@ impl App {
                     None,
                 );
                 self.drag = Drag::begin(&self.scene, gizmo, id, handle, view, cursor);
+                // The other selected nodes come along, as a Transform field applies to all of them. Never a
+                // node inside or around the dragged one, which would then move twice.
+                let others: Vec<Drag> = self
+                    .top_level_selection()
+                    .into_iter()
+                    .filter(|&o| o != id && !self.scene.is_ancestor_of(o, id) && !self.scene.is_ancestor_of(id, o))
+                    .filter_map(|o| Drag::carried(&self.scene, &self.gizmo_for(o)?, o, handle))
+                    .collect();
+                if let Some(drag) = self.drag.as_mut() {
+                    drag.others = others;
+                }
                 // Before anything moves, while evaluated meshes and live positions agree.
                 self.snap_sources = self.drag_snap_sources(id);
                 self.snap_indicator = None;
@@ -156,6 +171,10 @@ impl App {
     /// move, turn or scale (not resize), and only for bodies that passed through evaluation untouched.
     pub(crate) fn live_drag(&self) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
         let drag = self.drag.as_ref()?;
+        // Several bodies moving at once are left to evaluation.
+        if !drag.others.is_empty() {
+            return None;
+        }
         let node = self.scene.get(drag.node)?;
         if node.params().cloned().unwrap_or_default() != drag.start_params {
             return None;

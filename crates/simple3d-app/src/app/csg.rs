@@ -68,6 +68,9 @@ impl App {
         self.gpu.as_ref()?;
         let carried = match &self.drag {
             Some(drag) => {
+                if !drag.others.is_empty() {
+                    return None;
+                }
                 let node = self.scene.get(drag.node)?;
                 if node.params().cloned().unwrap_or_default() != drag.start_params {
                     return None;

@@ -6,6 +6,7 @@ mod components_undo;
 mod csg;
 mod document;
 mod drag;
+mod drag_selection;
 mod keymap;
 mod library;
 mod outliner;

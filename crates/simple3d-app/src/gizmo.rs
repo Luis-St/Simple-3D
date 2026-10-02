@@ -25,6 +25,7 @@ pub(crate) use hit::*;
 mod drag;
 pub use drag::Drag;
 mod axis;
+mod drag_carry;
 mod drag_resize;
 mod drag_update;
 pub(crate) use axis::*;

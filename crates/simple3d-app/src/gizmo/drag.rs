@@ -30,6 +30,10 @@ pub struct Drag {
     pub(super) turns: f64,
     /// The last value shown at the cursor.
     pub readout: String,
+    /// Whether the last resize was about the centre, which the carried nodes copy.
+    pub(super) symmetric: bool,
+    /// The other selected nodes, carried along by the same move, turn or size change.
+    pub others: Vec<Drag>,
 }
 
 impl Drag {
@@ -41,23 +45,7 @@ impl Drag {
         view: &View,
         cursor: egui::Pos2,
     ) -> Option<Drag> {
-        let n = scene.get(node)?;
-        let mut drag = Drag {
-            node,
-            handle,
-            gizmo: gizmo.clone(),
-            start_position: n.position,
-            start_rotation: n.rotation,
-            start_scale: Node::sane_scale(n.scale),
-            start_params: n.params().cloned().unwrap_or_default(),
-            start_local_lo: gizmo.local_lo,
-            start_local_hi: gizmo.local_hi,
-            grab: 0.0,
-            grab_point: Vec3::ZERO,
-            last_angle: 0.0,
-            turns: 0.0,
-            readout: String::new(),
-        };
+        let mut drag = Drag::carried(scene, gizmo, node, handle)?;
         match handle {
             Handle::MoveAxis(a) => {
                 drag.grab = view.ray_axis(cursor, gizmo.origin, gizmo.axes[a])?;
@@ -80,5 +68,28 @@ impl Drag {
             }
         }
         Some(drag)
+    }
+
+    /// A node carried along by another's drag: its pre-drag state, with nothing grabbed.
+    pub fn carried(scene: &Scene, gizmo: &Gizmo, node: NodeId, handle: Handle) -> Option<Drag> {
+        let n = scene.get(node)?;
+        Some(Drag {
+            node,
+            handle,
+            gizmo: gizmo.clone(),
+            start_position: n.position,
+            start_rotation: n.rotation,
+            start_scale: Node::sane_scale(n.scale),
+            start_params: n.params().cloned().unwrap_or_default(),
+            start_local_lo: gizmo.local_lo,
+            start_local_hi: gizmo.local_hi,
+            grab: 0.0,
+            grab_point: Vec3::ZERO,
+            last_angle: 0.0,
+            turns: 0.0,
+            readout: String::new(),
+            symmetric: false,
+            others: Vec::new(),
+        })
     }
 }
