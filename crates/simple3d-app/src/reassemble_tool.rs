@@ -13,6 +13,7 @@ mod open;
 mod preview;
 pub(crate) use preview::*;
 mod run;
+mod single;
 mod window;
 pub(crate) use window::*;
 mod controls;

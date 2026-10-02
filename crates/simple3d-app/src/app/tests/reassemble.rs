@@ -37,7 +37,7 @@ fn wait_for_answer(app: &mut App) {
 }
 
 /// Open the tool on the selection and set its numbers.
-fn open_with(app: &mut App, plan: Reassemble) {
+pub(super) fn open_with(app: &mut App, plan: Reassemble) {
     app.run(Command::Reassemble);
     app.reassemble_tool.as_mut().expect("the tool opened on the selection").plan = plan;
     wait_for_answer(app);

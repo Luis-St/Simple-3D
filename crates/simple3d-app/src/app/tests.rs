@@ -36,6 +36,7 @@ pub(crate) use pattern_grips::*;
 mod mesh;
 mod pattern_edit;
 mod reassemble;
+mod reassemble_single;
 mod simplify;
 mod snap;
 mod snap_bodies;

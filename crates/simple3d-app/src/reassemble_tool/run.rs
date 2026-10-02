@@ -19,8 +19,8 @@ impl App {
     }
 
     /// Place the found objects where the mesh stood (issue 108). The mesh's node becomes their group,
-    /// keeping its name, place, transform and colour. Always a group, even for one box, since folding a
-    /// rotated fit into a non-uniformly scaled node's transform is not representable.
+    /// keeping its name, place, transform and colour, or the one shape itself when that is all there is
+    /// (`App::become_single`).
     pub fn apply_reassemble(&mut self) {
         if !self.reassemble_ready() {
             return;
@@ -33,35 +33,13 @@ impl App {
         let name = self.scene.node(tool.target).name.clone();
         let assembly = &found.assembly;
         self.edit("Reassemble into objects", None);
-        if !self.scene.make_group(tool.target, GroupOp::Union) {
-            self.history.discard_last();
-            self.status = Status::Warning(format!("{name} could not be taken apart"));
-            return;
-        }
-        // One group and no leftover is the node itself; a second wrapping group would say nothing.
-        let flat = assembly.groups.len() == 1 && assembly.rest.is_none();
-        let mut at = 0;
-        for group in &assembly.groups {
-            let holder = if flat || group.len() == 1 {
-                tool.target
-            } else {
-                let holder = self.scene.add_group(GroupOp::Union, tool.target, at);
-                at += 1;
-                holder
-            };
-            let mut inside = if holder == tool.target { at } else { 0 };
-            for &index in group {
-                self.place_part(&assembly.parts[index], &name, holder, inside);
-                inside += 1;
+        if !self.become_single(tool.target, assembly) {
+            if !self.scene.make_group(tool.target, GroupOp::Union) {
+                self.history.discard_last();
+                self.status = Status::Warning(format!("{name} could not be taken apart"));
+                return;
             }
-            if holder == tool.target {
-                at = inside;
-            }
-            self.collapsed.remove(&holder);
-        }
-        if let Some(rest) = &assembly.rest {
-            let mesh = simple3d_core::mesh_data::MeshData::new(rest.clone());
-            self.scene.add_mesh(&format!("{name} Remainder"), mesh, tool.target, at);
+            self.place_assembly(tool.target, assembly, &name);
         }
         self.collapsed.remove(&tool.target);
         self.select_only(tool.target);
@@ -73,6 +51,35 @@ impl App {
         let back =
             if undo.is_empty() { "undo puts the mesh back".to_string() } else { format!("{undo} puts the mesh back") };
         self.status = Status::Info(format!("Reassembled {name} into {} -- {back}", tally(assembly)));
+    }
+
+    /// Fill the group the mesh's node has become.
+    fn place_assembly(&mut self, target: NodeId, assembly: &simple3d_geom::reassemble::Assembly, name: &str) {
+        // One group and no leftover is the node itself; a second wrapping group would say nothing.
+        let flat = assembly.groups.len() == 1 && assembly.rest.is_none();
+        let mut at = 0;
+        for group in &assembly.groups {
+            let holder = if flat || group.len() == 1 {
+                target
+            } else {
+                let holder = self.scene.add_group(GroupOp::Union, target, at);
+                at += 1;
+                holder
+            };
+            let mut inside = if holder == target { at } else { 0 };
+            for &index in group {
+                self.place_part(&assembly.parts[index], name, holder, inside);
+                inside += 1;
+            }
+            if holder == target {
+                at = inside;
+            }
+            self.collapsed.remove(&holder);
+        }
+        if let Some(rest) = &assembly.rest {
+            let mesh = simple3d_core::mesh_data::MeshData::new(rest.clone());
+            self.scene.add_mesh(&format!("{name} Remainder"), mesh, target, at);
+        }
     }
 
     /// Put one body into the tree: its recognised shape, or its triangles.
@@ -109,7 +116,7 @@ impl App {
 
 /// The registry shape and parameters to rebuild a recognised body, or nothing for a mesh. Starts
 /// from the shape's defaults so unrecognised parameters match the Add menu rather than zero.
-fn recipe(shape: Shape) -> Option<(&'static str, Params)> {
+pub(super) fn recipe(shape: Shape) -> Option<(&'static str, Params)> {
     let length = ParamValue::Length;
     let (type_id, values): (&str, Vec<(&str, ParamValue)>) = match shape {
         Shape::Mesh => return None,
