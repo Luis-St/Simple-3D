@@ -74,3 +74,37 @@ pub(crate) fn preview_loops(app: &App) -> Vec<Vec<Vec3>> {
     }
     mesh.indices.iter().map(|tri| tri.iter().map(|&v| mesh.positions[v as usize]).collect()).collect()
 }
+
+impl App {
+    /// The mesh `id` really holds: the original while the tool previews on it, so the Properties panel
+    /// does not report a result nobody has applied.
+    pub(crate) fn committed_mesh(&self, id: NodeId) -> Option<Arc<MeshData>> {
+        match &self.simplify_tool {
+            Some(tool) if tool.target == id => Some(tool.original.clone()),
+            _ => self.scene.get(id)?.mesh().cloned(),
+        }
+    }
+
+    /// `id`'s world bounds as committed: the original mesh placed as the evaluation places the preview.
+    pub(crate) fn committed_world_bounds(&self, id: NodeId) -> Option<(Vec3, Vec3)> {
+        let previewed = self.simplify_tool.as_ref().filter(|tool| tool.target == id && tool.shown.is_some());
+        let Some(tool) = previewed else { return self.evaluated.node_world_bounds.get(&id).copied() };
+        let node = self.scene.get(id)?;
+        let placement = simple3d_core::xform::Xform::from_pos_rot_scale(
+            node.position,
+            node.rotation,
+            simple3d_core::scene::Node::sane_scale(node.scale),
+        );
+        let own = self.evaluated.node_frames.get(&id)?.compose(&placement);
+        let mesh = &tool.original.mesh;
+        let (lo, _) = mesh.bounds()?;
+        // As the evaluation lifts a base-anchored shape onto its base.
+        let lift = match node.anchor {
+            simple3d_core::scene::Anchor::Base => Vec3::new(0.0, 0.0, -lo.z),
+            simple3d_core::scene::Anchor::Centre => Vec3::ZERO,
+        };
+        let mut points = mesh.positions.iter().map(|&p| own.point(p + lift));
+        let first = points.next()?;
+        Some(points.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
+    }
+}

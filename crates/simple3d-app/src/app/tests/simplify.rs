@@ -231,3 +231,22 @@ fn the_window_draws() {
     draw_one_frame(&mut app);
     assert!(app.simplify_tool.is_some(), "drawing the window closed it");
 }
+
+/// Regression: while the window was open the Properties panel read the preview, showing its
+/// triangle count and size as if Simplify had been pressed.
+#[test]
+fn properties_show_the_committed_mesh_while_the_preview_is_open() {
+    let (mut app, id) = app_with_a_mesh();
+    let before = triangles(&app, id);
+    let bounds = app.evaluated.node_world_bounds[&id];
+
+    open_with(&mut app, Simplify { detail: 50, keep_sharp: false, ..Simplify::default() });
+    assert!(triangles(&app, id) < before, "no preview stands in the document, so this proves nothing");
+    assert_ne!(app.evaluated.node_world_bounds[&id], bounds, "the preview kept the exact size");
+
+    assert_eq!(app.committed_mesh(id).unwrap().triangle_count(), before, "Properties count the preview");
+    let (lo, hi) = app.committed_world_bounds(id).unwrap();
+    assert!((lo - bounds.0).length() < 1e-9 && (hi - bounds.1).length() < 1e-9, "Properties measure the preview");
+    // The panel is drawn from these, and draws.
+    draw_one_frame(&mut app);
+}

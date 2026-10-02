@@ -9,7 +9,8 @@ use simple3d_core::scene::NodeId;
 /// means -- so what it can say is how much geometry there is and what can still
 /// be done to it.
 pub(crate) fn mesh_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
-    let Some(mesh) = app.scene.node(id).mesh() else { return };
+    // Not a Simplify preview's numbers, as if it were applied.
+    let Some(mesh) = app.committed_mesh(id) else { return };
     let triangles = mesh.triangle_count();
     let vertices = mesh.mesh.positions.len();
     field_row(ui, "Triangles", "", |ui| {

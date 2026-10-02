@@ -15,7 +15,7 @@ pub(crate) fn measurements(app: &mut App, ui: &mut egui::Ui, id: NodeId, selecte
         );
     }
     let unit = app.unit();
-    match app.evaluated.node_world_bounds.get(&id).copied() {
+    match app.committed_world_bounds(id) {
         Some((lo, hi)) => {
             field_row(ui, "Size", "", |ui| {
                 ui.add(
