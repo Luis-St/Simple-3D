@@ -82,7 +82,8 @@ impl App {
         let anchor = self.scene.node(first).position;
         // Measured across all nodes, so the addition clears the selection as a whole.
         let near = self.near_face_x(created).map_or(0.0, |x| x - anchor.x);
-        let at = self.insertion_point_world(near);
+        let parent = self.scene.node(first).parent.unwrap_or(self.scene.root());
+        let at = self.insertion_point_in(parent, near);
         for id in created {
             if let Some(node) = self.scene.get_mut(*id) {
                 node.position = node.position - anchor + at;

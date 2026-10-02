@@ -44,7 +44,7 @@ impl App {
             self.status = Status::Warning("That shape is not in the palette".into());
             return;
         };
-        let at = self.insertion_point_world(self.near_face_x(&[id]).unwrap_or(0.0));
+        let at = self.insertion_point_in(parent, self.near_face_x(&[id]).unwrap_or(0.0));
         if let Some(node) = self.scene.get_mut(id) {
             node.position = at;
         }

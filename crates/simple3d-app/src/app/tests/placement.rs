@@ -98,3 +98,27 @@ pub(crate) fn a_shape_added_into_a_rotated_group_still_lands_where_the_placement
     let centre = (world.0 + world.1) * 0.5;
     assert!((centre - Vec3::new(10.0, 0.0, 0.0)).length() < 1e-6, "the sphere landed at {centre:?}");
 }
+
+/// Regression: with a moved group selected, the hint named the origin in the group's own frame
+/// ("18.3397, 0, 0" for a group at -18.34), while the shape still landed at the world origin.
+#[test]
+pub(crate) fn the_hint_names_world_coordinates_when_a_moved_group_is_selected() {
+    let mut app = headless_app();
+    let plate = app.primary().unwrap();
+    app.run(Command::Group);
+    let group = app.primary().unwrap();
+    assert_ne!(group, plate, "grouping did not select the new group");
+    app.scene.get_mut(group).unwrap().position = Vec3::new(-18.0, 0.0, -7.0);
+    app.reevaluate_for_test();
+
+    assert_eq!(app.insertion_point_world(0.0), Vec3::ZERO);
+    let hint = insertion_hint(&app);
+    assert!(hint.contains("0, 0, 0"), "the hint does not name the world origin: {hint}");
+
+    app.add_node(Some("sphere"), GroupOp::Union);
+    let sphere = app.primary().unwrap();
+    assert_eq!(app.scene.node(sphere).parent, Some(group), "the sphere did not go into the selected group");
+    app.reevaluate_for_test();
+    let gizmo = app.gizmo_for(sphere).unwrap();
+    assert!(gizmo.origin.length() < 1e-9, "the sphere did not land at the world origin: {:?}", gizmo.origin);
+}

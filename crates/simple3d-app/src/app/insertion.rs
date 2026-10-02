@@ -43,7 +43,7 @@ impl App {
         match created {
             Some(id) => {
                 // Asked only now, with the node in the scene, since its size is part of the answer.
-                let at = self.insertion_point_world(self.near_face_x(&[id]).unwrap_or(0.0));
+                let at = self.insertion_point_in(parent, self.near_face_x(&[id]).unwrap_or(0.0));
                 if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
@@ -71,9 +71,8 @@ impl App {
 
     /// Where the next shape goes in world millimetres under the current placement. `near_face_x`
     /// keeps the shape's own width from burying it in the selection; pass 0 when only describing.
-    /// Converted into the parent's frame before writing, so rotated groups work.
     pub fn insertion_point_world(&self, near_face_x: f64) -> Vec3 {
-        let world = match self.settings.placement {
+        match self.settings.placement {
             Placement::Origin => Vec3::ZERO,
             Placement::Cursor => self.cursor.unwrap_or(Vec3::ZERO),
             Placement::ViewCentre => {
@@ -88,14 +87,20 @@ impl App {
                 }
                 None => Vec3::ZERO,
             },
-        };
-        let (parent, _) = self.scene.insertion_point(self.primary());
+        }
+    }
+
+    /// [`App::insertion_point_world`] as a `Node::position` under `parent`, so a shape added into a
+    /// moved or rotated group still lands there. Only for writing: shown, it read as the group's offset.
+    pub fn insertion_point_in(&self, parent: NodeId, near_face_x: f64) -> Vec3 {
+        let world = self.insertion_point_world(near_face_x);
         match self.evaluated.node_frames.get(&parent) {
             // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
             Some(frame) => {
                 let node = self.scene.node(parent);
+                let scale = simple3d_core::scene::Node::sane_scale(node.scale);
                 frame
-                    .compose(&simple3d_core::xform::Xform::from_pos_rot(node.position, node.rotation))
+                    .compose(&simple3d_core::xform::Xform::from_pos_rot_scale(node.position, node.rotation, scale))
                     .inverse()
                     .point(world)
             }
