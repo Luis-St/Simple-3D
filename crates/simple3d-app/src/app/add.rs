@@ -50,7 +50,7 @@ impl App {
         }
         self.collapsed.remove(&parent);
         self.select_only(id);
-        self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
+        self.status = Status::Info(hints::added(self, id));
     }
 
     /// Add a group or primitive where the tree points: inside `at` if it can hold children, else
@@ -71,6 +71,6 @@ impl App {
         self.size_fresh_patterns();
         self.collapsed.remove(&parent);
         self.select_only(id);
-        self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
+        self.status = Status::Info(hints::added(self, id));
     }
 }

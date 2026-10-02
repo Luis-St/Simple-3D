@@ -122,3 +122,29 @@ pub(crate) fn the_hint_names_world_coordinates_when_a_moved_group_is_selected() 
     let gizmo = app.gizmo_for(sphere).unwrap();
     assert!(gizmo.origin.length() < 1e-9, "the sphere did not land at the world origin: {:?}", gizmo.origin);
 }
+
+/// Regression: a shape added with a difference selected became one of its cuts, and the status said
+/// only "Added Sphere".
+#[test]
+pub(crate) fn adding_into_a_boolean_group_says_what_the_shape_does_there() {
+    let mut app = headless_app();
+    let root = app.scene.root();
+    let group = app.scene.add_group(GroupOp::Difference, root, 1);
+    app.scene.get_mut(group).unwrap().name = "Group".into();
+    app.scene.add_primitive("box", group, 0).unwrap();
+    app.select_only(group);
+    app.reevaluate_for_test();
+
+    app.add_node(Some("sphere"), GroupOp::Union);
+    let sphere = app.primary().unwrap();
+    assert_eq!(app.scene.node(sphere).parent, Some(group));
+    let name = app.scene.node(sphere).name.clone();
+    assert_eq!(app.status, Status::Info(format!("Added {name} to Group: it cuts the base")));
+
+    // Into a union nothing is worth saying.
+    app.scene.get_mut(group).unwrap().body = simple3d_core::scene::Body::Group { op: GroupOp::Union };
+    app.select_only(group);
+    app.add_node(Some("sphere"), GroupOp::Union);
+    let name = app.scene.node(app.primary().unwrap()).name.clone();
+    assert_eq!(app.status, Status::Info(format!("Added {name}")));
+}

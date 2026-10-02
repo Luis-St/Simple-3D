@@ -50,7 +50,7 @@ impl App {
                 // A pattern's first child lets it be sized, as when dropped or pasted in.
                 self.size_fresh_patterns();
                 self.select_only(id);
-                self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
+                self.status = Status::Info(hints::added(self, id));
             }
             None => self.status = Status::Warning("Unknown primitive type".into()),
         }

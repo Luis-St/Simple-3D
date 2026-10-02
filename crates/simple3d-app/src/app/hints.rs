@@ -18,6 +18,24 @@ pub(crate) fn children_plural(n: usize) -> &'static str {
     }
 }
 
+/// The status after adding `id`: where it went too when its group combines it with the rest, since
+/// a shape added into a difference silently became a cut.
+pub(crate) fn added(app: &App, id: simple3d_core::scene::NodeId) -> String {
+    use simple3d_core::scene::GroupOp;
+    let node = app.scene.node(id);
+    let Some(parent) = node.parent.and_then(|parent| app.scene.get(parent)) else {
+        return format!("Added {}", node.name);
+    };
+    let does = match parent.group_op() {
+        Some(GroupOp::Difference) if parent.children.first() == Some(&id) => "it is the base the rest cut",
+        Some(GroupOp::Difference) => "it cuts the base",
+        Some(GroupOp::Intersection) => "only where it overlaps the rest is kept",
+        Some(GroupOp::Hull) => "it joins the hull",
+        _ => return format!("Added {}", node.name),
+    };
+    format!("Added {} to {}: {does}", node.name, parent.name)
+}
+
 /// Where the next shape lands, in words; shared by the hint line and tile tooltips so they agree.
 pub fn insertion_hint(app: &App) -> String {
     let unit = app.unit();
