@@ -16,6 +16,8 @@ impl App {
                 return;
             }
         };
+        // Not every placed original: one already where the plan puts it is not said to move.
+        let moved = moving(&placements);
         let primary = self.primary();
         self.edit(
             match mode {
@@ -48,7 +50,6 @@ impl App {
         }
         // A copied pattern is sized like a duplicated one.
         self.size_fresh_patterns();
-        let moved = placed.len() - copies;
         // The last selected stays last, since the tool and the Properties panel measure from it.
         if let Some(at) = primary.and_then(|primary| placed.iter().position(|&id| id == primary)) {
             let primary = placed.remove(at);
@@ -62,13 +63,13 @@ impl App {
             (Arrange::Align, _) => format!("Aligned {objects}"),
             (Arrange::Distribute, _) => format!("Distributed {objects}"),
             (Arrange::Path, 0) => format!("Spread {objects} along the path"),
-            (Arrange::Path, _) => format!(
-                "Spread {objects} and {copies} cop{} along the path",
-                match copies {
-                    1 => "y",
-                    _ => "ies",
+            (Arrange::Path, _) => {
+                let made = format!("{copies} cop{}", if copies == 1 { "y" } else { "ies" });
+                match moved {
+                    0 => format!("Spread {made} along the path"),
+                    _ => format!("Spread {objects} and {made} along the path"),
                 }
-            ),
+            }
         });
     }
 }

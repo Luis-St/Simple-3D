@@ -41,6 +41,12 @@ impl Placement {
     }
 }
 
+/// How many originals really change place or turn; the window's preview and Apply's message both
+/// count these, so they agree.
+pub fn moving(placements: &[Placement]) -> usize {
+    placements.iter().filter(|p| !p.copy && p.moves()).count()
+}
+
 /// Every placement the tool's settings come to, originals first, or why there are none.
 pub fn plan(tool: &ArrangeTool, subjects: &[Subject]) -> Result<Vec<Placement>, String> {
     if subjects.is_empty() {

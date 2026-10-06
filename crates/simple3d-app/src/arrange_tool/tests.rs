@@ -131,3 +131,23 @@ fn applying_keeps_the_last_selected_object_last_selected() {
     assert_eq!(app.scene.node(b).position.y, 0.0, "the other box was not lined up on the last selected");
     assert_eq!(app.primary(), Some(a), "Apply changed which object is last selected");
 }
+
+/// Regression: the window said "1 object moves" while Apply reported every placed original, so
+/// aligning two boxes on one of them said "Aligned 2 objects".
+#[test]
+fn applying_counts_only_the_objects_that_move_as_the_window_does() {
+    let (mut app, a, b) = crate::app::tests::two_boxes("arrange-counts-moved", v(40.0, 15.0, 0.0));
+    app.reevaluate_for_test();
+    app.select_only(b);
+    app.toggle_selected(a);
+    app.toggle_arrange_tool();
+    let tool = app.arrange_tool.as_mut().expect("the tool opened on two boxes");
+    tool.align[1] = Some(Side::Min);
+    tool.to_key = true;
+    assert_eq!(moving(&app.arrange_plan().unwrap()), 1, "the window does not say one object moves");
+    app.apply_arrange();
+    match &app.status {
+        crate::app::Status::Info(text) => assert_eq!(text, "Aligned 1 object"),
+        other => panic!("Apply said {other:?}"),
+    }
+}

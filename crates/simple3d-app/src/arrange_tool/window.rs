@@ -63,7 +63,7 @@ fn summary(app: &App, ui: &mut egui::Ui) {
             return;
         }
         Ok(placements) => {
-            let moving = placements.iter().filter(|p| !p.copy && p.moves()).count();
+            let moving = moving(&placements);
             let copies = placements.iter().filter(|p| p.copy).count();
             match (moving, copies) {
                 (0, 0) => "Everything is already there.".to_string(),
