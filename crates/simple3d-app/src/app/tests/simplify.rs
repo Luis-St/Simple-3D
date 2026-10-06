@@ -250,3 +250,18 @@ fn properties_show_the_committed_mesh_while_the_preview_is_open() {
     // The panel is drawn from these, and draws.
     draw_one_frame(&mut app);
 }
+
+/// Regression: the status bar read the preview too, showing its size and the model's triangle count
+/// with the preview in it while Properties already showed the original.
+#[test]
+fn the_status_bar_shows_the_committed_mesh_while_the_preview_is_open() {
+    let (mut app, id) = app_with_a_mesh();
+    let (size, count) = (app.selection_size_text(), app.evaluated.mesh.triangle_count());
+
+    open_with(&mut app, Simplify { detail: 50, keep_sharp: false, ..Simplify::default() });
+    assert!(app.evaluated.mesh.triangle_count() < count, "no preview stands in the evaluation, so this proves nothing");
+    assert!(triangles(&app, id) < app.simplify_tool.as_ref().unwrap().original.triangle_count());
+
+    assert_eq!(app.selection_size_text(), size, "the status bar measures the preview");
+    assert_eq!(app.committed_triangle_count(), count, "the status bar counts the preview");
+}

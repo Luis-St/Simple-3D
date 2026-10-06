@@ -18,11 +18,12 @@ impl App {
         }
     }
 
-    /// Bounding size of the selection, or the whole scene when nothing is: "will this fit".
+    /// Bounding size of the selection, or the whole scene when nothing is: "will this fit". Not a
+    /// Simplify preview's size, as if it were applied.
     pub(crate) fn selection_size_text(&self) -> String {
         let unit = self.unit();
         let bounds = match self.primary() {
-            Some(id) => self.evaluated.node_world_bounds.get(&id).copied(),
+            Some(id) => self.committed_world_bounds(id),
             None => self.evaluated.bounds,
         };
         match bounds {

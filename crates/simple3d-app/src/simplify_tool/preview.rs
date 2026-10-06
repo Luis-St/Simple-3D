@@ -107,4 +107,14 @@ impl App {
         let first = points.next()?;
         Some(points.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
     }
+
+    /// The model's triangle count as committed: the evaluated count with the original's triangles in
+    /// place of the preview's, so the status bar does not report a result nobody has applied.
+    pub(crate) fn committed_triangle_count(&self) -> usize {
+        let total = self.evaluated.mesh.triangle_count();
+        let Some(tool) = self.simplify_tool.as_ref().filter(|tool| tool.shown.is_some()) else { return total };
+        // Read from the evaluation, which until it catches up still holds the original.
+        let Some(evaluated) = self.evaluated.node_meshes.get(&tool.target) else { return total };
+        (total + tool.original.triangle_count()).saturating_sub(evaluated.triangle_count())
+    }
 }

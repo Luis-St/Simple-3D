@@ -215,7 +215,7 @@ impl App {
                     ui.add(
                         egui::Label::new(theme::numeric(ui::describe_counts(
                             nodes,
-                            self.evaluated.mesh.triangle_count(),
+                            self.committed_triangle_count(),
                         )))
                         .selectable(false),
                     )
