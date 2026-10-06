@@ -96,10 +96,11 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
         }
     }
     // A tool's templates (issue 70): ghosts carried to where the tool would put them.
-    for (renderable, xform) in &request.templates {
+    for (renderable, xform, colour) in &request.templates {
         let placing = Placing::moved(Some(*xform));
-        plan.templates.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base: palette.template, tag_base: 0 });
-        plan.template_edges.push(LineDraw::template(renderable.id, placing, opaque(palette.template)));
+        let base = colour.unwrap_or(palette.template);
+        plan.templates.push(FaceDraw { id: renderable.id, placing, mode: GHOST, base, tag_base: 0 });
+        plan.template_edges.push(LineDraw::template(renderable.id, placing, opaque(base)));
     }
     let planes = mark_planes(request);
     if !planes.is_empty() {

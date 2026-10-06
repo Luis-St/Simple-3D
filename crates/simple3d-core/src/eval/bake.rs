@@ -124,5 +124,6 @@ pub(crate) fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
         positions: mesh.positions.iter().map(|&p| xf.point(p)).collect(),
         indices: mesh.indices.clone(),
         tags: mesh.tags.clone(),
+        sources: mesh.sources.clone(),
     }
 }

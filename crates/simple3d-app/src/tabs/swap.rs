@@ -27,6 +27,7 @@ impl App {
     pub(super) fn detach(&mut self) -> Document {
         // Undo the simplify preview first, or the tab would return holding an unaccepted result (issue 106).
         self.cancel_simplify_tool();
+        self.cancel_round_tool();
         let model = self.take_model();
         Document { model, path: self.path.take(), project: std::mem::take(&mut self.project) }
     }
@@ -68,6 +69,7 @@ impl App {
         self.arrange_tool = None;
         self.simplify_tool = None;
         self.reassemble_tool = None;
+        self.round_tool = None;
 
         // Nothing cached about the previous model survives.
         self.evaluation_generation += 1;

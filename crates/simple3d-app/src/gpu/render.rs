@@ -80,7 +80,7 @@ impl Gpu {
         extra.extend(request.live.ready.iter().copied());
         plan.csg.extend(extra.iter().skip(preview.is_some() as usize).map(|shape| shape.id));
         // After the boolean shapes are counted, since templates are drawn as ghosts, not booleans (issue 70).
-        extra.extend(request.templates.iter().map(|(renderable, _)| *renderable));
+        extra.extend(request.templates.iter().map(|(renderable, _, _)| *renderable));
         let kept = unsafe { self.keep_resident(&gl, request, &plan, &extra) };
         self.preview = preview;
         self.csg_half = half;

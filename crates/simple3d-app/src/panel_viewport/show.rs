@@ -21,6 +21,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if app.measure.active {
                 let view = app.current_view();
                 measure_interact(app, ui, &response, &view);
+            } else if app.round_tool.is_some() {
+                // Rounding picks edges and corners rather than objects (issue 88).
+                let view = app.current_view();
+                crate::round_tool::interact(app, ui, &response, &view);
             } else if crate::arrange_tool::wants_pointer(app) {
                 // Spreading along a path, the clicks build the path (issue 70).
                 let view = app.current_view();
@@ -33,7 +37,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 let grips_owned = pattern_grips_interact(app, ui, &view);
                 // The section grip likewise slides the cut rather than selecting behind it (issue 71).
                 let section_owned = crate::section_tool::interact(app, ui, &view);
-                let owned = grips_owned || section_owned || manipulate(app, ui, &response, &view);
+                // Push/pull drags faces rather than handles (issue 73).
+                let owned = grips_owned
+                    || section_owned
+                    || if app.mode == crate::gizmo::Mode::PushPull {
+                        crate::push_pull_tool::interact(app, ui, &response, &view)
+                    } else {
+                        manipulate(app, ui, &response, &view)
+                    };
                 // Picking is outside the manipulator, since with nothing selected there is no gizmo and the first
                 // click was lost.
                 if !owned && response.clicked_by(egui::PointerButton::Primary) {
@@ -85,6 +96,12 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     for section in app.scene.settings.sections() {
         crate::section_tool::hash_section(section, &mut hasher);
     }
+    // Push/pull's swept solid is drawn in the picture (issue 73).
+    if let Some((distance, _)) = app.push_pull.drag.as_ref().and_then(|drag| drag.prism.as_ref()) {
+        distance.to_bits().hash(&mut hasher);
+    }
+    // The round tool's ghost is drawn in the picture too (issue 88).
+    app.round_tool.as_ref().and_then(|tool| tool.picture_key()).hash(&mut hasher);
     // A GPU-drawn dragged body moves without anything above changing.
     if let Some(moved) = app.live_csg().map(|csg| csg.xform).or_else(|| app.live_move().map(|(_, _, moved)| moved)) {
         moved.hash_bits(&mut hasher);

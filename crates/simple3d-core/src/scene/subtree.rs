@@ -20,6 +20,7 @@ impl Scene {
         let mut original: Option<Box<NodeData>> = None;
         let mut tiling: Option<SplitPlan> = None;
         let mut component: Option<ComponentId> = None;
+        let mut outline: Option<simple3d_geom::push_pull::Outline> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -36,6 +37,10 @@ impl Scene {
             Body::Component { component: of, op } => {
                 component = Some(*of);
                 ("component".to_string(), *op, Params::new())
+            }
+            Body::Extrusion { outline: shape, params } => {
+                outline = Some((**shape).clone());
+                ("extrusion".to_string(), None, params.clone())
             }
         };
         Some(NodeData {
@@ -56,7 +61,9 @@ impl Scene {
             original,
             tiling,
             component,
+            outline,
             params,
+            edits: node.edits.clone(),
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
         })
     }
@@ -75,6 +82,11 @@ impl Scene {
             }
             // An integration without its component is refused: it would be nothing at all.
             "component" => Body::Component { component: data.component?, op: data.op },
+            // An extrusion without its outline is refused: there would be nothing to sweep.
+            "extrusion" => Body::Extrusion {
+                outline: Arc::new(data.outline.clone()?),
+                params: crate::scene::extrusion_params(&data.params),
+            },
             type_id => {
                 let spec = primitive::lookup(type_id)?;
                 Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -95,6 +107,8 @@ impl Scene {
             export_body: data.export_body,
             extracted: data.extracted,
             body,
+            // An edit that could not be a solid is dropped rather than refusing the whole node.
+            edits: data.edits.iter().cloned().filter_map(ObjectEdit::sane).collect(),
             children: Vec::new(),
             parent: Some(parent),
         };

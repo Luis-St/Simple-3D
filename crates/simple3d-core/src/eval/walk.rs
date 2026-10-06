@@ -47,7 +47,7 @@ impl Evaluator {
         let own = parent.compose(&placement);
         let shifted = own.compose(&Xform::from_translation(anchor_offset));
         match &node.body {
-            Body::Primitive { .. } => {
+            Body::Primitive { .. } if node.edits.is_empty() => {
                 let mesh = self.primitive_mesh(scene, id);
                 if let Some((lo, hi)) = mesh.bounds() {
                     out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
@@ -60,12 +60,19 @@ impl Evaluator {
                 out.meshes.insert(id, world);
             }
             // A stored mesh or an integration (issue 113): its own world geometry, picked, outlined and moved as one.
-            Body::Mesh { .. } | Body::Component { .. } => {
+            // A primitive with push/pull edits too, since its geometry is no longer the shared generated mesh.
+            Body::Mesh { .. } | Body::Component { .. } | Body::Extrusion { .. } | Body::Primitive { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 let inv =
                     Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale))
                         .inverse();
-                if let Some((lo, hi)) = subtree.mesh.bounds() {
+                // A primitive's box stays its body's, which its dimensions and their handles describe.
+                let primitive = matches!(node.body, Body::Primitive { .. });
+                if primitive {
+                    if let Some((lo, hi)) = self.primitive_mesh(scene, id).bounds() {
+                        out.local_bounds.insert(id, (lo + anchor_offset, hi + anchor_offset));
+                    }
+                } else if let Some((lo, hi)) = subtree.mesh.bounds() {
                     let (a, b) = (inv.point(lo), inv.point(hi));
                     out.local_bounds.insert(id, (a.min(b), a.max(b)));
                 }

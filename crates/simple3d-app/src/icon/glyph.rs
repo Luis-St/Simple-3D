@@ -9,6 +9,10 @@ pub enum Glyph {
     Resize,
     Scale,
     Measure,
+    /// A face pulled out of a slab: the push/pull tool (issue 73).
+    PushPull,
+    /// A square with one corner rounded off: the edge rounding tool (issue 88).
+    Round,
     /// Squares spread along a curve: the align and distribute tool (issue 70).
     Arrange,
     Pattern,
@@ -37,6 +41,8 @@ pub enum Glyph {
     Split,
     /// A component placed in the tree (issue 113).
     Component,
+    /// An outline swept into a solid by push/pull (issue 73).
+    Extrusion,
     // Primitive silhouettes.
     Box,
     RoundedBox,

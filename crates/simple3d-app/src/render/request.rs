@@ -1,6 +1,7 @@
 //! What one frame was asked for.
 
 use super::*;
+use crate::raster::Rgba;
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
 use simple3d_core::scene::AxisStyle;
@@ -93,8 +94,9 @@ pub struct Request<'a> {
     pub preview: Vec<Vec<Vec3>>,
     /// Bodies drawn translucent where a tool would put them, as a template of the result: the align
     /// tool's moved objects and the copies it would make (issue 70). Each is a renderable and the
-    /// world transform carrying it there.
-    pub templates: Vec<(&'a Renderable, Xform)>,
+    /// world transform carrying it there, with its colour when not the palette's template colour
+    /// (push/pull's solid, issue 73).
+    pub templates: Vec<(&'a Renderable, Xform, Option<Rgba>)>,
     /// What a drag has moved since the renderables were made; GPU renderer only (see [`Live`]).
     pub live: Live<'a>,
     /// The section planes (issue 71). Everything drawn from the model is cut by them, and the opening

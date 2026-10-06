@@ -49,6 +49,24 @@ impl Xform {
         Xform { m: [[x.x, y.x, z.x], [x.y, y.y, z.y], [x.z, y.z, z.z]], t: position }
     }
 
+    /// The Euler angles (X then Y then Z, in degrees, as `from_pos_rot` takes them) of the rotation
+    /// taking the world axes to the orthonormal right-handed `x`, `y`, `z` (issue 73).
+    pub fn rotation_of_axes(x: Vec3, y: Vec3, z: Vec3) -> Vec3 {
+        // Columns are the turned axes: R = Rz * Ry * Rx.
+        let (r00, r10, r20) = (x.x, x.y, x.z);
+        let (r01, r11) = (y.x, y.y);
+        let (r21, r22) = (y.z, z.z);
+        let b = (-r20).clamp(-1.0, 1.0).asin();
+        let (a, c) = if b.cos().abs() > 1e-9 {
+            (r21.atan2(r22), r10.atan2(r00))
+        } else {
+            // Gimbal lock: X and Z turn about the same line, so X takes none of it.
+            (0.0, (-r01).atan2(r11))
+        };
+        let tidy = |deg: f64| if deg.abs() < 1e-9 { 0.0 } else { deg };
+        Vec3::new(tidy(a.to_degrees()), tidy(b.to_degrees()), tidy(c.to_degrees()))
+    }
+
     /// Transform a point.
     pub fn point(&self, p: Vec3) -> Vec3 {
         self.vector(p) + self.t

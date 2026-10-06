@@ -3,7 +3,7 @@
 
 mod bvh;
 mod ray;
-pub use ray::ray_mesh;
+pub use ray::{ray_mesh, ray_mesh_triangle};
 mod pick;
 pub use pick::pick;
 #[cfg(test)]

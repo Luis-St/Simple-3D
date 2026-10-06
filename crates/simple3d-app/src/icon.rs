@@ -8,6 +8,7 @@ mod pen;
 pub use pen::draw;
 pub(crate) use pen::*;
 mod paint;
+mod paint_tools;
 pub(crate) use paint::*;
 mod button;
 pub use button::{button, button_sensing, shared_icon};

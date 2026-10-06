@@ -37,7 +37,7 @@ pub(crate) fn cancel_opposite_faces(mesh: Mesh) -> Mesh {
     }
     let (indices, tags) =
         mesh.indices.iter().enumerate().filter(|(i, _)| !dead[*i]).map(|(i, t)| (*t, mesh.tag(i))).unzip();
-    Mesh { positions: mesh.positions, indices, tags }
+    Mesh { positions: mesh.positions, indices, tags, sources: Vec::new() }
 }
 
 pub(crate) fn same_winding(a: &[u32; 3], b: &[u32; 3]) -> bool {

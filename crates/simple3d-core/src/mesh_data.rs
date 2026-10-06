@@ -90,6 +90,6 @@ impl MeshData {
             indices.push(tri);
         }
         let tags = decode_tags(&blob.tags, indices.len())?;
-        Some(MeshData { mesh: Mesh { positions, indices, tags } })
+        Some(MeshData { mesh: Mesh { positions, indices, tags, sources: Vec::new() } })
     }
 }

@@ -52,7 +52,7 @@ pub(crate) fn a_template_buried_in_a_body_is_not_drawn_through_it() {
     let lift = simple3d_core::xform::Xform::from_translation(Vec3::new(4.0, -4.0, 5.0));
     let mut req = request(vec![Item { renderable: &solid, style: Style::Solid }], DisplayMode::Shaded);
     let bare = render(&req);
-    req.templates = vec![(&small, lift)];
+    req.templates = vec![(&small, lift, None)];
     let frame = render(&req);
     let changed =
         (0..frame.width * frame.height).filter(|&i| bare.color[i * 4..i * 4 + 3] != frame.color[i * 4..i * 4 + 3]);
@@ -67,7 +67,7 @@ pub(crate) fn a_template_in_front_of_a_body_shows_solid_edges_over_it() {
     let mut req = request(vec![Item { renderable: &solid, style: Style::Solid }], DisplayMode::Shaded);
     // Between the body and the eye, so the body is behind every corner.
     let lift = simple3d_core::xform::Xform::from_translation(req.view.forward() * -60.0);
-    req.templates = vec![(&small, lift)];
+    req.templates = vec![(&small, lift, None)];
     let frame = render(&req);
     let edge = req.palette.template;
     for &corner in &small.mesh.positions {

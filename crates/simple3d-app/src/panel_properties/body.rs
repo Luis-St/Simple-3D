@@ -28,6 +28,26 @@ pub(crate) fn mesh_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
     );
 }
 
+/// An extrusion's panel (issue 73): its distance, the one number behind it. The outline is the face
+/// as it was when pushed; it is not re-read from the model, so editing the faces around it later
+/// leaves this solid as it is.
+pub(crate) fn extrusion_body(app: &mut App, ui: &mut egui::Ui, id: NodeId) {
+    let unit = app.unit();
+    for param in &simple3d_core::scene::EXTRUSION_PARAMS {
+        param_field(app, ui, &[id], id, param, unit, DIMENSION_ROW);
+    }
+    let area = match &app.scene.node(id).body {
+        simple3d_core::scene::Body::Extrusion { outline, .. } => outline.area(),
+        _ => return,
+    };
+    let suffix = unit.suffix();
+    let side = unit.from_mm(1.0);
+    field_row(ui, "Face area", "The outline captured from the face it was pushed out of or into.", |ui| {
+        let text = format!("{} {suffix}\u{00B2}", simple3d_core::unit::format_length(area * side, unit));
+        ui.add(egui::Label::new(theme::value(text)).selectable(false));
+    });
+}
+
 /// A split's panel (issue 82): what it was made from, how many pieces it is in,
 /// and the one button that undoes the break.
 ///

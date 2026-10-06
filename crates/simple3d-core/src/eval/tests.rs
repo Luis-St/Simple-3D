@@ -6,7 +6,12 @@ mod colour;
 mod component;
 mod groups;
 mod pattern;
+mod push_pull;
+mod push_pull_edits;
 mod ranges;
+mod round_edits;
+mod round_extend;
+mod round_extract;
 mod scale;
 
 use super::*;

@@ -51,7 +51,7 @@ pub fn weld_tolerant(mesh: &Mesh, tol: f64) -> Mesh {
             tags.push(mesh.tag(i));
         }
     }
-    Mesh { positions, indices, tags }
+    Mesh { positions, indices, tags, sources: Vec::new() }
 }
 
 /// Merge the ends of edges shorter than `limit`, dropping triangles that collapse. Chained booleans
@@ -88,7 +88,7 @@ pub(crate) fn collapse_short_edges(mesh: Mesh, limit: f64) -> Mesh {
             tags.push(mesh.tag(i));
         }
     }
-    Mesh { positions: mesh.positions, indices, tags }
+    Mesh { positions: mesh.positions, indices, tags, sources: Vec::new() }
 }
 
 /// Drop triangles thinner than `tol` (vertex to opposite edge), which are effectively segments but
@@ -106,5 +106,5 @@ pub(crate) fn drop_slivers(mesh: Mesh, tol: f64) -> Mesh {
             tags.push(mesh.tag(i));
         }
     }
-    Mesh { positions: mesh.positions, indices, tags }
+    Mesh { positions: mesh.positions, indices, tags, sources: Vec::new() }
 }

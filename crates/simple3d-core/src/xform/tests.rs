@@ -98,3 +98,16 @@ fn vectors_ignore_translation() {
     let v = xf.vector(Vec3::new(1.0, 0.0, 0.0));
     assert!(close(v, Vec3::new(0.0, 1.0, 0.0)), "{v:?}");
 }
+
+#[test]
+fn rotation_of_axes_gives_back_the_angles_that_turned_them() {
+    for rotation in [Vec3::new(10.0, 20.0, 30.0), Vec3::new(-170.0, 45.0, 80.0), Vec3::new(0.0, 90.0, 25.0), Vec3::ZERO]
+    {
+        let xf = Xform::from_pos_rot(Vec3::ZERO, rotation);
+        let found = Xform::rotation_of_axes(xf.axis(0), xf.axis(1), xf.axis(2));
+        let again = Xform::from_pos_rot(Vec3::ZERO, found);
+        for axis in 0..3 {
+            assert!((again.axis(axis) - xf.axis(axis)).length() < 1e-9, "{rotation:?} came back as {found:?}");
+        }
+    }
+}

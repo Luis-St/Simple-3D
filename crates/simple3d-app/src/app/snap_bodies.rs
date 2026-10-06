@@ -38,7 +38,11 @@ impl App {
         let whole = match &node.body {
             Body::Group { op } => *op != GroupOp::Assembly,
             Body::Split { .. } => false,
-            Body::Primitive { .. } | Body::Mesh { .. } | Body::Component { .. } | Body::Pattern { .. } => true,
+            Body::Primitive { .. }
+            | Body::Mesh { .. }
+            | Body::Component { .. }
+            | Body::Pattern { .. }
+            | Body::Extrusion { .. } => true,
         };
         let holds_excluded = exclude.iter().any(|&dragged| self.scene.is_ancestor_of(id, dragged));
         if whole && !holds_excluded {
@@ -76,6 +80,7 @@ impl App {
             positions: local.positions.iter().map(|&p| frame.point(p)).collect(),
             indices: local.indices.clone(),
             tags: local.tags.clone(),
+            sources: local.sources.clone(),
         });
         self.body_meshes.borrow_mut().insert(id, (key, mesh.clone()));
         Some(mesh)

@@ -49,6 +49,12 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
         draw_measure(app, ui, &painter, view);
     }
 
+    // The edges and corners picked for rounding (issue 88).
+    crate::round_tool::draw(app, ui, &painter, view);
+
+    // The face push/pull would take, or the solid it is sweeping (issue 73).
+    crate::push_pull_tool::draw(app, ui, &painter, view);
+
     // The path objects are spread along (issue 70).
     crate::arrange_tool::draw(app, ui, &painter, view);
 

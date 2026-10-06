@@ -27,6 +27,8 @@ impl App {
             // Lining up and spreading out the selection (issue 70).
             // In the marker slot's place too, so it lines up with the modes above.
             self.slotted_command_item(ui, Command::AlignDistribute, !self.selection.is_empty());
+            // Rounding edges and corners (issue 88), picked in the viewport, so always available.
+            self.slotted_command_item(ui, Command::RoundEdges, true);
             ui.separator();
             // Geometry snapping's mode (issue 68), here because the document settings only show with nothing
             // selected, while snapping needs a selection; it is manipulator behaviour, not document state.

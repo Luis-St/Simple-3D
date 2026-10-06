@@ -144,7 +144,7 @@ impl App {
     }
 
     /// Whether the picture shows this point. In wireframe nothing covers anything.
-    pub(super) fn shows(&self, view: &crate::view::View, at: Vec3) -> bool {
+    pub(crate) fn shows(&self, view: &crate::view::View, at: Vec3) -> bool {
         self.settings.display_mode == DisplayMode::Wireframe || self.in_clear_view(view, at)
     }
 

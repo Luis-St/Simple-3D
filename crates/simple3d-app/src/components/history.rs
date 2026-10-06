@@ -43,6 +43,8 @@ impl App {
 
     /// Undo the last step, whatever it discards.
     pub fn undo_now(&mut self) {
+        // The round tool's draft is not in the history, so the tool is put away first (issue 88).
+        self.cancel_round_tool();
         let made = self.undo_would_remove();
         match self.history.undo(&mut self.scene) {
             Some(label) => {
@@ -55,6 +57,7 @@ impl App {
 
     /// Redo the last undone step (`Command::Redo`), with any components it made.
     pub fn redo(&mut self) {
+        self.cancel_round_tool();
         let made = self.history.redo_creates().to_vec();
         match self.history.redo(&mut self.scene) {
             Some(label) => {

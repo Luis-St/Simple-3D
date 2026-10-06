@@ -47,7 +47,7 @@ impl Cell {
         let local = extrude_frustum_polygon(&centred, &centred, hi - lo);
         let (cu, cv, cw) = (self.centre.0, self.centre.1, (lo + hi) / 2.0);
         let positions = local.positions.iter().map(|p| tiling.to_world(p.x + cu, p.y + cv, p.z + cw)).collect();
-        Mesh { positions, indices: local.indices, tags: local.tags }
+        Mesh { positions, indices: local.indices, tags: local.tags, sources: local.sources }
     }
 }
 

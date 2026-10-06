@@ -5,11 +5,15 @@ use crate::vec3::Vec3;
 ///
 /// `tags` holds one number per triangle naming the body it came from. This crate only carries it
 /// through booleans, welding and healing, so callers can still colour faces by their operand.
+///
+/// `sources` is a second such channel naming the scene node a triangle came from (issue 73), so a
+/// picked face of a boolean's result can be traced to its object. Empty or short means 0, unknown.
 #[derive(Clone, Debug, Default)]
 pub struct Mesh {
     pub positions: Vec<Vec3>,
     pub indices: Vec<[u32; 3]>,
     pub tags: Vec<u32>,
+    pub sources: Vec<u32>,
 }
 
 /// The tag for a surface painted `rgb`. The top byte separates painted tags from 0, which means
@@ -37,6 +41,13 @@ impl Mesh {
     }
 
     pub fn push_tagged_triangle(&mut self, a: Vec3, b: Vec3, c: Vec3, tag: u32) {
+        self.push_face(a, b, c, tag, 0);
+    }
+
+    /// A triangle with both its tag and its source.
+    pub fn push_face(&mut self, a: Vec3, b: Vec3, c: Vec3, tag: u32, source: u32) {
+        self.pad_sources();
+        self.sources.push(source);
         let base = self.positions.len() as u32;
         self.positions.push(a);
         self.positions.push(b);
@@ -50,6 +61,25 @@ impl Mesh {
         self.tags.get(triangle).copied().unwrap_or(0)
     }
 
+    /// One triangle's source node; zero unless a caller set it.
+    pub fn source(&self, triangle: usize) -> u32 {
+        self.sources.get(triangle).copied().unwrap_or(0)
+    }
+
+    /// Mark every triangle as coming from one node.
+    pub fn set_source(&mut self, source: u32) {
+        self.sources.clear();
+        self.sources.resize(self.indices.len(), source);
+    }
+
+    /// Fill missing sources with 0, so a push or an append lines up with its triangle.
+    fn pad_sources(&mut self) {
+        let n = self.indices.len();
+        if self.sources.len() != n {
+            self.sources.resize(n, 0);
+        }
+    }
+
     /// Mark every triangle as one body, once per primitive before combining.
     pub fn set_tag(&mut self, tag: u32) {
         self.tags.clear();
@@ -58,6 +88,10 @@ impl Mesh {
 
     /// Append another mesh's geometry, offsetting its indices.
     pub fn append(&mut self, other: &Mesh) {
+        if !(self.sources.is_empty() && other.sources.is_empty()) {
+            self.pad_sources();
+            self.sources.extend((0..other.indices.len()).map(|i| other.source(i)));
+        }
         let base = self.positions.len() as u32;
         self.positions.extend_from_slice(&other.positions);
         self.indices.extend(other.indices.iter().map(|t| [t[0] + base, t[1] + base, t[2] + base]));
@@ -66,18 +100,18 @@ impl Mesh {
 
     pub fn transformed(&self, translate: Vec3, rotate_deg: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.rotate_xyz_deg(rotate_deg) + translate).collect();
-        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() }
     }
 
     /// Componentwise scale about the mesh's origin. Callers clamp non-positive factors first.
     pub fn scaled(&self, factor: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.scaled_by(factor)).collect();
-        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() }
     }
 
     pub fn translated(&self, offset: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| *p + offset).collect();
-        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone() }
+        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() }
     }
 
     /// The three corner positions of triangle `tri`.
@@ -157,14 +191,18 @@ impl Mesh {
         }
         let mut indices = Vec::with_capacity(self.indices.len());
         let mut tags = Vec::with_capacity(self.indices.len());
+        let mut sources = Vec::new();
         for (i, t) in self.indices.iter().enumerate() {
             let t = [remap[t[0] as usize], remap[t[1] as usize], remap[t[2] as usize]];
             if t[0] != t[1] && t[1] != t[2] && t[0] != t[2] {
                 indices.push(t);
                 tags.push(self.tag(i));
+                if !self.sources.is_empty() {
+                    sources.push(self.source(i));
+                }
             }
         }
-        (Mesh { positions, indices, tags }, remap)
+        (Mesh { positions, indices, tags, sources }, remap)
     }
 
     /// Closedness check on the welded mesh: every directed edge must be balanced by as many reverse

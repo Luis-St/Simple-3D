@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::primitive::ParamValue;
-use crate::scene::{Anchor, Body, NodeId, Scene};
+use crate::scene::{Anchor, Body, NodeId, ObjectEdit, Scene};
 use simple3d_geom::Vec3;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -29,10 +29,30 @@ impl Evaluator {
         hash_vec3(hasher, crate::scene::Node::sane_scale(node.scale));
         (node.anchor == Anchor::Base).hash(&mut hasher.0);
         self.hash_content(scene, id, hasher);
+        // Applied after the body's result, so they are in this key and not in the content key.
+        node.edits.len().hash(&mut hasher.0);
+        for edit in &node.edits {
+            match edit {
+                ObjectEdit::Push(edit) => {
+                    edit.placing.hash(&mut hasher.0);
+                    hash_f64(hasher, edit.distance);
+                    hash_vec3(hasher, edit.position);
+                    hash_vec3(hasher, edit.rotation);
+                    hash_outline(hasher, &edit.outline);
+                }
+                ObjectEdit::Round(edit) => hash_round(hasher, edit),
+            }
+        }
     }
 
     fn hash_content(&self, scene: &Scene, id: NodeId, hasher: &mut Hasher64) {
         let node = scene.node(id);
+        // The node itself, for the bodies whose triangles are stamped with it (issue 73): a cached copy
+        // made for a look-alike elsewhere would name the wrong object. Costs sharing between identical
+        // shapes, which the per-primitive mesh cache still does.
+        if source_stamped(scene, id) {
+            id.hash(&mut hasher.0);
+        }
         match &node.body {
             Body::Primitive { type_id, params } => {
                 type_id.hash(&mut hasher.0);
@@ -85,6 +105,12 @@ impl Evaluator {
                     None => component.hash(&mut hasher.0),
                 }
             }
+            Body::Extrusion { outline, params } => {
+                "extrusion".hash(&mut hasher.0);
+                hash_params(hasher, params);
+                hash_outline(hasher, outline);
+                crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
+            }
             Body::Mesh { mesh } => {
                 "mesh".hash(&mut hasher.0);
                 // Stored meshes are immutable, so their allocation and size identify them; hashing every vertex
@@ -95,6 +121,55 @@ impl Evaluator {
             }
         }
     }
+}
+
+/// Whether a node's result carries its own id as every triangle's source rather than its children's:
+/// leaves, and the bodies whose result is one new surface or is picked as one (hull, pattern,
+/// component).
+pub(crate) fn source_stamped(scene: &Scene, id: NodeId) -> bool {
+    match &scene.node(id).body {
+        Body::Group { op } => *op == crate::scene::GroupOp::Hull,
+        Body::Split { .. } => false,
+        _ => true,
+    }
+}
+
+fn hash_round(hasher: &mut Hasher64, edit: &crate::scene::RoundEdit) {
+    edit.kind.hash(&mut hasher.0);
+    hash_f64(hasher, edit.size);
+    edit.segments.hash(&mut hasher.0);
+    edit.edges.len().hash(&mut hasher.0);
+    for edge in &edit.edges {
+        for v in [edge.a, edge.b, edge.normals[0], edge.normals[1], edge.along[0], edge.along[1]] {
+            hash_vec3(hasher, v);
+        }
+        edge.convex.hash(&mut hasher.0);
+    }
+    edit.joints.len().hash(&mut hasher.0);
+    edit.joints.iter().for_each(|&p| hash_vec3(hasher, p));
+    edit.corners.len().hash(&mut hasher.0);
+    for corner in &edit.corners {
+        hash_vec3(hasher, corner.at);
+        for &(dir, length) in &corner.edges {
+            hash_vec3(hasher, dir);
+            hash_f64(hasher, length);
+        }
+        corner.faces.iter().for_each(|&n| hash_vec3(hasher, n));
+    }
+}
+
+fn hash_outline(hasher: &mut Hasher64, outline: &simple3d_geom::push_pull::Outline) {
+    for point in outline.outer.iter().chain(outline.holes.iter().flatten()) {
+        hash_f64(hasher, point[0]);
+        hash_f64(hasher, point[1]);
+    }
+    outline.outer.len().hash(&mut hasher.0);
+    outline.holes.iter().map(Vec::len).collect::<Vec<_>>().hash(&mut hasher.0);
+}
+
+/// The source number a node's triangles carry (issue 73); node ids stay far below `u32::MAX`.
+pub fn source_of(id: NodeId) -> u32 {
+    id as u32
 }
 
 /// `DefaultHasher::new` uses fixed keys, so hashes match across processes and evaluation is reproducible.

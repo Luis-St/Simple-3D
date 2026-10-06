@@ -30,6 +30,10 @@ impl App {
         // removes or repeats material; and at most one hull is rebuilt per frame.
         let mut hulls = 0;
         for (index, &id) in path[1..].iter().enumerate() {
+            // Push/pull's edits on a group are in no shape the expression is drawn from (issue 73).
+            if !self.scene.node(id).edits.is_empty() {
+                return None;
+            }
             match &self.scene.node(id).body {
                 Body::Group { op: GroupOp::Hull } => {
                     let below = &path[1..=index];

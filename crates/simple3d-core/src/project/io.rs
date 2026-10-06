@@ -16,7 +16,7 @@ pub fn project_to_string(root: &Scene, components: &[(ComponentId, &Scene)]) -> 
 
 fn write(scene: &Scene, components: &[(ComponentId, &Scene)]) -> String {
     let file = ProjectFile {
-        format: if components.is_empty() { PLAIN_FORMAT } else { FORMAT_VERSION },
+        format: format_for(scene, components),
         generator: format!("Simple 3D {}", env!("CARGO_PKG_VERSION")),
         settings: scene.settings.clone(),
         camera: scene.camera,
@@ -35,6 +35,17 @@ fn write(scene: &Scene, components: &[(ComponentId, &Scene)]) -> String {
     let mut text = serde_json::to_string_pretty(&file).expect("a scene always serialises");
     text.push('\n');
     text
+}
+
+/// The oldest version that can hold what the project uses, so files stay readable by older builds.
+fn format_for(scene: &Scene, components: &[(ComponentId, &Scene)]) -> u32 {
+    if std::iter::once(scene).chain(components.iter().map(|(_, s)| *s)).any(Scene::has_extrusion) {
+        FORMAT_VERSION
+    } else if !components.is_empty() {
+        COMPONENT_FORMAT
+    } else {
+        PLAIN_FORMAT
+    }
 }
 
 /// Only a project's root component.

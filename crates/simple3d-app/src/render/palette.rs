@@ -15,6 +15,10 @@ pub struct Palette {
     /// A tool's template of what it would place (issue 70): the accent, translucent, so it reads as
     /// not there yet.
     pub template: Rgba,
+    /// What push/pull would add (issue 73): green, translucent, so it reads as material to come.
+    pub extrusion: Rgba,
+    /// What push/pull would cut away (issue 73): the subtrahend's red.
+    pub reduction: Rgba,
     pub grid: Rgba,
     pub grid_major: Rgba,
     pub axis_x: Rgba,
@@ -40,6 +44,8 @@ impl Palette {
             // A subtrahend is a translucent red ghost, so a cut can be seen before it is resolved.
             ghost: fade(token::DANGER, 80),
             template: fade(token::ACCENT, 90),
+            extrusion: fade(token::ADD, 110),
+            reduction: fade(token::DANGER, 110),
             grid: [0x28, 0x2D, 0x35, 255],
             grid_major: rgba(token::SURFACE_3),
             axis_x: rgba(token::AXIS_X),
@@ -60,6 +66,8 @@ impl Palette {
             selected: [226, 122, 12, 255],
             ghost: [40, 110, 220, 60],
             template: [226, 122, 12, 80],
+            extrusion: [40, 150, 60, 100],
+            reduction: [200, 60, 50, 100],
             grid: [214, 218, 224, 255],
             grid_major: [186, 192, 200, 255],
             axis_x: [186, 54, 54, 255],

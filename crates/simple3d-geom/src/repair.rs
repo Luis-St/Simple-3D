@@ -101,5 +101,5 @@ fn compact(mesh: Mesh) -> Mesh {
         }
         indices.push(out);
     }
-    Mesh { positions, indices, tags: mesh.tags.clone() }
+    Mesh { positions, indices, tags: mesh.tags.clone(), sources: mesh.sources.clone() }
 }

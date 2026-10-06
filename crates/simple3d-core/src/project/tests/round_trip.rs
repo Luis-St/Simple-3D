@@ -66,7 +66,7 @@ pub(crate) fn a_project_with_components_round_trips() {
     };
     let part = sample();
     let text = project_to_string(&root_scene, &[(4, &part)]);
-    assert!(text.contains(&format!("\"format\": {FORMAT_VERSION}")));
+    assert!(text.contains(&format!("\"format\": {COMPONENT_FORMAT}")));
     let back = project_from_str(&text).unwrap();
     assert_eq!(fingerprint(&back.root), fingerprint(&root_scene));
     assert_eq!(back.components.len(), 1);

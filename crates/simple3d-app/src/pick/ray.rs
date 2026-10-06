@@ -21,18 +21,29 @@ pub fn ray_mesh(mesh: &Arc<Mesh>, origin: Vec3, dir: Vec3) -> Option<f64> {
     tree_for(mesh).nearest(mesh, origin, dir)
 }
 
+/// The nearest hit with the index of the triangle hit, for tools that need the face (issue 73).
+pub fn ray_mesh_triangle(mesh: &Arc<Mesh>, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
+    if mesh.indices.len() < MIN_TRIANGLES {
+        return ray_mesh_linear_triangle(mesh, origin, dir);
+    }
+    tree_for(mesh).nearest_triangle(mesh, origin, dir)
+}
+
 /// The same, by walking every triangle.
 pub(crate) fn ray_mesh_linear(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<f64> {
+    ray_mesh_linear_triangle(mesh, origin, dir).map(|(t, _)| t)
+}
+
+fn ray_mesh_linear_triangle(mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
     // A bounding-box reject first, keeping clicks instant with many primitives.
     let (lo, hi) = mesh.bounds()?;
     ray_box(origin, dir, lo, hi)?;
-    let mut nearest: Option<f64> = None;
-    for tri in &mesh.indices {
+    let mut nearest: Option<(f64, usize)> = None;
+    for (index, tri) in mesh.indices.iter().enumerate() {
         let [a, b, c] = mesh.corners(*tri);
-        let hit = ray_triangle(origin, dir, a, b, c);
-        if let Some(t) = hit {
-            if nearest.is_none_or(|best| t < best) {
-                nearest = Some(t);
+        if let Some(t) = ray_triangle(origin, dir, a, b, c) {
+            if nearest.is_none_or(|(best, _)| t < best) {
+                nearest = Some((t, index));
             }
         }
     }

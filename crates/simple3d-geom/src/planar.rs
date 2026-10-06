@@ -54,5 +54,5 @@ pub fn retriangulate_flat_regions(mesh: &Mesh) -> Mesh {
         }
     }
     let (indices, tags) = out.into_iter().unzip();
-    Mesh { positions: mesh.positions.clone(), indices, tags }
+    Mesh { positions: mesh.positions.clone(), indices, tags, sources: Vec::new() }
 }

@@ -29,6 +29,7 @@ impl Command {
             NewComponent => "New component",
             ConvertToMesh => "Convert to a mesh",
             SimplifyMesh => "Simplify the mesh",
+            RoundEdges => "Round or bevel edges",
             Reassemble => "Reassemble into objects",
             SplitIntoPieces => "Split into smaller pieces",
             Rejoin => "Join the pieces back together",
@@ -61,6 +62,7 @@ impl Command {
             ModeRotate => "Manipulator: rotate",
             ModeResize => "Manipulator: resize",
             ModeScale => "Manipulator: scale",
+            ModePushPull => "Push / pull a face",
             MeasureTool => "Measure tool",
             AlignDistribute => "Align and distribute",
             SnapToGeometry => "Snap to geometry (hold)",
@@ -78,15 +80,17 @@ impl Command {
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | MakeComponent | NewComponent
-            | ConvertToMesh | SimplifyMesh | Reassemble | SplitIntoPieces | Rejoin | Rename | ToggleVisibility
-            | MoveUp | MoveDown => Area::Edit,
+            | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble | SplitIntoPieces | Rejoin | Rename
+            | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
                 Area::View
             }
-            ModeMove | ModeRotate | ModeResize | ModeScale | MeasureTool | AlignDistribute | SnapToGeometry
-            | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | MeasureTool | AlignDistribute
+            | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => {
+                Area::Manipulate
+            }
         }
     }
 }

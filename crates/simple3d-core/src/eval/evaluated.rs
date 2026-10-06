@@ -58,6 +58,7 @@ impl Evaluated {
             positions: mesh.positions.iter().map(|&p| frame.point(p)).collect(),
             indices: mesh.indices.clone(),
             tags: mesh.tags.clone(),
+            sources: mesh.sources.clone(),
         }))
     }
 }

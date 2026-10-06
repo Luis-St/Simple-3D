@@ -24,16 +24,35 @@ impl Evaluator {
             Ok(local) => local,
             Err(errors) => return Arc::new(SubtreeResult::abandoned(errors)),
         };
-        let (errors, passed) = (local.errors.clone(), local.passed.clone());
+        let (mut errors, mut passed) = (local.errors.clone(), local.passed.clone());
         // Each step makes a new mesh, so the cached one is only read.
         let mut placed = std::borrow::Cow::Borrowed(&*local.mesh);
 
+        // The anchor reads the body alone, so a push below a base-anchored object does not lift it.
         let anchor_offset = match (node.anchor, placed.bounds()) {
             (Anchor::Base, Some((lo, _))) => Vec3::new(0.0, 0.0, -lo.z),
             _ => Vec3::ZERO,
         };
         if anchor_offset.z != 0.0 {
             placed = std::borrow::Cow::Owned(placed.translated(anchor_offset));
+        }
+        if !node.edits.is_empty() {
+            // A union's objects, so a rounding cutting into several gives each its own colour there.
+            let parts: Vec<Arc<Mesh>> = match node.body {
+                Body::Group { op: GroupOp::Union } => node
+                    .children
+                    .iter()
+                    .filter(|&&child| scene.node(child).visible)
+                    .map(|&child| Arc::new(self.subtree(scene, child, cancel).mesh.translated(anchor_offset)))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            placed = std::borrow::Cow::Owned(edits::with_edits(scene, id, &placed, &parts, &mut errors, cancel));
+            // The booleans rebuilt the vertices, so no child's are where they were.
+            passed.clear();
+            if cancel.is_cancelled() {
+                return Arc::new(SubtreeResult::abandoned(errors));
+            }
         }
         // Same order as `Xform::from_pos_rot_scale`, so the manipulator's frames agree with the mesh.
         // Scaling after anchoring keeps a base-anchored shape on z = 0.
@@ -77,6 +96,12 @@ impl Evaluator {
                     copy.set_tag(colour.tag());
                 }
                 copy
+            }
+            Body::Extrusion { outline, params } => {
+                use crate::primitive::ParamsExt;
+                let mut mesh = simple3d_geom::push_pull::extrude_outline(outline, params.num("distance"));
+                mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
+                mesh
             }
             Body::Primitive { .. } => {
                 // The generated mesh is shared between identical primitives, so colour goes on this copy only.
@@ -194,6 +219,10 @@ impl Evaluator {
                 combine(GroupOp::Union, &copies, id, &node.name, &mut errors, cancel).0
             }
         };
+        let mut mesh = mesh;
+        if source_stamped(scene, id) {
+            mesh.set_source(source_of(id));
+        }
         let local = Arc::new(LocalResult { mesh: Arc::new(mesh), errors, passed, node: id });
         // Cached only when not abandoned, as in `subtree`.
         if let (Some(key), false) = (key, cancel.is_cancelled()) {

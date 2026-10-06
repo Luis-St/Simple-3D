@@ -108,7 +108,7 @@ pub(crate) fn a_chain_of_booleans_survives_the_last_bits_of_its_input() {
             .iter()
             .map(|p| Vec3::new(nudge(p.x, next()), nudge(p.y, next()), nudge(p.z, next())))
             .collect();
-        Mesh { positions, indices: mesh.indices.clone(), tags: mesh.tags.clone() }
+        Mesh { positions, indices: mesh.indices.clone(), tags: mesh.tags.clone(), sources: Vec::new() }
     };
 
     let mut broken = Vec::new();

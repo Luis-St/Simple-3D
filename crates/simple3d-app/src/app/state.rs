@@ -133,6 +133,8 @@ pub struct App {
     pub cursor: Option<Vec3>,
     /// The measure tool (issue 69).
     pub measure: Measure,
+    /// The push/pull tool's hover and drag (issue 73).
+    pub(crate) push_pull: crate::push_pull_tool::PushPull,
     /// Whether snapping is requested this frame (issue 68).
     pub(crate) snap_requested: bool,
     /// The feature the current drag is snapped onto, for the viewport to mark.
@@ -188,6 +190,8 @@ pub struct App {
     /// The simplify tool's window (issue 106). Its result goes into the document live, so it keeps
     /// the original mesh for Cancel. See [`crate::simplify_tool`].
     pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
+    /// The edge rounding tool's window (issue 88); see [`crate::round_tool`].
+    pub round_tool: Option<crate::round_tool::RoundTool>,
     /// The reassembly tool's window (issue 108). Its subtree only enters the document on accept, to
     /// avoid rebuilding the outliner live. See [`crate::reassemble_tool`].
     pub reassemble_tool: Option<crate::reassemble_tool::ReassembleTool>,

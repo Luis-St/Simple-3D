@@ -25,6 +25,8 @@ impl Scene {
             export_body: original.export_body,
             extracted: original.extracted,
             body: Body::Split { original: Arc::new(original), plan },
+            // The original's edits are in its pieces' geometry and kept with the original.
+            edits: Vec::new(),
             children: Vec::new(),
             parent: Some(parent),
         };

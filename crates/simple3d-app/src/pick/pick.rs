@@ -27,5 +27,19 @@ pub fn pick(scene: &Scene, evaluated: &Evaluated, origin: Vec3, dir: Vec3) -> Op
             }
         }
     }
+    // What push/pull added to a boolean (issue 73) is in no operand's mesh, so the boolean's result
+    // is tried too. It only wins where it is in front of every operand: elsewhere its surface is one.
+    for &id in evaluated.group_meshes.keys() {
+        let Some(node) = scene.get(id) else { continue };
+        if !node.edits.iter().any(|edit| edit.adds()) || !scene.is_shown(id) {
+            continue;
+        }
+        let Some(mesh) = evaluated.result_mesh(id) else { continue };
+        if let Some(t) = super::ray::ray_mesh_linear(&mesh, origin, dir) {
+            if best.map_or(true, |(bt, _)| t < bt - 1e-6) {
+                best = Some((t, id));
+            }
+        }
+    }
     best.map(|(_, id)| id)
 }

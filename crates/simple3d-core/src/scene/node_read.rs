@@ -47,6 +47,11 @@ impl Node {
         matches!(self.body, Body::Split { .. })
     }
 
+    /// Whether this node is a pushed or pulled solid (issue 73).
+    pub fn is_extrusion(&self) -> bool {
+        matches!(self.body, Body::Extrusion { .. })
+    }
+
     /// Whether this node is an integration of a component (issue 113).
     pub fn is_component(&self) -> bool {
         matches!(self.body, Body::Component { .. })
@@ -101,6 +106,7 @@ impl Node {
             Body::Mesh { .. } => "mesh",
             Body::Split { .. } => "split",
             Body::Component { .. } => "component",
+            Body::Extrusion { .. } => "extrusion",
         }
     }
 
@@ -136,14 +142,14 @@ impl Node {
 
     pub fn params(&self) -> Option<&Params> {
         match &self.body {
-            Body::Primitive { params, .. } | Body::Pattern { params } => Some(params),
+            Body::Primitive { params, .. } | Body::Pattern { params } | Body::Extrusion { params, .. } => Some(params),
             _ => None,
         }
     }
 
     pub fn params_mut(&mut self) -> Option<&mut Params> {
         match &mut self.body {
-            Body::Primitive { params, .. } | Body::Pattern { params } => Some(params),
+            Body::Primitive { params, .. } | Body::Pattern { params } | Body::Extrusion { params, .. } => Some(params),
             _ => None,
         }
     }

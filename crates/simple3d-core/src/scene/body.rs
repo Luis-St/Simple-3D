@@ -4,6 +4,7 @@ use super::*;
 use crate::mesh_data::MeshData;
 use crate::primitive::Params;
 use serde::{Deserialize, Serialize};
+use simple3d_geom::push_pull::Outline;
 use simple3d_geom::tiling::SplitPlan;
 use std::sync::Arc;
 
@@ -46,6 +47,13 @@ pub enum Body {
     Split {
         original: Arc<NodeData>,
         plan: Option<SplitPlan>,
+    },
+    /// A solid pushed out of, or into, a face of the model (issue 73): the face's outline as captured,
+    /// in the node's own XY plane, swept along its +Z by the `distance` parameter. Behind an `Arc` so
+    /// undo snapshots share it.
+    Extrusion {
+        outline: Arc<Outline>,
+        params: Params,
     },
     /// A component placed here (issue 113), standing for another component's whole tree. `op`, if set,
     /// overrides the component's own operation; placement, visibility and colour are the node's own.

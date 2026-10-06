@@ -68,7 +68,7 @@ pub(crate) fn split_t_junctions(mesh: Mesh, tol: f64) -> Mesh {
         }
     }
 
-    Mesh { positions, indices, tags }
+    Mesh { positions, indices, tags, sources: Vec::new() }
 }
 
 /// A mesh vertex found lying on one edge of a triangle: how far along that edge

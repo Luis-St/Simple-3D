@@ -71,7 +71,9 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
         original: None,
         tiling: None,
         component: None,
+        outline: None,
         params: Params::new(),
+        edits: Vec::new(),
         children: vec![NodeData {
             name: "From the future".into(),
             type_id: "hyperboloid".into(),
@@ -90,7 +92,9 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
             original: None,
             tiling: None,
             component: None,
+            outline: None,
             params: Params::new(),
+            edits: Vec::new(),
             children: vec![],
         }],
     };

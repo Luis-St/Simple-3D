@@ -22,7 +22,11 @@ use serde::{Deserialize, Serialize};
 /// * 3: `split` nodes holding pieces and the original (issue 82). The later optional `tiling`
 ///   field needed no bump, since older builds read the file fine without it.
 /// * 4: components (issue 113). Projects without components are still written as 3.
-pub const FORMAT_VERSION: u32 = 4;
+/// * 5: `extrusion` nodes from push/pull (issue 73). Projects without them keep the version above.
+pub const FORMAT_VERSION: u32 = 5;
+
+/// The version a project with components but no extrusions is written as.
+pub const COMPONENT_FORMAT: u32 = 4;
 
 /// The version a project without components is written as (see [`FORMAT_VERSION`]).
 pub const PLAIN_FORMAT: u32 = 3;

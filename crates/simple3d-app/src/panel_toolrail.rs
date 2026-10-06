@@ -16,6 +16,7 @@ pub fn tool(mode: Mode) -> (Glyph, Command) {
         Mode::Rotate => (Glyph::Rotate, Command::ModeRotate),
         Mode::Resize => (Glyph::Resize, Command::ModeResize),
         Mode::Scale => (Glyph::Scale, Command::ModeScale),
+        Mode::PushPull => (Glyph::PushPull, Command::ModePushPull),
     }
 }
 
@@ -79,6 +80,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             .clicked()
         {
             app.run(Command::AlignDistribute);
+        }
+
+        // Rounding and bevelling edges (issue 88), lit while its window is open.
+        let rounding = app.round_tool.is_some();
+        let shortcut = app.keymap.shortcut_text(Command::RoundEdges);
+        if icon::button(ui, Glyph::Round, size, rounding, true)
+            .on_hover_text(format!("Round or bevel edges and corners  {shortcut}"))
+            .clicked()
+        {
+            app.run(Command::RoundEdges);
         }
 
         separator(ui);

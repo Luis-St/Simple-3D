@@ -33,8 +33,9 @@ pub(crate) use merge::*;
 mod convert;
 pub(crate) use convert::*;
 mod inherit;
-use inherit::inherit_tags;
+mod palette;
 pub use convert::{debug_mesh_to_polygons, debug_roundtrip, debug_splits_nothing};
+use inherit::inherit_tags;
 
 use crate::mesh::Mesh;
 
@@ -44,6 +45,8 @@ const EPSILON: f64 = 1e-8;
 const ABANDON_EVERY: u32 = 256;
 
 fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
+    let mut palette = palette::Palette::default();
+    let (a, b) = (&palette.encode(a), &palette.encode(b));
     let mut na = BspNode::new(mesh_to_polygons(a));
     let mut nb = BspNode::new(mesh_to_polygons(b));
     let scratch = &mut ClipScratch::default();
@@ -88,7 +91,7 @@ fn op(a: &Mesh, b: &Mesh, kind: BoolOp, give_up: crate::Abandon<'_>) -> Mesh {
     }
     // Heal the T-junctions whole-polygon clipping leaves, so every result (and chained input) is
     // edge-manifold. See `repair`.
-    crate::repair::heal_until(&polygons_to_mesh(&polys), give_up)
+    palette.decode(crate::repair::heal_until(&polygons_to_mesh(&polys), give_up))
 }
 
 enum BoolOp {

@@ -177,6 +177,6 @@ impl Surface {
             indices.push(out);
             tags.push(self.tags[index]);
         }
-        Mesh { positions, indices, tags }
+        Mesh { positions, indices, tags, sources: Vec::new() }
     }
 }

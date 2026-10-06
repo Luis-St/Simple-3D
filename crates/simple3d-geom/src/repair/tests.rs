@@ -96,6 +96,7 @@ fn a_needle_lid_is_traded_for_a_split_of_its_neighbour() {
         positions: vec![v(0.0, 0.0, 0.0), v(0.5, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)],
         indices: vec![[0, 3, 2], [0, 1, 4], [1, 2, 4], [0, 4, 3], [2, 3, 4], [0, 2, 1]],
         tags: Vec::new(),
+        sources: Vec::new(),
     };
     let area_free = |m: &Mesh| m.indices.iter().filter(|&&t| m.triangle_normal(t).length() < 0.5).count();
     assert_eq!(mesh.manifold_issue(), None, "this test needs a closed surface to start with");

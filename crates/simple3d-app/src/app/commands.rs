@@ -50,6 +50,7 @@ impl App {
             NewComponent => self.new_component(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             SimplifyMesh => self.open_simplify_tool(),
+            RoundEdges => self.open_round_tool(),
             Reassemble => self.open_reassemble_tool(),
             SplitIntoPieces => self.open_split_tool(),
             Rejoin => self.rejoin_selection(),
@@ -101,6 +102,7 @@ impl App {
             ModeRotate => self.pick_transform(Mode::Rotate),
             ModeResize => self.pick_transform(Mode::Resize),
             ModeScale => self.pick_transform(Mode::Scale),
+            ModePushPull => self.pick_transform(Mode::PushPull),
             MeasureTool => self.toggle_measure(),
             AlignDistribute => self.toggle_arrange_tool(),
             // A hold key read live during a drag, so pressing it alone does nothing (issue 68).
@@ -168,6 +170,11 @@ impl App {
     /// Switch to a transform tool, putting the measure tool away and clearing its span.
     pub(super) fn pick_transform(&mut self, mode: Mode) {
         self.mode = mode;
+        self.push_pull.drag = None;
+        if mode == Mode::PushPull {
+            self.status =
+                Status::Info("Push / pull: drag a flat face out to add material, or in to cut it away".into());
+        }
         if self.measure.active {
             self.measure.active = false;
             self.measure.clear();

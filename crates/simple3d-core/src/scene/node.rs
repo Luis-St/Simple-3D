@@ -30,6 +30,9 @@ pub struct Node {
     /// via [`Scene::has_row`], since the answer depends on the parent too.
     pub extracted: bool,
     pub body: Body,
+    /// Push/pull's additions and cuts and the round tool's treated edges, applied to the body's result
+    /// in order (issues 73 and 88).
+    pub edits: Vec<ObjectEdit>,
     pub children: Vec<NodeId>,
     pub parent: Option<NodeId>,
 }
@@ -51,6 +54,7 @@ impl Node {
             export_body: None,
             extracted: false,
             body,
+            edits: Vec::new(),
             children: Vec::new(),
             parent,
         }

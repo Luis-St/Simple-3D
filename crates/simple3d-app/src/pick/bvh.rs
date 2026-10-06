@@ -87,7 +87,13 @@ impl Bvh {
 
     /// The nearest hit along the ray, exactly as `ray_triangle` over every triangle would find it.
     pub(crate) fn nearest(&self, mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<f64> {
+        self.nearest_triangle(mesh, origin, dir).map(|(t, _)| t)
+    }
+
+    /// The same, with the index of the triangle hit.
+    pub(crate) fn nearest_triangle(&self, mesh: &Mesh, origin: Vec3, dir: Vec3) -> Option<(f64, usize)> {
         let mut nearest: Option<f64> = None;
+        let mut hit = 0usize;
         let mut stack = vec![0u32];
         while let Some(at) = stack.pop() {
             let node = &self.nodes[at as usize];
@@ -102,6 +108,7 @@ impl Bvh {
                     if let Some(t) = ray_triangle(origin, dir, a, b, c) {
                         if nearest.is_none_or(|best| t < best) {
                             nearest = Some(t);
+                            hit = index as usize;
                         }
                     }
                 }
@@ -119,7 +126,7 @@ impl Bvh {
                 (None, None) => {}
             }
         }
-        nearest
+        nearest.map(|t| (t, hit))
     }
 }
 

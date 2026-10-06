@@ -4,6 +4,7 @@ use super::*;
 use crate::mesh_data::MeshBlob;
 use crate::primitive::Params;
 use serde::{Deserialize, Serialize};
+use simple3d_geom::push_pull::Outline;
 use simple3d_geom::tiling::SplitPlan;
 use simple3d_geom::Vec3;
 
@@ -50,11 +51,17 @@ pub struct NodeData {
     /// A `split` node's cuts, one per pass (issue 82); absent for a plain separation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tiling: Option<SplitPlan>,
+    /// An `extrusion` node's captured outline (issue 73); its distance is in `params`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Outline>,
     /// The component a `component` node stands for (issue 113); its own operation override is in `op`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<ComponentId>,
     #[serde(default, skip_serializing_if = "Params::is_empty")]
     pub params: Params,
+    /// Push/pull's and the round tool's edits kept on the node (issues 73 and 88), in the order they apply.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<ObjectEdit>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<NodeData>,
 }

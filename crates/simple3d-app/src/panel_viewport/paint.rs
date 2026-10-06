@@ -108,7 +108,9 @@ pub(crate) fn paint_scene(
         // Where the align tool would put things, drawn as templates of its own objects (issue 70).
         let templates = crate::arrange_tool::templates(app)
             .into_iter()
-            .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform)))
+            .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform, None)))
+            .chain(crate::push_pull_tool::template(&app.push_pull, &palette))
+            .chain(crate::round_tool::templates(app.round_tool.as_ref(), &palette))
             .collect();
         let request = render::Request {
             view,

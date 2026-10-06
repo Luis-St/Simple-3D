@@ -141,6 +141,7 @@ impl App {
                         Mode::Rotate => "Rotate",
                         Mode::Resize => "Resize",
                         Mode::Scale => "Scale",
+                        Mode::PushPull => "Push / pull",
                     },
                     None,
                 );

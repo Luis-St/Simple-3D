@@ -20,6 +20,11 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
         let targets: Vec<NodeId> = app.selection.iter().copied().filter(|id| app.scene.contains(*id)).collect();
         let Some(primary) = app.primary() else {
             document(app, ui);
+            // Roundings shared by objects of the scene itself are held by it (issue 88).
+            let root = app.scene.root();
+            if !app.scene.node(root).edits.is_empty() {
+                section(ui, "Scene edits", |ui| face_edits(app, ui, root));
+            }
             return;
         };
         section(ui, "Object", |ui| common(app, ui, &targets));
@@ -34,6 +39,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 Body::Group { op } if targets.len() == 1 => section(ui, "Boolean", |ui| group(app, ui, primary, op)),
                 Body::Pattern { .. } if targets.len() == 1 => section(ui, "Pattern", |ui| pattern(app, ui, primary)),
                 Body::Mesh { .. } if targets.len() == 1 => section(ui, "Mesh", |ui| mesh_body(app, ui, primary)),
+                Body::Extrusion { .. } if targets.len() == 1 => {
+                    section(ui, "Extrusion", |ui| extrusion_body(app, ui, primary))
+                }
                 Body::Component { .. } if targets.len() == 1 => {
                     section(ui, "Component", |ui| component_body(app, ui, primary, &mut open_component))
                 }
@@ -53,6 +61,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                     );
                 }),
             },
+        }
+        if targets.len() == 1 && !app.scene.node(primary).edits.is_empty() {
+            section(ui, "Edits", |ui| face_edits(app, ui, primary));
         }
         section(ui, "Transform", |ui| placement(app, ui, &targets));
         section(ui, "Measured", |ui| measurements(app, ui, primary, targets.len()));

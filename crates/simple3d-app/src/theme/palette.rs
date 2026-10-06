@@ -33,6 +33,8 @@ pub mod token {
     pub const MEASURE: Color32 = Color32::from_rgb(0x4F, 0xC3, 0xD9);
     /// Difference operands, destructive actions, errors.
     pub const DANGER: Color32 = Color32::from_rgb(0xD4, 0x57, 0x4E);
+    /// Material about to be added: push/pull's extrusion (issue 73).
+    pub const ADD: Color32 = Color32::from_rgb(0x5C, 0xC2, 0x6B);
 
     pub const AXIS_X: Color32 = Color32::from_rgb(0xD4, 0x57, 0x4E);
     pub const AXIS_Y: Color32 = Color32::from_rgb(0x6F, 0xBF, 0x5B);

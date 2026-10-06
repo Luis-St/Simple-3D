@@ -9,10 +9,12 @@ pub enum Mode {
     Resize,
     /// Multiply by a factor; works on groups and ungoverned axes.
     Scale,
+    /// Drag a face of the model along its normal (issue 73); no handles, the faces are the handles.
+    PushPull,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 4] = [Mode::Move, Mode::Rotate, Mode::Resize, Mode::Scale];
+    pub const ALL: [Mode; 5] = [Mode::Move, Mode::Rotate, Mode::Resize, Mode::Scale, Mode::PushPull];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -20,6 +22,7 @@ impl Mode {
             Mode::Rotate => "Rotate",
             Mode::Resize => "Resize",
             Mode::Scale => "Scale",
+            Mode::PushPull => "Push / pull",
         }
     }
 }
