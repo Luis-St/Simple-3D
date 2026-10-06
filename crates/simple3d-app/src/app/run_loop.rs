@@ -35,11 +35,13 @@ impl App {
             self.image_key = u64::MAX;
         }
         // A GPU-drawn drag is evaluated once, when it ends (`App::live_drag`, `App::live_csg`).
-        if self.dirty && !self.drag_drawn_live() {
+        let submitting = self.dirty && !self.drag_drawn_live();
+        if submitting {
             self.worker.want(self.wanted_renderables());
             self.worker.submit(&self.scene);
             self.dirty = false;
         }
+        self.refresh_committed(submitting);
         self.poll_snap_warming();
         self.poll_export();
         self.poll_import();

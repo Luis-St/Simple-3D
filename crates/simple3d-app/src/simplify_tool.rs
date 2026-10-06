@@ -9,6 +9,8 @@
 //! [`PreviewViewport`](simple3d_core::scene::PreviewViewport). A non-modal
 //! [in-place popup](crate::popup), so the shape can be orbited while tuning.
 
+mod committed;
+pub(crate) use committed::*;
 mod open;
 mod preview;
 pub(crate) use preview::*;
@@ -42,6 +44,8 @@ pub struct SimplifyTool {
     pub job: Option<SimplifyJob>,
     /// Whether the result's triangles are drawn over the shape.
     pub wireframe: bool,
+    /// The document evaluated without the preview, for the status bar's numbers.
+    pub committed: Option<Committed>,
 }
 
 /// A finished run, as it stands in the document.

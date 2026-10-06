@@ -24,6 +24,7 @@ impl App {
             shown: None,
             job: None,
             wireframe: true,
+            committed: None,
         });
     }
 }

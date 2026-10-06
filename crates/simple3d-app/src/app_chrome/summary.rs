@@ -24,7 +24,7 @@ impl App {
         let unit = self.unit();
         let bounds = match self.primary() {
             Some(id) => self.committed_world_bounds(id),
-            None => self.evaluated.bounds,
+            None => self.committed_scene_bounds(),
         };
         match bounds {
             Some((lo, hi)) => ui::describe_size(hi - lo, unit),

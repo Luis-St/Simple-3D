@@ -38,6 +38,7 @@ mod pattern_edit;
 mod reassemble;
 mod reassemble_single;
 mod simplify;
+mod simplify_committed;
 mod snap;
 mod snap_bodies;
 mod snap_resize;

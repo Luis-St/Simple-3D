@@ -6,7 +6,7 @@ use simple3d_geom::simplify::Simplify;
 use std::time::{Duration, Instant};
 
 /// A document with one sphere baked into a mesh: thousands of triangles, no flat faces or creases.
-fn app_with_a_mesh() -> (App, simple3d_core::scene::NodeId) {
+pub(super) fn app_with_a_mesh() -> (App, simple3d_core::scene::NodeId) {
     let mut app = app_in(temp_config_dir("simplify"));
     let root = app.scene.root();
     let id = app.scene.add_primitive("sphere", root, 0).expect("the sphere is in the registry");
@@ -39,7 +39,7 @@ fn wait_for_preview(app: &mut App) {
 }
 
 /// Open the tool on the selection and set its numbers.
-fn open_with(app: &mut App, plan: Simplify) {
+pub(super) fn open_with(app: &mut App, plan: Simplify) {
     app.run(Command::SimplifyMesh);
     app.simplify_tool.as_mut().expect("the tool opened on the selection").plan = plan;
     wait_for_preview(app);

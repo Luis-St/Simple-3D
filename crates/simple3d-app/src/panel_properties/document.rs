@@ -157,7 +157,7 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
     });
     section(ui, "Scene", |ui| {
         let unit = app.unit();
-        match app.evaluated.bounds {
+        match app.committed_scene_bounds() {
             Some((lo, hi)) => {
                 field_row(ui, "Bounds", "", |ui| {
                     ui.add(egui::Label::new(theme::numeric(ui::describe_size(hi - lo, unit))).selectable(false).wrap());
