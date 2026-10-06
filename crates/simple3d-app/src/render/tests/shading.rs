@@ -17,6 +17,20 @@ pub(crate) fn a_box_has_twelve_feature_edges_and_a_cylinder_keeps_only_its_rims(
     assert!(edges.len() < 100, "the cap triangulation leaked into the edges: {}", edges.len());
 }
 
+/// An edge's bias follows the slope of the faces beside it (issue 115), so they must be its own.
+#[test]
+pub(crate) fn every_feature_edge_knows_the_two_faces_that_meet_at_it() {
+    let prepared = Renderable::prepare(&primitives::box_mesh(20.0, 20.0, 20.0));
+    assert_eq!(prepared.edge_faces.len(), prepared.edges.len());
+    for (edge, faces) in prepared.edges.iter().zip(&prepared.edge_faces) {
+        assert_ne!(faces[0], faces[1], "a closed box edge has two different faces");
+        for face in faces {
+            let tri = prepared.mesh.indices[*face as usize];
+            assert!(tri.contains(&edge[0]) && tri.contains(&edge[1]), "face {face} does not hold edge {edge:?}");
+        }
+    }
+}
+
 #[test]
 pub(crate) fn a_shaded_render_actually_draws_the_model() {
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));

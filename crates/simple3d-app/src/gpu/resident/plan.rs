@@ -140,11 +140,6 @@ impl Plan {
         for id in faces {
             needs.entry(id).or_default().faces = true;
         }
-        if self.csg_edges.is_some() {
-            for &id in &self.csg {
-                needs.entry(id).or_default().edges = true;
-            }
-        }
         for draw in self.lines.iter().chain(&self.overlays).chain(&self.template_edges) {
             needs.entry(draw.id).or_default().edges = true;
         }

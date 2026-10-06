@@ -14,6 +14,7 @@ impl Resident {
             faces: None,
             paint: None,
             edges: None,
+            edge_faces: None,
             tables: None,
             outline: None,
         }
@@ -56,6 +57,10 @@ impl Resident {
         if needs.edges && self.edges.is_none() {
             let vertices = vertices.expect("made above");
             self.edges = Some(indexed(gl, vertices, bytes_of(&item.edges), item.edges.len() as i32 * 2)?);
+            if !item.edges.is_empty() && item.edge_faces.len() == item.edges.len() {
+                let corners = far_corners(item, &positions);
+                self.edge_faces = Some(table(gl, width, Format::Vec4, bytes_of(&corners), corners.len())?);
+            }
         }
         if needs.outline && self.outline.is_none() {
             if self.tables.is_none() {
@@ -97,16 +102,34 @@ impl Resident {
                 gl.delete_texture(texture);
             }
         }
-        if let Some(paint) = self.paint {
-            gl.delete_texture(paint);
+        for texture in [self.paint, self.edge_faces].into_iter().flatten() {
+            gl.delete_texture(texture);
         }
     }
+}
+
+/// Two texels per feature edge: each neighbouring triangle's corner off the edge, stored like the
+/// positions, and in `w` the sign that turns `cross(b - a, corner - a)` outward for edge `[a, b]`.
+fn far_corners(item: &Renderable, positions: &[[f32; 3]]) -> Vec<[f32; 4]> {
+    let mut corners = Vec::with_capacity(item.edges.len() * 2);
+    for (edge, faces) in item.edges.iter().zip(&item.edge_faces) {
+        for &face in faces {
+            let tri = item.mesh.indices[face as usize];
+            let at = (0..3).find(|&k| tri[k] != edge[0] && tri[k] != edge[1]).unwrap_or(0);
+            // Wound a -> b inside the triangle, the cross product already points out.
+            let forwards = tri[(at + 1) % 3] == edge[0];
+            let [x, y, z] = positions[tri[at] as usize];
+            corners.push([x, y, z, if forwards { 1.0 } else { -1.0 }]);
+        }
+    }
+    corners
 }
 
 /// How a table's texels are laid out.
 #[derive(Clone, Copy)]
 enum Format {
     Vec3,
+    Vec4,
     UVec3,
     U16,
     U32,
@@ -117,6 +140,7 @@ impl Format {
     fn gl(self) -> (u32, u32, u32, usize) {
         match self {
             Format::Vec3 => (glow::RGB32F, glow::RGB, glow::FLOAT, 12),
+            Format::Vec4 => (glow::RGBA32F, glow::RGBA, glow::FLOAT, 16),
             Format::UVec3 => (glow::RGB32UI, glow::RGB_INTEGER, glow::UNSIGNED_INT, 12),
             Format::U16 => (glow::R16UI, glow::RED_INTEGER, glow::UNSIGNED_SHORT, 2),
             Format::U32 => (glow::R32UI, glow::RED_INTEGER, glow::UNSIGNED_INT, 4),

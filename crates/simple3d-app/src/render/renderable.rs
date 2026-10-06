@@ -34,6 +34,9 @@ pub struct Renderable {
     pub normals: Vec<Vec3>,
     /// Real creases, not artefacts of how flat faces are triangulated.
     pub edges: Vec<[u32; 2]>,
+    /// The two triangles beside each of `edges`, whose depth slope its bias follows (issue 115).
+    /// Empty where there are no faces, as for a tool's preview lines.
+    pub edge_faces: Vec<[u32; 2]>,
     /// Every surface edge with its neighbours, for the per-frame silhouette. Empty unless the item
     /// may be drawn as a selection, since this can be millions of entries.
     pub outline: Vec<BorderEdge>,
@@ -92,7 +95,7 @@ impl Renderable {
             let bodies = bodies_of(&welded);
             (table.join().expect("the edge table panicked"), bodies, parts.join().expect("the parts panicked"))
         });
-        let (edges, outline, axis_spans) = std::thread::scope(|scope| {
+        let ((edges, edge_faces), outline, axis_spans) = std::thread::scope(|scope| {
             let outline = scope.spawn(|| if outlined { table.border_edges() } else { Vec::new() });
             let spans = scope.spawn(|| std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis)));
             let edges = table.feature_edges(&normals, 20.0);
@@ -104,6 +107,7 @@ impl Renderable {
             mesh: welded,
             normals,
             edges,
+            edge_faces,
             outline,
             bodies,
             body_count,
@@ -138,9 +142,9 @@ impl Renderable {
         let (welded, _) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
-        let edges = EdgeTable::of(&welded).feature_edges(&normals, 20.0);
+        let (edges, edge_faces) = EdgeTable::of(&welded).feature_edges(&normals, 20.0);
         let bodies = vec![0; welded.positions.len()];
-        Renderable { mesh: welded, normals, edges, bodies, ..Renderable::empty() }
+        Renderable { mesh: welded, normals, edges, edge_faces, bodies, ..Renderable::empty() }
     }
 
     /// A copy carried by a rigid `xform`, surface and feature edges: a tool's template for the software renderer
@@ -151,7 +155,14 @@ impl Renderable {
         // Rigid, so the normals turn with the body; a degenerate triangle keeps its zero normal.
         let normals =
             self.normals.iter().map(|&n| if n == Vec3::ZERO { n } else { xform.vector(n).normalized() }).collect();
-        Renderable { mesh, normals, edges: self.edges.clone(), bodies: self.bodies.clone(), ..Renderable::empty() }
+        Renderable {
+            mesh,
+            normals,
+            edges: self.edges.clone(),
+            edge_faces: self.edge_faces.clone(),
+            bodies: self.bodies.clone(),
+            ..Renderable::empty()
+        }
     }
 
     pub fn empty() -> Renderable {
@@ -159,6 +170,7 @@ impl Renderable {
             mesh: Mesh::new(),
             normals: Vec::new(),
             edges: Vec::new(),
+            edge_faces: Vec::new(),
             outline: Vec::new(),
             bodies: Vec::new(),
             body_count: 0,

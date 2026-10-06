@@ -91,14 +91,7 @@ pub(crate) fn push_selection(
     // How fast a face's depth key changes per pixel on screen; nearly edge-on faces change fastest.
     let slope = |face: u32| -> f32 {
         let Some(tri) = item.mesh.indices.get(face as usize) else { return 0.0 };
-        let [a, b, c] = tri.map(|i| to_vertex(view, view.to_view(item.mesh.positions[i as usize])));
-        let (e1, e2) = (b.pos - a.pos, c.pos - a.pos);
-        let det = e1.x * e2.y - e2.x * e1.y;
-        if det.abs() < 1e-6 {
-            return f32::MAX;
-        }
-        let (k1, k2) = (b.key - a.key, c.key - a.key);
-        egui::vec2(k1 * e2.y - k2 * e1.y, e1.x * k2 - e2.x * k1).length() / det.abs()
+        depth_slope(tri.map(|i| to_vertex(view, view.to_view(item.mesh.positions[i as usize]))))
     };
     let drawn_slope = |face: u32| if faces_the_eye(face) { slope(face) } else { 0.0 };
     for edge in &item.outline {

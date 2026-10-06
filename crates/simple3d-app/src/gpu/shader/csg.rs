@@ -1,45 +1,64 @@
 //! The shaders of the per-pixel boolean passes.
 
-/// A boolean's edges per pixel: each shape's feature edges, kept only where they are edges of
-/// the result. `u_done` holds one past the resolved surface's shape index and its normal.
+/// A boolean's edges, found in the resolved surface itself: full screen, over `u_done`, which holds
+/// one past each visible pixel's shape index and its normal.
 ///
-/// The pixel's surface must be the edge's own shape's, and the result must turn or end there.
-/// Without the second test, edges buried under coplanar faces showed as dashes.
+/// A pixel of the result is on an edge where the result ends beside it or its surface turns by more
+/// than the feature edges' 20 degrees. Drawing each shape's own feature edges instead missed every
+/// edge where two shapes meet, like a cutter's walls in a plate, and dropped a shape's own edges
+/// wherever the pixel under them was a neighbour's (issue 115). The carried shapes' own edges are
+/// left to their selection outline; only where they meet another shape are they marked here.
 pub(crate) const CSG_EDGE_FRAGMENT: &str = r#"#version 330 core
-in vec4 v_colour;
-flat in uint v_tag;
-
 uniform sampler2D u_done;
-uniform float u_leaf_code;
+uniform vec4 u_colour;
 uniform uint u_tag;
+// One bit per carried shape, by index.
+uniform uvec4 u_carried;
 
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
 
 // The feature edges' own threshold, 20 degrees.
 const float SAME = 0.94;
+const float EMPTY = 0.5 / 255.0;
+
+bool carried(float code) {
+    uint leaf = uint(round(code * 255.0)) - 1u;
+    return ((u_carried[leaf / 32u] >> (leaf % 32u)) & 1u) == 1u;
+}
+
+vec4 done(ivec2 at) {
+    return texelFetch(u_done, clamp(at, ivec2(0), textureSize(u_done, 0) - 1), 0);
+}
 
 void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
-    vec4 centre = texelFetch(u_done, at, 0);
-    if (abs(centre.r - u_leaf_code) > 0.5 / 255.0) {
+    vec4 centre = done(at);
+    if (centre.r < EMPTY) {
         discard;
     }
     vec3 normal = centre.gba * 2.0 - 1.0;
-    ivec2 last = textureSize(u_done, 0) - 1;
-    bool turns = false;
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            vec4 other = texelFetch(u_done, clamp(at + ivec2(dx, dy), ivec2(0), last), 0);
-            if (other.r < 0.5 / 255.0 || dot(normal, other.gba * 2.0 - 1.0) < SAME) {
-                turns = true;
-            }
+    bool own = carried(centre.r);
+    bool edge = false;
+    // Where the result ends, the line runs on its own side, so every neighbour is asked.
+    for (int k = 0; k < 4; k++) {
+        ivec2 step = ivec2(k == 0 ? 1 : (k == 1 ? -1 : 0), k == 2 ? 1 : (k == 3 ? -1 : 0));
+        if (!own && done(at + step).r < EMPTY) {
+            edge = true;
         }
     }
-    if (!turns) {
+    // A crease is marked on one side only, so it is one pixel wide like a drawn edge.
+    for (int k = 0; k < 2; k++) {
+        vec4 other = done(at + (k == 0 ? ivec2(1, 0) : ivec2(0, 1)));
+        bool mine = own && abs(other.r - centre.r) < EMPTY;
+        if (other.r >= EMPTY && !mine && dot(normal, other.gba * 2.0 - 1.0) < SAME) {
+            edge = true;
+        }
+    }
+    if (!edge) {
         discard;
     }
-    out_colour = v_colour;
+    out_colour = u_colour;
     out_tag = u_tag;
 }
 "#;

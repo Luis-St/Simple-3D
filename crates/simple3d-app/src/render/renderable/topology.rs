@@ -37,7 +37,7 @@ pub(crate) fn bodies_of(mesh: &Mesh) -> Vec<u16> {
 #[cfg(test)]
 pub fn feature_edges(mesh: &Mesh, angle_deg: f64) -> Vec<[u32; 2]> {
     let normals: Vec<Vec3> = mesh.indices.iter().map(|tri| mesh.triangle_normal(*tri)).collect();
-    EdgeTable::of(mesh).feature_edges(&normals, angle_deg)
+    EdgeTable::of(mesh).feature_edges(&normals, angle_deg).0
 }
 
 /// Every edge with the triangles that meet at it, in a deterministic order.
@@ -100,9 +100,11 @@ impl EdgeTable {
         }
     }
 
-    pub(super) fn feature_edges(&self, normals: &[Vec3], angle_deg: f64) -> Vec<[u32; 2]> {
+    /// The feature edges, and the two triangles beside each (one twice for a boundary edge, the first
+    /// two at a junction), whose depth slope the edge's bias follows (issue 115).
+    pub(super) fn feature_edges(&self, normals: &[Vec3], angle_deg: f64) -> (Vec<[u32; 2]>, Vec<[u32; 2]>) {
         let cos_limit = angle_deg.to_radians().cos();
-        let mut edges = Vec::new();
+        let (mut edges, mut beside) = (Vec::new(), Vec::new());
         self.for_each(|ends, faces| {
             let keep = match faces {
                 [(_, a), (_, b)] => normals[*a as usize].dot(normals[*b as usize]) < cos_limit,
@@ -111,9 +113,10 @@ impl EdgeTable {
             };
             if keep {
                 edges.push(ends);
+                beside.push([faces[0].1, faces.get(1).unwrap_or(&faces[0]).1]);
             }
         });
-        edges
+        (edges, beside)
     }
 
     pub(super) fn border_edges(&self) -> Vec<BorderEdge> {

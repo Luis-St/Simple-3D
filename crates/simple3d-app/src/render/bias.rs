@@ -16,6 +16,28 @@ pub(crate) const SELECTION_SLOPE_PIXELS: f32 = 2.0;
 /// outline through everything in front of it.
 pub(crate) const SELECTION_SLOPE_CAP: f32 = 2.0e-2;
 
+/// Feature edges are pulled forward by this many pixels of the steepest drawn face beside them, as
+/// the outline is: with [`EDGE_BIAS`] alone, an edge beside a face seen at a grazing angle sank into
+/// it and drew dashed or not at all (issue 115). One pixel covers a line pixel's centre lying up to
+/// half a pixel onto that face.
+pub(crate) const EDGE_SLOPE_PIXELS: f32 = 1.0;
+
+/// The most the slope may add to an edge, as a fraction of its depth key. Below the outline's cap,
+/// since a feature edge pulled too far shows through the faces in front of it.
+pub(crate) const EDGE_SLOPE_CAP: f32 = 5.0e-3;
+
+/// How fast a projected triangle's depth key changes per pixel; nearly edge-on faces change fastest,
+/// and a triangle seen exactly edge-on reports `f32::MAX`.
+pub(crate) fn depth_slope([a, b, c]: [crate::raster::Vertex; 3]) -> f32 {
+    let (e1, e2) = (b.pos - a.pos, c.pos - a.pos);
+    let det = e1.x * e2.y - e2.x * e1.y;
+    if det.abs() < 1e-6 {
+        return f32::MAX;
+    }
+    let (k1, k2) = (b.key - a.key, c.key - a.key);
+    egui::vec2(k1 * e2.y - k2 * e1.y, e1.x * k2 - e2.x * k1).length() / det.abs()
+}
+
 /// Grid and axes are biased away from the eye so coplanar faces hide them (the grid used to cross a
 /// plate's side walls). Axes less than the grid, since X and Y lie on grid lines.
 pub(crate) const GRID_BIAS: f32 = -8.0e-4;

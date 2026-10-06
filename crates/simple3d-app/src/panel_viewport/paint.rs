@@ -68,6 +68,7 @@ pub(crate) fn paint_scene(
                     live.csg = Some(render::CsgPreview {
                         leaves: csg.leaves.iter().map(|(leaf, placed)| (&**leaf, *placed)).collect(),
                         program: csg.program.clone(),
+                        carried: csg.carried_leaves.clone(),
                         tag: solid.bodies.get(part.start as usize).map_or(0, |&body| render::body_tag(body, 0)),
                     });
                 }

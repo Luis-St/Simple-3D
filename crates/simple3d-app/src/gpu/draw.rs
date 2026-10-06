@@ -77,7 +77,7 @@ impl Gpu {
         self.copy_depth(&gl, width, height, depth);
         self.draw_lines(&gl, &plan.lines, view, section, viewport, depth);
         if let (Some(csg), Some(colour)) = (&request.live.csg, plan.csg_edges) {
-            self.draw_csg_edges(&gl, request, csg, colour, viewport, depth);
+            self.draw_csg_edges(&gl, csg, colour);
         }
         self.draw_outlines(&gl, &plan.outlines, view, section, viewport, depth);
         self.draw_crossings(&gl, &plan.crossings, view, viewport, depth);

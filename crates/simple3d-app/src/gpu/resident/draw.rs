@@ -79,13 +79,42 @@ impl Gpu {
             set_projection(gl, program, resident, view, section, &draw.placing);
             set4(gl, program, "u_colour", &as_float(draw.colour));
             set_f32(gl, program, "u_bias", draw.bias);
+            // Only lines lying on the drawn faces; the wireframe has none to sink into.
+            self.set_edge_slope(gl, program, resident, draw.bias > 0.0);
             set_i32(gl, program, "u_tagged", draw.tag_base.is_some() as i32);
             set_u32(gl, program, "u_tag_base", draw.tag_base.unwrap_or(0) as u32);
             gl.bind_vertex_array(Some(edges.array));
             gl.draw_elements(glow::LINES, edges.count, glow::UNSIGNED_INT, 0);
         }
         gl.disable(glow::CLIP_DISTANCE0);
+        gl.active_texture(glow::TEXTURE1);
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        gl.active_texture(glow::TEXTURE0);
         gl.bind_vertex_array(Some(self.buffer.array));
+    }
+
+    /// Feature edges' slope bias (`line_geometry`), from `resident`'s neighbouring faces on texture
+    /// unit 1; `draw_lines` unbinds it again.
+    pub(in crate::gpu) unsafe fn set_edge_slope(
+        &self,
+        gl: &glow::Context,
+        program: &Program,
+        resident: &Resident,
+        wanted: bool,
+    ) {
+        let sloped = wanted && resident.edge_faces.is_some();
+        set_i32(gl, program, "u_sloped", sloped as i32);
+        if !sloped {
+            return;
+        }
+        gl.active_texture(glow::TEXTURE1);
+        gl.bind_texture(glow::TEXTURE_2D, resident.edge_faces);
+        gl.active_texture(glow::TEXTURE0);
+        set_i32(gl, program, "u_far_corners", 1);
+        set_i32(gl, program, "u_table_width", self.table_width as i32);
+        set_f32(gl, program, "u_slope_pixels", EDGE_SLOPE_PIXELS);
+        set_f32(gl, program, "u_slope_cap", EDGE_SLOPE_CAP);
+        set_f32(gl, program, "u_edge_on", EDGE_ON as f32);
     }
 
     /// Selected and glowing bodies' outlines.

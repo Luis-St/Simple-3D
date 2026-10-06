@@ -116,7 +116,8 @@ void main() {
 "#;
 
 /// A resident mesh's feature edges, read via the edge list. The geometry stage sees both ends,
-/// so the line gets `line_step`'s bias from the mean of their keys.
+/// so the line gets `line_step`'s bias from the mean of their keys, plus the depth slope of the
+/// drawn faces beside it (`push_edges`, issue 115).
 pub(crate) fn line_vertex() -> String {
     resident(
         r#"
@@ -161,16 +162,51 @@ flat in int g_hidden[];
 
 uniform vec4 u_colour;
 uniform float u_bias;
+// Whether `u_far_corners` holds this mesh's edges' neighbouring triangles (`far_corners`), and how
+// many pixels of their slope to add, at most a fraction of the depth (`EDGE_SLOPE_PIXELS`, `EDGE_SLOPE_CAP`).
+uniform int u_sloped;
+uniform sampler2D u_far_corners;
+uniform int u_table_width;
+uniform float u_slope_pixels;
+uniform float u_slope_cap;
+uniform float u_edge_on;
 
 out vec4 v_colour;
 flat out uint v_tag;
 out vec3 v_world;
 
+// How fast the depth key of the triangle beside the edge changes per pixel, or 0 when it faces away
+// and is culled.
+float drawn_slope(int texel) {
+    vec4 far = texelFetch(u_far_corners, ivec2(texel % u_table_width, texel / u_table_width), 0);
+    vec3 c = u_model * far.xyz;
+    vec3 normal = cross(g_pos[1] - g_pos[0], c - g_pos[0]) * far.w;
+    float length_ = length(normal);
+    // The key row is the reversed view direction, so a face towards the eye has a positive dot.
+    if (length_ == 0.0 || dot(normal / length_, u_row_key.xyz) <= u_edge_on) {
+        return 0.0;
+    }
+    vec3 pa = g_screen[0];
+    vec3 pb = g_screen[1];
+    vec3 pc = project(c);
+    vec2 e1 = pb.xy - pa.xy;
+    vec2 e2 = pc.xy - pa.xy;
+    float det = e1.x * e2.y - e2.x * e1.y;
+    float k1 = pb.z - pa.z;
+    float k2 = pc.z - pa.z;
+    return abs(det) > 1e-6 ? length(vec2(k1 * e2.y - k2 * e1.y, e1.x * k2 - e2.x * k1) / det) : 1e30;
+}
+
 void main() {
     if (g_hidden[0] == 1 || g_hidden[1] == 1) {
         return;
     }
-    float bias = u_bias * (abs(g_screen[0].z) + abs(g_screen[1].z)) * 0.5;
+    float scale = (abs(g_screen[0].z) + abs(g_screen[1].z)) * 0.5;
+    float bias = u_bias * scale;
+    if (u_sloped == 1) {
+        float steepest = max(drawn_slope(gl_PrimitiveIDIn * 2), drawn_slope(gl_PrimitiveIDIn * 2 + 1));
+        bias += min(steepest * u_slope_pixels, u_slope_cap * scale);
+    }
     for (int i = 0; i < 2; i++) {
         gl_Position = place(g_screen[i].xy, g_screen[i].z + bias);
         gl_ClipDistance[0] = g_clip[i];

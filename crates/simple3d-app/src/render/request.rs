@@ -63,6 +63,9 @@ pub struct CsgPreview<'a> {
     /// The postfix expression: a leaf index, or `CSG_UNION`, `CSG_DIFFERENCE` or `CSG_INTERSECTION`
     /// on the two values before it.
     pub program: Vec<i32>,
+    /// The indices of the leaves the drag carries. The selection outline draws their edges, and the
+    /// boolean's edges beside it would stair-step against its band (`CSG_EDGE_FRAGMENT`).
+    pub carried: Vec<usize>,
     /// The body tag the result is drawn with, so an origin axis treats it as that body.
     pub tag: u16,
 }

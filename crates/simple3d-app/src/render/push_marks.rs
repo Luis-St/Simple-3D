@@ -50,12 +50,28 @@ pub(crate) fn push_edges(
     tag_base: u16,
     section: &[Plane],
 ) {
+    let towards = view.forward();
+    // The depth slope of a face beside an edge, if it is drawn: solids are culled facing away.
+    let drawn_slope = |face: u32| -> f32 {
+        let (Some(tri), Some(normal)) = (item.mesh.indices.get(face as usize), item.normals.get(face as usize)) else {
+            return 0.0;
+        };
+        if normal.dot(towards) >= -EDGE_ON {
+            return 0.0;
+        }
+        depth_slope(tri.map(|corner| screen[corner as usize]))
+    };
     extend_in_order(steps, item.edges.len(), |range, out| {
-        for edge in &item.edges[range] {
+        for index in range {
+            let edge = item.edges[index];
             // Tagged like its faces, so an edge of the solid an axis enters does not hide that axis.
             let tag = item.body_tag(edge[0] as usize, tag_base);
-            push_edge(out, view, item, screen, *edge, section, |a, b| {
-                projected_line_step(a, b, colour, EDGE_BIAS, tag, true)
+            let steepest =
+                item.edge_faces.get(index).map_or(0.0, |&[near, far]| drawn_slope(near).max(drawn_slope(far)));
+            push_edge(out, view, item, screen, edge, section, |a, b| {
+                let scale = (a.key.abs() + b.key.abs()) * 0.5;
+                let bias = EDGE_BIAS * scale + (steepest * EDGE_SLOPE_PIXELS).min(EDGE_SLOPE_CAP * scale);
+                Step::Line { a, b, colour, bias, tag, write_depth: true }
             });
         }
     });

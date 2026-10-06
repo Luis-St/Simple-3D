@@ -15,6 +15,8 @@ pub(crate) struct LiveCsg {
     /// The shapes from the last evaluation, in world space, each with its move (the drag's, a
     /// pattern copy's, or both).
     pub leaves: Vec<(Arc<Renderable>, Option<Xform>)>,
+    /// Which of `leaves` move with the drag; their own edges are left to the selection outline.
+    pub carried_leaves: Vec<usize>,
     /// Which node is dragged, and how far it has moved.
     pub carried: NodeId,
     pub xform: Xform,
@@ -82,7 +84,11 @@ impl App {
         let (group, planned, program) = self.csg_plan(carried)?;
         let xform = self.moved_by(carried)?;
         let mut leaves = Vec::with_capacity(planned.len());
+        let mut carried_leaves = Vec::new();
         for leaf in planned {
+            if leaf.carried {
+                carried_leaves.push(leaves.len());
+            }
             let (shape, moved) = match leaf.shape {
                 Shape::Node(id) => (self.csg_leaf(id)?, leaf.carried.then_some(xform)),
                 Shape::Hull(id) => (self.csg_hull(id, carried, xform)?, None),
@@ -93,7 +99,8 @@ impl App {
             };
             leaves.push((shape, placed));
         }
-        Some(LiveCsg { range: self.scene_renderable.parts.get(&group)?.clone(), leaves, carried, xform, program })
+        let range = self.scene_renderable.parts.get(&group)?.clone();
+        Some(LiveCsg { range, leaves, carried_leaves, carried, xform, program })
     }
 
     /// The shapes [`App::live_csg`] would draw for the selection, prepared before any drag starts,

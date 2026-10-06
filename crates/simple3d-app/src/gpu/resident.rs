@@ -8,7 +8,8 @@ use super::*;
 use crate::raster::Rgba;
 use crate::render::{
     mark_colours, shade, tag_bases, to_vertex, Live, Palette, Renderable, Request, Style, EDGE_BIAS, EDGE_ON,
-    MARK_BIAS, PREVIEW_BIAS, SELECTION_BIAS, SELECTION_CREASE, SELECTION_SLOPE_CAP, SELECTION_SLOPE_PIXELS,
+    EDGE_SLOPE_CAP, EDGE_SLOPE_PIXELS, MARK_BIAS, PREVIEW_BIAS, SELECTION_BIAS, SELECTION_CREASE, SELECTION_SLOPE_CAP,
+    SELECTION_SLOPE_PIXELS,
 };
 use crate::snap::MARK_AXIS;
 use crate::view::View;
@@ -58,6 +59,9 @@ pub(crate) struct Resident {
     /// One colour tag per triangle, when any triangle is painted.
     pub(super) paint: Option<glow::Texture>,
     pub(super) edges: Option<Batch>,
+    /// Per feature edge, the far corner of each triangle beside it, for the edge's slope bias
+    /// (`line_geometry`, issue 115). `None` for lines without faces.
+    pub(super) edge_faces: Option<glow::Texture>,
     tables: Option<Tables>,
     outline: Option<Batch>,
 }
