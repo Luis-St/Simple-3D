@@ -127,7 +127,18 @@ pub(crate) fn every_view_menu_toggle_starts_its_word_at_the_same_place() {
     egui_kittest::kittest::Queryable::get_by_label(&harness, "View").click();
     harness.step();
     harness.step();
-    let starts: Vec<(&str, f32)> = ["Shaded", "Wireframe", "Ground grid", "Side docks", "Reduce motion"]
+    // The plain commands too, which line up with the toggles rather than sitting a slot further left.
+    let starts: Vec<(&str, f32)> = [
+        "Shaded",
+        "Frame all",
+        "View: top",
+        "Wireframe",
+        "Ground grid",
+        "Side docks",
+        "Panels",
+        "Reset panel layout",
+        "Reduce motion",
+    ]
         .into_iter()
         .map(|word| (word, word_start(harness.output(), word).unwrap_or_else(|| panic!("no entry reads {word:?}"))))
         .collect();

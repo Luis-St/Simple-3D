@@ -42,7 +42,15 @@ impl App {
     }
 
     pub(super) fn command_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
-        let label = ui::menu_label(&self.keymap, command);
+        self.command_entry(ui, ui::menu_label(&self.keymap, command), command, enabled);
+    }
+
+    /// A command behind an empty marker slot, for menus whose toggles carry one, so every word lines up.
+    pub(super) fn slotted_command_item(&mut self, ui: &mut egui::Ui, command: Command, enabled: bool) {
+        self.command_entry(ui, format!("  {}", ui::menu_label(&self.keymap, command)), command, enabled);
+    }
+
+    fn command_entry(&mut self, ui: &mut egui::Ui, label: String, command: Command, enabled: bool) {
         if ui::menu_entry(ui, &label, enabled).clicked() {
             self.run(command);
             ui.close();

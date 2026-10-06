@@ -53,8 +53,9 @@ impl App {
 
     pub(super) fn view_menu(&mut self, ui: &mut egui::Ui) {
         ui.menu_button("View", |ui| {
-            self.command_item(ui, Command::FrameSelection, !self.selection.is_empty());
-            self.command_item(ui, Command::FrameAll, true);
+            // Every entry keeps the marker slot, so the commands line up with the toggles below.
+            self.slotted_command_item(ui, Command::FrameSelection, !self.selection.is_empty());
+            self.slotted_command_item(ui, Command::FrameAll, true);
             ui.separator();
             for command in [
                 Command::ViewTop,
@@ -65,7 +66,7 @@ impl App {
                 Command::ViewRight,
                 Command::ViewIsometric,
             ] {
-                self.command_item(ui, command, true);
+                self.slotted_command_item(ui, command, true);
             }
             ui.separator();
             for (mode, command) in [
@@ -103,7 +104,7 @@ impl App {
             }
             ui.separator();
             // Panel placement is a view decision.
-            ui.menu_button("Panels", |ui| {
+            ui.menu_button(ui::marked(ui, false, "Panels"), |ui| {
                 for panel in Panel::ALL {
                     let side = self.settings.layout.side_of(panel);
                     let collapsed = self.settings.layout.is_collapsed(panel);
@@ -124,7 +125,7 @@ impl App {
                     });
                 }
             });
-            self.command_item(ui, Command::ResetLayout, true);
+            self.slotted_command_item(ui, Command::ResetLayout, true);
             ui.separator();
             // Through the marker slot like the toggles above, so its word lines up with theirs.
             let text = format!("{} Reduce motion", if self.settings.reduce_motion { "*" } else { " " });
