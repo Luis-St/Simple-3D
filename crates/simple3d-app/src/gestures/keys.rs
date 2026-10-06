@@ -118,3 +118,36 @@ pub(crate) fn every_manipulate_menu_entry_keeps_the_marker_slot() {
         assert!(harness.query_by_label_contains(label).is_some(), "no entry reads {label:?}");
     }
 }
+
+/// Regression: Reduce motion was a plain button with a hand-built star or space, which in the
+/// menu's font is narrower than the marker slot, so its word started left of the toggles above it.
+#[test]
+pub(crate) fn every_view_menu_toggle_starts_its_word_at_the_same_place() {
+    let mut harness = harness("view-menu");
+    egui_kittest::kittest::Queryable::get_by_label(&harness, "View").click();
+    harness.step();
+    harness.step();
+    let starts: Vec<(&str, f32)> = ["Shaded", "Wireframe", "Ground grid", "Side docks", "Reduce motion"]
+        .into_iter()
+        .map(|word| (word, word_start(harness.output(), word).unwrap_or_else(|| panic!("no entry reads {word:?}"))))
+        .collect();
+    for &(word, x) in &starts[1..] {
+        assert_eq!(x, starts[0].1, "{word:?} starts elsewhere than {:?}", starts[0].0);
+    }
+}
+
+/// Where a menu entry's word is drawn: the first glyph after its marker slot, in screen space.
+fn word_start(output: &egui::FullOutput, word: &str) -> Option<f32> {
+    fn find(shape: &egui::Shape, word: &str) -> Option<f32> {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| find(shape, word)),
+            egui::Shape::Text(text) => {
+                let label = text.galley.text();
+                let slot = label.strip_prefix("* ").or_else(|| label.strip_prefix("  "))?;
+                (slot == word).then(|| text.pos.x + text.galley.rows[0].glyphs[2].pos.x)
+            }
+            _ => None,
+        }
+    }
+    output.shapes.iter().find_map(|clipped| find(&clipped.shape, word))
+}

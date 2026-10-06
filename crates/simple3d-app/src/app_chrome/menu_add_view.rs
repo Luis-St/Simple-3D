@@ -110,14 +110,14 @@ impl App {
                     ui.menu_button(panel.label(), |ui| {
                         for option in Side::ALL {
                             let text = format!("{} {}", if side == option { "*" } else { " " }, option.label());
-                            if ui.button(text).clicked() {
+                            if ui::menu_entry(ui, &text, true).clicked() {
                                 let index = self.settings.layout.panels(option).len();
                                 self.settings.layout.move_to(panel, option, index);
                                 ui.close();
                             }
                         }
                         ui.separator();
-                        if ui.button(if collapsed { "* Rolled up" } else { "  Rolled up" }).clicked() {
+                        if ui::menu_entry(ui, if collapsed { "* Rolled up" } else { "  Rolled up" }, true).clicked() {
                             self.settings.layout.toggle_collapsed(panel);
                             ui.close();
                         }
@@ -126,8 +126,9 @@ impl App {
             });
             self.command_item(ui, Command::ResetLayout, true);
             ui.separator();
+            // Through the marker slot like the toggles above, so its word lines up with theirs.
             let text = format!("{} Reduce motion", if self.settings.reduce_motion { "*" } else { " " });
-            if ui.button(text).on_hover_text("Turn the camera to a new view instantly, with no transition").clicked() {
+            if ui::menu_entry(ui, &text, true).on_hover_text("Turn the camera to a new view instantly, with no transition").clicked() {
                 self.settings.reduce_motion = !self.settings.reduce_motion;
                 ui.close();
             }
