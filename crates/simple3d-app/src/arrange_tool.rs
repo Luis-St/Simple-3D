@@ -156,6 +156,8 @@ pub struct Landing {
 pub enum OntoAt {
     Centre,
     Clicked,
+    /// Straight below their middle, as if they fell onto the face along its normal.
+    Below,
 }
 
 impl ArrangeTool {

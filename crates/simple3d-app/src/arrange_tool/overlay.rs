@@ -92,11 +92,11 @@ fn draw_onto(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
         }
     };
     if let Some(landing) = tool.landing {
-        let at = match tool.onto {
-            OntoAt::Centre => landing.centre,
-            OntoAt::Clicked => landing.at,
-        };
-        mark(at, landing.normal, colour);
+        let subjects = app.arrange_subjects();
+        if !subjects.is_empty() {
+            let at = super::onto::landing_point(tool.onto, &landing, super::onto::middle(&subjects));
+            mark(at, landing.normal, colour);
+        }
     }
     let Some(cursor) = ui.input(|i| i.pointer.hover_pos()).filter(|at| painter.clip_rect().contains(*at)) else {
         return;

@@ -20,6 +20,7 @@ pub(super) fn onto_controls(app: &mut App, ui: &mut egui::Ui, tool: &mut Arrange
             for (onto, name, hover) in [
                 (OntoAt::Centre, "Face centre", "The middle of the flat face, or the clicked point on a curved one."),
                 (OntoAt::Clicked, "Where clicked", "The point the face was clicked at."),
+                (OntoAt::Below, "Below them", "Straight below their middle, as if they fell onto the face."),
             ] {
                 if theme::choice(ui, tool.onto == onto, name).on_hover_text(hover).clicked() {
                     tool.onto = onto;

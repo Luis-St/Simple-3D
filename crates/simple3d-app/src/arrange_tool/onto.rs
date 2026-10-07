@@ -11,21 +11,36 @@ pub(super) fn onto_face(tool: &ArrangeTool, subjects: &[Subject]) -> Result<Vec<
     };
     let normal = landing.normal.normalized();
     let turn = if tool.turn { Xform::turn_z_to(normal) } else { Xform::IDENTITY };
-    let (lo, hi) =
-        subjects.iter().skip(1).fold(subjects[0].bounds, |(lo, hi), s| (lo.min(s.bounds.0), hi.max(s.bounds.1)));
-    let centre = (lo + hi) * 0.5;
+    let centre = middle(subjects);
     // How far the lowest point sits below the middle along the normal, once turned about the middle.
     let lowest =
         subjects.iter().flat_map(points).map(|p| turn.vector(p - centre).dot(normal)).fold(f64::INFINITY, f64::min);
-    let at = match tool.onto {
-        OntoAt::Centre => landing.centre,
-        OntoAt::Clicked => landing.at,
-    };
+    let at = landing_point(tool.onto, &landing, centre);
     let middle = at + normal * (tool.lift - lowest);
     let world = Xform { m: turn.m, t: middle - turn.vector(centre) };
     // Already resting there: nothing moves, so no template.
     let still = (world.t.length() < 1e-9) && turn == Xform::IDENTITY;
     Ok(subjects.iter().map(|subject| carried(subject, if still { Xform::IDENTITY } else { world })).collect())
+}
+
+/// Where on the face the objects' middle `centre` lands: for [`OntoAt::Below`] where it would
+/// fall to along the normal, onto the face's plane through the clicked point.
+pub(super) fn landing_point(onto: OntoAt, landing: &Landing, centre: Vec3) -> Vec3 {
+    match onto {
+        OntoAt::Centre => landing.centre,
+        OntoAt::Clicked => landing.at,
+        OntoAt::Below => {
+            let normal = landing.normal.normalized();
+            centre - normal * (centre - landing.at).dot(normal)
+        }
+    }
+}
+
+/// The middle of the subjects' joint box.
+pub(super) fn middle(subjects: &[Subject]) -> Vec3 {
+    let (lo, hi) =
+        subjects.iter().skip(1).fold(subjects[0].bounds, |(lo, hi), s| (lo.min(s.bounds.0), hi.max(s.bounds.1)));
+    (lo + hi) * 0.5
 }
 
 /// Every point of a subject's body in world space, or its box's corners without one.

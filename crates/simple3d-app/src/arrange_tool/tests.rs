@@ -189,6 +189,16 @@ fn onto_a_side_face_the_object_is_turned_to_stand_out_from_it() {
 }
 
 #[test]
+fn below_them_the_object_falls_straight_onto_the_face() {
+    let mut tool = tool(1, Arrange::OntoFace);
+    tool.onto = OntoAt::Below;
+    tool.landing = Some(Landing { centre: v(100.0, 0.0, 20.0), at: v(104.0, 2.0, 20.0), normal: v(0.0, 0.0, 1.0) });
+    // Off the face's middle and clicked point: it keeps its X and Y, only dropping to rest on it.
+    let placed = plan(&tool, &[cube(1, v(30.0, -7.0, 60.0))]).unwrap();
+    assert_eq!(placed[0].position, v(35.0, -2.0, 25.0));
+}
+
+#[test]
 fn onto_a_face_without_one_picked_asks_for_a_click() {
     let tool = tool(1, Arrange::OntoFace);
     assert!(plan(&tool, &[cube(1, v(0.0, 0.0, 0.0))]).unwrap_err().contains("Click a face"));
