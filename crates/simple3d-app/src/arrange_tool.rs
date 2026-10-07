@@ -20,6 +20,9 @@ mod controls;
 use controls::*;
 mod path_controls;
 use path_controls::*;
+mod onto;
+mod onto_controls;
+use onto_controls::*;
 mod pointer;
 pub(crate) use pointer::*;
 mod overlay;
@@ -38,6 +41,8 @@ pub enum Arrange {
     Align,
     Distribute,
     Path,
+    /// Onto a face picked in the viewport (issue 118).
+    OntoFace,
 }
 
 impl Arrange {
@@ -46,6 +51,7 @@ impl Arrange {
             Arrange::Align => "Align",
             Arrange::Distribute => "Distribute",
             Arrange::Path => "Along a path",
+            Arrange::OntoFace => "Onto a face",
         }
     }
 }
@@ -127,6 +133,29 @@ pub struct ArrangeTool {
     pub count: usize,
     /// Turn each object about Z as the path turns.
     pub follow: bool,
+    /// The face picked to put the objects onto (issue 118).
+    pub landing: Option<Landing>,
+    /// Where on that face they go.
+    pub onto: OntoAt,
+    /// Turn them so their own bottom (-Z) faces the face, rather than keep their turn.
+    pub turn: bool,
+    /// How far above the face they rest, in millimetres.
+    pub lift: f64,
+}
+
+/// A face picked to put objects onto: its middle, where it was clicked, and which way is out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Landing {
+    pub centre: Vec3,
+    pub at: Vec3,
+    pub normal: Vec3,
+}
+
+/// Where on the picked face the objects' middle lands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OntoAt {
+    Centre,
+    Clicked,
 }
 
 impl ArrangeTool {
@@ -143,6 +172,14 @@ impl ArrangeTool {
     pub(crate) fn hash_preview<H: Hasher>(&self, hasher: &mut H) {
         (&self.targets, self.key, self.mode, self.align, self.to_key, self.axis, self.spacing).hash(hasher);
         (self.source, self.closed, self.count, self.follow, self.gap.to_bits()).hash(hasher);
+        (self.onto, self.turn, self.lift.to_bits()).hash(hasher);
+        if let Some(landing) = self.landing {
+            for point in [landing.centre, landing.at, landing.normal] {
+                for number in [point.x, point.y, point.z] {
+                    number.to_bits().hash(hasher);
+                }
+            }
+        }
         for point in self.runs.iter().flatten().flat_map(|&(a, b)| [a, b]).chain(self.points.iter().copied()) {
             for number in [point.x, point.y, point.z] {
                 number.to_bits().hash(hasher);

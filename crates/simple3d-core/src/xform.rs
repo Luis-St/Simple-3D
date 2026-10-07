@@ -67,6 +67,31 @@ impl Xform {
         Vec3::new(tidy(a.to_degrees()), tidy(b.to_degrees()), tidy(c.to_degrees()))
     }
 
+    /// The shortest turn taking +Z to the unit `normal`, so an object's bottom faces a face it is put
+    /// on (issues 117 and 118). Facing straight down, it is half a turn about X.
+    pub fn turn_z_to(normal: Vec3) -> Xform {
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let cos = up.dot(normal);
+        if cos > 1.0 - 1e-12 {
+            return Xform::IDENTITY;
+        }
+        if cos < -1.0 + 1e-12 {
+            return Xform { m: [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]], t: Vec3::ZERO };
+        }
+        // Rodrigues: R = I + [v]x + [v]x^2 (1 - cos) / |v|^2, with v = up x normal.
+        let v = up.cross(normal);
+        let k = (1.0 - cos) / v.dot(v);
+        let skew = [[0.0, -v.z, v.y], [v.z, 0.0, -v.x], [-v.y, v.x, 0.0]];
+        let mut m = [[0.0; 3]; 3];
+        for r in 0..3 {
+            for c in 0..3 {
+                let square: f64 = (0..3).map(|i| skew[r][i] * skew[i][c]).sum();
+                m[r][c] = if r == c { 1.0 } else { 0.0 } + skew[r][c] + square * k;
+            }
+        }
+        Xform { m, t: Vec3::ZERO }
+    }
+
     /// Transform a point.
     pub fn point(&self, p: Vec3) -> Vec3 {
         self.vector(p) + self.t

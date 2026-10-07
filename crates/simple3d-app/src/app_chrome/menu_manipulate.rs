@@ -27,6 +27,8 @@ impl App {
             // Lining up and spreading out the selection (issue 70).
             // In the marker slot's place too, so it lines up with the modes above.
             self.slotted_command_item(ui, Command::AlignDistribute, !self.selection.is_empty());
+            // Resting the selection on a picked face (issue 118), a mode of the same tool.
+            self.slotted_command_item(ui, Command::OntoFace, !self.selection.is_empty());
             // Rounding edges and corners (issue 88), picked in the viewport, so always available.
             self.slotted_command_item(ui, Command::RoundEdges, true);
             ui.separator();

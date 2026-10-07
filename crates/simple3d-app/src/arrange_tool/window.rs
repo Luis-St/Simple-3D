@@ -33,6 +33,7 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
                 "Spread the objects along a path of body edges or drawn lines, making copies if more are \
                  asked for than are selected.",
             ),
+            (Arrange::OntoFace, "Put the objects onto a face picked in the viewport, resting on it."),
         ] {
             if theme::choice(ui, tool.mode == mode, mode.label()).on_hover_text(hover).clicked() {
                 tool.mode = mode;
@@ -49,6 +50,7 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
         Arrange::Align => align_controls(app, ui, &mut tool),
         Arrange::Distribute => distribute_controls(app, ui, &mut tool),
         Arrange::Path => path_controls(app, ui, &mut tool),
+        Arrange::OntoFace => onto_controls(app, ui, &mut tool),
     }
     app.arrange_tool = Some(tool);
     ui.add_space(6.0);

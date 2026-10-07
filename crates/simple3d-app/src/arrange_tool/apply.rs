@@ -24,6 +24,7 @@ impl App {
                 Arrange::Align => "Align",
                 Arrange::Distribute => "Distribute",
                 Arrange::Path => "Distribute along a path",
+                Arrange::OntoFace => "Put onto a face",
             },
             None,
         );
@@ -62,6 +63,7 @@ impl App {
         self.status = Status::Info(match (mode, copies) {
             (Arrange::Align, _) => format!("Aligned {objects}"),
             (Arrange::Distribute, _) => format!("Distributed {objects}"),
+            (Arrange::OntoFace, _) => format!("Put {objects} onto the face"),
             (Arrange::Path, 0) => format!("Spread {objects} along the path"),
             (Arrange::Path, _) => {
                 let made = format!("{copies} cop{}", if copies == 1 { "y" } else { "ies" });

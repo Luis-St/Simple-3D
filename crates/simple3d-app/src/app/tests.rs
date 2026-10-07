@@ -14,6 +14,7 @@ mod panels;
 mod pattern_kind;
 mod pattern_stages;
 mod pattern_variations;
+mod place_on_surface;
 mod placement;
 mod settings;
 mod steps;

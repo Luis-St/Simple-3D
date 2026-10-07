@@ -6,6 +6,8 @@ mod display;
 pub use display::{DisplayMode, RenderEngine};
 mod snap;
 pub use snap::SnapMode;
+mod size;
+pub use size::SizeAnchor;
 mod open;
 pub use open::OpenTarget;
 mod layout;

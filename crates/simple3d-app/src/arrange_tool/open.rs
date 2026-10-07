@@ -26,18 +26,23 @@ impl ArrangeTool {
             points: Vec::new(),
             closed: false,
             follow: false,
+            landing: None,
+            onto: OntoAt::Centre,
+            turn: true,
+            lift: 0.0,
         }
     }
 }
 
 impl ArrangeTool {
     /// The group whose contents are lined up or distributed: the tool was opened on that one group
-    /// alone, and one object has nothing to line up with. Along a path the group is one object.
+    /// alone, and one object has nothing to line up with. Along a path or onto a face the group is one
+    /// object.
     pub fn inside(&self, scene: &Scene) -> Option<NodeId> {
         let [only] = self.targets[..] else { return None };
         let node = scene.get(only)?;
         let holds = matches!(node.body, Body::Group { .. }) && node.children.len() >= 2;
-        (self.mode != Arrange::Path && holds).then_some(only)
+        (!matches!(self.mode, Arrange::Path | Arrange::OntoFace) && holds).then_some(only)
     }
 
     /// What the tool arranges now: the objects it was opened on, or that lone group's contents.
@@ -78,6 +83,18 @@ impl App {
         self.status = Status::Info("Align and distribute: nothing moves until Apply".into());
     }
 
+    /// Open the tool on the selection straight in its "onto a face" mode (issue 118), or switch an
+    /// open one to it.
+    pub fn open_onto_face(&mut self) {
+        if self.arrange_tool.is_none() {
+            self.toggle_arrange_tool();
+        }
+        if let Some(tool) = self.arrange_tool.as_mut() {
+            tool.mode = Arrange::OntoFace;
+            self.status = Status::Info("Onto a face: click the face to put the selection on".into());
+        }
+    }
+
     pub(crate) fn close_arrange_tool(&mut self) {
         self.arrange_tool = None;
     }
@@ -104,7 +121,16 @@ impl App {
                 let bounds = *self.evaluated.node_world_bounds.get(&id)?;
                 let node = self.scene.get(id)?;
                 let parent = self.evaluated.node_frames.get(&id).copied().unwrap_or(Xform::IDENTITY);
-                Some(Subject { id, bounds, parent, position: node.position, rotation: node.rotation })
+                // Only putting onto a face needs the body itself.
+                let body = match tool.mode {
+                    Arrange::OntoFace => {
+                        self.evaluated.node_meshes.get(&id).map(|mesh| (mesh.clone(), Xform::IDENTITY)).or_else(|| {
+                            Some((self.evaluated.group_meshes.get(&id)?.clone(), *self.evaluated.node_frames.get(&id)?))
+                        })
+                    }
+                    _ => None,
+                };
+                Some(Subject { id, bounds, parent, position: node.position, rotation: node.rotation, body })
             })
             .collect()
     }

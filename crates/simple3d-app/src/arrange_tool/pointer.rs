@@ -5,9 +5,9 @@ use crate::app::{App, Status};
 use crate::view::View;
 use simple3d_geom::path::smooth_run;
 
-/// Whether the tool takes the viewport's clicks: only while spreading along a path.
+/// Whether the tool takes the viewport's clicks: while spreading along a path, or picking a face.
 pub(crate) fn wants_pointer(app: &App) -> bool {
-    app.arrange_tool.as_ref().is_some_and(|tool| tool.mode == Arrange::Path)
+    app.arrange_tool.as_ref().is_some_and(|tool| matches!(tool.mode, Arrange::Path | Arrange::OntoFace))
 }
 
 /// A click adds to the path, a right-click (not a right drag, which orbits) takes the last addition
@@ -15,6 +15,10 @@ pub(crate) fn wants_pointer(app: &App) -> bool {
 pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) {
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+    }
+    if app.arrange_tool.as_ref().is_some_and(|tool| tool.mode == Arrange::OntoFace) {
+        super::onto_interact(app, ui, response, view);
+        return;
     }
     if response.clicked_by(egui::PointerButton::Secondary) {
         take_back(app);

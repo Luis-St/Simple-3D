@@ -65,6 +65,7 @@ impl Command {
             ModePushPull => "Push / pull a face",
             MeasureTool => "Measure tool",
             AlignDistribute => "Align and distribute",
+            OntoFace => "Put onto a face",
             SnapToGeometry => "Snap to geometry (hold)",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
@@ -88,7 +89,7 @@ impl Command {
                 Area::View
             }
             ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | MeasureTool | AlignDistribute
-            | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => {
+            | OntoFace | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => {
                 Area::Manipulate
             }
         }

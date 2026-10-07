@@ -56,10 +56,18 @@ pub fn insertion_hint(app: &App) -> String {
             format!("Lands at {where_}. Shift+right-click in the viewport to put the 3D cursor somewhere else.")
         }
         Placement::ViewCentre => format!("Lands at what the camera is looking at: {where_}."),
-        Placement::BesideSelection => format!(
-            "Lands clear of the selection, its near side at {} {} on X.",
-            simple3d_core::unit::format_length(at.x, unit),
-            unit.suffix()
-        ),
+        Placement::OnSurface => {
+            "Follows the pointer onto the surface under it; click to put it down, Escape to take it back.".to_string()
+        }
+        Placement::BesideSelection => {
+            let (axis, sign) = app.beside_side();
+            let name = crate::gizmo::axis_name(axis);
+            format!(
+                "Lands against the face of the selection towards you ({}{name}), its near side at {} {} on {name}.",
+                if sign > 0.0 { "+" } else { "-" },
+                simple3d_core::unit::format_length(at.get(axis), unit),
+                unit.suffix()
+            )
+        }
     }
 }

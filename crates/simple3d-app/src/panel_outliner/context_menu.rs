@@ -78,6 +78,7 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
         item(ui, &mut blocks, keymap, &mut chosen, Command::Pattern, !is_root);
         // Lined up or spread along a path, which also makes copies (issue 70).
         item(ui, &mut blocks, keymap, &mut chosen, Command::AlignDistribute, !is_root);
+        item(ui, &mut blocks, keymap, &mut chosen, Command::OntoFace, !is_root);
         // Make a group into a component, or open an existing one (issue 113).
         item(ui, &mut blocks, keymap, &mut chosen, Command::MakeComponent, is_group && !is_root && !multiple);
         // On the root an empty component, on other groups one made from the group.

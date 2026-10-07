@@ -34,6 +34,10 @@ pub struct AppSettings {
     /// When a drag snaps to other bodies' geometry (issue 68); older files read as "while a key is held".
     #[serde(default)]
     pub geometry_snap: SnapMode,
+    /// What stays put while resizing or scaling, on every axis (issue 120); older files read as the
+    /// side opposite the pulled handle, as before.
+    #[serde(default, deserialize_with = "SizeAnchor::lenient")]
+    pub size_anchor: SizeAnchor,
     /// Pin what the camera looks at, so pan and pointer zoom leave it alone. Older files read as unlocked.
     #[serde(default)]
     pub lock_view_centre: bool,
@@ -87,6 +91,7 @@ impl Default for AppSettings {
             show_bounding_box: false,
             placement: Placement::Origin,
             geometry_snap: SnapMode::default(),
+            size_anchor: SizeAnchor::Opposite,
             lock_view_centre: false,
             open_target: OpenTarget::Tab,
             rotate_snap_deg: 15.0,

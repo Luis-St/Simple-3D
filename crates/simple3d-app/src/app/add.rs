@@ -44,13 +44,14 @@ impl App {
             self.status = Status::Warning("That shape is not in the palette".into());
             return;
         };
-        let at = self.insertion_point_in(parent, self.near_face_x(&[id]).unwrap_or(0.0));
+        let at = self.insertion_point_in(parent, self.near_face(&[id]).unwrap_or(0.0));
         if let Some(node) = self.scene.get_mut(id) {
             node.position = at;
         }
         self.collapsed.remove(&parent);
         self.select_only(id);
         self.status = Status::Info(hints::added(self, id));
+        self.start_placing(id);
     }
 
     /// Add a group or primitive where the tree points: inside `at` if it can hold children, else
@@ -72,5 +73,8 @@ impl App {
         self.collapsed.remove(&parent);
         self.select_only(id);
         self.status = Status::Info(hints::added(self, id));
+        if type_id.is_some() {
+            self.start_placing(id);
+        }
     }
 }

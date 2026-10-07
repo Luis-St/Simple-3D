@@ -76,6 +76,7 @@ impl App {
         self.scene_renderable = crate::render::Renderable::prepare_scene(&self.evaluated.mesh, &self.evaluated.ranges);
         self.node_renderables.clear();
         self.settling = None;
+        self.placing = None;
         self.renderable_key = u64::MAX;
         self.invalidate_image();
 

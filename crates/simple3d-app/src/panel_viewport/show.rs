@@ -17,8 +17,11 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         let cube = view_cube_interact(app, ui, rect);
         if !cube.taken {
             navigate(app, ui, &response);
-            // The measure tool owns the pointer while out: clicks pick features to measure.
-            if app.measure.active {
+            // A shape being put down owns the pointer until it is (issue 117).
+            if app.placing.is_some() {
+                let view = app.current_view();
+                crate::place_tool::interact(app, ui, &response, &view);
+            } else if app.measure.active {
                 let view = app.current_view();
                 measure_interact(app, ui, &response, &view);
             } else if app.round_tool.is_some() {

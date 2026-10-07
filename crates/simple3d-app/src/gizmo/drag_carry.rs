@@ -63,7 +63,7 @@ impl Drag {
                 None => return,
             }
         };
-        let halves = if self.symmetric { 2.0 } else { 1.0 };
+        let halves = self.fixed(positive, self.symmetric).growth();
         for other in &self.others {
             let outward = if self.gizmo.mode == Mode::Scale {
                 if start <= MIN_EXTENT {

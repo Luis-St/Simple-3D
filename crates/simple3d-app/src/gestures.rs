@@ -27,6 +27,7 @@ mod pattern_tool;
 mod push_pull;
 mod round_tool;
 mod round_tool_joins;
+mod size_tool;
 mod snap;
 mod split_tool;
 mod tab_drag;

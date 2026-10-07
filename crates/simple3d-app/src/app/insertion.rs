@@ -43,7 +43,7 @@ impl App {
         match created {
             Some(id) => {
                 // Asked only now, with the node in the scene, since its size is part of the answer.
-                let at = self.insertion_point_in(parent, self.near_face_x(&[id]).unwrap_or(0.0));
+                let at = self.insertion_point_in(parent, self.near_face(&[id]).unwrap_or(0.0));
                 if let Some(node) = self.scene.get_mut(id) {
                     node.position = at;
                 }
@@ -51,39 +51,59 @@ impl App {
                 self.size_fresh_patterns();
                 self.select_only(id);
                 self.status = Status::Info(hints::added(self, id));
+                self.start_placing(id);
             }
             None => self.status = Status::Warning("Unknown primitive type".into()),
         }
     }
 
-    /// The near side of what is being added along X, relative to its origin, measured from the nodes
-    /// since not every shape has a width parameter. `None` if nothing to measure or not needed (only
-    /// "beside the selection" needs it).
-    pub(super) fn near_face_x(&self, ids: &[NodeId]) -> Option<f64> {
+    /// The side of the selection a shape added beside it goes on: the face of the selection's box
+    /// that looks most towards the camera, so it lands on the face being looked at.
+    pub fn beside_side(&self) -> (usize, f64) {
+        // From the target towards the eye, as `View` builds it.
+        let camera = self.scene.camera;
+        let (yaw, pitch) = (camera.yaw.to_radians(), camera.pitch.to_radians());
+        let towards = Vec3::new(pitch.cos() * yaw.cos(), pitch.cos() * yaw.sin(), pitch.sin());
+        let axis = (0..3).max_by(|&a, &b| towards.get(a).abs().total_cmp(&towards.get(b).abs())).unwrap_or(0);
+        (axis, if towards.get(axis) < 0.0 { -1.0 } else { 1.0 })
+    }
+
+    /// The near side of what is being added along [`App::beside_side`], relative to its origin,
+    /// measured from the nodes since not every shape has a width parameter. `None` if nothing to
+    /// measure or not needed (only "beside the selection" needs it).
+    pub(super) fn near_face(&self, ids: &[NodeId]) -> Option<f64> {
         if self.settings.placement != Placement::BesideSelection {
             return None;
         }
-        ids.iter()
-            .filter_map(|&id| simple3d_core::eval::subtree_bounds(&self.scene, id))
-            .map(|(lo, _)| lo.x)
-            .reduce(f64::min)
+        let (axis, sign) = self.beside_side();
+        let sides = ids.iter().filter_map(|&id| simple3d_core::eval::subtree_bounds(&self.scene, id));
+        if sign > 0.0 {
+            sides.map(|(lo, _)| lo.get(axis)).reduce(f64::min)
+        } else {
+            sides.map(|(_, hi)| hi.get(axis)).reduce(f64::max)
+        }
     }
 
-    /// Where the next shape goes in world millimetres under the current placement. `near_face_x`
-    /// keeps the shape's own width from burying it in the selection; pass 0 when only describing.
-    pub fn insertion_point_world(&self, near_face_x: f64) -> Vec3 {
+    /// Where the next shape goes in world millimetres under the current placement. `near_face` keeps
+    /// the shape's own size from burying it in the selection; pass 0 when only describing.
+    pub fn insertion_point_world(&self, near_face: f64) -> Vec3 {
         match self.settings.placement {
             Placement::Origin => Vec3::ZERO,
-            Placement::Cursor => self.cursor.unwrap_or(Vec3::ZERO),
+            // Put down where it is first, until the pointer carries it onto a surface.
+            Placement::Cursor | Placement::OnSurface => self.cursor.unwrap_or(Vec3::ZERO),
             Placement::ViewCentre => {
                 let step = self.move_snap();
                 let t = self.scene.camera.target;
                 Vec3::new((t.x / step).round() * step, (t.y / step).round() * step, (t.z / step).round() * step)
             }
             Placement::BesideSelection => match self.selection_bounds() {
-                // Clear of the selection along +X, with one step of air.
+                // Touching the selection's face towards the camera, centred on it otherwise.
                 Some((lo, hi)) => {
-                    Vec3::new(hi.x + self.move_snap() - near_face_x, (lo.y + hi.y) * 0.5, (lo.z + hi.z) * 0.5)
+                    let (axis, sign) = self.beside_side();
+                    let mut at = (lo + hi) * 0.5;
+                    let side = if sign > 0.0 { hi.get(axis) } else { lo.get(axis) };
+                    at.set(axis, side - near_face);
+                    at
                 }
                 None => Vec3::ZERO,
             },
@@ -92,8 +112,8 @@ impl App {
 
     /// [`App::insertion_point_world`] as a `Node::position` under `parent`, so a shape added into a
     /// moved or rotated group still lands there. Only for writing: shown, it read as the group's offset.
-    pub fn insertion_point_in(&self, parent: NodeId, near_face_x: f64) -> Vec3 {
-        let world = self.insertion_point_world(near_face_x);
+    pub fn insertion_point_in(&self, parent: NodeId, near_face: f64) -> Vec3 {
+        let world = self.insertion_point_world(near_face);
         match self.evaluated.node_frames.get(&parent) {
             // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
             Some(frame) => {

@@ -23,6 +23,10 @@ pub(crate) fn templates(app: &App) -> Vec<(NodeId, Xform)> {
 /// The path, where each object's centre lands on it, and what a click would add, over the picture.
 /// Drawn over rather than in the picture, so a path behind a body stays readable.
 pub(crate) fn draw(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
+    if app.arrange_tool.as_ref().is_some_and(|tool| tool.mode == Arrange::OntoFace) {
+        draw_onto(app, ui, painter, view);
+        return;
+    }
     let Some(tool) = app.arrange_tool.as_ref().filter(|tool| tool.mode == Arrange::Path) else { return };
     let colour = token::ACCENT;
     let screen = |p: Vec3| view.project(p).map(|(at, _)| at);
@@ -72,5 +76,32 @@ pub(crate) fn draw(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &Vie
                 line(last, hover.at, 1.0, colour.gamma_multiply(0.6));
             }
         }
+    }
+}
+
+/// The picked face's landing point with its normal, and where a click would pick (issue 118).
+fn draw_onto(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
+    let Some(tool) = app.arrange_tool.as_ref() else { return };
+    let colour = token::ACCENT;
+    let mark = |at: Vec3, normal: Vec3, colour: egui::Color32| {
+        let Some((screen, _)) = view.project(at) else { return };
+        painter.circle_stroke(screen, 5.0, egui::Stroke::new(1.5_f32, colour));
+        let reach = normal * (24.0 * view.mm_per_pixel_at(at));
+        if let Some((tip, _)) = view.project(at + reach) {
+            painter.line_segment([screen, tip], egui::Stroke::new(1.5_f32, colour));
+        }
+    };
+    if let Some(landing) = tool.landing {
+        let at = match tool.onto {
+            OntoAt::Centre => landing.centre,
+            OntoAt::Clicked => landing.at,
+        };
+        mark(at, landing.normal, colour);
+    }
+    let Some(cursor) = ui.input(|i| i.pointer.hover_pos()).filter(|at| painter.clip_rect().contains(*at)) else {
+        return;
+    };
+    if let Some((at, _, normal)) = super::hit_under(app, view, cursor) {
+        mark(at, normal, colour.gamma_multiply(0.6));
     }
 }

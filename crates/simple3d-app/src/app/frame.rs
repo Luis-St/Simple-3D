@@ -59,6 +59,7 @@ impl App {
         // Drawn after the viewport, as the layer above it (issue 82).
         crate::split_tool::show(self, ctx);
         crate::arrange_tool::show(self, ctx);
+        crate::size_tool::show(self, ctx);
         crate::simplify_tool::show(self, ctx);
         crate::reassemble_tool::show(self, ctx);
         crate::measure_tool::show(self, ctx);

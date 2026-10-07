@@ -6,7 +6,7 @@ use simple3d_core::xform::Xform;
 use simple3d_geom::path::SAME_POINT;
 
 /// One object as the plan sees it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Subject {
     pub id: NodeId,
     /// Its world-space box.
@@ -15,10 +15,13 @@ pub struct Subject {
     pub parent: Xform,
     pub position: Vec3,
     pub rotation: Vec3,
+    /// Its body in world space, as a mesh and the frame its points are in, for finding where it
+    /// rests exactly when turned onto a face; without one its box's corners stand in.
+    pub body: Option<(std::sync::Arc<simple3d_geom::Mesh>, Xform)>,
 }
 
 impl Subject {
-    fn centre(&self) -> Vec3 {
+    pub(super) fn centre(&self) -> Vec3 {
         (self.bounds.0 + self.bounds.1) * 0.5
     }
 }
@@ -56,6 +59,7 @@ pub fn plan(tool: &ArrangeTool, subjects: &[Subject]) -> Result<Vec<Placement>, 
         Arrange::Align => align(tool, subjects),
         Arrange::Distribute => distribute(tool, subjects),
         Arrange::Path => along_path(tool, subjects),
+        Arrange::OntoFace => super::onto::onto_face(tool, subjects),
     }
 }
 

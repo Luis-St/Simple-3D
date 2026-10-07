@@ -68,6 +68,7 @@ pub enum Command {
     ModePushPull,
     MeasureTool,
     AlignDistribute,
+    OntoFace,
     SnapToGeometry,
     NudgeLeft,
     NudgeRight,

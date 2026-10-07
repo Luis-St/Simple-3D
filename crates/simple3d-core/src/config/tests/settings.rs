@@ -72,3 +72,15 @@ pub(crate) fn dialogs_are_their_own_windows_unless_the_settings_say_otherwise() 
     let back: AppSettings = serde_json::from_str(&text).expect("and load again");
     assert!(back.embed_dialogs, "the switch did not survive the file");
 }
+
+#[test]
+pub(crate) fn the_size_anchor_survives_the_file_and_an_older_per_axis_one_reads_as_the_default() {
+    let older = r#"{"size_anchor": ["min", "centre", "max"], "show_grid": false}"#;
+    let migrated: AppSettings = serde_json::from_str(older).expect("a per-axis anchor still loads");
+    assert_eq!(migrated.size_anchor, SizeAnchor::Opposite);
+    assert!(!migrated.show_grid, "the rest of the file was dropped with it");
+
+    let settings = AppSettings { size_anchor: SizeAnchor::Centre, ..AppSettings::default() };
+    let back: AppSettings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(back.size_anchor, SizeAnchor::Centre);
+}

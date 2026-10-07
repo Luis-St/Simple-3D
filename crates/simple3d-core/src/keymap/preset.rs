@@ -90,6 +90,8 @@ impl Keymap {
         set(NudgeToward, Chord::key("PageDown"));
         // Align and distribute (issue 70): D for distribute, beside Duplicate's Ctrl+D.
         set(AlignDistribute, Chord::ctrl_shift("D"));
+        // Put onto a face (issue 118): F for face.
+        set(OntoFace, Chord::ctrl_shift("F"));
         // Snap to geometry while dragging (issue 77): Ctrl alone, the precise-gesture modifier.
         set(SnapToGeometry, Chord::modifiers(true, false, false));
 

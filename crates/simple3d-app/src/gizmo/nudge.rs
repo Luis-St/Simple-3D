@@ -17,10 +17,11 @@ pub enum Nudge {
     Move { axis: usize, world_delta: Vec3 },
     /// Add this many degrees to the node's rotation about `axis`.
     Rotate { axis: usize, degrees: f64 },
-    /// Rewrite `driver`'s parameter so the extent along `axis` becomes `extent`.
-    Resize { axis: usize, driver: AxisDriver, extent: f64 },
-    /// Set the node's own scale factor on `axis` to `factor`.
-    Scale { axis: usize, factor: f64 },
+    /// Rewrite `driver`'s parameter so the extent along `axis` becomes `extent`, and move the node by
+    /// `shift` (in its parent's frame) so its centre stays put (issue 120).
+    Resize { axis: usize, driver: AxisDriver, extent: f64, shift: Vec3 },
+    /// Set the node's own scale factor on `axis` to `factor`, and move it by `shift` likewise.
+    Scale { axis: usize, factor: f64, shift: Vec3 },
     /// A resize on an axis no parameter governs; the caller reports it.
     NoDimension { axis: usize },
 }
@@ -48,13 +49,17 @@ impl Nudge {
                     node.rotation = rotation;
                 }
             }
-            Nudge::Resize { driver, extent, .. } => {
+            Nudge::Resize { driver, extent, shift, .. } => {
+                if let Some(node) = scene.get_mut(id) {
+                    node.position = node.position + shift;
+                }
                 if let Some(params) = scene.get_mut(id).and_then(|n| n.params_mut()) {
                     params.insert(driver.param.to_string(), ParamValue::Length(extent / driver.factor));
                 }
             }
-            Nudge::Scale { axis, factor } => {
+            Nudge::Scale { axis, factor, shift } => {
                 if let Some(node) = scene.get_mut(id) {
+                    node.position = node.position + shift;
                     let mut scale = Node::sane_scale(node.scale);
                     scale.set(axis, factor);
                     node.scale = scale;
@@ -96,7 +101,9 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
         Mode::Resize => match gizmo.drivers[axis] {
             Some(driver) => {
                 let extent = gizmo.local_hi.get(axis) - gizmo.local_lo.get(axis);
-                Nudge::Resize { axis, driver, extent: (extent + move_snap * sign).max(MIN_EXTENT) }
+                let target = (extent + move_snap * sign).max(MIN_EXTENT);
+                let shift = anchor_shift(gizmo, axis, if extent > MIN_EXTENT { target / extent } else { 1.0 });
+                Nudge::Resize { axis, driver, extent: target, shift }
             }
             None => Nudge::NoDimension { axis },
         },
@@ -109,10 +116,19 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
             } else {
                 let factor = ((world + move_snap * sign).max(MIN_EXTENT)) / world;
                 let grown = (gizmo.own_scale.get(axis) * factor).max(Node::MIN_SCALE);
-                Nudge::Scale { axis, factor: grown }
+                let shift = anchor_shift(gizmo, axis, grown / gizmo.own_scale.get(axis));
+                Nudge::Scale { axis, factor: grown, shift }
             }
         }
     })
+}
+
+/// How far a node must move, in its parent's frame, for its centre on `axis` to stay put when the
+/// box grows `k` times about the node's origin. A key pulls no side, so whatever the anchor, the
+/// centre holds (issue 120).
+fn anchor_shift(gizmo: &Gizmo, axis: usize, k: f64) -> Vec3 {
+    let held = (gizmo.local_lo.get(axis) + gizmo.local_hi.get(axis)) / 2.0;
+    gizmo.parent.inverse().vector(gizmo.own.axis_vector(axis) * (held * (1.0 - k)))
 }
 
 /// The undo-coalescing key for a nudge, so a held key is one undo step (acceptance criterion 26).

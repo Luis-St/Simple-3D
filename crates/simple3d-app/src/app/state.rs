@@ -90,6 +90,10 @@ pub struct App {
     pub(crate) renderable_key: u64,
 
     pub mode: Mode,
+    /// The resize and scale popup was closed; it comes back when either tool is picked again (issue 120).
+    pub(crate) size_tool_hidden: bool,
+    /// The size change being typed or scrubbed in that popup, measured from where it began.
+    pub(crate) size_run: Option<crate::size_tool::SizeRun>,
     pub drag: Option<Drag>,
     /// A body released from a GPU-drawn drag, drawn at its drop position until its evaluation
     /// arrives (`App::live_move`); otherwise it jumped back meanwhile.
@@ -129,6 +133,8 @@ pub struct App {
     pub outliner_drag: Option<Carried>,
     pub drop_target: Option<DropTarget>,
 
+    /// A shape just added that follows the pointer onto a surface until a click (issue 117).
+    pub(crate) placing: Option<crate::place_tool::Placing>,
     /// The 3D cursor where new shapes land; `None` means the origin.
     pub cursor: Option<Vec3>,
     /// The measure tool (issue 69).

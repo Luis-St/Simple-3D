@@ -1,3 +1,4 @@
+mod anchor;
 mod handles;
 mod move_drag;
 mod nudge;

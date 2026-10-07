@@ -15,11 +15,14 @@ pub enum Placement {
     ViewCentre,
     /// Clear of the selection along +X, so the new shape is not inside it.
     BesideSelection,
+    /// Wherever the pointer puts it down: it follows the pointer over the model's surfaces, resting
+    /// on the one under it, until a click (issue 117).
+    OnSurface,
 }
 
 impl Placement {
-    pub const ALL: [Placement; 4] =
-        [Placement::Origin, Placement::Cursor, Placement::ViewCentre, Placement::BesideSelection];
+    pub const ALL: [Placement; 5] =
+        [Placement::Origin, Placement::Cursor, Placement::ViewCentre, Placement::BesideSelection, Placement::OnSurface];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -27,6 +30,7 @@ impl Placement {
             Placement::Cursor => "3D cursor",
             Placement::ViewCentre => "View centre",
             Placement::BesideSelection => "Beside selection",
+            Placement::OnSurface => "On a surface",
         }
     }
 }

@@ -63,6 +63,7 @@ impl Command {
         Command::ModePushPull,
         Command::MeasureTool,
         Command::AlignDistribute,
+        Command::OntoFace,
         Command::SnapToGeometry,
         Command::NudgeLeft,
         Command::NudgeRight,

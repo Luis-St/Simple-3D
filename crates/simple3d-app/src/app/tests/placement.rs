@@ -35,40 +35,41 @@ pub(crate) fn a_new_shape_lands_where_the_placement_says_and_the_hint_agrees() {
     app.reevaluate_for_test();
     app.settings.placement = Placement::BesideSelection;
     let (_, hi) = app.selection_bounds().expect("the plate has bounds");
-    assert_eq!(app.insertion_point_world(0.0).x, hi.x + app.move_snap());
+    (app.scene.camera.yaw, app.scene.camera.pitch) = (0.0, 10.0);
+    assert_eq!(app.beside_side(), (0, 1.0), "looking from +X, the face towards the camera is not +X");
+    assert_eq!(app.insertion_point_world(0.0).x, hi.x);
 }
 
-/// "Beside the selection" means no overlap, measured on the added shape rather than restating the formula.
+/// "Beside the selection" means touching the face of it the camera looks at, measured on the added
+/// shape rather than restating the formula.
 #[test]
-pub(crate) fn a_shape_added_beside_the_selection_does_not_overlap_it() {
-    for type_id in ["box", "sphere", "tetrahedron", "cylinder"] {
-        let mut app = headless_app();
-        app.settings.placement = Placement::Origin;
-        app.add_node(Some(type_id), GroupOp::Union);
-        let first = app.primary().unwrap();
-        app.reevaluate_for_test();
-        let (_, hi) = app.selection_bounds().expect("the first shape has bounds");
+pub(crate) fn a_shape_added_beside_the_selection_touches_the_face_looked_at() {
+    // Each view looks at a different face: from +X, +Y, -X, -Y, from above and from below.
+    let views = [
+        (0.0, 20.0, 0, 1.0),
+        (90.0, 20.0, 1, 1.0),
+        (180.0, 20.0, 0, -1.0),
+        (-90.0, 20.0, 1, -1.0),
+        (30.0, 70.0, 2, 1.0),
+        (30.0, -70.0, 2, -1.0),
+    ];
+    for (yaw, pitch, axis, sign) in views {
+        for type_id in ["box", "sphere", "tetrahedron", "cylinder"] {
+            let mut app = headless_app();
+            (app.scene.camera.yaw, app.scene.camera.pitch) = (yaw, pitch);
+            app.settings.placement = Placement::Origin;
+            app.add_node(Some(type_id), GroupOp::Union);
+            app.reevaluate_for_test();
+            let (lo, hi) = app.selection_bounds().expect("the first shape has bounds");
 
-        app.settings.placement = Placement::BesideSelection;
-        app.add_node(Some(type_id), GroupOp::Union);
-        let second = app.primary().unwrap();
-        assert_ne!(first, second);
-        app.reevaluate_for_test();
-        let (lo2, _) = app.selection_bounds().expect("the second shape has bounds");
-
-        assert!(
-            lo2.x >= hi.x,
-            "a {type_id} added beside the selection starts at {} but the selection reaches {}",
-            lo2.x,
-            hi.x
-        );
-        // Exactly one step of air between them.
-        assert!(
-            (lo2.x - hi.x - app.move_snap()).abs() < 1e-6,
-            "a {type_id} left {} of air, not one step of {}",
-            lo2.x - hi.x,
-            app.move_snap()
-        );
+            app.settings.placement = Placement::BesideSelection;
+            app.add_node(Some(type_id), GroupOp::Union);
+            app.reevaluate_for_test();
+            let (lo2, hi2) = app.selection_bounds().expect("the second shape has bounds");
+            // No air between them, on the face looked at.
+            let gap = if sign > 0.0 { lo2.get(axis) - hi.get(axis) } else { lo.get(axis) - hi2.get(axis) };
+            assert!(gap.abs() < 1e-6, "yaw {yaw} pitch {pitch}: a {type_id} left {gap} between it and the selection");
+        }
     }
 }
 

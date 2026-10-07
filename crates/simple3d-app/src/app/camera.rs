@@ -108,7 +108,9 @@ impl App {
 
 impl App {
     pub fn gizmo_for(&self, id: NodeId) -> Option<Gizmo> {
-        Gizmo::build(&self.scene, &self.evaluated, id, self.mode)
+        let mut gizmo = Gizmo::build(&self.scene, &self.evaluated, id, self.mode)?;
+        gizmo.anchor = self.settings.size_anchor;
+        Some(gizmo)
     }
 
     pub fn current_view(&self) -> crate::view::View {

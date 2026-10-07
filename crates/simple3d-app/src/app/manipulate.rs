@@ -183,11 +183,12 @@ impl App {
         self.moved_since_evaluated(drag.node)
     }
 
-    /// [`App::live_drag`], or a just-released body still awaiting its evaluation.
+    /// [`App::live_drag`], a shape being put onto a surface (issue 117), or a just-released body
+    /// still awaiting its evaluation.
     pub(crate) fn live_move(&self) -> Option<(NodeId, std::ops::Range<u32>, simple3d_core::xform::Xform)> {
         match self.drag {
             Some(_) => self.live_drag(),
-            None => self.moved_since_evaluated(self.settling?),
+            None => self.moved_since_evaluated(self.placing.as_ref().map(|placing| placing.id).or(self.settling)?),
         }
     }
 
@@ -220,7 +221,8 @@ impl App {
 
     /// Whether a GPU-drawn drag is under way, evaluated once at its end.
     pub(crate) fn drag_drawn_live(&self) -> bool {
-        self.drag.is_some() && (self.live_drag().is_some() || self.live_csg().is_some())
+        let placing = self.placing.is_some() && self.drag.is_none() && self.live_move().is_some();
+        placing || self.drag.is_some() && (self.live_drag().is_some() || self.live_csg().is_some())
     }
 }
 

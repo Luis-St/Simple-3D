@@ -81,7 +81,8 @@ impl App {
         let Some(&first) = created.first() else { return };
         let anchor = self.scene.node(first).position;
         // Measured across all nodes, so the addition clears the selection as a whole.
-        let near = self.near_face_x(created).map_or(0.0, |x| x - anchor.x);
+        let along = self.beside_side().0;
+        let near = self.near_face(created).map_or(0.0, |side| side - anchor.get(along));
         let parent = self.scene.node(first).parent.unwrap_or(self.scene.root());
         let at = self.insertion_point_in(parent, near);
         for id in created {

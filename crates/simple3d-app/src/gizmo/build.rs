@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::view::View;
+use simple3d_core::config::SizeAnchor;
 use simple3d_core::eval::Evaluated;
 use simple3d_core::primitive::AxisDriver;
 use simple3d_core::scene::{Node, NodeId, Scene};
@@ -30,6 +31,8 @@ pub struct Gizmo {
     /// World millimetres per local millimetre along each axis (own and ancestors' scale), to turn a
     /// screen drag into a dimension change.
     pub axis_scale: [f64; 3],
+    /// What stays put while sizing (issue 120); the app fills it from its settings.
+    pub anchor: SizeAnchor,
 }
 
 impl Gizmo {
@@ -68,6 +71,7 @@ impl Gizmo {
             drivers,
             own_scale: Node::sane_scale(node.scale),
             axis_scale,
+            anchor: SizeAnchor::Opposite,
         })
     }
 

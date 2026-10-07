@@ -13,6 +13,7 @@ fn cube(id: NodeId, at: Vec3) -> Subject {
         parent: Xform::IDENTITY,
         position: at + v(5.0, 5.0, 5.0),
         rotation: Vec3::ZERO,
+        body: None,
     }
 }
 
@@ -150,4 +151,45 @@ fn applying_counts_only_the_objects_that_move_as_the_window_does() {
         crate::app::Status::Info(text) => assert_eq!(text, "Aligned 1 object"),
         other => panic!("Apply said {other:?}"),
     }
+}
+
+#[test]
+fn onto_a_top_face_the_object_rests_on_its_middle_without_turning() {
+    let mut tool = tool(1, Arrange::OntoFace);
+    tool.landing = Some(Landing { centre: v(100.0, 0.0, 20.0), at: v(104.0, 2.0, 20.0), normal: v(0.0, 0.0, 1.0) });
+    let placed = plan(&tool, &[cube(1, v(0.0, 0.0, 0.0))]).unwrap();
+    // The cube's middle over the face's middle, its bottom on the face.
+    assert_eq!(placed[0].position, v(100.0, 0.0, 25.0));
+    assert_eq!(placed[0].rotation, Vec3::ZERO);
+    tool.onto = OntoAt::Clicked;
+    tool.lift = 1.0;
+    let placed = plan(&tool, &[cube(1, v(0.0, 0.0, 0.0))]).unwrap();
+    assert_eq!(placed[0].position, v(104.0, 2.0, 26.0));
+}
+
+#[test]
+fn onto_a_side_face_the_object_is_turned_to_stand_out_from_it() {
+    let mut tool = tool(1, Arrange::OntoFace);
+    tool.landing = Some(Landing { centre: v(50.0, 0.0, 10.0), at: v(50.0, 0.0, 10.0), normal: v(1.0, 0.0, 0.0) });
+    // A flat 10 x 10 x 2 plate, so which way it stands shows.
+    let mut plate = cube(1, v(0.0, 0.0, 0.0));
+    plate.bounds = (v(-5.0, -5.0, -1.0), v(5.0, 5.0, 1.0));
+    plate.position = Vec3::ZERO;
+    let placed = plan(&tool, &[plate.clone()]).unwrap();
+    let p = placed[0];
+    assert!((p.position - v(51.0, 0.0, 10.0)).length() < 1e-9, "the plate is at {:?}", p.position);
+    // Its own +Z now points out of the face.
+    let up = Xform::from_pos_rot(Vec3::ZERO, p.rotation).vector(v(0.0, 0.0, 1.0));
+    assert!((up - v(1.0, 0.0, 0.0)).length() < 1e-9, "its top faces {up:?}");
+    // Kept as it is, it only moves, its half width out from the face.
+    tool.turn = false;
+    let placed = plan(&tool, &[plate]).unwrap();
+    assert!((placed[0].position - v(55.0, 0.0, 10.0)).length() < 1e-9, "{:?}", placed[0].position);
+    assert_eq!(placed[0].rotation, Vec3::ZERO);
+}
+
+#[test]
+fn onto_a_face_without_one_picked_asks_for_a_click() {
+    let tool = tool(1, Arrange::OntoFace);
+    assert!(plan(&tool, &[cube(1, v(0.0, 0.0, 0.0))]).unwrap_err().contains("Click a face"));
 }

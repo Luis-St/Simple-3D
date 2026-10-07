@@ -27,6 +27,7 @@ pub use drag::Drag;
 mod axis;
 mod drag_carry;
 mod drag_resize;
+pub(crate) use drag_resize::Fixed;
 mod drag_update;
 pub(crate) use axis::*;
 pub use axis::{axis_colour, axis_name, axis_screen_sign, screen_aligned_axes};

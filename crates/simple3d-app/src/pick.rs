@@ -6,5 +6,7 @@ mod ray;
 pub use ray::{ray_mesh, ray_mesh_triangle};
 mod pick;
 pub use pick::pick;
+mod surface;
+pub(crate) use surface::surface_hit;
 #[cfg(test)]
 mod tests;
