@@ -174,7 +174,7 @@ impl App {
     fn hull_cache(&self, id: NodeId, carried: NodeId) -> Option<HullCache> {
         let shown = |node: NodeId| {
             let node = self.scene.node(node);
-            node.children.iter().copied().filter(|&child| self.scene.node(child).visible).collect::<Vec<_>>()
+            node.children.iter().copied().filter(|&child| self.scene.node(child).adds()).collect::<Vec<_>>()
         };
         // Only unions are allowed below a hull (`csg_plan`), so siblings off the path are operands too.
         let mut still = Vec::new();

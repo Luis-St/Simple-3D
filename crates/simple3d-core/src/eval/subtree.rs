@@ -42,7 +42,7 @@ impl Evaluator {
                 Body::Group { op: GroupOp::Union } => node
                     .children
                     .iter()
-                    .filter(|&&child| scene.node(child).visible)
+                    .filter(|&&child| scene.node(child).adds())
                     .map(|&child| Arc::new(self.subtree(scene, child, cancel).mesh.translated(anchor_offset)))
                     .collect(),
                 _ => Vec::new(),
@@ -115,6 +115,10 @@ impl Evaluator {
                 let mut places: Vec<usize> = Vec::new();
                 let visible = node.children.iter().filter(|&&child| scene.node(child).visible);
                 for (place, &child) in visible.enumerate() {
+                    // A negative part keeps its place, since `passed` counts every shown child.
+                    if scene.node(child).negative {
+                        continue;
+                    }
                     let child_result = self.subtree(scene, child, cancel);
                     errors.extend(child_result.errors.iter().cloned());
                     if child_result.mesh.triangle_count() > 0 {
@@ -127,7 +131,8 @@ impl Evaluator {
                 }
                 let (mesh, untouched) = combine(op, &child_meshes, id, &node.name, &mut errors, cancel);
                 passed.extend(untouched.into_iter().map(|(index, offset)| (places[index], offset)));
-                mesh
+                let negatives = self.negatives(scene, id, &mut errors, cancel);
+                negative::cut_negatives(mesh, negatives, &mut passed, id, &node.name, &mut errors, cancel)
             }
             // A split's pieces are appended, not unioned (issue 82). They are disjoint by construction,
             // and a union would weld neighbours back into the original shape, slowly, on every edit.
@@ -136,6 +141,9 @@ impl Evaluator {
                 let mut pieces = Mesh::new();
                 let visible = node.children.iter().filter(|&&child| scene.node(child).visible);
                 for (place, &child) in visible.enumerate() {
+                    if scene.node(child).negative {
+                        continue;
+                    }
                     let child_result = self.subtree(scene, child, cancel);
                     errors.extend(child_result.errors.iter().cloned());
                     passed.push((place, pieces.positions.len() as u32));
@@ -144,7 +152,8 @@ impl Evaluator {
                         return Err(errors);
                     }
                 }
-                pieces
+                let negatives = self.negatives(scene, id, &mut errors, cancel);
+                negative::cut_negatives(pieces, negatives, &mut passed, id, &node.name, &mut errors, cancel)
             }
             // The component's result placed at the integration's origin (issue 113), evaluated as its own
             // tab does, with this node's placement on top.
@@ -190,13 +199,17 @@ impl Evaluator {
                 // The repeated unit: children placed and appended, not booleaned, so this stays fast.
                 let mut unit = Mesh::new();
                 for &child in &node.children {
-                    if !scene.node(child).visible {
+                    if !scene.node(child).adds() {
                         continue;
                     }
                     let child_result = self.subtree(scene, child, cancel);
                     errors.extend(child_result.errors.iter().cloned());
                     unit.append(&child_result.mesh);
                 }
+                // Negative parts are cut from the unit, so every copy has the hole.
+                let negatives = self.negatives(scene, id, &mut errors, cancel);
+                let unit =
+                    negative::cut_negatives(unit, negatives, &mut Vec::new(), id, &node.name, &mut errors, cancel);
                 if cancel.is_cancelled() {
                     return Err(errors);
                 }

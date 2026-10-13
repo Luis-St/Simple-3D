@@ -26,6 +26,7 @@ mod import;
 mod measure;
 mod measure_axis;
 mod measure_hidden;
+mod negative;
 mod nudge;
 mod paint;
 mod pattern_grips;

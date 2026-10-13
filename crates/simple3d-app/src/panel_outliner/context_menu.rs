@@ -28,6 +28,11 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             if hidden { "Show" } else { "Hide" },
             app.keymap.shortcut_text(Command::ToggleVisibility)
         );
+        let negative = format!(
+            "{}\t{}",
+            if app.scene.node(id).negative { "Make it solid" } else { "Make it a negative part" },
+            app.keymap.shortcut_text(Command::ToggleNegative)
+        );
 
         let mut chosen: Option<Command> = None;
         let mut operation: Option<GroupOp> = None;
@@ -121,6 +126,10 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             blocks.entry(ui);
             if crate::ui::menu_entry(ui, &show_hide, true).clicked() {
                 chosen = Some(Command::ToggleVisibility);
+                ui.close();
+            }
+            if crate::ui::menu_entry(ui, &negative, true).clicked() {
+                chosen = Some(Command::ToggleNegative);
                 ui.close();
             }
         }

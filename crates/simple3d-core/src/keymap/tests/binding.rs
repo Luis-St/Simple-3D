@@ -8,7 +8,7 @@ pub(crate) fn rebinding_onto_a_used_combination_names_the_holder() {
     let mut map = Keymap::default();
     let save = map.binding(Command::Save).unwrap().clone();
     let holder = map.set(Command::Export, save.clone(), false).unwrap_err();
-    assert_eq!(holder, Command::Save);
+    assert_eq!(holder, Action::Command(Command::Save));
     // Nothing changes while the user decides.
     assert_eq!(map.binding(Command::Save), Some(&save));
     assert_ne!(map.binding(Command::Export), Some(&save));
@@ -34,7 +34,7 @@ pub(crate) fn a_conflict_is_named_after_switching_preset_too() {
     assert_eq!(chord, Chord::key("G"), "MeshEditor's ModeMove binding changed; pick another chord");
 
     let named = map.set(Command::Rename, chord.clone(), false).unwrap_err();
-    assert_eq!(named, holder, "the conflict named the wrong command");
+    assert_eq!(named, Action::Command(holder), "the conflict named the wrong command");
     // Refused, not overwritten: both bindings unchanged.
     assert_eq!(map.binding(Command::ModeMove), Some(&chord));
     assert_ne!(map.binding(Command::Rename), Some(&chord));

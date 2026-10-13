@@ -3,11 +3,12 @@
 use super::*;
 use crate::scene::{ExportBody, NodeId, Scene};
 use crate::xform::Xform;
-use simple3d_geom::Mesh;
+use simple3d_geom::{evaluate_boolean, BooleanOp, Mesh};
 use std::collections::BTreeMap;
 
 /// One evaluated body per node rather than [`selection_mesh`]'s single union, for per-object
 /// exports (issue 58). Booleans are their results; hidden, missing or empty nodes are skipped.
+/// A negative part among `ids` is no body: it cuts the bodies in its parent instead (issue 119).
 pub struct Part {
     pub id: NodeId,
     pub name: String,
@@ -17,18 +18,53 @@ pub struct Part {
 pub fn part_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xform>) -> Vec<Part> {
     let mut evaluator = Evaluator::new();
     let cancel = Cancel::new();
+    let negatives = negative_meshes(scene, ids, frames, &mut evaluator);
     let mut parts = Vec::new();
     for &id in ids {
-        if !scene.contains(id) || !scene.node(id).visible {
+        if !scene.contains(id) || !scene.node(id).adds() {
             continue;
         }
         let Some(parent) = frames.get(&id) else { continue };
         let mesh = apply(parent, &evaluator.subtree(scene, id, &cancel).mesh);
+        let mesh = cut_by(scene, &[id], mesh, &negatives);
         if mesh.triangle_count() > 0 {
             parts.push(Part { id, name: scene.node(id).name.clone(), mesh });
         }
     }
     parts
+}
+
+/// The world meshes of the negative parts among `ids`, each with the parent whose bodies it cuts.
+fn negative_meshes(
+    scene: &Scene,
+    ids: &[NodeId],
+    frames: &BTreeMap<NodeId, Xform>,
+    evaluator: &mut Evaluator,
+) -> Vec<(NodeId, Mesh)> {
+    let mut out = Vec::new();
+    for &id in ids {
+        let Some(node) = scene.get(id).filter(|node| node.cuts()) else { continue };
+        let (Some(parent), Some(frame)) = (node.parent, frames.get(&id)) else { continue };
+        let mesh = apply(frame, &evaluator.subtree(scene, id, &Cancel::new()).mesh);
+        if mesh.triangle_count() > 0 {
+            out.push((parent, mesh));
+        }
+    }
+    out
+}
+
+/// `mesh`, a body made of `members`, with every negative part cut whose parent holds one of them.
+fn cut_by(scene: &Scene, members: &[NodeId], mesh: Mesh, negatives: &[(NodeId, Mesh)]) -> Mesh {
+    let cutters: Vec<Mesh> = negatives
+        .iter()
+        .filter(|(parent, _)| members.iter().any(|&member| scene.is_ancestor_of(*parent, member)))
+        .map(|(_, cutter)| cutter.clone())
+        .collect();
+    if cutters.is_empty() || mesh.triangle_count() == 0 {
+        return mesh;
+    }
+    let operands: Vec<Mesh> = std::iter::once(mesh).chain(cutters).collect();
+    evaluate_boolean(BooleanOp::Difference, &operands)
 }
 
 /// The bodies a chosen-bodies export writes, one unioned solid per [`Part`] (issue 58).
@@ -40,9 +76,11 @@ pub fn part_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xfor
 /// Bodies come out in tree order; a merged one is named for its shapes, as slicers show only names.
 pub fn body_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xform>) -> Vec<Part> {
     let mut roots: Vec<(NodeId, Option<u32>)> = Vec::new();
+    let mut cutters: Vec<NodeId> = Vec::new();
     for &id in ids {
-        collect_bodies(scene, id, &mut roots);
+        collect_bodies(scene, id, &mut roots, &mut cutters);
     }
+    let negatives = negative_meshes(scene, &cutters, frames, &mut Evaluator::new());
 
     // Grouped by number in first-seen order; unnumbered nodes are bodies of their own.
     let mut bodies: Vec<(Option<u32>, Vec<NodeId>)> = Vec::new();
@@ -56,7 +94,7 @@ pub fn body_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xfor
     bodies
         .into_iter()
         .filter_map(|(_, members)| {
-            let mesh = selection_mesh(scene, &members, frames);
+            let mesh = cut_by(scene, &members, selection_mesh(scene, &members, frames), &negatives);
             if mesh.triangle_count() == 0 {
                 return None;
             }
@@ -66,15 +104,20 @@ pub fn body_meshes(scene: &Scene, ids: &[NodeId], frames: &BTreeMap<NodeId, Xfor
         .collect()
 }
 
-pub(crate) fn collect_bodies(scene: &Scene, id: NodeId, out: &mut Vec<(NodeId, Option<u32>)>) {
+/// The bodies under `id` into `out`, and the negative parts that cut them into `cutters`.
+fn collect_bodies(scene: &Scene, id: NodeId, out: &mut Vec<(NodeId, Option<u32>)>, cutters: &mut Vec<NodeId>) {
     if !scene.contains(id) || !scene.node(id).visible {
+        return;
+    }
+    if scene.node(id).negative {
+        cutters.push(id);
         return;
     }
     match scene.node(id).export_body {
         // Only where the group really can be split; a stale mark is read as what this export can do.
         Some(ExportBody::Split) if scene.can_split_for_export(id) => {
             for &child in &scene.node(id).children {
-                collect_bodies(scene, child, out);
+                collect_bodies(scene, child, out, cutters);
             }
         }
         Some(ExportBody::Shared(key)) => out.push((id, Some(key))),

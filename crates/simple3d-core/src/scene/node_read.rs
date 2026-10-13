@@ -25,6 +25,16 @@ impl Node {
         self.ghost = visibility == Visibility::Ghost;
     }
 
+    /// Whether the node adds material to its parent's result: shown and not a negative part.
+    pub fn adds(&self) -> bool {
+        self.visible && !self.negative
+    }
+
+    /// Whether the node is cut from its siblings' result (issue 119): a shown negative part.
+    pub fn cuts(&self) -> bool {
+        self.visible && self.negative
+    }
+
     /// A scale with every axis clamped into the range that produces a solid.
     pub fn sane_scale(scale: Vec3) -> Vec3 {
         Vec3::new(scale.x.max(Node::MIN_SCALE), scale.y.max(Node::MIN_SCALE), scale.z.max(Node::MIN_SCALE))

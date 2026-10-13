@@ -40,6 +40,8 @@ impl App {
                     let unions = below.iter().all(|&id| {
                         matches!(self.scene.node(id).body, Body::Group { op: GroupOp::Union | GroupOp::Assembly })
                     });
+                    // A negative part below cuts before the hull, which its points know nothing of (issue 119).
+                    let unions = unions && !path[..=index].iter().any(|&id| self.scene.node(id).negative);
                     hulls += 1;
                     if !unions || hulls > 1 {
                         return None;
@@ -105,20 +107,29 @@ impl App {
         }
     }
 
-    /// A group's shown children with `op` between each pair.
+    /// A group's shown children with `op` between each pair, then its negative parts subtracted
+    /// (issue 119), as the evaluation does.
     fn csg_children(&self, node: NodeId, op: i32, copy: Option<Xform>, plan: &mut Plan<'_>) -> Option<()> {
         let mut first = true;
-        for &child in &self.scene.node(node).children {
-            if !self.scene.node(child).visible
-                || self.evaluated.result_mesh(child).is_none_or(|mesh| mesh.indices.is_empty())
-            {
-                continue;
+        for negatives in [false, true] {
+            for &child in &self.scene.node(node).children {
+                let shown = self.scene.node(child);
+                if !shown.visible
+                    || shown.negative != negatives
+                    || self.evaluated.result_mesh(child).is_none_or(|mesh| mesh.indices.is_empty())
+                {
+                    continue;
+                }
+                // Nothing to cut from: the evaluation leaves an empty result, which waits for it here.
+                if negatives && first {
+                    return None;
+                }
+                self.csg_expression(child, copy, plan)?;
+                if !first {
+                    plan.program.push(if negatives { CSG_DIFFERENCE } else { op });
+                }
+                first = false;
             }
-            self.csg_expression(child, copy, plan)?;
-            if !first {
-                plan.program.push(op);
-            }
-            first = false;
         }
         // An empty group cannot be expressed here, so it waits for evaluation.
         (!first).then_some(())

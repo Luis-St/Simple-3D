@@ -56,30 +56,8 @@ pub(crate) fn row(
         painter.rect_filled(rect, 0.0, token::SURFACE_3);
     }
 
-    // Visibility at the right edge, always drawn, dimmed when hidden.
-    let eye_rect =
-        egui::Rect::from_min_size(egui::pos2(rect.right() - 22.0, rect.top() + 3.0), egui::Vec2::splat(16.0));
-    let eye = ui.interact(
-        eye_rect,
-        ui.id().with((id, "eye")),
-        if shadowed { egui::Sense::hover() } else { egui::Sense::click() },
-    );
-    if !is_root {
-        let colour = if eye.hovered() && !shadowed {
-            token::TEXT_HI
-        } else if visible {
-            token::TEXT_LO
-        } else {
-            token::TEXT_LO.gamma_multiply(0.45)
-        };
-        icon::draw(&painter, eye_rect.shrink(1.0), if visible { Glyph::Eye } else { Glyph::EyeOff }, colour);
-        if eye.clicked() && !shadowed {
-            app.edit("Toggle visibility", None);
-            if let Some(node) = app.scene.get_mut(id) {
-                node.visible = !visible;
-            }
-        }
-    }
+    // Visibility and the negative-part switch at the right edge.
+    let (toggles_left, on_toggle) = toggles(app, ui, &painter, rect, id, shadowed);
 
     let mut x = rect.left() + 6.0 + depth as f32 * 12.0;
 
@@ -129,7 +107,7 @@ pub(crate) fn row(
         if *rename_id == id {
             let field = egui::Rect::from_min_max(
                 egui::pos2(x, rect.top() + 1.0),
-                egui::pos2(eye_rect.left() - 4.0, rect.bottom() - 1.0),
+                egui::pos2(toggles_left - 4.0, rect.bottom() - 1.0),
             );
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(field));
             let response =
@@ -150,7 +128,7 @@ pub(crate) fn row(
     }
 
     // The operator badge is right-aligned so badges line up down the tree.
-    let mut name_right = eye_rect.left() - 6.0;
+    let mut name_right = toggles_left - 6.0;
     if let Some((mark, subtracted)) = badge {
         let colour = if subtracted { token::DANGER } else { token::TEXT_LO.gamma_multiply(0.8) };
         let badge_rect =
@@ -194,8 +172,8 @@ pub(crate) fn row(
         ))
     };
 
-    // The eye and the twisty take their own clicks without selecting the row.
-    if !shadowed && !eye.hovered() && !twisty_hovered {
+    // The switches and the twisty take their own clicks without selecting the row.
+    if !shadowed && !on_toggle && !twisty_hovered {
         // Read before being overwritten below, since a double click's second click reports both
         // `clicked` and `double_clicked` in one frame.
         let same_row_again = app.outliner_last_click == Some(id);

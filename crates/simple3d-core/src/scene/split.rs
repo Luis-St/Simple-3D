@@ -20,6 +20,7 @@ impl Scene {
             anchor: original.anchor,
             visible: original.visible,
             ghost: original.ghost,
+            negative: original.negative,
             colour: original.colour.as_deref().and_then(Colour::from_hex),
             segments: original.segments,
             export_body: original.export_body,
@@ -55,6 +56,7 @@ impl Scene {
         node.anchor = kept.anchor;
         node.visible = kept.visible;
         node.ghost = kept.ghost;
+        node.negative = kept.negative;
         node.colour = kept.colour;
         node.segments = kept.segments;
         node.export_body = kept.export_body;

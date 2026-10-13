@@ -151,6 +151,7 @@ impl App {
             ui.separator();
             self.command_item(ui, Command::Rename, has_selection);
             self.command_item(ui, Command::ToggleVisibility, has_selection);
+            self.command_item(ui, Command::ToggleNegative, self.can_toggle_negative());
             self.command_item(ui, Command::MoveUp, self.can_reorder(-1));
             self.command_item(ui, Command::MoveDown, self.can_reorder(1));
             ui.separator();

@@ -102,6 +102,7 @@ fn component_root(nodes: &[NodeData], name: &str) -> Option<NodeData> {
             root.anchor = Default::default();
             root.visible = true;
             root.ghost = false;
+            root.negative = false;
             root.export_body = None;
             return Some(root);
         }

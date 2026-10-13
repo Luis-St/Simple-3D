@@ -59,6 +59,7 @@ impl Scene {
         data.anchor = Anchor::Centre;
         data.visible = true;
         data.ghost = false;
+        data.negative = false;
         data.export_body = None;
         data.extracted = false;
         for child in self.nodes[&id].children.clone() {

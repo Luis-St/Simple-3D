@@ -7,9 +7,9 @@ use simple3d_geom::tiling::SplitPlan;
 use std::sync::Arc;
 
 impl Scene {
-    /// A difference group's base: its first visible child (spec section 3.3).
+    /// A difference group's base: its first visible child that is not a negative part (spec section 3.3).
     pub fn difference_base(&self, group: NodeId) -> Option<NodeId> {
-        self.nodes.get(&group)?.children.iter().copied().find(|c| self.nodes[c].visible)
+        self.nodes.get(&group)?.children.iter().copied().find(|c| self.nodes[c].adds())
     }
 
     // -- portable form (project file and clipboard share one schema) ---------
@@ -53,6 +53,7 @@ impl Scene {
             anchor: node.anchor,
             visible: node.visible,
             ghost: node.ghost,
+            negative: node.negative,
             colour: node.colour.map(Colour::to_hex),
             segments: node.segments,
             export_body: node.export_body,
@@ -102,6 +103,7 @@ impl Scene {
             anchor: data.anchor,
             visible: data.visible,
             ghost: data.ghost,
+            negative: data.negative,
             colour: data.colour.as_deref().and_then(Colour::from_hex),
             segments: data.segments,
             export_body: data.export_body,

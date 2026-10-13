@@ -60,6 +60,7 @@ impl App {
                 }
             }
             ToggleVisibility => self.toggle_visibility(),
+            ToggleNegative => self.toggle_negative(),
             MoveUp => self.reorder(-1),
             MoveDown => self.reorder(1),
 

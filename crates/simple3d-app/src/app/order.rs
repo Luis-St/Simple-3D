@@ -19,6 +19,37 @@ impl App {
         }
     }
 
+    /// Whether the selection holds anything that can be a negative part: anything but the root.
+    pub fn can_toggle_negative(&self) -> bool {
+        self.top_level_selection().into_iter().any(|id| id != self.scene.root())
+    }
+
+    /// Mark the selection as negative parts, cut from their siblings (issue 119), or back to solid.
+    /// Like visibility, everything follows the primary node.
+    pub(crate) fn toggle_negative(&mut self) {
+        let root = self.scene.root();
+        let targets: Vec<NodeId> = self.top_level_selection().into_iter().filter(|&id| id != root).collect();
+        let Some(&first) = targets.last() else { return };
+        let primary = self.primary().filter(|id| targets.contains(id)).unwrap_or(first);
+        self.set_negative(&targets, !self.scene.node(primary).negative);
+    }
+
+    /// Make `targets` negative parts or solid, as one undo step; the root is never one.
+    pub(crate) fn set_negative(&mut self, targets: &[NodeId], negative: bool) {
+        let root = self.scene.root();
+        let changes =
+            targets.iter().any(|&id| id != root && self.scene.get(id).is_some_and(|n| n.negative != negative));
+        if !changes {
+            return;
+        }
+        self.edit(if negative { "Make negative part" } else { "Make solid" }, None);
+        for &id in targets.iter().filter(|&&id| id != root) {
+            if let Some(node) = self.scene.get_mut(id) {
+                node.negative = negative;
+            }
+        }
+    }
+
     /// Whether a move by `delta` would move anything, for greying out menu entries.
     pub fn can_reorder(&self, delta: isize) -> bool {
         !self.reorder_plan(delta).is_empty()

@@ -7,6 +7,7 @@ mod menu;
 mod menu_add_view;
 mod menu_file_edit;
 mod menu_manipulate;
+mod record_chord;
 mod shortcuts;
 mod status_bar;
 mod summary;

@@ -19,6 +19,8 @@ mod migrate;
 mod preset;
 pub(crate) use migrate::*;
 mod lookup;
+mod primitive;
+pub use primitive::Action;
 #[cfg(test)]
 mod tests;
 mod text;
@@ -32,6 +34,9 @@ pub struct Keymap {
     #[serde(deserialize_with = "bindings_from_names")]
     pub bindings: BTreeMap<Command, Chord>,
     pub nav: NavMap,
+    /// Shortcuts adding a primitive, by registry id (issue 124); none in any preset.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub primitives: BTreeMap<String, Chord>,
 }
 
 impl Default for Keymap {

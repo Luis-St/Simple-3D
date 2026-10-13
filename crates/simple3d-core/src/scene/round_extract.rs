@@ -77,7 +77,7 @@ impl Scene {
         };
         let root = self.root;
         let touched: Vec<NodeId> =
-            self.nodes[&root].children.iter().copied().filter(|id| self.nodes[id].visible && reached(id)).collect();
+            self.nodes[&root].children.iter().copied().filter(|id| self.nodes[id].adds() && reached(id)).collect();
         // The scene's children all sit in the frame the scene gives them.
         let Some(&frame) = touched.first().and_then(|first| frames.get(first)) else { return Vec::new() };
         let inverse = frame.inverse();

@@ -31,6 +31,9 @@ pub struct NodeData {
     /// Omitted unless a ghost.
     #[serde(default, skip_serializing_if = "is_false")]
     pub ghost: bool,
+    /// Omitted unless a negative part (issue 119).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub negative: bool,
     /// `#rrggbb`, omitted when unpainted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<String>,

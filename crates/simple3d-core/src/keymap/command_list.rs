@@ -33,6 +33,7 @@ impl Command {
         Command::Rejoin,
         Command::Rename,
         Command::ToggleVisibility,
+        Command::ToggleNegative,
         Command::MoveUp,
         Command::MoveDown,
         Command::FrameSelection,

@@ -35,18 +35,13 @@ impl Keymap {
             .map(|(command, _)| *command)
     }
 
-    /// Which command already holds `chord`, besides `command`; the editor names it rather than overwriting.
-    pub fn conflict(&self, command: Command, chord: &Chord) -> Option<Command> {
-        self.bindings.iter().find(|(k, c)| **k != command && *c == chord).map(|(k, _)| *k)
-    }
-
     /// Assign a binding, refusing on conflict with the holder's name; the caller may retry with `force`.
-    pub fn set(&mut self, command: Command, chord: Chord, force: bool) -> Result<(), Command> {
-        if let Some(holder) = self.conflict(command, &chord) {
+    pub fn set(&mut self, command: Command, chord: Chord, force: bool) -> Result<(), Action> {
+        if let Some(holder) = self.holder(&chord, Some(&Action::Command(command))) {
             if !force {
                 return Err(holder);
             }
-            self.bindings.remove(&holder);
+            self.release(&holder);
         }
         self.bindings.insert(command, chord);
         Ok(())
@@ -62,8 +57,8 @@ impl Keymap {
         match preset.bindings.get(&command) {
             Some(chord) => {
                 // Clear the current holder, so the reset cannot create a conflict.
-                if let Some(holder) = self.conflict(command, chord) {
-                    self.bindings.remove(&holder);
+                if let Some(holder) = self.holder(chord, Some(&Action::Command(command))) {
+                    self.release(&holder);
                 }
                 self.bindings.insert(command, chord.clone());
             }
@@ -77,8 +72,16 @@ impl Keymap {
         *self = Keymap::from_preset(self.preset);
     }
 
+    /// Start over from `preset`, keeping the primitive shortcuts it leaves free (issue 124), since
+    /// presets bind no primitives.
     pub fn switch_preset(&mut self, preset: Preset) {
+        let primitives = std::mem::take(&mut self.primitives);
         *self = Keymap::from_preset(preset);
+        for (type_id, chord) in primitives {
+            if self.holder(&chord, Some(&Action::Primitive(type_id.clone()))).is_none() {
+                self.primitives.insert(type_id, chord);
+            }
+        }
     }
 
     /// Commands sharing a chord; should be empty. For tests and checking imported keymaps.

@@ -9,7 +9,7 @@ use crate::worker::{EvalWorker, ExportJob, ImportJob, SplitJob};
 use simple3d_core::clipboard::Clip;
 use simple3d_core::config::{AppSettings, Side};
 use simple3d_core::eval::Evaluated;
-use simple3d_core::keymap::{Chord, Command, Keymap};
+use simple3d_core::keymap::{Action, Chord, Keymap};
 use simple3d_core::library;
 use simple3d_core::scene::{NodeId, Scene};
 use simple3d_core::undo::History;
@@ -254,8 +254,10 @@ pub struct App {
     pub(crate) pattern_tool_resumable: bool,
 
     pub keymap_search: String,
-    pub recording: Option<Command>,
-    pub keymap_conflict: Option<(Command, Chord, Command)>,
+    /// What the next held keys get bound to: from the keymap editor, or a palette tile (issue 124).
+    pub recording: Option<Action>,
+    /// A recorded chord someone else holds: what it was for, the chord, and the holder.
+    pub keymap_conflict: Option<(Action, Chord, Action)>,
     /// Modifier-only hold tracking (issue 77), since the toolkit reports no key event for them.
     /// Separate states for shortcuts and the keymap recorder.
     pub shortcut_mods: ui::ChordHold,

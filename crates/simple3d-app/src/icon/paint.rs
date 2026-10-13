@@ -140,6 +140,10 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.ellipse(0.5, 0.5, 0.42, 0.26, 0.0, TAU);
             pen.line(&[(0.14, 0.86), (0.86, 0.14)]);
         }
+        Glyph::Negative => {
+            pen.circle(0.5, 0.5, 0.36);
+            pen.line(&[(0.32, 0.5), (0.68, 0.5)]);
+        }
         // Deliberate exception to "no filled pictograms": a solid dot reads instantly at 22 px rows.
         Glyph::Bracket => {
             pen.line(&[(0.44, 0.14), (0.26, 0.14), (0.26, 0.86), (0.44, 0.86)]);

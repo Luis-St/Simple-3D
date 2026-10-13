@@ -36,6 +36,7 @@ pub enum Command {
     Rejoin,
     Rename,
     ToggleVisibility,
+    ToggleNegative,
     MoveUp,
     MoveDown,
 

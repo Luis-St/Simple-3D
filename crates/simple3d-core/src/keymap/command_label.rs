@@ -35,6 +35,7 @@ impl Command {
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
+            ToggleNegative => "Toggle negative part",
             MoveUp => "Move up among siblings",
             MoveDown => "Move down among siblings",
             FrameSelection => "Frame selection",
@@ -82,7 +83,7 @@ impl Command {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | MakeComponent | NewComponent
             | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble | SplitIntoPieces | Rejoin | Rename
-            | ToggleVisibility | MoveUp | MoveDown => Area::Edit,
+            | ToggleVisibility | ToggleNegative | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {

@@ -7,6 +7,8 @@ use crate::theme::{self, token};
 use simple3d_core::primitive;
 use simple3d_core::scene::GroupOp;
 
+mod shortcut;
+
 /// Side of one palette tile.
 const TILE: f32 = 26.0;
 
@@ -137,6 +139,8 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
             ui.add_space(theme::metric::PANEL_PAD - theme::metric::GAP);
             for spec in chunk {
                 let hint = crate::app::insertion_hint(app);
+                let bound = app.keymap.primitive_shortcut_text(spec.type_id);
+                let name = if bound.is_empty() { spec.label.to_string() } else { format!("{} ({bound})", spec.label) };
                 // Click adds where the document says; drag carries it into the outliner like a row drag.
                 let response = icon::button_sensing(
                     ui,
@@ -147,13 +151,15 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
                     true,
                     DRAG_OR_CLICK,
                 )
-                .on_hover_text(format!("{}\n{hint}\nOr drag it into the outliner", spec.label));
+                .on_hover_text(format!("{name}\n{hint}\nOr drag it into the outliner; right-click for a shortcut"));
                 if response.clicked() {
                     app.add_node(Some(spec.type_id), GroupOp::Union);
                 }
                 if response.drag_started() {
                     app.outliner_drag = Some(Carried::Shape(spec.type_id));
                 }
+                shortcut::tile_menu(app, &response, spec);
+                shortcut::prompt(app, ui, response.rect, spec);
             }
         });
     }

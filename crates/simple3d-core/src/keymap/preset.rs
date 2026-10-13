@@ -53,6 +53,8 @@ impl Keymap {
         set(Rejoin, Chord::ctrl_shift("J"));
         set(Rename, Chord::key("F2"));
         set(ToggleVisibility, Chord::key("H"));
+        // H for a hole, as visibility already has H (issue 119).
+        set(ToggleNegative, Chord::shift("H"));
         set(MoveUp, Chord::ctrl("Up"));
         set(MoveDown, Chord::ctrl("Down"));
 
@@ -137,7 +139,7 @@ impl Keymap {
             }
         };
 
-        let map = Keymap { preset, bindings, nav };
+        let map = Keymap { preset, bindings, nav, primitives: BTreeMap::new() };
         debug_assert!(map.self_conflicts().is_empty(), "preset {preset:?} ships with a conflict");
         map
     }

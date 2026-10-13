@@ -33,6 +33,8 @@ pub enum Glyph {
     // Outliner marks.
     Eye,
     EyeOff,
+    /// A hole: the negative part toggle (issue 119).
+    Negative,
     Bracket,
     Warning,
     /// Geometry a node owns outright, not a primitive (issue 80).

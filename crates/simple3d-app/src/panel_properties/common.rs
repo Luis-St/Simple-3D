@@ -52,6 +52,26 @@ pub(crate) fn common(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         },
     );
 
+    // A negative part is cut from its siblings, so a hole needs no difference group (issue 119).
+    let negative = app.scene.node(id).negative;
+    let mixed_negative = targets.iter().any(|t| app.scene.node(*t).negative != negative);
+    field_row(
+        ui,
+        "Part",
+        "Solid: adds to its group. Negative: cut from the other objects in its group. \
+             The document's Cutters setting draws it as a translucent shell.",
+        |ui| {
+            ui.add_enabled_ui(!is_root, |ui| {
+                for (option, label) in [(false, "Solid"), (true, "Negative")] {
+                    let showing = !mixed_negative && negative == option;
+                    if theme::choice(ui, showing, label).clicked() && (mixed_negative || negative != option) {
+                        app.set_negative(targets, option);
+                    }
+                }
+            });
+        },
+    );
+
     field_row(
         ui,
         "Colour",

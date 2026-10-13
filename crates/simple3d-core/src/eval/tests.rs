@@ -5,6 +5,7 @@ mod cancel;
 mod colour;
 mod component;
 mod groups;
+mod negative;
 mod pattern;
 mod push_pull;
 mod push_pull_edits;

@@ -5,13 +5,27 @@ use simple3d_core::scene::{NodeId, Visibility};
 use std::hash::{Hash, Hasher};
 
 impl App {
-    /// The nodes drawn as ghosts: hidden but asked to be seen; a ghost group carries its children.
+    /// The nodes drawn as ghosts: hidden but asked to be seen, and, while the document shows
+    /// cutters, negative parts and a difference's cutters (issue 119); a ghost group carries its
+    /// children.
     pub(crate) fn ghosts(&self) -> Vec<NodeId> {
-        self.scene
-            .depth_first()
-            .into_iter()
-            .filter(|id| self.scene.node(*id).visibility() == Visibility::Ghost)
-            .collect()
+        self.scene.depth_first().into_iter().filter(|id| self.is_ghost(*id)).collect()
+    }
+
+    fn is_ghost(&self, id: NodeId) -> bool {
+        let node = self.scene.node(id);
+        if node.visibility() == Visibility::Ghost {
+            return true;
+        }
+        self.scene.settings.show_cutters && self.scene.is_shown(id) && self.cuts(id)
+    }
+
+    /// Whether `id` removes material: a negative part, or a difference group's child after its base.
+    fn cuts(&self, id: NodeId) -> bool {
+        let node = self.scene.node(id);
+        let Some(parent) = node.parent else { return false };
+        let difference = self.scene.node(parent).group_op() == Some(simple3d_core::scene::GroupOp::Difference);
+        node.cuts() || (difference && self.scene.difference_base(parent) != Some(id))
     }
 
     /// A cheap summary of which nodes are ghosts, for the cache key. Read in scene order every frame,
@@ -20,7 +34,7 @@ impl App {
     /// [`ghosts`]: App::ghosts
     pub(super) fn ghost_generation(&self) -> u64 {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for id in self.scene.ids().filter(|id| self.scene.node(*id).visibility() == Visibility::Ghost) {
+        for id in self.scene.ids().filter(|id| self.is_ghost(*id)) {
             id.hash(&mut hasher);
         }
         hasher.finish()

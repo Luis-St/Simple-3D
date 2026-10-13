@@ -16,7 +16,7 @@ impl Keymap {
         let preset = Keymap::from_preset(map.preset);
         for (command, was, now) in MOVED_DEFAULTS {
             let (was, now) = (Chord::from_str(was)?, Chord::from_str(now)?);
-            if map.bindings.get(&command) == Some(&was) && map.conflict(command, &now).is_none() {
+            if map.bindings.get(&command) == Some(&was) && map.holder(&now, Some(&Action::Command(command))).is_none() {
                 map.bindings.insert(command, now);
             }
         }
@@ -29,13 +29,14 @@ impl Keymap {
         for command in Command::ALL {
             if !map.bindings.contains_key(command) {
                 if let Some(chord) = preset.bindings.get(command) {
-                    if map.conflict(*command, chord).is_none() {
+                    if map.holder(chord, Some(&Action::Command(*command))).is_none() {
                         map.bindings.insert(*command, chord.clone());
                     }
                 }
             }
         }
         map.bindings.retain(|k, _| Command::ALL.contains(k));
+        map.primitives.retain(|type_id, _| crate::primitive::lookup(type_id).is_some());
         Ok(map)
     }
 }

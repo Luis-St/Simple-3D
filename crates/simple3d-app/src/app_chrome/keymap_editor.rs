@@ -3,44 +3,13 @@
 use super::*;
 use crate::app::{App, Status};
 use crate::theme;
-use crate::ui;
-use simple3d_core::keymap::{Area, Command, Keymap, MouseButton, Preset};
+use simple3d_core::keymap::{Action, Area, Command, Keymap, MouseButton, Preset};
 
 impl App {
     pub(super) fn keymap_body(&mut self, ui: &mut egui::Ui) {
         // Recording swallows the next key press so it cannot fire the command being bound. Keys are read
         // from this window's context, since the dialog is its own window.
-        if let Some(command) = self.recording {
-            let (escaped, modifiers, held) = ui.input(|input| {
-                let escaped = input
-                    .events
-                    .iter()
-                    .any(|event| matches!(event, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. }));
-                (escaped, input.modifiers, ui::keys_down(input))
-            });
-            // The binding is whatever is held together, taken on release (issue 77): waiting for the
-            // release is what makes multi-key chords like Q+W+E possible.
-            let captured = if escaped {
-                self.recording = None;
-                self.record_mods.reset();
-                None
-            } else {
-                self.record_mods.update(modifiers, held.iter().map(String::as_str), false)
-            };
-            if let Some(chord) = captured {
-                match self.keymap.set(command, chord.clone(), false) {
-                    Ok(()) => {
-                        self.recording = None;
-                        self.persist_keymap();
-                    }
-                    // Name the current holder and offer to reassign or cancel; never overwrite silently.
-                    Err(holder) => {
-                        self.keymap_conflict = Some((command, chord, holder));
-                        self.recording = None;
-                    }
-                }
-            }
-        }
+        self.record_chord(ui.ctx());
 
         // Rows are laid out to the actual width, with one label column for both grids and buttons at
         // the right edge (issue 63).
@@ -180,24 +149,8 @@ impl App {
                     ui.end_row();
                     for command in commands {
                         label_cell(ui, command.label(), name_column);
-                        let recording = self.recording == Some(command);
-                        let text = if recording {
-                            // Modifiers and multi-key holds are bindings too (issue 77), so the prompt says so.
-                            "hold the keys, then let go...".to_string()
-                        } else {
-                            let shown = self.keymap.shortcut_text(command);
-                            if shown.is_empty() {
-                                "unbound".to_string()
-                            } else {
-                                shown
-                            }
-                        };
-                        let button = egui::vec2(binding_column, theme::metric::INPUT_ROW);
-                        if ui.add(egui::Button::new(text).min_size(button)).clicked() {
-                            self.recording = Some(command);
-                            // A modifier held for the click itself is not the binding.
-                            self.record_mods.reset();
-                        }
+                        let shown = self.keymap.shortcut_text(command);
+                        self.binding_button(ui, Action::Command(command), shown, binding_column);
                         let reset = egui::vec2(reset_column, theme::metric::INPUT_ROW);
                         if ui.add(egui::Button::new("Reset").min_size(reset)).clicked() {
                             self.keymap.reset(command);
@@ -207,29 +160,78 @@ impl App {
                     }
                     ui.end_row();
                 }
+                self.primitive_rows(ui, &needle, name_column, binding_column, reset_column);
             });
         });
 
         // Drawn inside the keymap dialog, the window that took the key press.
-        if let Some((command, chord, holder)) = self.keymap_conflict.clone() {
+        if let Some((target, chord, holder)) = self.keymap_conflict.clone() {
             egui::Window::new("That combination is already in use")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 40.0))
                 .show(ui.ctx(), |ui| {
                     ui.label(format!("{chord} is currently bound to \"{}\".", holder.label()));
-                    ui.label(format!("Reassign it to \"{}\"?", command.label()));
+                    ui.label(format!("Reassign it to \"{}\"?", target.label()));
                     ui.horizontal(|ui| {
                         if ui.button("Reassign").clicked() {
-                            let _ = self.keymap.set(command, chord.clone(), true);
-                            self.persist_keymap();
-                            self.keymap_conflict = None;
+                            self.bind_recorded(target.clone(), chord.clone(), true);
                         }
                         if ui.button("Cancel").clicked() {
                             self.keymap_conflict = None;
                         }
                     });
                 });
+        }
+    }
+}
+
+impl App {
+    /// The button showing `target`'s binding; a click records a new one.
+    fn binding_button(&mut self, ui: &mut egui::Ui, target: Action, shown: String, width: f32) {
+        let text = if self.recording.as_ref() == Some(&target) {
+            // Modifiers and multi-key holds are bindings too (issue 77), so the prompt says so.
+            "hold the keys, then let go...".to_string()
+        } else if shown.is_empty() {
+            "unbound".to_string()
+        } else {
+            shown
+        };
+        if ui.add(egui::Button::new(text).min_size(egui::vec2(width, theme::metric::INPUT_ROW))).clicked() {
+            self.start_recording(target);
+        }
+    }
+
+    /// Shortcuts adding each primitive (issue 124), after the commands; none are bound by a preset,
+    /// so their second button clears rather than resets.
+    fn primitive_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        needle: &str,
+        name_column: f32,
+        binding_column: f32,
+        clear_column: f32,
+    ) {
+        let specs: Vec<_> = simple3d_core::primitive::REGISTRY
+            .iter()
+            .filter(|spec| needle.is_empty() || format!("add {}", spec.label).to_lowercase().contains(needle))
+            .collect();
+        if specs.is_empty() {
+            return;
+        }
+        ui.add(egui::Label::new(theme::header_text("Primitives")).selectable(false));
+        ui.end_row();
+        for spec in specs {
+            label_cell(ui, &format!("Add {}", spec.label), name_column);
+            let shown = self.keymap.primitive_shortcut_text(spec.type_id);
+            self.binding_button(ui, Action::Primitive(spec.type_id.to_string()), shown, binding_column);
+            let bound = self.keymap.primitive_binding(spec.type_id).is_some();
+            let clear = egui::vec2(clear_column, theme::metric::INPUT_ROW);
+            if ui.add_enabled(bound, egui::Button::new("Clear").min_size(clear)).clicked() {
+                self.keymap.unbind_primitive(spec.type_id);
+                self.persist_keymap();
+            }
+            ui.end_row();
         }
     }
 }

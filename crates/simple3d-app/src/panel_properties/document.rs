@@ -137,6 +137,17 @@ pub(crate) fn document(app: &mut App, ui: &mut egui::Ui) {
                 }
             },
         );
+        field_row(
+            ui,
+            "Cutters",
+            "Draw negative parts and the cutters of difference groups as translucent shells",
+            |ui| {
+                let mut on = app.scene.settings.show_cutters;
+                if ui.checkbox(&mut on, "").changed() {
+                    app.scene.settings.show_cutters = on;
+                }
+            },
+        );
         field_row(ui, "Segments", "", |ui| {
             let segments = app.scene.settings.default_segments as f64;
             let width = room_left(ui).max(40.0);

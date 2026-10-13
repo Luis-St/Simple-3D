@@ -28,6 +28,8 @@ impl Evaluator {
         hash_vec3(hasher, node.rotation);
         hash_vec3(hasher, crate::scene::Node::sane_scale(node.scale));
         (node.anchor == Anchor::Base).hash(&mut hasher.0);
+        // Whether its parent adds or cuts it (issue 119).
+        node.negative.hash(&mut hasher.0);
         self.hash_content(scene, id, hasher);
         // Applied after the body's result, so they are in this key and not in the content key.
         node.edits.len().hash(&mut hasher.0);

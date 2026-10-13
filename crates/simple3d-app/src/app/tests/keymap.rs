@@ -1,7 +1,7 @@
 //! Binding keys, and the keymap a restarted application comes back with.
 
 use super::*;
-use simple3d_core::keymap::{Chord, Command, Keymap};
+use simple3d_core::keymap::{Action, Chord, Command, Keymap};
 
 /// Issue 76 through the app: the editor records a lone modifier, the binding reads back as it, and
 /// holding it requests a snap. The recorder reads its own window's input, which unit tests miss.
@@ -14,11 +14,15 @@ pub(crate) fn a_modifier_alone_can_be_bound_in_the_editor_and_held_afterwards() 
     // so it is freed first.
     app.keymap.unbind(Command::ZoomToPointer);
     app.modal = Modal::Keymap;
-    app.recording = Some(Command::ToggleBoundingBox);
+    app.recording = Some(Action::Command(Command::ToggleBoundingBox));
 
     // Alt down, held a frame, then released with nothing under it.
     draw_frame_with(&mut app, egui::Modifiers::ALT, Vec::new());
-    assert_eq!(app.recording, Some(Command::ToggleBoundingBox), "the press alone should not finish the binding");
+    assert_eq!(
+        app.recording,
+        Some(Action::Command(Command::ToggleBoundingBox)),
+        "the press alone should not finish the binding"
+    );
     draw_frame_with(&mut app, egui::Modifiers::ALT, Vec::new());
     draw_frame_with(&mut app, egui::Modifiers::NONE, Vec::new());
 
@@ -40,7 +44,7 @@ pub(crate) fn a_modifier_alone_can_be_bound_in_the_editor_and_held_afterwards() 
 pub(crate) fn keys_held_together_bind_as_one_combination() {
     let mut app = headless_app();
     app.modal = Modal::Keymap;
-    app.recording = Some(Command::ToggleBoundingBox);
+    app.recording = Some(Action::Command(Command::ToggleBoundingBox));
     let down = |key: egui::Key| egui::Event::Key {
         key,
         physical_key: None,

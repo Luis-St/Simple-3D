@@ -20,6 +20,10 @@ pub struct Node {
     /// How a hidden node looks: nothing, or a translucent ghost (for positioning a tool body). Read via
     /// `Node::visibility`.
     pub ghost: bool,
+    /// A negative part (issue 119): cut from its shown siblings' result instead of added to it, in any
+    /// group, so a hole needs no difference group of its own. Drawn as a ghost only while the scene shows
+    /// cutters (`SceneSettings::show_cutters`).
+    pub negative: bool,
     /// This node's paint; without one it takes its nearest painted ancestor's colour.
     pub colour: Option<Colour>,
     /// Per-object override of the scene's default segment count.
@@ -49,6 +53,7 @@ impl Node {
             anchor: Anchor::Centre,
             visible: true,
             ghost: false,
+            negative: false,
             colour: None,
             segments: None,
             export_body: None,

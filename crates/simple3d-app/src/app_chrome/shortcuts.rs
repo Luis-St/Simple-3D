@@ -7,7 +7,15 @@ use simple3d_core::keymap::Chord;
 impl App {
     /// Run the command the pressed keys are bound to; focused text fields keep the keyboard.
     pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.modal != Modal::None || self.recording.is_some() || self.rename.is_some() {
+        // A palette tile's recording (issue 124) takes the keys here; the keymap dialog reads its own.
+        if self.modal == Modal::None && self.recording.is_some() {
+            self.record_chord(ctx);
+        }
+        if self.modal != Modal::None
+            || self.recording.is_some()
+            || self.keymap_conflict.is_some()
+            || self.rename.is_some()
+        {
             // The release ending a modifier hold will land elsewhere, so drop the hold in progress.
             self.shortcut_mods.reset();
             return;
@@ -54,18 +62,17 @@ impl App {
         for (key, modifiers) in events {
             let pressed = key.name();
             let down = |name: &str| name == pressed || held.iter().any(|k| k == name);
-            let command =
-                self.keymap.command_for_press(pressed, down, modifiers.command, modifiers.shift, modifiers.alt);
-            if let Some(command) = command {
-                self.run(command);
+            let action = self.keymap.action_for_press(pressed, down, modifiers.command, modifiers.shift, modifiers.alt);
+            if let Some(action) = action {
+                self.run_action(action);
             }
         }
         // A modifier held and released alone is its own binding (issue 77); chords with keys already
         // fired. A mouse button counts as pressed, so Ctrl+click does not fire Ctrl.
         let completed = self.shortcut_mods.update(modifiers, held.iter().map(String::as_str), pointer);
         if let Some(chord) = completed.filter(Chord::is_modifier_only) {
-            if let Some(command) = self.keymap.command_for(&chord) {
-                self.run(command);
+            if let Some(action) = self.keymap.action_for(&chord) {
+                self.run_action(action);
             }
         }
     }

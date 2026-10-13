@@ -32,7 +32,8 @@ impl App {
 
     fn collect_bodies(&self, id: NodeId, exclude: &[NodeId], out: &mut Vec<(NodeId, Arc<Mesh>)>) {
         let Some(node) = self.scene.get(id) else { return };
-        if !node.visible || exclude.contains(&id) {
+        // A negative part is in no body (issue 119).
+        if !node.adds() || exclude.contains(&id) {
             return;
         }
         let whole = match &node.body {

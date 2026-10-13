@@ -22,7 +22,7 @@ pub(super) fn with_edits(
     // the addition was pushed from and meets.
     let mut stamped = id;
     while !source_stamped(scene, stamped) {
-        match scene.node(stamped).children.iter().copied().find(|&child| scene.node(child).visible) {
+        match scene.node(stamped).children.iter().copied().find(|&child| scene.node(child).adds()) {
             Some(child) => stamped = child,
             None => break,
         }

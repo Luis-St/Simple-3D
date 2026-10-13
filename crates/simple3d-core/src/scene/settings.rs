@@ -25,6 +25,10 @@ pub struct SceneSettings {
     /// Mark where the principal planes cut solids, showing e.g. how much is below the build plate.
     #[serde(default = "default_true")]
     pub plane_marks: bool,
+    /// Draw what cuts, negative parts and a difference's cutters, as translucent shells (issue 119).
+    /// Off and omitted by default, so the model reads as what it evaluates to.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub show_cutters: bool,
     /// What the viewport hides under a tool preview (issue 82); omitted from the file at its default.
     #[serde(default, skip_serializing_if = "is_no_change")]
     pub preview_viewport: PreviewViewport,
@@ -50,6 +54,7 @@ impl Default for SceneSettings {
             axes_visible: all_axes(),
             axis_style: AxisStyle::default(),
             plane_marks: true,
+            show_cutters: false,
             preview_viewport: PreviewViewport::NoChange,
             section: SectionView::default(),
             more_sections: Vec::new(),
