@@ -81,10 +81,12 @@ pub(crate) fn strip(app: &mut App, ui: &mut egui::Ui, panel: Panel, side: Side, 
             centre = header(app, ui, panel, side);
         });
     } else {
+        // Half the dock to start, so the outliner above the primitives has room for a real tree.
+        let start = (ui.available_height() * 0.5).max(200.0);
         builder
             .frame(frame)
             .resizable(true)
-            .default_height(200.0)
+            .default_height(start)
             .height_range(metric::ROW + 24.0..=680.0)
             .show_inside(ui, |ui| {
                 centre = header(app, ui, panel, side);
