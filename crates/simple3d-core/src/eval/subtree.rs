@@ -219,12 +219,8 @@ impl Evaluator {
                     if cancel.is_cancelled() {
                         return Err(errors);
                     }
-                    let mut copy = apply(&instance.xform, &unit);
-                    // A reflection reverses the winding, so the faces are flipped back.
-                    if instance.mirrored {
-                        copy.flip_winding();
-                    }
-                    copies.push(copy);
+                    // A reflection's winding is flipped back by `apply`.
+                    copies.push(apply(&instance.xform, &unit));
                 }
                 // Copies are unioned, to match manual duplicates in a union group: touching copies must merge
                 // into a clean solid, and concatenating made shared edges non-manifold. Non-overlapping copies

@@ -96,7 +96,7 @@ impl Drag {
             }
             let factor = target_extent / start_extent;
             let mut scale = self.start_scale;
-            let grown = (self.start_scale.get(axis) * factor).max(Node::MIN_SCALE);
+            let grown = Node::sane_factor(self.start_scale.get(axis) * factor);
             scale.set(axis, grown);
             scene.get_mut(self.node)?.scale = scale;
         } else {

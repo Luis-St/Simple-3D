@@ -84,8 +84,10 @@ pub(crate) fn scrub_scale(app: &mut App, targets: &[NodeId], axis: usize, delta:
     for target in targets {
         let Some(node) = app.scene.get_mut(*target) else { continue };
         let mut s = Node::sane_scale(node.scale);
-        let next = (s.get(axis) + delta).max(Node::MIN_SCALE);
-        s.set(axis, next);
+        // On the factor's size, so a scrub grows a mirrored axis (issue 122) rather than flipping it back.
+        let current = s.get(axis);
+        let next = (current.abs() + delta).max(Node::MIN_SCALE);
+        s.set(axis, if current < 0.0 { -next } else { next });
         node.scale = s;
     }
     app.touch();

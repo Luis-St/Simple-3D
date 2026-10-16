@@ -105,6 +105,8 @@ impl App {
             self.command_item(ui, Command::Cut, has_selection);
             self.command_item(ui, Command::Paste, self.clipboard.is_some());
             self.command_item(ui, Command::Duplicate, has_selection);
+            // Duplicating a moved copy puts the next as far on again (issue 121).
+            self.command_item(ui, Command::RepeatDuplicate, has_selection);
             self.command_item(ui, Command::Delete, has_selection);
             ui.separator();
             // The same blocks as the outliner's menu, in the same order (issue 94).

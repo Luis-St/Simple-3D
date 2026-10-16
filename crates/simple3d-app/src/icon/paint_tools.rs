@@ -1,4 +1,4 @@
-//! The glyphs of the modelling tools added after the first set (issues 73, 88).
+//! The glyphs of the modelling tools added after the first set (issues 73, 88, 122).
 
 use super::*;
 
@@ -26,6 +26,15 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             }
             pen.line(&[(0.10 + dx, 0.40 + dy), (0.30 + dx, 0.40 + dy), (0.30 + dx, 0.70 + dy)]);
             pen.line(&[(0.30 + dx, 0.70 + dy), (0.62 + dx, 0.70 + dy), (0.62 + dx, 0.90 + dy), (0.62, 0.90)]);
+        }
+        // A flag shape and its mirror image either side of a dashed line.
+        Glyph::Mirror => {
+            for i in 0..4 {
+                let y = 0.08 + i as f32 * 0.23;
+                pen.line(&[(0.50, y), (0.50, y + 0.13)]);
+            }
+            pen.closed(&[(0.40, 0.22), (0.40, 0.80), (0.08, 0.80)]);
+            pen.closed(&[(0.60, 0.22), (0.60, 0.80), (0.92, 0.80)]);
         }
         _ => {}
     }

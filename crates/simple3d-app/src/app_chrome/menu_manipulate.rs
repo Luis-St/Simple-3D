@@ -29,6 +29,8 @@ impl App {
             self.slotted_command_item(ui, Command::AlignDistribute, !self.selection.is_empty());
             // Resting the selection on a picked face (issue 118), a mode of the same tool.
             self.slotted_command_item(ui, Command::OntoFace, !self.selection.is_empty());
+            // Mirroring (issue 122), which can open with nothing selected and choose the objects first.
+            self.slotted_command_item(ui, Command::Mirror, true);
             // Rounding edges and corners (issue 88), picked in the viewport, so always available.
             self.slotted_command_item(ui, Command::RoundEdges, true);
             ui.separator();

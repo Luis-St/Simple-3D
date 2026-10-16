@@ -120,10 +120,15 @@ pub(crate) struct Collected {
 pub(crate) use simple3d_geom::aabb::bounds_of;
 
 pub(crate) fn apply(xf: &Xform, mesh: &Mesh) -> Mesh {
-    Mesh {
+    let mut placed = Mesh {
         positions: mesh.positions.iter().map(|&p| xf.point(p)).collect(),
         indices: mesh.indices.clone(),
         tags: mesh.tags.clone(),
         sources: mesh.sources.clone(),
+    };
+    // A mirroring transform reverses the winding, so the faces are flipped back (issue 122).
+    if xf.mirrors() {
+        placed.flip_winding();
     }
+    placed
 }

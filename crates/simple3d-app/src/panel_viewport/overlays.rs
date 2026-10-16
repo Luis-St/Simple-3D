@@ -58,6 +58,9 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // The path objects are spread along (issue 70).
     crate::arrange_tool::draw(app, ui, &painter, view);
 
+    // The line and plane objects are mirrored across (issue 122).
+    crate::mirror_tool::draw(app, ui, &painter, view);
+
     // Only the held tool is shown; projection and handle frame were dropped as they never change
     // (issue 100). The measure tool is named while open.
     let tool = if app.measure.active { "Measure" } else { app.mode.label() };

@@ -67,6 +67,9 @@ impl App {
         }
         self.split_tool = None;
         self.arrange_tool = None;
+        self.mirror_tool = None;
+        self.last_duplicate.clear();
+        self.repeat_hold = false;
         self.simplify_tool = None;
         self.reassemble_tool = None;
         self.round_tool = None;

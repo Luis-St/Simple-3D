@@ -116,6 +116,31 @@ impl Xform {
         Vec3::new(self.m[0][axis], self.m[1][axis], self.m[2][axis])
     }
 
+    /// The linear part's determinant: negative for a transform that mirrors (issue 122).
+    pub fn det(&self) -> f64 {
+        let m = self.m;
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    }
+
+    /// Whether the transform turns a body inside out, so a mesh carried by it needs its winding flipped.
+    pub fn mirrors(&self) -> bool {
+        self.det() < 0.0
+    }
+
+    /// The reflection across the plane through `point` with normal `normal` (issue 122).
+    pub fn reflection(point: Vec3, normal: Vec3) -> Xform {
+        let n = normal.normalized();
+        let mut m = Xform::IDENTITY.m;
+        for (r, row) in m.iter_mut().enumerate() {
+            for (c, cell) in row.iter_mut().enumerate() {
+                *cell -= 2.0 * n.get(r) * n.get(c);
+            }
+        }
+        let linear = Xform { m, t: Vec3::ZERO };
+        Xform { m, t: point - linear.vector(point) }
+    }
+
     /// `self` applied after `inner`.
     pub fn compose(&self, inner: &Xform) -> Xform {
         let mut m = [[0.0; 3]; 3];

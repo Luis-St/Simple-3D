@@ -22,6 +22,7 @@ impl Command {
             Cut => "Cut",
             Paste => "Paste",
             Duplicate => "Duplicate",
+            RepeatDuplicate => "Duplicate, repeating the last move",
             Delete => "Delete",
             Group => "Group selection",
             Pattern => "Make a pattern of the selection",
@@ -67,6 +68,7 @@ impl Command {
             MeasureTool => "Measure tool",
             AlignDistribute => "Align and distribute",
             OntoFace => "Put onto a face",
+            Mirror => "Mirror",
             SnapToGeometry => "Snap to geometry (hold)",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
@@ -81,18 +83,17 @@ impl Command {
         use Command::*;
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
-            Undo | Redo | Copy | Cut | Paste | Duplicate | Delete | Group | Pattern | MakeComponent | NewComponent
-            | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble | SplitIntoPieces | Rejoin | Rename
-            | ToggleVisibility | ToggleNegative | MoveUp | MoveDown => Area::Edit,
+            Undo | Redo | Copy | Cut | Paste | Duplicate | RepeatDuplicate | Delete | Group | Pattern
+            | MakeComponent | NewComponent | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble
+            | SplitIntoPieces | Rejoin | Rename | ToggleVisibility | ToggleNegative | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
                 Area::View
             }
             ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | MeasureTool | AlignDistribute
-            | OntoFace | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => {
-                Area::Manipulate
-            }
+            | OntoFace | Mirror | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway
+            | NudgeToward => Area::Manipulate,
         }
     }
 }

@@ -30,6 +30,8 @@ impl Keymap {
         set(Cut, Chord::ctrl("X"));
         set(Paste, Chord::ctrl("V"));
         set(Duplicate, Chord::ctrl("D"));
+        // Duplicate's own key with Shift also repeats the move the last copy was given (issue 121).
+        set(RepeatDuplicate, Chord::ctrl_shift("D"));
         set(Delete, Chord::key("Delete"));
         set(Group, Chord::ctrl("G"));
         set(Pattern, Chord::ctrl_shift("P"));
@@ -90,10 +92,13 @@ impl Keymap {
         set(NudgeDown, Chord::key("Down"));
         set(NudgeAway, Chord::key("PageUp"));
         set(NudgeToward, Chord::key("PageDown"));
-        // Align and distribute (issue 70): D for distribute, beside Duplicate's Ctrl+D.
-        set(AlignDistribute, Chord::ctrl_shift("D"));
+        // Align and distribute (issue 70): A for align. It had Ctrl+Shift+D until repeating a duplicate's
+        // move took that (issue 121).
+        set(AlignDistribute, Chord::alt("A"));
         // Put onto a face (issue 118): F for face.
         set(OntoFace, Chord::ctrl_shift("F"));
+        // Mirror (issue 122): M for mirror, free with Alt in every preset.
+        set(Mirror, Chord::alt("M"));
         // Snap to geometry while dragging (issue 77): Ctrl alone, the precise-gesture modifier.
         set(SnapToGeometry, Chord::modifiers(true, false, false));
 

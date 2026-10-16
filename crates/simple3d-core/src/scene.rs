@@ -12,6 +12,8 @@ pub use body::{Body, ExportBody};
 mod node;
 pub use node::{Node, Visibility};
 mod node_read;
+mod mirror;
+pub use mirror::Mirrored;
 mod view_settings;
 pub use view_settings::{AxisStyle, PreviewViewport, SectionKeep, SectionView};
 mod settings;

@@ -192,6 +192,14 @@ pub struct App {
     pub split_tool: Option<crate::split_tool::SplitTool>,
     /// The align and distribute tool's window (issue 70); see [`crate::arrange_tool`].
     pub arrange_tool: Option<crate::arrange_tool::ArrangeTool>,
+    /// The mirror tool's window (issue 122); see [`crate::mirror_tool`].
+    pub mirror_tool: Option<crate::mirror_tool::MirrorTool>,
+    /// Each original and its copy from the last duplicate, so duplicating a moved copy can repeat the
+    /// move (issue 121).
+    pub(crate) last_duplicate: Vec<(NodeId, NodeId)>,
+    /// The repeating duplicate's chord is held: where the copies would go is shown, and they are made
+    /// when it is let go (issue 121).
+    pub(crate) repeat_hold: bool,
     pub split_job: Option<SplitJob>,
     /// The simplify tool's window (issue 106). Its result goes into the document live, so it keeps
     /// the original mesh for Cancel. See [`crate::simplify_tool`].

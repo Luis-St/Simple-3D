@@ -54,11 +54,6 @@ impl Evaluated {
         }
         let mesh = self.group_meshes.get(&id)?;
         let frame = self.node_frames.get(&id)?;
-        Some(std::borrow::Cow::Owned(Mesh {
-            positions: mesh.positions.iter().map(|&p| frame.point(p)).collect(),
-            indices: mesh.indices.clone(),
-            tags: mesh.tags.clone(),
-            sources: mesh.sources.clone(),
-        }))
+        Some(std::borrow::Cow::Owned(super::bake::apply(frame, mesh)))
     }
 }

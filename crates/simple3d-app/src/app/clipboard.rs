@@ -6,6 +6,8 @@ use simple3d_core::scene::NodeId;
 
 impl App {
     pub(crate) fn after_history(&mut self, message: &str) {
+        // An undone copy's id may come back as another node, so no move is repeated across history.
+        self.last_duplicate.clear();
         self.selection.retain(|id| self.scene.contains(*id));
         self.fields.clear();
         self.rename = None;
@@ -70,26 +72,43 @@ impl App {
         self.status = Status::Info("Pasted".into());
     }
 
-    pub(super) fn duplicate(&mut self) {
+    /// Copy the top of the selection in place; with `repeat`, a copy moved since the last duplicate is
+    /// copied on as far again (issue 121).
+    pub(super) fn duplicate(&mut self, repeat: bool) {
+        self.repeat_hold = false;
         let targets = self.top_level_selection();
         if targets.is_empty() {
             self.status = Status::Info("Nothing to duplicate".into());
             return;
         }
+        // Read before the copies exist: a copy moved since the last duplicate goes on as far again (issue 121).
+        let steps: Vec<_> = targets.iter().map(|&id| self.repeated_step(id).filter(|_| repeat)).collect();
         // Duplicate leaves the clipboard alone (spec section 8.1).
         self.edit("Duplicate", None);
         let mut created = Vec::new();
-        for id in targets {
+        let mut made = Vec::new();
+        for (id, step) in targets.into_iter().zip(&steps) {
             if let Some(copy) = self.scene.duplicate(id) {
+                if let (Some((position, rotation)), Some(node)) = (step, self.scene.get_mut(copy)) {
+                    node.position = *position;
+                    node.rotation = *rotation;
+                }
                 created.push(copy);
+                made.push((id, copy));
             }
         }
+        self.last_duplicate = made;
         self.size_fresh_patterns();
         if !created.is_empty() {
             self.selection = created;
             self.on_selection_changed();
         }
-        self.status = Status::Info("Duplicated".into());
+        let repeated = steps.iter().flatten().count();
+        self.status = Status::Info(match (repeat, repeated) {
+            (false, _) => "Duplicated".into(),
+            (true, 0) => "Duplicated in place: move a fresh copy first, and the next copy repeats that move".into(),
+            (true, _) => "Duplicated, moved on as far as the last copy was".into(),
+        });
     }
 
     pub(super) fn delete_selection(&mut self) {

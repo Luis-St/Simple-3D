@@ -8,7 +8,7 @@ use simple3d_geom::Vec3;
 use std::sync::Arc;
 
 impl Node {
-    /// The smallest scale factor: zero flattens and negative inverts the solid.
+    /// The smallest scale factor's size: zero flattens the solid. A negative factor mirrors it (issue 122).
     pub const MIN_SCALE: f64 = 1e-4;
 
     /// The node's visibility as one three-state answer rather than two flags.
@@ -35,9 +35,19 @@ impl Node {
         self.visible && self.negative
     }
 
-    /// A scale with every axis clamped into the range that produces a solid.
+    /// A scale with every axis clamped into the range that produces a solid, keeping its sign.
     pub fn sane_scale(scale: Vec3) -> Vec3 {
-        Vec3::new(scale.x.max(Node::MIN_SCALE), scale.y.max(Node::MIN_SCALE), scale.z.max(Node::MIN_SCALE))
+        Vec3::new(Node::sane_factor(scale.x), Node::sane_factor(scale.y), Node::sane_factor(scale.z))
+    }
+
+    /// One scale factor at least [`Node::MIN_SCALE`] in size; a negative one stays a mirror, and zero
+    /// or something not a number becomes the smallest plain factor.
+    pub fn sane_factor(factor: f64) -> f64 {
+        if factor < 0.0 {
+            factor.min(-Node::MIN_SCALE)
+        } else {
+            factor.max(Node::MIN_SCALE)
+        }
     }
 
     pub fn is_group(&self) -> bool {

@@ -42,7 +42,8 @@ impl App {
             Copy => self.copy_selection(false),
             Cut => self.copy_selection(true),
             Paste => self.paste(),
-            Duplicate => self.duplicate(),
+            Duplicate => self.duplicate(false),
+            RepeatDuplicate => self.duplicate(true),
             Delete => self.delete_selection(),
             Group => self.group_selection(),
             Pattern => self.make_pattern(),
@@ -107,6 +108,7 @@ impl App {
             MeasureTool => self.toggle_measure(),
             AlignDistribute => self.toggle_arrange_tool(),
             OntoFace => self.open_onto_face(),
+            Mirror => self.toggle_mirror_tool(),
             // A hold key read live during a drag, so pressing it alone does nothing (issue 68).
             SnapToGeometry => {}
             // The other hold key, read live by the wheel (issue 97).

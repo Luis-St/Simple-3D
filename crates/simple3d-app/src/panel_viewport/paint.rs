@@ -108,6 +108,10 @@ pub(crate) fn paint_scene(
         // Where the align tool would put things, drawn as templates of its own objects (issue 70).
         let templates = crate::arrange_tool::templates(app)
             .into_iter()
+            // And the mirror images the mirror tool would make (issue 122).
+            .chain(crate::mirror_tool::templates(app))
+            // And the copies a held repeating duplicate would make (issue 121).
+            .chain(app.repeat_templates())
             .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform, None)))
             .chain(crate::push_pull_tool::template(&app.push_pull, &palette))
             .chain(crate::round_tool::templates(app.round_tool.as_ref(), &palette))

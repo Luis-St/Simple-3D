@@ -103,10 +103,16 @@ impl Mesh {
         Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() }
     }
 
-    /// Componentwise scale about the mesh's origin. Callers clamp non-positive factors first.
+    /// Componentwise scale about the mesh's origin. Callers clamp zero factors first; an odd number of
+    /// negative ones mirrors the mesh, and its winding is flipped so it still faces out.
     pub fn scaled(&self, factor: Vec3) -> Mesh {
         let positions = self.positions.iter().map(|p| p.scaled_by(factor)).collect();
-        Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() }
+        let mut mesh =
+            Mesh { positions, indices: self.indices.clone(), tags: self.tags.clone(), sources: self.sources.clone() };
+        if factor.x * factor.y * factor.z < 0.0 {
+            mesh.flip_winding();
+        }
+        mesh
     }
 
     pub fn translated(&self, offset: Vec3) -> Mesh {

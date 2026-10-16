@@ -75,10 +75,10 @@ pub fn commit_angle(text: &str, current: f64) -> Option<f64> {
     Some(wrap_degrees(entry.resolve(current)))
 }
 
-/// A scale factor, clamped positive, since zero flattens and negative inverts the solid.
+/// A scale factor kept away from zero, which flattens the solid; a negative one mirrors it (issue 122).
 pub fn commit_factor(text: &str, current: f64) -> Option<f64> {
     let entry = parse_entry_plain(text)?;
-    Some(entry.resolve(current).max(simple3d_core::scene::Node::MIN_SCALE))
+    Some(simple3d_core::scene::Node::sane_factor(entry.resolve(current)))
 }
 
 /// How a parameter's value is shown in its field.

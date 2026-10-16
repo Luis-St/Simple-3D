@@ -2,7 +2,7 @@
 
 use crate::app::{App, Modal};
 use crate::ui;
-use simple3d_core::keymap::Chord;
+use simple3d_core::keymap::{Action, Chord, Command};
 
 impl App {
     /// Run the command the pressed keys are bound to; focused text fields keep the keyboard.
@@ -18,6 +18,7 @@ impl App {
         {
             // The release ending a modifier hold will land elsewhere, so drop the hold in progress.
             self.shortcut_mods.reset();
+            self.cancel_repeat_hold();
             return;
         }
         // egui moves focus with Tab even though Tab is bound here, and a focused button then swallowed
@@ -29,6 +30,7 @@ impl App {
         }
         if ctx.wants_keyboard_input() || self.fields.opening_one(ctx) {
             self.shortcut_mods.reset();
+            self.cancel_repeat_hold();
             return;
         }
         // Escape closes an in-place popup, which being non-modal nothing else catches (issue 82). Taken
@@ -39,6 +41,10 @@ impl App {
         }
         if self.arrange_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.close_arrange_tool();
+            return;
+        }
+        if self.mirror_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.close_mirror_tool();
             return;
         }
         let (events, modifiers, held, pointer) = ctx.input(|input| {
@@ -63,10 +69,19 @@ impl App {
             let pressed = key.name();
             let down = |name: &str| name == pressed || held.iter().any(|k| k == name);
             let action = self.keymap.action_for_press(pressed, down, modifiers.command, modifiers.shift, modifiers.alt);
-            if let Some(action) = action {
-                self.run_action(action);
+            match action {
+                // Previewed while held, and copied when let go (issue 121); the key's own repeats are ignored.
+                Some(Action::Command(Command::RepeatDuplicate)) => {
+                    if !self.repeat_hold {
+                        self.start_repeat_hold();
+                    }
+                }
+                Some(action) => self.run_action(action),
+                None => {}
             }
         }
+        let still = self.holding(Command::RepeatDuplicate, |key| held.iter().any(|k| k == key.name()), modifiers);
+        self.follow_repeat_hold(still);
         // A modifier held and released alone is its own binding (issue 77); chords with keys already
         // fired. A mouse button counts as pressed, so Ctrl+click does not fire Ctrl.
         let completed = self.shortcut_mods.update(modifiers, held.iter().map(String::as_str), pointer);

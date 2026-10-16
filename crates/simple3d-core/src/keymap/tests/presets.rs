@@ -106,3 +106,17 @@ pub(crate) fn a_moved_navigation_default_is_carried_over_but_a_chosen_drag_is_no
         assert_eq!(back.nav, Keymap::from_preset(preset).nav, "{preset:?} lost its own navigation");
     }
 }
+
+#[test]
+pub(crate) fn align_moves_off_ctrl_shift_d_for_repeating_a_duplicate() {
+    // Issue 121: repeating a duplicate's move took Ctrl+Shift+D, which align and distribute had.
+    let stored = r#"{
+      "preset": "default",
+      "bindings": { "align_distribute": "Ctrl+Shift+D" },
+      "nav": { "orbit": { "button": "right" }, "pan": { "button": "middle" }, "invert_zoom": false }
+    }"#;
+    let map = Keymap::from_text(stored).unwrap();
+    assert_eq!(map.binding(Command::AlignDistribute), Some(&Chord::alt("A")));
+    assert_eq!(map.binding(Command::RepeatDuplicate), Some(&Chord::ctrl_shift("D")));
+    assert!(map.self_conflicts().is_empty());
+}

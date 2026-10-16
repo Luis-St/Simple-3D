@@ -82,6 +82,16 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             app.run(Command::AlignDistribute);
         }
 
+        // Mirroring (issue 122), lit while its window is open.
+        let mirroring = app.mirror_tool.is_some();
+        let shortcut = app.keymap.shortcut_text(Command::Mirror);
+        if icon::button(ui, Glyph::Mirror, size, mirroring, true)
+            .on_hover_text(format!("Mirror objects across an axis, an edge or a line  {shortcut}"))
+            .clicked()
+        {
+            app.run(Command::Mirror);
+        }
+
         // Rounding and bevelling edges (issue 88), lit while its window is open.
         let rounding = app.round_tool.is_some();
         let shortcut = app.keymap.shortcut_text(Command::RoundEdges);

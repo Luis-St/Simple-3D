@@ -24,6 +24,7 @@ pub(crate) use files::*;
 mod add;
 mod camera;
 mod clipboard;
+mod repeat_duplicate;
 mod csg;
 pub(crate) use csg::*;
 mod commands;

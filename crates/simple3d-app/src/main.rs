@@ -10,6 +10,7 @@ mod components;
 mod dock;
 // Pointer gestures, executed. Test-only.
 mod arrange_tool;
+mod mirror_tool;
 #[cfg(test)]
 mod gestures;
 mod gizmo;

@@ -151,8 +151,12 @@ impl Renderable {
     /// (issue 70), which cannot draw a renderable moved.
     pub(crate) fn placed(&self, xform: &simple3d_core::xform::Xform) -> Renderable {
         let positions = self.mesh.positions.iter().map(|&p| xform.point(p)).collect();
-        let mesh =
+        let mut mesh =
             Mesh { positions, indices: self.mesh.indices.clone(), tags: self.mesh.tags.clone(), sources: Vec::new() };
+        // A mirrored template (issue 122) keeps facing out.
+        if xform.mirrors() {
+            mesh.flip_winding();
+        }
         // Rigid, so the normals turn with the body; a degenerate triangle keeps its zero normal.
         let normals =
             self.normals.iter().map(|&n| if n == Vec3::ZERO { n } else { xform.vector(n).normalized() }).collect();

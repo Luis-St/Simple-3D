@@ -2,6 +2,7 @@ mod arrange;
 mod collection;
 mod colour;
 mod edit;
+mod mirror;
 mod naming;
 mod portable;
 mod split;

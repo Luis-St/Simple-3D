@@ -11,8 +11,10 @@ pub(crate) const RETIRED: [&str; 4] = ["toggle_projection", "toggle_ghosts", "br
 
 /// Old defaults this build has moved. Keymap files carry the whole default set, so a binding still
 /// exactly at the old default is moved; one the user changed is kept. Snap moved from V to Ctrl
-/// alone (issue 77).
-pub(crate) const MOVED_DEFAULTS: [(Command, &str, &str); 1] = [(Command::SnapToGeometry, "V", "Ctrl")];
+/// alone (issue 77); align and distribute from Ctrl+Shift+D to Alt+A, for repeating a duplicate's move
+/// (issue 121).
+pub(crate) const MOVED_DEFAULTS: [(Command, &str, &str); 2] =
+    [(Command::SnapToGeometry, "V", "Ctrl"), (Command::AlignDistribute, "Ctrl+Shift+D", "Alt+A")];
 
 /// The same rule for the pan drag, which is not a `Chord` or `Command`. Pan moved from
 /// Shift+right-drag to the middle button (issue 72).

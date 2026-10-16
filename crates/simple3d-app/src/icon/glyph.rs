@@ -15,6 +15,8 @@ pub enum Glyph {
     Round,
     /// Squares spread along a curve: the align and distribute tool (issue 70).
     Arrange,
+    /// A shape and its mirror image across a dashed line: the mirror tool (issue 122).
+    Mirror,
     Pattern,
     // Object actions.
     Group,

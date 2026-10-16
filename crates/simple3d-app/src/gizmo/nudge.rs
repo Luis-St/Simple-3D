@@ -115,7 +115,7 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
                 Nudge::NoDimension { axis }
             } else {
                 let factor = ((world + move_snap * sign).max(MIN_EXTENT)) / world;
-                let grown = (gizmo.own_scale.get(axis) * factor).max(Node::MIN_SCALE);
+                let grown = Node::sane_factor(gizmo.own_scale.get(axis) * factor);
                 let shift = anchor_shift(gizmo, axis, grown / gizmo.own_scale.get(axis));
                 Nudge::Scale { axis, factor: grown, shift }
             }

@@ -32,6 +32,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 // Spreading along a path, the clicks build the path (issue 70).
                 let view = app.current_view();
                 crate::arrange_tool::interact(app, ui, &response, &view);
+            } else if crate::mirror_tool::wants_pointer(app) {
+                // Mirroring, the clicks pick the edge or draw the line (issue 122).
+                let view = app.current_view();
+                crate::mirror_tool::interact(app, ui, &response, &view);
             } else {
                 let view = app.current_view();
                 place_cursor(app, ui, &response, &view);
@@ -83,6 +87,12 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     }
     // The align tool's templates are not in the scene either (issue 70).
     if let Some(tool) = app.arrange_tool.as_ref() {
+        tool.hash_preview(&mut hasher);
+    }
+    // Nor are a held repeating duplicate's (issue 121), which follow the selection already in the key.
+    app.repeat_hold.hash(&mut hasher);
+    // Nor are the mirror tool's (issue 122).
+    if let Some(tool) = app.mirror_tool.as_ref() {
         tool.hash_preview(&mut hasher);
     }
     // The reassembly overlay is not the mesh, so it needs its own key part (issue 108).

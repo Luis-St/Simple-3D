@@ -67,10 +67,11 @@ impl App {
             self.status = Status::Warning("Select the objects to align or distribute".into());
             return;
         }
-        // Both take the viewport's clicks, so only one is out.
+        // These take the viewport's clicks too, so only one is out.
         if self.measure.active {
             self.toggle_measure();
         }
+        self.mirror_tool = None;
         let key = self.primary().filter(|id| targets.contains(id));
         let mut tool = ArrangeTool::on(targets, key);
         // A lone group is most likely meant as what it holds, which is what lining up needs.

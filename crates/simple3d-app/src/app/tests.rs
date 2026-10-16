@@ -47,6 +47,7 @@ mod snap_resize;
 mod split;
 pub(crate) use split::*;
 mod pieces;
+mod repeat_duplicate;
 mod preview;
 
 use super::*;
