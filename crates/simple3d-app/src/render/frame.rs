@@ -88,6 +88,7 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
         push_grid(&mut steps, &view, &request.grid, &request.palette);
     }
     let cut = &request.section[..];
+    let quiet = Quiet::new(&request.live.quiet);
     for (item, tag_base) in request.items.iter().zip(tag_bases(&request.items)) {
         // Each vertex projected once for everything this item draws.
         let needs_screen = item.style != Style::Selected && cut.is_empty();
@@ -105,7 +106,7 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
                     }
                     DisplayMode::ShadedWithEdges => {
                         push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut);
-                        push_edges(&mut steps, &view, item.renderable, screen, palette.edge, tag_base, cut);
+                        push_edges(&mut steps, &view, item.renderable, screen, (palette.edge, tag_base), cut, &quiet);
                     }
                 }
                 push_cap(&mut steps, &view, item.renderable, palette, cut, request.mode);

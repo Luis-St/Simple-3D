@@ -220,6 +220,7 @@ impl Gpu {
         if let Some(at) = program.at("u_carried") {
             gl.uniform_4_u32_slice(Some(at), &carried);
         }
+        set_i32(gl, program, "u_quiet", csg.quiet as i32);
         gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(scene.done));
         set_i32(gl, program, "u_done", 0);

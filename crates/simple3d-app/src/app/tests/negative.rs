@@ -95,3 +95,20 @@ fn shortcut_frame(app: &mut App, events: Vec<egui::Event>) {
     let input = egui::RawInput { events, ..Default::default() };
     let _ = ctx.run(input, |ctx| app.handle_shortcuts(ctx));
 }
+
+#[test]
+pub(crate) fn a_negative_part_on_the_move_is_a_moving_cutter_and_not_a_ghost() {
+    let mut app = app_in(temp_config_dir("negative-moving"));
+    let root = app.scene.root();
+    let plate = app.scene.add_primitive("plate", root, 0).unwrap();
+    let hole = app.scene.add_primitive("cylinder", root, 1).unwrap();
+    app.scene.get_mut(hole).unwrap().negative = true;
+    app.scene.settings.show_cutters = true;
+    app.reevaluate_for_test();
+    app.settling = Some(hole);
+    let moving: Vec<_> = app.moving_cutters().into_iter().map(|(id, _)| id).collect();
+    assert_eq!(moving, vec![hole], "the moving negative part is not drawn as its red shell");
+    assert!(app.ghosts().is_empty(), "the moving negative part was drawn as a ghost as well");
+    app.settling = Some(plate);
+    assert!(app.moving_cutters().is_empty(), "a moving solid was drawn as a cutter");
+}

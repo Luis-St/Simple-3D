@@ -14,6 +14,8 @@ uniform vec4 u_colour;
 uniform uint u_tag;
 // One bit per carried shape, by index.
 uniform uvec4 u_carried;
+// The carried shapes cut: no crease beside them is marked, as their red shell shows the cut.
+uniform int u_quiet;
 
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
@@ -51,7 +53,8 @@ void main() {
     for (int k = 0; k < 2; k++) {
         vec4 other = done(at + (k == 0 ? ivec2(1, 0) : ivec2(0, 1)));
         bool mine = own && abs(other.r - centre.r) < EMPTY;
-        if (other.r >= EMPTY && !mine && dot(normal, other.gba * 2.0 - 1.0) < SAME) {
+        bool quiet = u_quiet == 1 && (own || (other.r >= EMPTY && carried(other.r)));
+        if (other.r >= EMPTY && !mine && !quiet && dot(normal, other.gba * 2.0 - 1.0) < SAME) {
             edge = true;
         }
     }

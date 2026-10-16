@@ -40,15 +40,14 @@ pub(crate) fn push_glow(
     });
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn push_edges(
     steps: &mut Vec<Step>,
     view: &View,
     item: &Renderable,
     screen: &[Vertex],
-    colour: Rgba,
-    tag_base: u16,
+    (colour, tag_base): (Rgba, u16),
     section: &[Plane],
+    quiet: &Quiet,
 ) {
     let towards = view.forward();
     // The depth slope of a face beside an edge, if it is drawn: solids are culled facing away.
@@ -64,6 +63,10 @@ pub(crate) fn push_edges(
     extend_in_order(steps, item.edges.len(), |range, out| {
         for index in range {
             let edge = item.edges[index];
+            let [a, b] = edge.map(|corner| item.mesh.positions[corner as usize]);
+            if quiet.holds(a, b) {
+                continue;
+            }
             // Tagged like its faces, so an edge of the solid an axis enters does not hide that axis.
             let tag = item.body_tag(edge[0] as usize, tag_base);
             let steepest =

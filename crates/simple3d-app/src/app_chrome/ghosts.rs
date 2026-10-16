@@ -17,11 +17,32 @@ impl App {
         if node.visibility() == Visibility::Ghost {
             return true;
         }
-        self.scene.settings.show_cutters && self.scene.is_shown(id) && self.cuts(id)
+        // A cutter on the move is drawn as a template instead (`moving_cutters`).
+        self.scene.settings.show_cutters && self.scene.is_shown(id) && self.cuts(id) && !self.moving(id)
+    }
+
+    /// Whether `id` is being dragged or is settling after one.
+    fn moving(&self, id: NodeId) -> bool {
+        let dragged =
+            self.drag.as_ref().is_some_and(|drag| drag.node == id || drag.others.iter().any(|o| o.node == id));
+        dragged || self.settling == Some(id)
+    }
+
+    /// The cutters being dragged, each with how far it has moved since the last evaluation. They are
+    /// drawn as red shells with red edges whatever the document says, and the edges of what they cut
+    /// are left out meanwhile, so the cut reads as the shell rather than as black lines.
+    pub(crate) fn moving_cutters(&self) -> Vec<(NodeId, simple3d_core::xform::Xform)> {
+        let dragged =
+            self.drag.iter().flat_map(|drag| std::iter::once(drag.node).chain(drag.others.iter().map(|o| o.node)));
+        dragged
+            .chain(self.settling)
+            .filter(|&id| self.scene.contains(id) && self.scene.is_shown(id) && self.cuts(id))
+            .map(|id| (id, self.moved_by(id).unwrap_or(simple3d_core::xform::Xform::IDENTITY)))
+            .collect()
     }
 
     /// Whether `id` removes material: a negative part, or a difference group's child after its base.
-    fn cuts(&self, id: NodeId) -> bool {
+    pub(crate) fn cuts(&self, id: NodeId) -> bool {
         let node = self.scene.node(id);
         let Some(parent) = node.parent else { return false };
         let difference = self.scene.node(parent).group_op() == Some(simple3d_core::scene::GroupOp::Difference);

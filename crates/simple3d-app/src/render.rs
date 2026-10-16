@@ -41,6 +41,8 @@ mod axis_spans;
 pub(crate) use axis_spans::*;
 mod axis_prepare;
 pub(crate) use axis_prepare::*;
+mod quiet;
+pub(crate) use quiet::*;
 mod plane_marks;
 pub(crate) use plane_marks::*;
 #[cfg(test)]

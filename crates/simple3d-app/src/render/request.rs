@@ -54,6 +54,10 @@ pub struct Live<'a> {
     pub csg: Option<CsgPreview<'a>>,
     /// Shapes to upload ahead of a possible drag without drawing them (`App::csg_ready`).
     pub ready: Vec<&'a Renderable>,
+    /// Dragged cutters in world space, moved by the transform: the model's edges lying on them are
+    /// left out, since the cutter's red shell shows the cut (CPU renderer; the GPU's per-pixel boolean
+    /// has [`CsgPreview::quiet`]).
+    pub quiet: Vec<(&'a Renderable, Xform)>,
 }
 
 /// A boolean the GPU computes per pixel (see [`Live::csg`]).
@@ -69,6 +73,9 @@ pub struct CsgPreview<'a> {
     pub carried: Vec<usize>,
     /// The body tag the result is drawn with, so an origin axis treats it as that body.
     pub tag: u16,
+    /// The carried shapes cut, so no crease beside them is marked: the cutter's red shell shows the
+    /// cut instead of black lines on what it cuts into.
+    pub quiet: bool,
 }
 
 impl Live<'_> {

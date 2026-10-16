@@ -70,6 +70,7 @@ pub(crate) fn paint_scene(
                         program: csg.program.clone(),
                         carried: csg.carried_leaves.clone(),
                         tag: solid.bodies.get(part.start as usize).map_or(0, |&body| render::body_tag(body, 0)),
+                        quiet: app.cuts(csg.carried),
                     });
                 }
                 None => {
@@ -86,6 +87,13 @@ pub(crate) fn paint_scene(
                 }
             }
         }
+        // A dragged cutter is a red shell with red edges, and the edges it cuts into are left out.
+        let cutters: Vec<_> = app
+            .moving_cutters()
+            .into_iter()
+            .filter_map(|(id, moved)| app.node_renderables.get(&id).map(|renderable| (&**renderable, moved)))
+            .collect();
+        live.quiet = cutters.clone();
         // Ghosts before the selection outline, so the outline stays readable.
         let ghosts = app.ghosts();
         for (id, renderable) in &app.node_renderables {
@@ -95,7 +103,9 @@ pub(crate) fn paint_scene(
             }
         }
         for id in &selected {
-            if let Some(renderable) = app.node_renderables.get(id) {
+            // A dragged cutter is outlined by its own red edges instead.
+            let cutter = |renderable: &render::Renderable| cutters.iter().any(|(moving, _)| moving.id == renderable.id);
+            if let Some(renderable) = app.node_renderables.get(id).filter(|renderable| !cutter(renderable)) {
                 items.push(Item { renderable, style: Style::Selected });
             }
         }
@@ -113,6 +123,7 @@ pub(crate) fn paint_scene(
             // And the copies a held repeating duplicate would make (issue 121).
             .chain(app.repeat_templates())
             .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform, None)))
+            .chain(cutters.iter().map(|&(renderable, moved)| (renderable, moved, Some(palette.ghost))))
             .chain(crate::push_pull_tool::template(&app.push_pull, &palette))
             .chain(crate::round_tool::templates(app.round_tool.as_ref(), &palette))
             .collect();
