@@ -102,7 +102,9 @@ pub(crate) fn paint_scene(
                 items.push(Item { renderable, style: Style::Ghost });
             }
         }
-        for id in &selected {
+        // The shape being set up is a template, not a selected body (`App::adding`).
+        let adding = app.adding();
+        for id in selected.iter().filter(|&&id| Some(id) != adding) {
             // A dragged cutter is outlined by its own red edges instead.
             let cutter = |renderable: &render::Renderable| cutters.iter().any(|(moving, _)| moving.id == renderable.id);
             if let Some(renderable) = app.node_renderables.get(id).filter(|renderable| !cutter(renderable)) {
@@ -122,6 +124,8 @@ pub(crate) fn paint_scene(
             .chain(crate::mirror_tool::templates(app))
             // And the copies a held repeating duplicate would make (issue 121).
             .chain(app.repeat_templates())
+            // And the shape being set up before it is added.
+            .chain(adding.map(|id| (id, simple3d_core::xform::Xform::IDENTITY)))
             .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform, None)))
             .chain(cutters.iter().map(|&(renderable, moved)| (renderable, moved, Some(palette.ghost))))
             .chain(crate::push_pull_tool::template(&app.push_pull, &palette))

@@ -86,6 +86,8 @@ impl App {
             return;
         }
         self.history.squash_since(adding.mark);
+        // Evaluated again with the shape in the model, no longer a template.
+        self.touch();
         self.status = Status::Info(format!("Added {}", self.scene.node(adding.id).name));
         if adding.placement == Placement::OnSurface {
             self.start_placing_now(adding.id);
@@ -100,6 +102,20 @@ impl App {
             self.undo_now();
             self.status = Status::Info(format!("Did not add the {}", adding.label.to_lowercase()));
         }
+    }
+
+    /// The shape being set up, which the viewport draws as a template rather than as part of the model.
+    pub(crate) fn adding(&self) -> Option<NodeId> {
+        self.add_popup.as_ref().map(|adding| adding.id).filter(|&id| self.scene.contains(id))
+    }
+
+    /// The document as the evaluation should see it while a shape is set up: without that shape, which
+    /// is drawn as a template from its own mesh, like the other tools' previews. `None` otherwise.
+    pub(crate) fn scene_without_adding(&self) -> Option<simple3d_core::scene::Scene> {
+        let id = self.adding()?;
+        let mut scene = self.scene.clone();
+        scene.get_mut(id)?.set_visibility(simple3d_core::scene::Visibility::Hidden);
+        Some(scene)
     }
 
     /// Move the shape to where `placement` puts it.

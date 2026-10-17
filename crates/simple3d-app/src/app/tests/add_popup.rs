@@ -76,3 +76,16 @@ pub(crate) fn a_shapes_shortcut_pressed_with_the_settings_key_held_finds_its_sha
     assert_eq!(found, Some("cylinder"));
     assert_eq!(app.primitive_under_settings_key("N", |key| key == "N", egui::Modifiers::SHIFT), None);
 }
+
+#[test]
+pub(crate) fn the_shape_being_set_up_is_left_out_of_the_model_until_it_is_added() {
+    // It is drawn as a template, in the tools' translucent orange, from its own mesh.
+    let mut app = headless_app();
+    app.open_add_popup("box");
+    let id = app.adding().expect("the popup did not open");
+    let evaluated = app.scene_without_adding().expect("no scene without it");
+    assert!(!evaluated.node(id).adds(), "the shape being set up is still part of the model");
+    assert!(app.scene.node(id).adds(), "the document itself lost the shape");
+    app.confirm_add_popup();
+    assert!(app.scene_without_adding().is_none());
+}

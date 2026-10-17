@@ -38,7 +38,10 @@ impl App {
         let submitting = self.dirty && !self.drag_drawn_live();
         if submitting {
             self.worker.want(self.wanted_renderables());
-            self.worker.submit(&self.scene);
+            match self.scene_without_adding() {
+                Some(scene) => self.worker.submit(&scene),
+                None => self.worker.submit(&self.scene),
+            }
             self.dirty = false;
         }
         self.refresh_committed(submitting);
