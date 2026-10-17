@@ -62,7 +62,7 @@ pub(crate) fn draw(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &Vie
             }
         }
         PathSource::Drawn => {
-            let Some((hover, caught)) = app.measure_catch(view, cursor) else { return };
+            let Some((hover, caught)) = app.pick_position(view, cursor, &[]) else { return };
             match &caught {
                 Some(caught) => crate::panel_viewport::draw_snap_mark(painter, view, caught, colour),
                 None => {

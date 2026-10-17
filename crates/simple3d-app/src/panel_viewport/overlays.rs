@@ -30,6 +30,7 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
 
     // The 3D cursor, where the next shape would land.
     draw_cursor(app, &painter, view);
+    draw_cursor_snap(app, ui, &painter, view);
 
     // A snapped feature (issue 68), with the edges and corners of what it caught (issue 87).
     if let Some(mark) = &app.snap_indicator {

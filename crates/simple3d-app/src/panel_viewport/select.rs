@@ -23,7 +23,7 @@ pub(crate) fn measure_interact(app: &mut App, ui: &mut egui::Ui, response: &egui
     }
     if response.clicked_by(egui::PointerButton::Primary) {
         if let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) {
-            if let Some(point) = app.measure_point_at(view, cursor) {
+            if let Some((point, _)) = app.pick_position(view, cursor, &[]) {
                 app.measure_click(point);
             }
         }

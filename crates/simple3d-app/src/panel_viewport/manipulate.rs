@@ -8,8 +8,6 @@ use crate::view::View;
 /// The manipulator: hover, drag start and run, and Escape cancel. Returns whether the pointer is
 /// the manipulator's, so a handle click does not also reselect.
 pub(crate) fn manipulate(app: &mut App, ui: &mut egui::Ui, response: &egui::Response, view: &View) -> bool {
-    // Whether a move drag snaps this frame (issue 68), read every frame so mode or key changes apply at once.
-    app.snap_requested = app.geometry_snap_wanted(|k| ui.input(|i| i.key_down(k)), ui.input(|i| i.modifiers));
     let Some(id) = app.primary() else {
         app.drag = None;
         app.hover_handle = None;

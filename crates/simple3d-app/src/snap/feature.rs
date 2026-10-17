@@ -18,6 +18,10 @@ pub enum FeatureKind {
     /// Where a world axis passes through a body's surface: offered as corners, with the run between
     /// two as an edge (issue 78).
     AxisCrossing,
+    /// Where two lines of the drawn ground grid cross (issue 126).
+    GridPoint,
+    /// Anywhere along a line of the drawn ground grid (issue 126).
+    GridLine,
 }
 
 impl FeatureKind {
@@ -30,6 +34,8 @@ impl FeatureKind {
             FeatureKind::Axis => "axis",
             FeatureKind::PlaneMark => "plane mark",
             FeatureKind::AxisCrossing => "axis crossing",
+            FeatureKind::GridPoint => "grid point",
+            FeatureKind::GridLine => "grid line",
         }
     }
 }

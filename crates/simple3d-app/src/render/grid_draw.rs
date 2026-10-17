@@ -27,10 +27,8 @@ pub(crate) fn push_grid_level(
     majors: bool,
     palette: &Palette,
 ) {
-    let lines = ((radius / spacing).ceil() as i64).clamp(1, MAX_LINES);
-    let half = spacing * lines as f64;
-    let cx = (view.camera().target.x / spacing).round() * spacing;
-    let cy = (view.camera().target.y / spacing).round() * spacing;
+    let ((cx, cy), half) = grid_square(view, spacing, radius);
+    let lines = (half / spacing).round() as i64;
     // Every tenth line is major, counted from the world origin so majors stay put while panning.
     let shade = |world: f64| {
         let index = (world / spacing).round() as i64;

@@ -5,7 +5,6 @@ use crate::app::{App, Status};
 use crate::view::View;
 use crate::{popup, theme};
 use simple3d_core::primitive::ParamKind;
-use simple3d_core::scene::NodeId;
 
 pub(super) fn onto_controls(app: &mut App, ui: &mut egui::Ui, tool: &mut ArrangeTool) {
     let hint = match tool.landing {
@@ -80,9 +79,5 @@ pub(crate) fn landing_under(app: &App, view: &View, cursor: egui::Pos2) -> Optio
 pub(crate) fn hit_under(app: &App, view: &View, cursor: egui::Pos2) -> Option<(Vec3, usize, Vec3)> {
     let tool = app.arrange_tool.as_ref()?;
     let moving = tool.arranged(&app.scene);
-    let (origin, dir) = view.ray(cursor);
-    crate::pick::surface_hit(&app.evaluated.mesh, origin, dir, |source| {
-        let owner = NodeId::from(source);
-        moving.iter().any(|&id| id == owner || app.scene.is_ancestor_of(id, owner))
-    })
+    app.surface_hit_under(view, cursor, &moving)
 }

@@ -1,54 +1,59 @@
 //! The nearest point on a line, and whether a drag is asking to snap.
 
 use super::*;
+use crate::snap::FeatureKind;
 use simple3d_core::config::SnapMode;
 use simple3d_core::keymap::Command;
+use simple3d_core::scene::NodeId;
 use simple3d_geom::Vec3;
 
 impl App {
     /// The point on the nearest line (a body edge, a plane mark, or a world axis) for a pointer near
-    /// one but not near a notable point on it (issue 78). Edges come from the feature list; axes and
-    /// plane marks are measurable lines in their own right. Also returns the line, so a caught
-    /// edge can be shown whole (issue 87).
-    pub(super) fn nearest_line(
+    /// one but not near a notable point on it (issue 78), leaving out the bodies of `exclude`. Edges
+    /// come from the feature list; axes and plane marks are measurable lines in their own right. Also
+    /// returns the line, so a caught edge can be shown whole (issue 87).
+    pub(crate) fn nearest_line(
         &self,
         view: &crate::view::View,
         cursor: egui::Pos2,
-    ) -> Option<(Vec3, crate::snap::FeatureKind, f32, (Vec3, Vec3))> {
+        exclude: &[NodeId],
+    ) -> Option<(Vec3, FeatureKind, f32, (Vec3, Vec3))> {
+        let mut lines = Vec::new();
+        for (id, mesh) in self.snap_bodies(exclude) {
+            let snaps = self.snaps_of(id, &mesh);
+            lines.extend(
+                snaps.features.iter().filter_map(|feature| feature.span).map(|(a, b)| (a, b, FeatureKind::Edge)),
+            );
+            // The principal-plane marks on the surface, which are read for exactly this kind of measurement.
+            lines.extend(snaps.marks.iter().map(|&(a, b)| (a, b, FeatureKind::PlaneMark)));
+        }
+        // Only as far as the axes are drawn.
+        let reach = crate::render::grid_radius(view);
+        let axes = crate::snap::axis_lines(self.scene.settings.axes_visible, reach);
+        lines.extend(axes.into_iter().map(|(a, b)| (a, b, FeatureKind::Axis)));
+        self.nearest_on_lines(view, cursor, lines, exclude)
+    }
+
+    /// The nearest point in reach and in sight on any of `lines`, with its kind, screen distance and line.
+    pub(crate) fn nearest_on_lines(
+        &self,
+        view: &crate::view::View,
+        cursor: egui::Pos2,
+        lines: impl IntoIterator<Item = (Vec3, Vec3, FeatureKind)>,
+        exclude: &[NodeId],
+    ) -> Option<(Vec3, FeatureKind, f32, (Vec3, Vec3))> {
         let project = |p: Vec3| view.project(p).map(|(screen, _)| screen);
-        let mut near: Vec<(Vec3, crate::snap::FeatureKind, f32, (Vec3, Vec3))> = Vec::new();
-        let mut consider = |a: Vec3, b: Vec3, kind: crate::snap::FeatureKind| {
+        let mut near: Vec<(Vec3, FeatureKind, f32, (Vec3, Vec3))> = Vec::new();
+        for (a, b, kind) in lines {
             if let Some((at, distance)) = crate::snap::nearest_on_edge(a, b, project, cursor, crate::snap::CATCH_PIXELS)
             {
                 near.push((at, kind, distance, (a, b)));
             }
-        };
-        for (id, mesh) in self.snap_bodies(&[]) {
-            let snaps = self.snaps_of(id, &mesh);
-            for feature in &snaps.features {
-                if let Some((a, b)) = feature.span {
-                    consider(a, b, crate::snap::FeatureKind::Edge);
-                }
-            }
-            // The principal-plane marks on the surface, which are read for exactly this kind of measurement.
-            for &(a, b) in &snaps.marks {
-                consider(a, b, crate::snap::FeatureKind::PlaneMark);
-            }
-        }
-        // Only as far as the axes are drawn.
-        let reach = crate::render::grid_radius(view);
-        for (a, b) in crate::snap::axis_lines(self.scene.settings.axes_visible, reach) {
-            consider(a, b, crate::snap::FeatureKind::Axis);
         }
         // Nearest first, and the nearest visible one wins; hidden edges, marks and axis stretches once
         // made the tool jump to lines inside the object.
-        near.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-        near.into_iter().find(|&(at, kind, _, _)| match kind {
-            // Axes keep their own visibility test in every mode, since their stretch inside a body is cut
-            // out even in wireframe.
-            crate::snap::FeatureKind::Axis => self.in_clear_view(view, at),
-            _ => self.shows(view, at),
-        })
+        near.sort_by(|a, b| a.2.total_cmp(&b.2));
+        near.into_iter().find(|&(at, kind, _, _)| self.sees(view, at, kind, exclude))
     }
 
     /// The model edge nearest the pointer and in sight, for picking a path (issue 70). Only real

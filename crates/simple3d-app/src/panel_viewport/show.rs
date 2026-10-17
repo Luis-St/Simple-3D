@@ -13,6 +13,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         // from the same camera as the overlays after this frame's navigation (issue 102).
         let scene = ui.painter().add(egui::Shape::Noop);
 
+        // Whether drags and position picks snap this frame (issues 68, 126), read every frame so mode or
+        // key changes apply at once.
+        app.snap_requested = app.geometry_snap_wanted(|k| ui.input(|i| i.key_down(k)), ui.input(|i| i.modifiers));
         // The cube gets the pointer first, or a face click would also orbit.
         let cube = view_cube_interact(app, ui, rect);
         if !cube.taken {

@@ -46,7 +46,7 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
             }
         }
         PathSource::Drawn => {
-            let Some((point, _)) = app.measure_catch(view, cursor) else { return };
+            let Some((point, _)) = app.pick_position(view, cursor, &[]) else { return };
             if let Some(tool) = app.arrange_tool.as_mut() {
                 tool.points.push(point.at);
             }

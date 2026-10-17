@@ -53,7 +53,7 @@ pub(crate) fn the_measure_tool_snaps_a_click_to_a_bodys_vertex() {
     let (lo, hi) = app.evaluated.node_meshes[&id].bounds().unwrap();
     let corner = Vec3::new(hi.x, hi.y, hi.z);
     let (screen, _) = view.project(corner).unwrap();
-    let point = app.measure_point_at(&view, screen + egui::vec2(3.0, 3.0)).expect("a point under the cursor");
+    let point = snapped_pick(&app, &view, screen + egui::vec2(3.0, 3.0)).expect("a point under the cursor");
     assert_eq!(point.kind, Some(crate::snap::FeatureKind::Vertex), "the click did not catch the corner");
     assert!((point.at - corner).length() < 1e-6, "snapped to {:?}, not the corner {:?}", point.at, corner);
     let _ = lo;
@@ -73,13 +73,13 @@ pub(crate) fn a_measure_click_between_two_corners_catches_the_edge_itself() {
     let (a, b) = (Vec3::new(lo.x, hi.y, hi.z), Vec3::new(hi.x, hi.y, hi.z));
     let along = a + (b - a) * (1.0 / 3.0);
     let (screen, _) = view.project(along).unwrap();
-    let point = app.measure_point_at(&view, screen).expect("a point under the cursor");
+    let point = snapped_pick(&app, &view, screen).expect("a point under the cursor");
     assert_eq!(point.kind, Some(crate::snap::FeatureKind::Edge), "caught {:?}, not the edge", point.kind);
     assert!((point.at - along).length() < 0.2, "caught {:?}, a third along is {:?}", point.at, along);
 
     // A corner in reach still wins over the edge beside it.
     let (screen, _) = view.project(b).unwrap();
-    let point = app.measure_point_at(&view, screen + egui::vec2(2.0, 2.0)).unwrap();
+    let point = snapped_pick(&app, &view, screen + egui::vec2(2.0, 2.0)).unwrap();
     assert_eq!(point.kind, Some(crate::snap::FeatureKind::Vertex));
 }
 
@@ -148,4 +148,9 @@ pub(crate) fn picking_a_transform_tool_puts_the_measure_tool_away() {
     app.run(Command::ModeRotate);
     assert!(!app.measure.active, "the measure tool held the pointer after a transform tool was chosen");
     assert!(app.measure.points.is_empty(), "its span was left hanging in the scene");
+}
+
+/// Where a pick lands with snapping asked for, as a measure click with the snap key held makes.
+pub(crate) fn snapped_pick(app: &App, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
+    app.pick_snapping(view, cursor, &[], true).map(|(point, _)| point)
 }

@@ -27,11 +27,13 @@ fn cut_dodecahedron() -> (App, NodeId, NodeId) {
 pub(crate) fn a_measure_click_catches_only_what_is_left_of_a_cut_shape() {
     // Regression: the uncut dodecahedron and the cutter were snapped to, so a pointer in thin air
     // caught the cut-away top corner, and one on the cut caught a face reaching above it.
-    let (app, _, _) = cut_dodecahedron();
+    let (mut app, _, _) = cut_dodecahedron();
+    // Without the grid, which the ground behind the corner would catch (issue 126).
+    app.scene.settings.grid_visible = false;
     let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
     let top = Vec3::new(-3.5682208977308996, 0.0, 9.341723589627156);
     let (screen, _) = view.project(top).unwrap();
-    let caught = app.measure_catch(&view, screen).map(|(point, _)| point);
+    let caught = snapped_pick(&app, &view, screen);
     assert!(caught.is_none_or(|point| point.kind.is_none()), "the cut-away corner was caught: {caught:?}");
 
     // Every feature measuring can catch is on what is left: nothing above the cut, nothing of the box.

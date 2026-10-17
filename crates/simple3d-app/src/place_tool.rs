@@ -6,6 +6,7 @@
 //! moved without evaluating each step (`App::live_move`). Escape takes the addition back.
 
 use crate::app::{App, Status};
+use crate::snap::{on_grid, SnapMark};
 use crate::view::View;
 use simple3d_core::config::Placement;
 use simple3d_core::scene::{Anchor, Node, NodeId};
@@ -33,7 +34,8 @@ impl App {
             return;
         }
         let Some(node) = self.scene.get(id) else { return };
-        let Some((mut lo, mut hi)) = simple3d_core::eval::subtree_bounds(&self.scene, id) else { return };
+        // In its own frame: it may start at the 3D cursor, and that offset would be added twice.
+        let Some((mut lo, mut hi)) = simple3d_core::eval::baked_mesh(&self.scene, id).bounds() else { return };
         if node.anchor == Anchor::Base {
             (lo.z, hi.z) = (0.0, hi.z - lo.z);
         }
@@ -55,6 +57,7 @@ impl App {
         // Still drawn where it was put until that is evaluated, as a released drag is.
         let drawn = self.live_move_of(id);
         self.placing = None;
+        self.snap_indicator = None;
         self.settling = Some(id).filter(|_| drawn);
         self.touch();
         let name = self.scene.get(id).map(|node| node.name.clone()).unwrap_or_default();
@@ -64,6 +67,7 @@ impl App {
     /// Take the addition back, unless something else was done since.
     pub(crate) fn cancel_placing(&mut self) {
         let Some(placing) = self.placing.take() else { return };
+        self.snap_indicator = None;
         if self.history.revision() == placing.revision {
             self.undo();
             self.status = Status::Info("Took the new shape back".into());
@@ -74,7 +78,8 @@ impl App {
     pub(crate) fn follow_pointer(&mut self, view: &View, cursor: egui::Pos2, free: bool) {
         let Some(placing) = self.placing.as_ref() else { return };
         let id = placing.id;
-        let Some((position, rotation)) = resting(self, placing, view, cursor, free) else { return };
+        let Some(((position, rotation), mark)) = resting(self, placing, view, cursor, free) else { return };
+        self.snap_indicator = mark;
         let node = self.scene.node(id);
         if node.position != position || node.rotation != rotation {
             if let Some(node) = self.scene.get_mut(id) {
@@ -113,19 +118,28 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
 }
 
 /// The position and rotation that rest the shape on the surface under `cursor`, or on the ground
-/// away from the model. Its middle sits over the point; on the grid unless `free` (Alt), where the
-/// surface is square to an axis.
-fn resting(app: &App, placing: &Placing, view: &View, cursor: egui::Pos2, free: bool) -> Option<(Vec3, Vec3)> {
-    let (origin, dir) = view.ray(cursor);
+/// away from the model, and the snap it caught. Its middle sits over the point: one snapped to while
+/// snapping is asked for (issue 126), else on the grid unless `free` (Alt), where the surface is
+/// square to an axis.
+fn resting(
+    app: &App,
+    placing: &Placing,
+    view: &View,
+    cursor: egui::Pos2,
+    free: bool,
+) -> Option<((Vec3, Vec3), Option<SnapMark>)> {
     let up = Vec3::new(0.0, 0.0, 1.0);
     let id = placing.id;
-    let hit = crate::pick::surface_hit(&app.evaluated.mesh, origin, dir, |source| {
-        let owner = NodeId::from(source);
-        owner == id || app.scene.is_ancestor_of(id, owner)
-    })
-    .map(|(at, _, normal)| (at, normal))
-    .or_else(|| Some((view.ray_plane_ahead(cursor, Vec3::ZERO, up)?, up)))?;
-    let (at, normal) = (snapped(hit.0, hit.1, if free { 0.0 } else { app.move_snap() }), hit.1);
+    let hit = app
+        .surface_hit_under(view, cursor, &[id])
+        .map(|(at, _, normal)| (at, normal))
+        .or_else(|| Some((view.ray_plane_ahead(cursor, Vec3::ZERO, up)?, up)))?;
+    // Turned to the surface under the pointer even when the point snaps, since that is what it rests on.
+    let caught = if app.snap_requested { app.snap_catch(view, cursor, &[id]) } else { None };
+    let (at, normal) = match &caught {
+        Some((point, _)) => (point.at, hit.1),
+        None => (on_grid(hit.0, Some(hit.1), if free { 0.0 } else { app.move_snap() }), hit.1),
+    };
     let turn = Xform::turn_z_to(normal);
     let (lo, hi) = placing.local;
     let scale = Node::sane_scale(app.scene.node(id).scale);
@@ -136,19 +150,6 @@ fn resting(app: &App, placing: &Placing, view: &View, cursor: egui::Pos2, free: 
     let inverse = placing.frame.inverse();
     let local = inverse.compose(&turn);
     let rotation = Xform::rotation_of_axes(local.axis(0), local.axis(1), local.axis(2));
-    Some((inverse.point(world), rotation))
-}
-
-/// `at` on the move grid along the two axes a surface square to an axis lies in; a slanted surface
-/// has no grid to keep to.
-fn snapped(at: Vec3, normal: Vec3, step: f64) -> Vec3 {
-    let Some(across) = (0..3).find(|&axis| normal.get(axis).abs() > 1.0 - 1e-9) else { return at };
-    if step <= 0.0 {
-        return at;
-    }
-    let mut out = at;
-    for axis in (0..3).filter(|&axis| axis != across) {
-        out.set(axis, (at.get(axis) / step).round() * step);
-    }
-    out
+    let mark = caught.map(|(point, mark)| mark.unwrap_or_else(|| SnapMark::at(point.at)));
+    Some(((inverse.point(world), rotation), mark))
 }

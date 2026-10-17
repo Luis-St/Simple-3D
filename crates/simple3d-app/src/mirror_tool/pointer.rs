@@ -37,7 +37,7 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
             None => app.status = Status::Info("Click on a body's edge to mirror across it".into()),
         },
         MirrorBy::Line => {
-            let Some((point, _)) = app.measure_catch(view, cursor) else { return };
+            let Some((point, _)) = app.pick_position(view, cursor, &[]) else { return };
             let Some(tool) = app.mirror_tool.as_mut() else { return };
             tool.ends = match tool.ends {
                 [Some(start), None] => [Some(start), Some(point.at)],

@@ -44,7 +44,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         let at = point.map_or(Vec3::ZERO, |p| p.at);
         let step = unit.from_mm(app.move_snap()).max(1e-6);
         let hover = match point.and_then(|p| p.kind) {
-            Some(kind) => format!("Caught the {} of a body. Type here to place it exactly.", kind.label()),
+            Some(kind) => format!("Snapped to the {}. Type here to place it exactly.", kind.label()),
             None if point.is_some() => "Click in the viewport to move it, or type it exactly.".to_string(),
             None => "Click in the viewport to place it, or type it here.".to_string(),
         };
@@ -106,9 +106,9 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         None => {
             ui.add(
                 egui::Label::new(theme::hint(
-                    "Click two features in the viewport. The pointer catches corners, edges, face centres, the \
-                     marks the planes through zero leave on a body, and the axes themselves -- whatever the frame \
-                     shows; right-click takes the last one back.",
+                    "Click two points in the viewport. With the snap key held (Ctrl by default) the pointer \
+                     catches corners, edges, face centres, the marks the planes through zero leave on a body, the \
+                     axes and the grid -- whatever the frame shows; right-click takes the last one back.",
                 ))
                 .selectable(false),
             );

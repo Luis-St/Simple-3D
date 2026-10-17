@@ -75,6 +75,15 @@ pub fn grid_levels(view: &View, spacing: f64) -> (f64, f64, f64) {
     (fine, coarse, t * t * (3.0 - 2.0 * t))
 }
 
+/// Where one grid decade is drawn: centred on the camera target snapped to its spacing, so lines sit
+/// on whole multiples and the axes lie along the grid, and how far either side, `MAX_LINES` at most.
+pub(crate) fn grid_square(view: &View, spacing: f64, radius: f64) -> ((f64, f64), f64) {
+    let lines = ((radius / spacing).ceil() as i64).clamp(1, MAX_LINES);
+    let cx = (view.camera().target.x / spacing).round() * spacing;
+    let cy = (view.camera().target.y / spacing).round() * spacing;
+    ((cx, cy), spacing * lines as f64)
+}
+
 /// The legible grid spacing at this zoom: `grid_levels`' coarse decade.
 pub fn effective_grid_spacing(view: &View, spacing: f64) -> f64 {
     grid_levels(view, spacing).1

@@ -6,41 +6,8 @@ use simple3d_core::scene::NodeId;
 use simple3d_geom::{Mesh, Vec3};
 
 impl App {
-    /// Where a measure click lands: the nearest shown snap feature within reach, else a point on the
-    /// nearest line, else the surface under the pointer, else the ground; `None` on empty sky.
-    /// Exact points win whenever in reach, so aiming at a corner never lands on its edge (issue 78).
-    pub fn measure_point_at(&self, view: &crate::view::View, cursor: egui::Pos2) -> Option<MeasurePoint> {
-        self.measure_catch(view, cursor).map(|(point, _)| point)
-    }
-
-    /// [`App::measure_point_at`], with the mark of the vertex, edge or face it caught (issue 87).
-    pub fn measure_catch(
-        &self,
-        view: &crate::view::View,
-        cursor: egui::Pos2,
-    ) -> Option<(MeasurePoint, Option<crate::snap::SnapMark>)> {
-        // Only what the picture shows can be caught; hidden corners and edges otherwise projected into
-        // the face in front of them and snapped out of nowhere.
-        let shown = |feature: &crate::snap::Feature, _: &std::sync::Arc<Mesh>| self.shows(view, feature.point);
-        if let Some((feature, _, node)) = self.nearest_feature_where(view, cursor, &[], shown) {
-            let point = MeasurePoint { at: feature.point, kind: Some(feature.kind) };
-            return Some((point, Some(self.snap_mark(node, &feature, &[]))));
-        }
-        if let Some((at, kind, _, (a, b))) = self.nearest_line(view, cursor) {
-            // A body edge is shown whole; axes and plane marks are drawn lines already.
-            let edge = crate::snap::Feature::edge(a, b);
-            let mark = (kind == crate::snap::FeatureKind::Edge).then(|| crate::snap::SnapMark::of(at, [(&edge, &[][..])]));
-            return Some((MeasurePoint { at, kind: Some(kind) }, mark));
-        }
-        if let Some(at) = self.surface_under(view, cursor) {
-            return Some((MeasurePoint { at, kind: None }, None));
-        }
-        let ground = view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))?;
-        Some((MeasurePoint { at: ground, kind: None }, None))
-    }
-
     /// The nearest snap feature of a shown body within the catch radius, with its distance and body,
-    /// for measuring and drag snapping; `exclude` drops the bodies being dragged.
+    /// for position picks and drag snapping; `exclude` drops the bodies being dragged.
     ///
     /// Only features facing the camera. A drag checks against the target's own body only, since the
     /// scene lags a frame and the dragged body would cover what it is aimed at.
@@ -73,7 +40,7 @@ impl App {
         }
     }
 
-    /// The same, for a caller that accepts only some features (the measure tool). Candidates are
+    /// The same, for a caller that accepts only some features (a position pick). Candidates are
     /// offered nearest first, so the costly visibility check runs on as few as possible.
     pub fn nearest_feature_where(
         &self,
