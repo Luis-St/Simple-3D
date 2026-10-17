@@ -10,7 +10,7 @@ use simple3d_core::primitive::PrimitiveSpec;
 pub(super) fn tile_menu(app: &mut App, response: &egui::Response, spec: &'static PrimitiveSpec) {
     let bound = app.keymap.primitive_shortcut_text(spec.type_id);
     response.context_menu(|ui| {
-        if ui.button("Add with settings...").clicked() {
+        if ui.button("Add with settings").clicked() {
             app.open_add_popup(spec.type_id);
             ui.close();
         }
