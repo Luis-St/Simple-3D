@@ -14,6 +14,11 @@ pub(crate) fn param_value(app: &App, id: NodeId, key: &str, default: ParamValue)
 }
 
 pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str) {
+    primitive_as(app, ui, targets, type_id, DIMENSION_ROW);
+}
+
+/// [`primitive`] with its scrub gestures under `style`'s scope.
+pub(crate) fn primitive_as(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], type_id: &str, style: RowStyle) {
     let Some(spec) = simple3d_core::primitive::lookup(type_id) else {
         ui.colored_label(token::DANGER, format!("Unknown primitive type \"{type_id}\""));
         return;
@@ -36,7 +41,7 @@ pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], ty
         }
         let axes = along(param.key);
         let axes = chips.then_some(axes.as_slice());
-        param_field_on(app, ui, targets, id, param, param.label, unit, DIMENSION_ROW, axes);
+        param_field_on(app, ui, targets, id, param, param.label, unit, style, axes);
     }
 
     if spec.segmented {
@@ -55,16 +60,12 @@ pub(crate) fn primitive(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], ty
             match app.scene.node(id).segments {
                 Some(current) => {
                     let field_id = ui.id().with((id, "segments"));
+                    let grip = scoped(style, "Object segments");
                     let width = room_left(ui).max(40.0);
                     ui.scope(|ui| {
                         ui.set_width(width);
-                        let field = Scalar {
-                            grip: "Object segments",
-                            id: field_id,
-                            kind: SEGMENTS,
-                            current: current as f64,
-                            step: 1.0,
-                        };
+                        let field =
+                            Scalar { grip: &grip, id: field_id, kind: SEGMENTS, current: current as f64, step: 1.0 };
                         scalar_field(app, ui, field, |app, count, started| {
                             edit_or_touch(app, started, "Segments", &format!("segments:{id}"));
                             for target in targets {

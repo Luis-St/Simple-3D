@@ -34,27 +34,34 @@ impl App {
     }
 
     pub fn add_node(&mut self, type_id: Option<&str>, op: GroupOp) {
+        if let Some(id) = self.insert_new(type_id, op, self.settings.placement) {
+            self.start_placing(id);
+        }
+    }
+
+    /// Add a shape or group where `placement` puts it and select it, without letting it follow the
+    /// pointer yet; `None` for a type the palette does not know.
+    pub(crate) fn insert_new(&mut self, type_id: Option<&str>, op: GroupOp, placement: Placement) -> Option<NodeId> {
         self.edit("Add", None);
         let (parent, index) = self.scene.insertion_point(self.primary());
         let created = match type_id {
             Some(type_id) => self.scene.add_primitive(type_id, parent, index),
             None => Some(self.scene.add_group(op, parent, index)),
         };
-        match created {
-            Some(id) => {
-                // Asked only now, with the node in the scene, since its size is part of the answer.
-                let at = self.insertion_point_in(parent, self.near_face(&[id]).unwrap_or(0.0));
-                if let Some(node) = self.scene.get_mut(id) {
-                    node.position = at;
-                }
-                // A pattern's first child lets it be sized, as when dropped or pasted in.
-                self.size_fresh_patterns();
-                self.select_only(id);
-                self.status = Status::Info(hints::added(self, id));
-                self.start_placing(id);
-            }
-            None => self.status = Status::Warning("Unknown primitive type".into()),
+        let Some(id) = created else {
+            self.status = Status::Warning("Unknown primitive type".into());
+            return None;
+        };
+        // Asked only now, with the node in the scene, since its size is part of the answer.
+        let at = self.landing_in(placement, parent, self.near_face(placement, &[id]).unwrap_or(0.0));
+        if let Some(node) = self.scene.get_mut(id) {
+            node.position = at;
         }
+        // A pattern's first child lets it be sized, as when dropped or pasted in.
+        self.size_fresh_patterns();
+        self.select_only(id);
+        self.status = Status::Info(hints::added(self, id));
+        Some(id)
     }
 
     /// The side of the selection a shape added beside it goes on: the face of the selection's box
@@ -71,8 +78,8 @@ impl App {
     /// The near side of what is being added along [`App::beside_side`], relative to its origin,
     /// measured from the nodes since not every shape has a width parameter. `None` if nothing to
     /// measure or not needed (only "beside the selection" needs it).
-    pub(super) fn near_face(&self, ids: &[NodeId]) -> Option<f64> {
-        if self.settings.placement != Placement::BesideSelection {
+    pub(crate) fn near_face(&self, placement: Placement, ids: &[NodeId]) -> Option<f64> {
+        if placement != Placement::BesideSelection {
             return None;
         }
         let (axis, sign) = self.beside_side();
@@ -87,7 +94,12 @@ impl App {
     /// Where the next shape goes in world millimetres under the current placement. `near_face` keeps
     /// the shape's own size from burying it in the selection; pass 0 when only describing.
     pub fn insertion_point_world(&self, near_face: f64) -> Vec3 {
-        match self.settings.placement {
+        self.landing(self.settings.placement, near_face)
+    }
+
+    /// [`App::insertion_point_world`] under `placement` rather than the document's.
+    pub(crate) fn landing(&self, placement: Placement, near_face: f64) -> Vec3 {
+        match placement {
             Placement::Origin => Vec3::ZERO,
             // Put down where it is first, until the pointer carries it onto a surface.
             Placement::Cursor | Placement::OnSurface => self.cursor.unwrap_or(Vec3::ZERO),
@@ -113,7 +125,12 @@ impl App {
     /// [`App::insertion_point_world`] as a `Node::position` under `parent`, so a shape added into a
     /// moved or rotated group still lands there. Only for writing: shown, it read as the group's offset.
     pub fn insertion_point_in(&self, parent: NodeId, near_face: f64) -> Vec3 {
-        let world = self.insertion_point_world(near_face);
+        self.landing_in(self.settings.placement, parent, near_face)
+    }
+
+    /// [`App::insertion_point_in`] under `placement` rather than the document's.
+    pub(crate) fn landing_in(&self, placement: Placement, parent: NodeId, near_face: f64) -> Vec3 {
+        let world = self.landing(placement, near_face);
         match self.evaluated.node_frames.get(&parent) {
             // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
             Some(frame) => {

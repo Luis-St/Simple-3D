@@ -33,6 +33,9 @@ pub struct History {
     open_at: Option<Instant>,
     /// Bumped per recorded edit; compared with the saved value for the unsaved-changes marker.
     revision: u64,
+    /// How many of the oldest steps were dropped past `depth`, so [`History::mark`] still counts
+    /// from the first step ever taken.
+    dropped: u64,
 }
 
 impl Default for History {

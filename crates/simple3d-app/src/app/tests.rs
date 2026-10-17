@@ -1,3 +1,4 @@
+mod add_popup;
 mod bounds;
 mod camera;
 mod components;

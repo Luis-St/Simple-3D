@@ -5,10 +5,16 @@ use crate::theme;
 use simple3d_core::keymap::Action;
 use simple3d_core::primitive::PrimitiveSpec;
 
-/// The tile's right-click menu: set, change or remove its shortcut.
-pub(super) fn tile_menu(app: &mut App, response: &egui::Response, spec: &PrimitiveSpec) {
+/// The tile's right-click menu: set the shape up before adding it ([`crate::add_popup`]), or set,
+/// change or remove its shortcut.
+pub(super) fn tile_menu(app: &mut App, response: &egui::Response, spec: &'static PrimitiveSpec) {
     let bound = app.keymap.primitive_shortcut_text(spec.type_id);
     response.context_menu(|ui| {
+        if ui.button("Add with settings...").clicked() {
+            app.open_add_popup(spec.type_id);
+            ui.close();
+        }
+        ui.separator();
         let set = if bound.is_empty() {
             "Set a shortcut...".to_string()
         } else {

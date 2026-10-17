@@ -68,6 +68,7 @@ impl App {
         crate::section_tool::show(self, ctx);
         crate::pattern_tool::show(self, ctx);
         crate::noise_popup::show(self, ctx);
+        crate::add_popup::show(self, ctx);
         crate::dock::resolve_drag(self, ctx);
         // Tab drags leaving the window (issue 107), after the panels so the tab row's rect is known.
         crate::tabs::resolve_drag(self, ctx);

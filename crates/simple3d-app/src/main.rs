@@ -4,6 +4,7 @@
 // No console window on Windows release builds; debug builds keep it so panics are visible.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod add_popup;
 mod app;
 mod app_chrome;
 mod components;

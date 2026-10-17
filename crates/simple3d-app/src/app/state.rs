@@ -249,6 +249,8 @@ pub struct App {
     pub pattern_kinds: Vec<simple3d_core::pattern_library::Entry>,
     /// The pattern whose scatter window is open (issue 79); one at a time.
     pub(crate) noise_popup: Option<NodeId>,
+    /// The shape being set up before it is added, from its palette tile's menu.
+    pub(crate) add_popup: Option<crate::add_popup::Adding>,
     /// Which tool stages are folded (issue 79).
     pub(crate) pattern_tool_folded: [bool; simple3d_core::pattern::MAX_STAGES],
     /// Scatter parts shown despite being zero, so a part does not vanish while being typed into

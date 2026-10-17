@@ -9,6 +9,23 @@ use simple3d_core::unit::{format_angle, format_length, format_number, wrap_degre
 use simple3d_geom::Vec3;
 
 pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
+    transform(app, ui, targets, DIMENSION_ROW);
+    step_row(app, ui);
+    rotate_step_row(app, ui);
+    ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
+    if targets.len() > 1 {
+        ui.add(
+            egui::Label::new(theme::hint(
+                "A value applies to all of them; a delta (\u{201C}+2\u{201D}, \u{201C}- 5\u{201D}) applies to each \
+                 from where it already is.",
+            ))
+            .selectable(false),
+        );
+    }
+}
+
+/// Position, rotation and scale alone, their scrub gestures under `style`'s scope.
+pub(crate) fn transform(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId], style: RowStyle) {
     let unit = app.unit();
     let Some(&primary) = targets.last() else { return };
 
@@ -17,7 +34,7 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         let field_id = ui.id().with((primary, "pos", axis));
         let shown = ui::shared_text(targets.iter().map(|t| format_length(app.scene.node(*t).position.get(axis), unit)));
         let step = unit.from_mm(app.move_snap());
-        let outcome = value_field(app, ui, name, field_id, &shown, step);
+        let outcome = value_field(app, ui, &scoped(style, name), field_id, &shown, step);
         if let Some(scrubbed) = outcome.scrubbed {
             scrub_transform(app, targets, axis, unit.to_mm(scrubbed.delta), false, scrubbed.started);
         }
@@ -40,7 +57,7 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         let shown =
             ui::shared_text(targets.iter().map(|t| format_angle(wrap_degrees(app.scene.node(*t).rotation.get(axis)))));
         let step = app.settings.rotate_snap_deg.max(1.0);
-        let outcome = value_field(app, ui, name, field_id, &shown, step);
+        let outcome = value_field(app, ui, &scoped(style, name), field_id, &shown, step);
         if let Some(scrubbed) = outcome.scrubbed {
             scrub_transform(app, targets, axis, scrubbed.delta, true, scrubbed.started);
         }
@@ -62,7 +79,7 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
         let shown = ui::shared_text(
             targets.iter().map(|t| format_number(Node::sane_scale(app.scene.node(*t).scale).get(axis), 4)),
         );
-        let outcome = value_field(app, ui, name, field_id, &shown, 0.05);
+        let outcome = value_field(app, ui, &scoped(style, name), field_id, &shown, 0.05);
         if let Some(scrubbed) = outcome.scrubbed {
             scrub_scale(app, targets, axis, scrubbed.delta, scrubbed.started);
         }
@@ -89,19 +106,6 @@ pub(crate) fn placement(app: &mut App, ui: &mut egui::Ui, targets: &[NodeId]) {
                 }
             }
         });
-    }
-
-    step_row(app, ui);
-    rotate_step_row(app, ui);
-    ui.add(egui::Label::new(theme::hint("Rotations are applied X, then Y, then Z.")).selectable(false));
-    if targets.len() > 1 {
-        ui.add(
-            egui::Label::new(theme::hint(
-                "A value applies to all of them; a delta (\u{201C}+2\u{201D}, \u{201C}- 5\u{201D}) applies to each \
-                 from where it already is.",
-            ))
-            .selectable(false),
-        );
     }
 }
 

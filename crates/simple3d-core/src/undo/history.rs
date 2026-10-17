@@ -13,6 +13,7 @@ impl History {
             open_key: None,
             open_at: None,
             revision: 0,
+            dropped: 0,
         }
     }
 
@@ -64,6 +65,7 @@ impl History {
     pub fn clear(&mut self) {
         self.past.clear();
         self.future.clear();
+        self.dropped = 0;
         self.open_key = None;
         self.open_at = None;
     }
@@ -86,6 +88,7 @@ impl History {
         self.past.push(Snapshot { label: label.to_string(), scene: scene.clone(), created: Vec::new() });
         if self.past.len() > self.depth {
             self.past.remove(0);
+            self.dropped += 1;
         }
         false
     }
@@ -96,6 +99,24 @@ impl History {
         self.close();
         self.revision += 1;
         self.past.pop().is_some()
+    }
+
+    /// Where the undo stack stands, for [`History::squash_since`]: steps dropped off its far end
+    /// still count.
+    pub fn mark(&self) -> u64 {
+        self.dropped + self.past.len() as u64
+    }
+
+    /// Fold every step taken since `mark` into the first of them, so a change made in several
+    /// edits undoes as one, under that first step's label.
+    pub fn squash_since(&mut self, mark: u64) {
+        self.close();
+        let first = mark.saturating_sub(self.dropped) as usize;
+        if self.past.len() > first + 1 {
+            let created: Vec<ComponentId> = self.past[first..].iter().flat_map(|s| s.created.clone()).collect();
+            self.past.truncate(first + 1);
+            self.past[first].created = created;
+        }
     }
 
     /// End any open coalescing run, so the next edit starts a new step.

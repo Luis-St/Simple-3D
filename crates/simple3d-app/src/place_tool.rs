@@ -35,9 +35,13 @@ impl App {
     /// Let a just-added shape follow the pointer, under the "On a surface" placement. Nothing that
     /// has no shape yet (an empty group or pattern) follows.
     pub(crate) fn start_placing(&mut self, id: NodeId) {
-        if self.settings.placement != Placement::OnSurface {
-            return;
+        if self.settings.placement == Placement::OnSurface {
+            self.start_placing_now(id);
         }
+    }
+
+    /// Let `id` follow the pointer whatever the document's placement, as the add popup asks for.
+    pub(crate) fn start_placing_now(&mut self, id: NodeId) {
         let Some(node) = self.scene.get(id) else { return };
         // In its own frame: it may start at the 3D cursor, and that offset would be added twice.
         let Some((mut lo, mut hi)) = simple3d_core::eval::baked_mesh(&self.scene, id).bounds() else { return };

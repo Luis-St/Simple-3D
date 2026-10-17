@@ -29,6 +29,19 @@ pub(crate) const PATTERN_ROW: RowStyle = RowStyle { edit_label: "Set pattern", g
 /// The same rows, in the creation tool's window (issue 67).
 pub(crate) const PATTERN_TOOL_ROW: RowStyle = RowStyle { grip_scope: "tool", ..PATTERN_ROW };
 
+/// A shape's dimensions in the popup setting it up before it is added, beside the same rows in
+/// the properties panel.
+pub(crate) const ADD_POPUP_ROW: RowStyle = RowStyle { grip_scope: "add", ..DIMENSION_ROW };
+
+/// A scrub gesture's name under `style`'s scope, so one shown in two places at once stays two gestures.
+pub(crate) fn scoped(style: RowStyle, name: &str) -> String {
+    if style.grip_scope.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}:{name}", style.grip_scope)
+    }
+}
+
 /// The room left on the current line, up to the row's pinned right edge. Not
 /// [`egui::Ui::available_width`], which in a wrapped layout reports a new line's width (issue 57).
 pub(crate) fn room_left(ui: &egui::Ui) -> f32 {

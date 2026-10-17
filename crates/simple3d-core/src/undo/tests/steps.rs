@@ -124,3 +124,35 @@ pub(crate) fn a_new_edit_discards_the_redo_stack() {
     shape(&mut scene);
     assert!(!history.can_redo());
 }
+
+#[test]
+pub(crate) fn a_squashed_run_of_edits_undoes_as_its_first_step() {
+    let mut scene = Scene::new();
+    let mut history = History::new();
+    history.record(&scene, "Before", None);
+    let mark = history.mark();
+    history.record(&scene, "Add", None);
+    let id = shape(&mut scene);
+    history.record(&scene, "Move", None);
+    scene.get_mut(id).unwrap().position = Vec3::new(5.0, 0.0, 0.0);
+    history.squash_since(mark);
+    assert_eq!(history.undo_len(), 2);
+    assert_eq!(history.undo(&mut scene).as_deref(), Some("Add"));
+    assert!(scene.get(id).is_none(), "undoing the squashed step left the shape");
+}
+
+#[test]
+pub(crate) fn squashing_still_finds_its_start_once_old_steps_are_dropped() {
+    let mut scene = Scene::new();
+    let mut history = History::new();
+    for _ in 0..DEFAULT_DEPTH {
+        history.record(&scene, "Old", None);
+    }
+    let mark = history.mark();
+    history.record(&scene, "Add", None);
+    let id = shape(&mut scene);
+    history.record(&scene, "Move", None);
+    history.squash_since(mark);
+    assert_eq!(history.undo(&mut scene).as_deref(), Some("Add"));
+    assert!(scene.get(id).is_none());
+}

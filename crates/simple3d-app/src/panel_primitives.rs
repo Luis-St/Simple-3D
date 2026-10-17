@@ -151,7 +151,9 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
                     true,
                     DRAG_OR_CLICK,
                 )
-                .on_hover_text(format!("{name}\n{hint}\nOr drag it into the outliner; right-click for a shortcut"));
+                .on_hover_text(format!(
+                    "{name}\n{hint}\nOr drag it into the outliner; right-click to set it up first or for a shortcut"
+                ));
                 if response.clicked() {
                     app.add_node(Some(spec.type_id), GroupOp::Union);
                 }
