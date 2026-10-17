@@ -135,6 +135,18 @@ impl ParamSpec {
         }
     }
 
+    /// An angle that is a quantity, kept within `min`..`max`.
+    pub(super) const fn angle(key: &'static str, label: &'static str, default: f64, min: f64, max: f64) -> ParamSpec {
+        ParamSpec {
+            key,
+            label,
+            kind: ParamKind::Angle { min, max, wrap: false },
+            default: ParamValue::Angle(default),
+            lock_group: 0,
+            shown_when: None,
+        }
+    }
+
     pub(super) const fn count(key: &'static str, label: &'static str, default: u32, min: u32, max: u32) -> ParamSpec {
         ParamSpec {
             key,

@@ -4,6 +4,7 @@ mod boxes;
 mod cones;
 mod flat;
 mod polyhedra;
+mod printing;
 mod round;
 
 use super::*;
@@ -36,4 +37,11 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
     flat::DISC,
     flat::RING,
     flat::SLOT,
+    // 3D printing
+    printing::HEX_NUT,
+    printing::HEX_STANDOFF,
+    printing::SCREW_HOLE,
+    printing::THREADED_ROD,
+    printing::SPUR_GEAR,
+    printing::SPRING,
 ];

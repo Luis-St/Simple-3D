@@ -25,6 +25,8 @@ const POLY: &str = "Regular polyhedra";
 
 const FLAT: &str = "Flat shapes";
 
+const PRINTING: &str = "3D printing";
+
 const MEASURE: &[&str] = &["Across corners", "Across flats"];
 
 const CORNER_STYLE: &[&str] = &["Rounded", "Chamfered"];
@@ -34,3 +36,5 @@ const CHAMFER_EDGES: &[&str] = &["All edges", "Vertical edges", "Top and bottom"
 const WALL_MODE: &[&str] = &["Wall thickness", "Inner diameter"];
 
 const SIZE_MODE: &[&str] = &["Circumscribed diameter", "Edge length"];
+
+const SCREW_HEAD: &[&str] = &["Countersunk", "Counterbored", "Plain"];

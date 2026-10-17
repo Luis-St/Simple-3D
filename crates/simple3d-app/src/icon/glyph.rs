@@ -66,6 +66,12 @@ pub enum Glyph {
     Disc,
     Ring,
     Slot,
+    HexNut,
+    HexStandoff,
+    ScrewHole,
+    ThreadedRod,
+    Gear,
+    Spring,
 }
 
 impl Glyph {
@@ -90,6 +96,12 @@ impl Glyph {
             "disc" => Glyph::Disc,
             "ring" => Glyph::Ring,
             "slot" => Glyph::Slot,
+            "hex_nut" => Glyph::HexNut,
+            "hex_standoff" => Glyph::HexStandoff,
+            "screw_hole" => Glyph::ScrewHole,
+            "threaded_rod" => Glyph::ThreadedRod,
+            "spur_gear" => Glyph::Gear,
+            "spring" => Glyph::Spring,
             _ => Glyph::Box,
         }
     }

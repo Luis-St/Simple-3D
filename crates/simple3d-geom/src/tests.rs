@@ -9,6 +9,7 @@ mod boolean_shape;
 mod dimensions;
 mod planar;
 mod primitives;
+mod printing;
 
 use crate::vec3::Vec3;
 
