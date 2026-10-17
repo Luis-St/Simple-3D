@@ -101,6 +101,9 @@ impl Keymap {
         set(Mirror, Chord::alt("M"));
         // Snap to geometry while dragging (issue 77): Ctrl alone, the precise-gesture modifier.
         set(SnapToGeometry, Chord::modifiers(true, false, false));
+        // Held while a primitive is added from its tile, the Add menu or its shortcut, it opens the
+        // popup setting it up first: Shift alone, free in every preset.
+        set(AddWithSettings, Chord::modifiers(false, true, false));
 
         let nav = match preset {
             Preset::Default => {

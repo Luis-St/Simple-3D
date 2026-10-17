@@ -5,7 +5,6 @@ use crate::app::{App, Carried};
 use crate::icon::{self, Glyph};
 use crate::theme::{self, token};
 use simple3d_core::primitive;
-use simple3d_core::scene::GroupOp;
 
 mod shortcut;
 
@@ -141,6 +140,13 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
                 let hint = crate::app::insertion_hint(app);
                 let bound = app.keymap.primitive_shortcut_text(spec.type_id);
                 let name = if bound.is_empty() { spec.label.to_string() } else { format!("{} ({bound})", spec.label) };
+                // The hold key named, as a riddle otherwise; unbound, only the menu sets a shape up first.
+                let settings_key = app.keymap.shortcut_text(simple3d_core::keymap::Command::AddWithSettings);
+                let first = if settings_key.is_empty() {
+                    "right-click to set it up first".to_string()
+                } else {
+                    format!("{settings_key}+click or right-click to set it up first")
+                };
                 // Click adds where the document says; drag carries it into the outliner like a row drag.
                 let response = icon::button_sensing(
                     ui,
@@ -152,10 +158,11 @@ fn category_block(app: &mut App, ui: &mut egui::Ui, category: &'static str, forc
                     DRAG_OR_CLICK,
                 )
                 .on_hover_text(format!(
-                    "{name}\n{hint}\nOr drag it into the outliner; right-click to set it up first or for a shortcut"
+                    "{name}\n{hint}\nOr drag it into the outliner; {first}, or right-click for a shortcut"
                 ));
                 if response.clicked() {
-                    app.add_node(Some(spec.type_id), GroupOp::Union);
+                    let settings = app.settings_held(ui.ctx());
+                    app.add_primitive(spec.type_id, settings);
                 }
                 if response.drag_started() {
                     app.outliner_drag = Some(Carried::Shape(spec.type_id));

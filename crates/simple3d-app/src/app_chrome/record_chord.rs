@@ -3,7 +3,6 @@
 use crate::app::App;
 use crate::ui;
 use simple3d_core::keymap::{Action, Chord};
-use simple3d_core::scene::GroupOp;
 
 impl App {
     /// Feed `ctx`'s keys to the recording in progress. The binding is whatever is held together, taken
@@ -54,7 +53,7 @@ impl App {
             Action::Command(command) => self.run(command),
             Action::Primitive(type_id) => {
                 if let Some(spec) = simple3d_core::primitive::lookup(&type_id) {
-                    self.add_node(Some(spec.type_id), GroupOp::Union);
+                    self.add_primitive(spec.type_id, false);
                 }
             }
         }

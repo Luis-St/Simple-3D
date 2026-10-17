@@ -69,6 +69,23 @@ impl App {
             let pressed = key.name();
             let down = |name: &str| name == pressed || held.iter().any(|k| k == name);
             let action = self.keymap.action_for_press(pressed, down, modifiers.command, modifiers.shift, modifiers.alt);
+            // A shape's shortcut pressed with the add-with-settings key held opens its popup instead.
+            // A command bound to the press itself still wins.
+            if self.holding(Command::AddWithSettings, |key| down(key.name()), modifiers) {
+                let shape = match &action {
+                    Some(Action::Primitive(type_id)) => {
+                        simple3d_core::primitive::lookup(type_id).map(|spec| spec.type_id)
+                    }
+                    None | Some(Action::Command(Command::AddWithSettings)) => {
+                        self.primitive_under_settings_key(pressed, down, modifiers)
+                    }
+                    Some(Action::Command(_)) => None,
+                };
+                if let Some(type_id) = shape {
+                    self.add_primitive(type_id, true);
+                    continue;
+                }
+            }
             match action {
                 // Previewed while held, and copied when let go (issue 121); the key's own repeats are ignored.
                 Some(Action::Command(Command::RepeatDuplicate)) => {

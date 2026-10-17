@@ -50,3 +50,29 @@ pub(crate) fn the_popup_chooses_where_its_shape_lands_without_changing_the_docum
     app.confirm_add_popup();
     assert_eq!(app.placing.as_ref().map(|placing| placing.id), Some(id), "it does not follow the pointer after Add");
 }
+
+#[test]
+pub(crate) fn holding_the_settings_key_while_adding_opens_the_popup() {
+    let mut app = headless_app();
+    app.add_primitive("box", true);
+    assert!(app.add_popup.is_some(), "the held key did not open the popup");
+    app.confirm_add_popup();
+    app.add_primitive("box", false);
+    assert!(app.add_popup.is_none(), "a plain add opened the popup");
+}
+
+#[test]
+pub(crate) fn a_shapes_shortcut_pressed_with_the_settings_key_held_finds_its_shape() {
+    // Shift+B is not B's binding, so the shape is looked up with the hold key's modifier taken off.
+    let mut app = headless_app();
+    app.keymap
+        .bind(
+            &simple3d_core::keymap::Action::Primitive("cylinder".into()),
+            simple3d_core::keymap::Chord::key("B"),
+            true,
+        )
+        .unwrap();
+    let found = app.primitive_under_settings_key("B", |key| key == "B", egui::Modifiers::SHIFT);
+    assert_eq!(found, Some("cylinder"));
+    assert_eq!(app.primitive_under_settings_key("N", |key| key == "N", egui::Modifiers::SHIFT), None);
+}

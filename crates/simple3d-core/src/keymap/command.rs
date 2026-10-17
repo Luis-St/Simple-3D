@@ -73,6 +73,7 @@ pub enum Command {
     OntoFace,
     Mirror,
     SnapToGeometry,
+    AddWithSettings,
     NudgeLeft,
     NudgeRight,
     NudgeUp,

@@ -70,6 +70,7 @@ impl Command {
             OntoFace => "Put onto a face",
             Mirror => "Mirror",
             SnapToGeometry => "Snap to geometry (hold)",
+            AddWithSettings => "Add a primitive with settings (hold)",
             NudgeLeft => "Nudge left",
             NudgeRight => "Nudge right",
             NudgeUp => "Nudge up",
@@ -92,8 +93,8 @@ impl Command {
                 Area::View
             }
             ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | MeasureTool | AlignDistribute
-            | OntoFace | Mirror | SnapToGeometry | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway
-            | NudgeToward => Area::Manipulate,
+            | OntoFace | Mirror | SnapToGeometry | AddWithSettings | NudgeLeft | NudgeRight | NudgeUp | NudgeDown
+            | NudgeAway | NudgeToward => Area::Manipulate,
         }
     }
 }

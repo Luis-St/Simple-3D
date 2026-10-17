@@ -68,6 +68,7 @@ impl Command {
         Command::OntoFace,
         Command::Mirror,
         Command::SnapToGeometry,
+        Command::AddWithSettings,
         Command::NudgeLeft,
         Command::NudgeRight,
         Command::NudgeUp,

@@ -8,6 +8,7 @@ use crate::popup::{PopupEvent, PopupSpec};
 use crate::theme;
 use crate::ui;
 use simple3d_core::config::Placement;
+use simple3d_core::keymap::{Action, Command};
 use simple3d_core::scene::{GroupOp, NodeId};
 
 /// The popup's key, which also remembers where it was dragged.
@@ -29,6 +30,39 @@ pub(crate) struct Adding {
 }
 
 impl App {
+    /// Add `type_id` from its tile, the Add menu or its shortcut: straight in, or through the popup while
+    /// the add-with-settings key is held.
+    pub(crate) fn add_primitive(&mut self, type_id: &'static str, settings: bool) {
+        if settings {
+            self.open_add_popup(type_id);
+        } else {
+            self.add_node(Some(type_id), GroupOp::Union);
+        }
+    }
+
+    /// Whether the add-with-settings key is held now.
+    pub(crate) fn settings_held(&self, ctx: &egui::Context) -> bool {
+        ctx.input(|i| self.holding(Command::AddWithSettings, |key| i.key_down(key), i.modifiers))
+    }
+
+    /// The primitive bound to a press made with the add-with-settings key held, its modifiers taken off
+    /// the press, since Shift+B is not B's binding.
+    pub(crate) fn primitive_under_settings_key(
+        &self,
+        pressed: &str,
+        down: impl Fn(&str) -> bool,
+        mods: egui::Modifiers,
+    ) -> Option<&'static str> {
+        let hold = self.keymap.binding(Command::AddWithSettings)?;
+        let (ctrl, shift, alt) = (mods.command && !hold.ctrl, mods.shift && !hold.shift, mods.alt && !hold.alt);
+        // The hold key's own keys are not part of the shape's binding either.
+        let down = |name: &str| down(name) && !hold.keys.iter().any(|key| key == name);
+        match self.keymap.action_for_press(pressed, down, ctrl, shift, alt)? {
+            Action::Primitive(type_id) => simple3d_core::primitive::lookup(&type_id).map(|spec| spec.type_id),
+            Action::Command(_) => None,
+        }
+    }
+
     /// Add `type_id` and open the popup on it. A shape still being set up or put down is kept first.
     pub(crate) fn open_add_popup(&mut self, type_id: &'static str) {
         let Some(spec) = simple3d_core::primitive::lookup(type_id) else { return };

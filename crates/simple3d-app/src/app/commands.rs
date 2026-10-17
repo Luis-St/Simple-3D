@@ -111,6 +111,8 @@ impl App {
             Mirror => self.toggle_mirror_tool(),
             // A hold key read live during a drag, so pressing it alone does nothing (issue 68).
             SnapToGeometry => {}
+            // Read when a primitive is added, which it turns into opening the add popup.
+            AddWithSettings => {}
             // The other hold key, read live by the wheel (issue 97).
             ZoomToPointer => {}
             NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway | NudgeToward => self.nudge(command),

@@ -42,7 +42,8 @@ impl App {
                 ui.menu_button(category, |ui| {
                     for spec in primitive::REGISTRY.iter().filter(|s| s.category == category) {
                         if ui.button(spec.label).clicked() {
-                            self.add_node(Some(spec.type_id), GroupOp::Union);
+                            let settings = self.settings_held(ui.ctx());
+                            self.add_primitive(spec.type_id, settings);
                             ui.close();
                         }
                     }
