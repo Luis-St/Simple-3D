@@ -140,6 +140,7 @@ impl App {
             pattern_kinds: Vec::new(),
             noise_popup: None,
             add_popup: None,
+            unlocked: std::collections::HashSet::new(),
             pattern_tool_folded: [false; simple3d_core::pattern::MAX_STAGES],
             noise_parts_open: (None, [false; crate::noise_popup::Part::COUNT]),
             pattern_tool_hover: None,

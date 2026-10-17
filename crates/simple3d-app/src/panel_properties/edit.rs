@@ -10,9 +10,12 @@ pub(crate) fn set_param(app: &mut App, id: NodeId, key: &str, value: ParamValue)
     }
 }
 
-/// Whether a lock group's parameters hold the same value; the lock is derived from the numbers, so
-/// files hold no hidden state.
+/// Whether a lock group's parameters hold the same value and were not unlocked since; the lock is
+/// derived from the numbers, so files hold no hidden state, and an unlock lasts the session.
 pub(crate) fn is_locked(app: &App, id: NodeId, group: u8) -> bool {
+    if app.unlocked.contains(&(id, group)) {
+        return false;
+    }
     let Some(spec) = app.scene.node(id).spec() else { return false };
     let Some(params) = app.scene.node(id).params() else { return false };
     let keys: Vec<&str> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key).collect();
@@ -25,15 +28,17 @@ pub(crate) fn is_locked(app: &App, id: NodeId, group: u8) -> bool {
     }
 }
 
-/// Clicking the lock equalises the group to the clicked field, or if locked, just reports unlocking.
+/// Clicking the lock equalises the group to the clicked field, or if locked, unlocks it: the values
+/// stay as they are, and each is then edited on its own.
 pub(crate) fn toggle_lock(app: &mut App, id: NodeId, group: u8, key: &str) {
     let Some(spec) = app.scene.node(id).spec() else { return };
     let keys: Vec<String> = spec.params.iter().filter(|p| p.lock_group == group).map(|p| p.key.to_string()).collect();
     if is_locked(app, id, group) {
-        // Nothing to change; the fields are already independent in the model.
-        app.status = Status::Info("Unlocked; edit the diameters independently".into());
+        app.unlocked.insert((id, group));
+        app.status = Status::Info("Unlocked; edit them independently".into());
         return;
     }
+    app.unlocked.remove(&(id, group));
     let Some(value) = app.scene.node(id).params().map(|p| p.num(key)) else { return };
     app.edit("Lock dimensions", None);
     for other in keys {
@@ -43,7 +48,7 @@ pub(crate) fn toggle_lock(app: &mut App, id: NodeId, group: u8, key: &str) {
 
 /// When a locked group's member changes, bring the others with it.
 pub(crate) fn apply_lock(app: &mut App, id: NodeId, group: u8, key: &str, value: ParamValue) {
-    if group == 0 {
+    if group == 0 || app.unlocked.contains(&(id, group)) {
         return;
     }
     // Judge the lock from before this edit, since the group no longer agrees now.

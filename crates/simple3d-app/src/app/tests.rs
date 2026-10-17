@@ -10,6 +10,7 @@ mod drag;
 mod drag_selection;
 mod keymap;
 mod library;
+mod locks;
 mod outliner;
 mod panels;
 mod pattern_kind;

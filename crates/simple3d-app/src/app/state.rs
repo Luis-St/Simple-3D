@@ -251,6 +251,9 @@ pub struct App {
     pub(crate) noise_popup: Option<NodeId>,
     /// The shape being set up before it is added, from its palette tile's menu.
     pub(crate) add_popup: Option<crate::add_popup::Adding>,
+    /// Lock groups unlocked although their values still agree, by node and group: an unlock clicked
+    /// before any value was changed, which agreeing values alone would read as locked again.
+    pub(crate) unlocked: std::collections::HashSet<(NodeId, u8)>,
     /// Which tool stages are folded (issue 79).
     pub(crate) pattern_tool_folded: [bool; simple3d_core::pattern::MAX_STAGES],
     /// Scatter parts shown despite being zero, so a part does not vanish while being typed into
