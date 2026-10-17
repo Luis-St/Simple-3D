@@ -2,7 +2,7 @@
 
 use super::*;
 use simple3d_core::config::Placement;
-use simple3d_core::scene::GroupOp;
+use simple3d_core::scene::{GroupOp, NodeId};
 use simple3d_geom::Vec3;
 
 /// A view straight down on the origin, and the screen point over `at`.
@@ -99,4 +99,70 @@ pub(crate) fn a_new_shape_starting_at_the_3d_cursor_still_rests_where_the_pointe
     assert!(lo.z.abs() < 1e-6, "it rests at {} instead of on the ground", lo.z);
     let middle = ((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
     assert!((middle.0 - 40.0).abs() < 1e-6 && (middle.1 - 20.0).abs() < 1e-6, "its middle is at {middle:?}");
+}
+
+/// A box to put things on, turned `turn` degrees about Z, and a new, smaller box following the
+/// pointer under "On a surface"; with the view straight down and the base's evaluated top.
+fn box_on_a_box(app: &mut App, turn: f64) -> (NodeId, NodeId, crate::view::View, f64) {
+    app.add_node(Some("box"), GroupOp::Union);
+    let base = app.primary().unwrap();
+    app.scene.get_mut(base).unwrap().rotation.z = turn;
+    app.reevaluate_for_test();
+    let (_, top) = app.evaluated.node_world_bounds[&base];
+    app.settings.placement = Placement::OnSurface;
+    app.add_node(Some("box"), GroupOp::Union);
+    let new = app.primary().unwrap();
+    app.scene.get_mut(new).unwrap().scale = Vec3::new(0.5, 0.5, 0.5);
+    let view = looking_down(app);
+    (base, new, view, top.z)
+}
+
+#[test]
+pub(crate) fn near_the_middle_of_a_face_a_new_shape_sits_on_its_centre() {
+    // Issue 128: the face centre is caught without the snap key, off the grid step.
+    let mut app = headless_app();
+    app.scene.settings.grid_spacing = 7.0;
+    let (_, new, view, top) = box_on_a_box(&mut app, 0.0);
+    let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(3.0, -2.0);
+    app.follow_pointer(&view, over, false);
+    app.reevaluate_for_test();
+    let (lo, hi) = app.evaluated.node_world_bounds[&new];
+    let middle = Vec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z);
+    assert!((middle - Vec3::new(0.0, 0.0, top)).length() < 1e-6, "rests at {middle:?}, not on the face centre");
+    assert!(app.snap_indicator.is_some(), "the caught centre is not shown");
+}
+
+#[test]
+pub(crate) fn near_a_corner_of_a_face_a_new_shape_sits_flush_in_it() {
+    // Issue 128: a corner puts the shape's own corner on it, the shape inside the face.
+    let mut app = headless_app();
+    let (base, new, view, top) = box_on_a_box(&mut app, 0.0);
+    let (blo, bhi) = app.evaluated.node_world_bounds[&base];
+    let corner = Vec3::new(bhi.x, blo.y, top);
+    let over = view.project(corner + Vec3::new(-0.5, 0.5, 0.0)).unwrap().0;
+    app.follow_pointer(&view, over, false);
+    app.reevaluate_for_test();
+    let (lo, hi) = app.evaluated.node_world_bounds[&new];
+    assert!((hi.x - bhi.x).abs() < 1e-6 && (lo.y - blo.y).abs() < 1e-6, "not flush in the corner: {lo:?} {hi:?}");
+    assert!((lo.z - top).abs() < 1e-6 && hi.x - lo.x < bhi.x - blo.x, "not resting on the face: {lo:?} {hi:?}");
+}
+
+#[test]
+pub(crate) fn on_a_turned_face_a_new_shape_turns_along_its_edges() {
+    let mut app = headless_app();
+    let (_, new, view, top) = box_on_a_box(&mut app, 30.0);
+    let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(2.0, 2.0);
+    app.follow_pointer(&view, over, false);
+    let turned = app.scene.node(new).rotation.z.rem_euclid(90.0);
+    assert!((turned - 30.0).abs() < 1e-6, "turned {turned} degrees, not along the face's edges");
+}
+
+#[test]
+pub(crate) fn alt_leaves_the_face_snaps_out() {
+    let mut app = headless_app();
+    let (_, new, view, top) = box_on_a_box(&mut app, 30.0);
+    let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(2.0, 2.0);
+    app.follow_pointer(&view, over, true);
+    assert_eq!(app.scene.node(new).rotation.z, 0.0, "turned along the face with Alt held");
+    assert!(app.snap_indicator.is_none());
 }

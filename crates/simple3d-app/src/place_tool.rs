@@ -2,6 +2,8 @@
 //! just added follows the pointer, resting on whatever face of the model is under it -- turned so
 //! its bottom faces it -- or on the ground, until a click puts it down.
 //!
+//! On a flat face the shape catches the face's centre and corners (issue 128, `face`).
+//!
 //! The shape is moved in the document as it follows, as a drag moves a body, and the GPU draws it
 //! moved without evaluating each step (`App::live_move`). Escape takes the addition back.
 
@@ -12,6 +14,9 @@ use simple3d_core::config::Placement;
 use simple3d_core::scene::{Anchor, Node, NodeId};
 use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
+
+mod face;
+use face::Caught;
 
 /// The shape being put down.
 #[derive(Clone, Debug)]
@@ -120,7 +125,8 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
 /// The position and rotation that rest the shape on the surface under `cursor`, or on the ground
 /// away from the model, and the snap it caught. Its middle sits over the point: one snapped to while
 /// snapping is asked for (issue 126), else on the grid unless `free` (Alt), where the surface is
-/// square to an axis.
+/// square to an axis. Unless `free`, near the centre or a corner of a flat face it sits in the middle
+/// of the face or flush into the corner, its sides along the face's edges (issue 128).
 fn resting(
     app: &App,
     placing: &Placing,
@@ -136,20 +142,38 @@ fn resting(
         .or_else(|| Some((view.ray_plane_ahead(cursor, Vec3::ZERO, up)?, up)))?;
     // Turned to the surface under the pointer even when the point snaps, since that is what it rests on.
     let caught = if app.snap_requested { app.snap_catch(view, cursor, &[id]) } else { None };
-    let (at, normal) = match &caught {
-        Some((point, _)) => (point.at, hit.1),
-        None => (on_grid(hit.0, Some(hit.1), if free { 0.0 } else { app.move_snap() }), hit.1),
+    let on_face = match (&caught, free) {
+        (None, false) => app.face_at(hit.0, hit.1, &[id]).and_then(|face| Some((face.catch(view, cursor)?, face))),
+        _ => None,
     };
-    let turn = Xform::turn_z_to(normal);
+    let mut turn = Xform::turn_z_to(hit.1);
     let (lo, hi) = placing.local;
     let scale = Node::sane_scale(app.scene.node(id).scale);
     let centre = (lo + hi) * 0.5;
+    let (at, mark) = match (&caught, on_face) {
+        (Some((point, mark)), _) => (point.at, Some(mark.clone().unwrap_or_else(|| SnapMark::at(point.at)))),
+        (None, Some(((at, how), face))) => {
+            turn = face.aligned(&turn, &how);
+            let mark = Some(face.mark(at));
+            match how {
+                Caught::Centre => (at, mark),
+                // Its middle off the corner by half its footprint along each side, towards the face.
+                Caught::Corner([a, b]) => {
+                    let inward = a + b;
+                    let half = (hi - lo) * 0.5;
+                    let side =
+                        |axis: usize, extent: f64| turn.axis(axis) * (extent * inward.dot(turn.axis(axis)).signum());
+                    (at + side(0, half.x * scale.x) + side(1, half.y * scale.y), mark)
+                }
+            }
+        }
+        (None, None) => (on_grid(hit.0, Some(hit.1), if free { 0.0 } else { app.move_snap() }), None),
+    };
     // From the point on the surface back to the origin: under the middle, down to the bottom.
     let offset = Vec3::new(-centre.x * scale.x, -centre.y * scale.y, -lo.z * scale.z);
     let world = at + turn.vector(offset);
     let inverse = placing.frame.inverse();
     let local = inverse.compose(&turn);
     let rotation = Xform::rotation_of_axes(local.axis(0), local.axis(1), local.axis(2));
-    let mark = caught.map(|(point, mark)| mark.unwrap_or_else(|| SnapMark::at(point.at)));
     Some(((inverse.point(world), rotation), mark))
 }

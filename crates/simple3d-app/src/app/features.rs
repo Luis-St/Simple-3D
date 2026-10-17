@@ -85,7 +85,7 @@ impl App {
     ///
     /// Finding them costs about 6.5 ms for 16k triangles, which every visible body paid each frame.
     /// The evaluated meshes are shared `Arc`s, so the pointer is the change key.
-    pub(super) fn snaps_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Snaps {
+    pub(crate) fn snaps_of(&self, id: NodeId, mesh: &std::sync::Arc<simple3d_geom::Mesh>) -> Snaps {
         let (axes, marked, mask) = self.snap_settings();
         let key = (std::sync::Arc::as_ptr(mesh) as usize, mask);
         if let Some((cached_key, snaps)) = self.snap_features.borrow().get(&id) {
