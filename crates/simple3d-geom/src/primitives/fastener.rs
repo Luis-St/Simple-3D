@@ -46,21 +46,51 @@ pub enum ScrewHead {
 /// A screw hole as a solid to cut with: a shaft `length` long, widening at the top to the head.
 /// A head narrower than the shaft is taken as the shaft.
 pub fn screw_hole_mesh(shaft_diameter: f64, head_diameter: f64, length: f64, head: ScrewHead, segments: u32) -> Mesh {
+    screw_hole_shaped_mesh(shaft_diameter, head_diameter, length, head, 0.0, false, segments)
+}
+
+/// [`screw_hole_mesh`] with the head sunk a further `recess` below the surface, and at the bottom if
+/// `head_at_bottom`. A head too big for the length swallows the shaft rather than changing shape: a
+/// countersink keeps its angle and diameter and starts below the shaft's width, a counterbore runs
+/// the whole length.
+pub fn screw_hole_shaped_mesh(
+    shaft_diameter: f64,
+    head_diameter: f64,
+    length: f64,
+    head: ScrewHead,
+    recess: f64,
+    head_at_bottom: bool,
+    segments: u32,
+) -> Mesh {
     let (r, bottom, top) = (shaft_diameter / 2.0, -length / 2.0, length / 2.0);
     let wide = head_diameter.max(shaft_diameter) / 2.0;
     let profile = match head {
         _ if wide - r <= 1e-6 => vec![(r, bottom), (r, top)],
         ScrewHead::Plain => vec![(r, bottom), (r, top)],
         ScrewHead::Countersunk { angle } => {
-            let half = (angle.clamp(1.0, 179.0) / 2.0).to_radians();
-            let sink = ((wide - r) / half.tan()).min(length * 0.99);
-            vec![(r, bottom), (r, top - sink), (wide, top)]
+            let slope = (angle.clamp(1.0, 179.0) / 2.0).to_radians().tan();
+            let recess = recess.clamp(0.0, length);
+            let seat = top - recess;
+            let room = seat - bottom;
+            let sink = (wide - r) / slope;
+            let mut profile = if sink <= room {
+                vec![(r, bottom), (r, seat - sink), (wide, seat)]
+            } else {
+                vec![(wide - room * slope, bottom), (wide, seat)]
+            };
+            if recess > 1e-9 {
+                profile.push((wide, top));
+            }
+            profile
         }
+        ScrewHead::Counterbored { depth } if depth >= length => vec![(wide, bottom), (wide, top)],
         ScrewHead::Counterbored { depth } => {
-            let step = top - depth.clamp(1e-3, length * 0.99);
+            let step = top - depth.max(1e-3);
             vec![(r, bottom), (r, step), (wide, step), (wide, top)]
         }
     };
+    let profile: Vec<(f64, f64)> =
+        if head_at_bottom { profile.iter().rev().map(|&(r, z)| (r, -z)).collect() } else { profile };
     revolve_open_profile(&profile, segments, true, true)
 }
 

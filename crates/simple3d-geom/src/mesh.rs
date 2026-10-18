@@ -163,6 +163,15 @@ impl Mesh {
         }
     }
 
+    /// The mesh turned outside out if it was built inside out, for generators whose winding follows
+    /// from their parameters.
+    pub fn turned_outward(mut self) -> Mesh {
+        if self.signed_volume() < 0.0 {
+            self.flip_winding();
+        }
+        self
+    }
+
     pub fn flip_winding(&mut self) {
         for t in self.indices.iter_mut() {
             t.swap(1, 2);

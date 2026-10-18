@@ -3,6 +3,7 @@
 mod boxes;
 mod cones;
 mod flat;
+mod mechanics;
 mod polyhedra;
 mod printing;
 mod round;
@@ -41,7 +42,7 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
     printing::HEX_NUT,
     printing::HEX_STANDOFF,
     printing::SCREW_HOLE,
-    printing::THREADED_ROD,
-    printing::SPUR_GEAR,
-    printing::SPRING,
+    mechanics::THREADED_ROD,
+    mechanics::SPUR_GEAR,
+    mechanics::SPRING,
 ];

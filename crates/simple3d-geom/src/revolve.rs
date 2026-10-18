@@ -9,3 +9,5 @@ mod extrude;
 pub use extrude::{extrude_frustum_polygon, extrude_stack};
 mod profile;
 pub use profile::{revolve_closed_profile, revolve_open_profile};
+mod loft;
+pub use loft::grid_mesh;

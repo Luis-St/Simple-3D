@@ -11,18 +11,22 @@ pub(super) const PLATE: PrimitiveSpec = PrimitiveSpec {
         ParamSpec::positive_length("width", "Width (X)", 40.0),
         ParamSpec::positive_length("depth", "Depth (Y)", 20.0),
         ParamSpec::positive_length("thickness", "Thickness (Z)", 4.0),
-        ParamSpec::length("corner_radius", "Corner radius (0 = square)", 0.0),
+        ParamSpec::choice("corner_mode", "Corners", PLATE_CORNERS),
+        ParamSpec::length("corner_radius", "Corner radius (0 = square)", 0.0).when("corner_mode", 0),
+        ParamSpec::length("radius_front_right", "Front right radius (+X -Y)", 0.0).when("corner_mode", 1),
+        ParamSpec::length("radius_back_right", "Back right radius (+X +Y)", 0.0).when("corner_mode", 1),
+        ParamSpec::length("radius_back_left", "Back left radius (-X +Y)", 0.0).when("corner_mode", 1),
+        ParamSpec::length("radius_front_left", "Front left radius (-X -Y)", 0.0).when("corner_mode", 1),
         ParamSpec::count("corner_segments", "Corner segments", 6, 1, 64),
     ],
     segmented: false,
     build: |p, _seg| {
-        gen::rounded_plate_mesh(
-            p.num("width"),
-            p.num("depth"),
-            p.num("thickness"),
-            p.num("corner_radius"),
-            p.int("corner_segments"),
-        )
+        let (w, d, t, seg) = (p.num("width"), p.num("depth"), p.num("thickness"), p.int("corner_segments"));
+        if p.int("corner_mode") == 1 {
+            let keys = ["radius_front_right", "radius_back_right", "radius_back_left", "radius_front_left"];
+            return gen::plate_corners_mesh(w, d, t, keys.map(|key| p.num(key)), seg);
+        }
+        gen::rounded_plate_mesh(w, d, t, p.num("corner_radius"), seg)
     },
     axes: |_p| {
         [Some(AxisDriver::direct("width")), Some(AxisDriver::direct("depth")), Some(AxisDriver::direct("thickness"))]
@@ -79,9 +83,14 @@ pub(super) const SLOT: PrimitiveSpec = PrimitiveSpec {
         ParamSpec::positive_length("length", "Length (X)", 30.0),
         ParamSpec::positive_length("width", "Width (Y)", 10.0),
         ParamSpec::positive_length("thickness", "Thickness (Z)", 4.0),
+        ParamSpec::length("edge_rounding", "Edge rounding (0 = sharp)", 0.0),
+        ParamSpec::length("wall", "Wall thickness (0 = solid)", 0.0),
     ],
     segmented: true,
-    build: |p, seg| gen::slot_mesh(p.num("length"), p.num("width"), p.num("thickness"), seg),
+    build: |p, seg| {
+        let (length, width, thickness) = (p.num("length"), p.num("width"), p.num("thickness"));
+        gen::slot_shaped_mesh(length, width, thickness, p.num("edge_rounding"), p.num("wall"), seg)
+    },
     axes: |_p| {
         [Some(AxisDriver::direct("length")), Some(AxisDriver::direct("width")), Some(AxisDriver::direct("thickness"))]
     },

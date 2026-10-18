@@ -1,4 +1,4 @@
-//! Shapes wound about Z (issue 123): a coil spring and a threaded rod.
+//! A threaded rod (issue 123), of any of the usual thread forms or one of its own.
 
 use crate::mesh::Mesh;
 use crate::vec3::Vec3;
@@ -10,70 +10,78 @@ const THREAD_ROWS: f64 = 12.0;
 /// The most rows a threaded rod is drawn with, however long and fine.
 const MOST_THREAD_ROWS: usize = 4000;
 
-/// A coil spring `diameter` across outside, of round wire `wire` thick, `turns` turns of `pitch`
-/// each, centred on the origin and starting on +X. The wire is narrowed to fit the coil, and the
-/// pitch widened to keep the turns apart.
-pub fn spring_mesh(diameter: f64, wire: f64, pitch: f64, turns: f64, segments: u32) -> Mesh {
-    let wire = wire.min(diameter * 0.9) / 2.0;
-    let coil = diameter / 2.0 - wire;
-    let pitch = pitch.max(wire * 2.2);
-    let per_turn = segments.max(8) as usize;
-    let steps = ((turns.max(0.05) * per_turn as f64).round() as usize).max(1);
-    let around = (segments as usize / 2).max(8);
-    let rise = pitch * steps as f64 / per_turn as f64;
-    // The wire's section lies in the plane through the axis, as for a gently pitched coil it nearly is.
-    let rings: Vec<Vec<Vec3>> = (0..=steps)
-        .map(|j| {
-            let theta = TAU * j as f64 / per_turn as f64;
-            let z = pitch * theta / TAU - rise / 2.0;
-            (0..around)
-                .map(|k| {
-                    let phi = TAU * k as f64 / around as f64;
-                    let r = coil + wire * phi.cos();
-                    Vec3::new(r * theta.cos(), r * theta.sin(), z + wire * phi.sin())
-                })
-                .collect()
-        })
-        .collect();
-    let mut mesh = Mesh::new();
-    for pair in rings.windows(2) {
-        for k in 0..around {
-            let l = (k + 1) % around;
-            mesh.push_triangle(pair[0][k], pair[1][k], pair[1][l]);
-            mesh.push_triangle(pair[0][k], pair[1][l], pair[0][l]);
+/// A thread's form over one pitch: its depth, and the shares of the pitch its crest, each flank and
+/// its root take, which add up to one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ThreadProfile {
+    pub depth: f64,
+    pub crest: f64,
+    pub flank: f64,
+    pub root: f64,
+}
+
+impl ThreadProfile {
+    /// The ISO metric basic profile: 60 degrees, five eighths of the sharp triangle deep.
+    pub fn iso(pitch: f64) -> ThreadProfile {
+        ThreadProfile { depth: 0.625 * 0.866_025 * pitch, crest: 1.0 / 8.0, flank: 5.0 / 16.0, root: 1.0 / 4.0 }
+    }
+
+    /// The trapezoidal (ISO 2904) form: 30 degrees, half a pitch deep, for lead screws.
+    pub fn trapezoidal(pitch: f64) -> ThreadProfile {
+        ThreadProfile::custom(pitch, 30.0, pitch / 2.0)
+    }
+
+    /// Square: upright flanks, half a pitch deep.
+    pub fn square(pitch: f64) -> ThreadProfile {
+        ThreadProfile { depth: pitch / 2.0, crest: 0.5, flank: 0.0, root: 0.5 }
+    }
+
+    /// Flanks `angle` degrees apart and `depth` deep, crest and root sharing what they leave. A depth the
+    /// angle has no room for in one pitch is cut to where the flanks meet.
+    pub fn custom(pitch: f64, angle: f64, depth: f64) -> ThreadProfile {
+        let slope = (angle.clamp(0.0, 179.0) / 2.0).to_radians().tan();
+        let pitch = pitch.max(1e-9);
+        let depth = if slope > 0.0 { depth.max(0.0).min(pitch / 2.0 / slope) } else { depth.max(0.0) };
+        let flank = (depth * slope / pitch).min(0.5);
+        let rest = (1.0 - 2.0 * flank) / 2.0;
+        ThreadProfile { depth, crest: rest, flank, root: rest }
+    }
+
+    /// How deep the thread is cut a share `u` of a pitch along, 0 at the crest and 1 at the root.
+    fn depth_at(&self, u: f64) -> f64 {
+        let flank = self.flank.max(1e-12);
+        match u {
+            u if u < self.crest => 0.0,
+            u if u < self.crest + self.flank => (u - self.crest) / flank,
+            u if u < self.crest + self.flank + self.root => 1.0,
+            u => (1.0 - (u - self.crest - self.flank - self.root) / flank).max(0.0),
         }
     }
-    for (ring, flip) in [(&rings[0], true), (&rings[steps], false)] {
-        let centre = ring.iter().fold(Vec3::ZERO, |sum, &p| sum + p) * (1.0 / around as f64);
-        for k in 0..around {
-            let (a, b) = (ring[k], ring[(k + 1) % around]);
-            if flip {
-                mesh.push_triangle(centre, a, b)
-            } else {
-                mesh.push_triangle(centre, b, a)
-            }
-        }
-    }
-    outward(mesh)
 }
 
 /// A rod `diameter` across its crests with a metric (ISO 60 degree) thread of `pitch`, `length`
 /// long and centred on the origin. To cut a matching inner thread, give a slightly larger one.
 pub fn threaded_rod_mesh(diameter: f64, pitch: f64, length: f64, segments: u32) -> Mesh {
+    thread_mesh(diameter, pitch, length, ThreadProfile::iso(pitch), false, segments)
+}
+
+/// [`threaded_rod_mesh`] with a thread of `profile`, winding the other way if `left_hand`. The core is
+/// kept to a tenth of the diameter, however deep the thread.
+pub fn thread_mesh(
+    diameter: f64,
+    pitch: f64,
+    length: f64,
+    profile: ThreadProfile,
+    left_hand: bool,
+    segments: u32,
+) -> Mesh {
     let major = diameter / 2.0;
     let pitch = pitch.max(1e-3);
-    // The basic profile's depth, five eighths of the sharp triangle's.
-    let minor = (major - 0.625 * 0.866_025 * pitch).max(major * 0.1);
+    let minor = (major - profile.depth).max(major * 0.1);
+    let hand = if left_hand { -1.0 } else { 1.0 };
     let radius = |theta: f64, z: f64| {
-        let u = ((z - pitch * theta / TAU) / pitch).rem_euclid(1.0);
-        let (crest, fall, root) = (1.0 / 8.0, 5.0 / 16.0, 1.0 / 4.0);
-        let depth = match u {
-            u if u < crest => 0.0,
-            u if u < crest + fall => (u - crest) / fall,
-            u if u < crest + fall + root => 1.0,
-            u => 1.0 - (u - crest - fall - root) / fall,
-        };
-        major - (major - minor) * depth
+        let u = ((z - hand * pitch * theta / TAU) / pitch).rem_euclid(1.0);
+        major - (major - minor) * profile.depth_at(u)
     };
     let columns = segments.max(8) as usize;
     let rows = ((length / pitch * THREAD_ROWS).ceil() as usize).clamp(2, MOST_THREAD_ROWS);
@@ -108,13 +116,5 @@ pub fn threaded_rod_mesh(diameter: f64, pitch: f64, length: f64, segments: u32) 
             }
         }
     }
-    outward(mesh)
-}
-
-/// The mesh turned outside out if it was built inside out.
-fn outward(mut mesh: Mesh) -> Mesh {
-    if mesh.signed_volume() < 0.0 {
-        mesh.flip_winding();
-    }
-    mesh
+    mesh.turned_outward()
 }

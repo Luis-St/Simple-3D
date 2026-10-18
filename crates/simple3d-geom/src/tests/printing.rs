@@ -43,6 +43,36 @@ pub(crate) fn a_spur_gear_reaches_its_tip_circle_and_keeps_its_bore() {
 }
 
 #[test]
+pub(crate) fn every_tooth_profile_reaches_its_own_tip_circle() {
+    // The circular arc's teeth end in a half circle on the pitch circle, short of one module.
+    let tips = [
+        (ToothProfile::Involute, 11.0),
+        (ToothProfile::Cycloidal, 11.0),
+        (ToothProfile::CircularArc, 10.0 + 10.0 * (PI / 40.0).tan()),
+    ];
+    for (profile, tip) in tips {
+        let mut spec = GearSpec::new(20, 1.0, 20.0, 5.0, 5.0);
+        spec.profile = profile;
+        let gear = gear_mesh(&spec);
+        assert_manifold("gear", &gear);
+        let farthest = gear.positions.iter().map(|p| p.x.hypot(p.y)).fold(0.0, f64::max);
+        assert!((farthest - tip).abs() < 1e-9 && gear.signed_volume() > 0.0, "{profile:?}: tip {farthest}");
+    }
+}
+
+#[test]
+pub(crate) fn a_keyway_leaves_nothing_inside_the_bore() {
+    // A keyway corner once landed on a tooth's radial root edge and was put at the middle, a sliver
+    // fanned across the face.
+    let mut spec = GearSpec::new(20, 1.0, 20.0, 5.0, 5.0);
+    spec.key = (2.0, 1.0);
+    let gear = gear_mesh(&spec);
+    assert_manifold("keyed gear", &gear);
+    let nearest = gear.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min);
+    assert!((nearest - 2.5).abs() < 1e-9, "a point {nearest} from the middle");
+}
+
+#[test]
 pub(crate) fn a_threaded_rod_winds_between_its_crests_and_roots() {
     let rod = threaded_rod_mesh(8.0, 1.25, 20.0, 32);
     assert_manifold("threaded rod", &rod);

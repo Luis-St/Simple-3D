@@ -93,6 +93,15 @@ impl ParamSpec {
         ParamSpec { lock_group: group, ..ParamSpec::length(key, label, default) }
     }
 
+    /// A length that may be negative, as an offset from the middle is.
+    pub(super) const fn signed_length(key: &'static str, label: &'static str, default: f64) -> ParamSpec {
+        ParamSpec { kind: ParamKind::Length { min: f64::NEG_INFINITY }, ..ParamSpec::length(key, label, default) }
+    }
+
+    pub(super) const fn flag(key: &'static str, label: &'static str, default: bool) -> ParamSpec {
+        ParamSpec { kind: ParamKind::Bool, default: ParamValue::Bool(default), ..ParamSpec::length(key, label, 0.0) }
+    }
+
     pub(super) const fn positive_length(key: &'static str, label: &'static str, default: f64) -> ParamSpec {
         ParamSpec { kind: ParamKind::Length { min: 1e-3 }, ..ParamSpec::length(key, label, default) }
     }
