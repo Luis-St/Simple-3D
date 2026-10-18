@@ -37,6 +37,18 @@ pub(crate) fn cancelling_the_popup_takes_the_shape_out_again() {
 }
 
 #[test]
+pub(crate) fn deselecting_the_shape_being_set_up_cancels_it() {
+    // A click into the viewport's empty space clears the selection.
+    let mut app = headless_app();
+    let before = app.scene.depth_first().len();
+    app.open_add_popup("box");
+    app.selection.clear();
+    crate::add_popup::show(&mut app, &egui::Context::default());
+    assert!(app.add_popup.is_none(), "the popup stayed open");
+    assert_eq!(app.scene.depth_first().len(), before, "the shape stayed in the document");
+}
+
+#[test]
 pub(crate) fn the_popup_chooses_where_its_shape_lands_without_changing_the_documents_choice() {
     let mut app = headless_app();
     app.cursor = Some(simple3d_geom::Vec3::new(30.0, 10.0, 0.0));

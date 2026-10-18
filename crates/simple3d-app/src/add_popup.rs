@@ -1,6 +1,7 @@
 //! Setting a shape up before it is added: from a palette tile's menu, an in-place popup with the
 //! shape's parameters, where it lands and its position. The shape is in the scene while the popup is
-//! open, so the viewport previews every change; Add keeps it as one undo step, Cancel takes it out.
+//! open, so the viewport previews every change; Add keeps it as one undo step, Cancel or deselecting
+//! it takes it out.
 //! Saved shapes are not offered it, having no parameters of their own.
 
 use crate::app::{App, Status};
@@ -138,6 +139,10 @@ pub(crate) fn show(app: &mut App, ctx: &egui::Context) {
     // Not modal, so the shape may be deleted or undone away while it is open.
     if app.add_popup.as_ref().is_some_and(|adding| !app.scene.contains(adding.id)) {
         app.add_popup = None;
+    }
+    // Clicking it away, in the viewport or the outliner, is taken as Cancel.
+    if app.add_popup.as_ref().is_some_and(|adding| !app.is_selected(adding.id)) {
+        app.cancel_add_popup();
     }
     let Some(adding) = app.add_popup.clone() else { return };
     let title = format!("Add a {}", adding.label.to_lowercase());
