@@ -34,6 +34,10 @@ pub(crate) fn measure_interact(app: &mut App, ui: &mut egui::Ui, response: &egui
 }
 
 pub(crate) fn select_under_cursor(app: &mut App, ui: &mut egui::Ui, view: &View) {
+    // The shape being set up keeps the selection until its popup's Add or Cancel is pressed.
+    if app.add_popup.is_some() {
+        return;
+    }
     let Some(cursor) = ui.input(|i| i.pointer.interact_pos()) else { return };
     let (origin, direction) = view.ray(cursor);
     let adding = ui.input(|i| i.modifiers.command || i.modifiers.shift);

@@ -14,6 +14,7 @@ mod handles;
 mod scrub;
 mod section;
 pub(crate) use camera::*;
+mod add_popup;
 mod arrange_tool;
 mod cursor;
 mod keys;
