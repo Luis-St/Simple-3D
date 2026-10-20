@@ -75,6 +75,8 @@ pub enum Glyph {
     InternalGear,
     /// A straight bar of teeth.
     Rack,
+    /// A cone of teeth seen from the side.
+    BevelGear,
     Spring,
 }
 
@@ -107,6 +109,7 @@ impl Glyph {
             "spur_gear" => Glyph::Gear,
             "internal_gear" => Glyph::InternalGear,
             "gear_rack" => Glyph::Rack,
+            "bevel_gear" => Glyph::BevelGear,
             "spring" => Glyph::Spring,
             _ => Glyph::Box,
         }

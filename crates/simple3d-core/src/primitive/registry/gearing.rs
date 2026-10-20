@@ -1,9 +1,9 @@
-//! The gears that mesh with the spur gear (issue 123): an internal gear for planetary gearboxes and a
-//! rack for a straight push.
+//! The gears that mesh with the spur gear (issue 123): an internal gear for planetary gearboxes, a rack
+//! for a straight push, and a bevel gear for shafts at a right angle.
 
 use super::super::*;
 use super::mechanics::gear_spec;
-use simple3d_geom::primitives::{self as gen, RackSpec, ToothProfile};
+use simple3d_geom::primitives::{self as gen, BevelSpec, RackSpec, ToothProfile};
 use std::f64::consts::PI;
 
 pub(super) const INTERNAL_GEAR: PrimitiveSpec = PrimitiveSpec {
@@ -66,5 +66,39 @@ fn rack_spec(p: &Params) -> RackSpec {
         height: p.num("height"),
         helix: if helical { p.num("helix_angle") } else { 0.0 },
         herringbone: helical && p.flag("herringbone"),
+    }
+}
+
+pub(super) const BEVEL_GEAR: PrimitiveSpec = PrimitiveSpec {
+    type_id: "bevel_gear",
+    label: "Bevel gear",
+    category: PRINTING,
+    params: &[
+        ParamSpec::count("teeth", "Teeth", 20, 3, 400),
+        ParamSpec::count("mate_teeth", "Teeth of the meshing gear", 20, 3, 400),
+        ParamSpec::positive_length("module", "Module at the back", 1.0),
+        ParamSpec::positive_length("face_width", "Face width", 4.0),
+        ParamSpec::length("bore", "Bore diameter (0 = solid)", 4.0),
+        ParamSpec::choice("profile", "Tooth profile", GEAR_PROFILE),
+    ],
+    segmented: false,
+    build: |p, _seg| gen::bevel_gear_mesh(&bevel_spec(p)),
+    axes: |p| {
+        // Across the tips at the back, where a tooth points both ways along the axis.
+        let spec = bevel_spec(p);
+        let tips = Some(AxisDriver { param: "module", factor: 2.0 * spec.tip_radius() / spec.module });
+        let teeth = spec.teeth.max(3);
+        [tips.filter(|_| teeth % 2 == 0), tips.filter(|_| teeth % 4 == 0), None]
+    },
+};
+
+fn bevel_spec(p: &Params) -> BevelSpec {
+    BevelSpec {
+        teeth: p.int("teeth"),
+        mate_teeth: p.int("mate_teeth"),
+        module: p.num("module").max(1e-9),
+        profile: ToothProfile::from_index(p.int("profile")),
+        face_width: p.num("face_width"),
+        bore: p.num("bore"),
     }
 }

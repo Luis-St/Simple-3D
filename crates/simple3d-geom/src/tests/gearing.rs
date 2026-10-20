@@ -33,3 +33,24 @@ pub(crate) fn a_rack_is_as_long_as_its_teeth_and_as_high_as_it_is_given() {
         assert_manifold("herringbone rack", &rack_mesh(&spec));
     }
 }
+
+#[test]
+pub(crate) fn a_bevel_gear_is_as_wide_as_its_tips_at_the_back() {
+    for profile in [ToothProfile::Involute, ToothProfile::Cycloidal, ToothProfile::CircularArc] {
+        for mate_teeth in [20, 40] {
+            let spec = BevelSpec { teeth: 20, mate_teeth, module: 1.0, profile, face_width: 4.0, bore: 4.0 };
+            let gear = bevel_gear_mesh(&spec);
+            assert_manifold("bevel gear", &gear);
+            let (lo, hi) = gear.bounds().unwrap();
+            let wide = 2.0 * spec.tip_radius();
+            assert!(
+                (hi.x - lo.x - wide).abs() < 1e-9 && (hi.y - lo.y - wide).abs() < 1e-9,
+                "{profile:?}: {lo:?} to {hi:?}"
+            );
+            assert!(
+                (hi.z + lo.z).abs() < 1e-9 && gear.signed_volume() > 0.0,
+                "{profile:?} is off centre or inside out"
+            );
+        }
+    }
+}

@@ -1,10 +1,12 @@
 //! A spur gear (issue 123) of involute, cycloidal or circular-arc teeth, straight, helical or herringbone,
 //! with a hub and a keyway; the other kinds of gear build on its teeth.
 
+mod bevel;
 mod body;
 mod internal;
 mod rack;
 mod tooth;
+pub use bevel::{bevel_gear_mesh, BevelSpec};
 pub use body::Body;
 pub use internal::internal_gear_mesh;
 pub use rack::{rack_mesh, RackSpec};

@@ -30,6 +30,13 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             outline.extend([(0.92, 0.52), (0.92, 0.80)]);
             pen.closed(&outline);
         }
+        // A cone's frustum from the side, its teeth running up towards the apex.
+        Glyph::BevelGear => {
+            pen.closed(&[(0.08, 0.78), (0.92, 0.78), (0.70, 0.30), (0.30, 0.30)]);
+            for (bottom, top) in [(0.30, 0.42), (0.50, 0.50), (0.70, 0.58)] {
+                pen.line(&[(bottom, 0.78), (top, 0.30)]);
+            }
+        }
         _ => {}
     }
 }
