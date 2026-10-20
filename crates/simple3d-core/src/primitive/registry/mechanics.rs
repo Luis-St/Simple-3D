@@ -1,7 +1,7 @@
 //! The moving parts printed for a mechanism (issue 123): threaded rods, gears and springs.
 
 use super::super::*;
-use simple3d_geom::primitives::{self as gen, GearSpec, SpringEnds, ThreadProfile, ToothProfile};
+use simple3d_geom::primitives::{self as gen, GearSpec, HubSide, SpringEnds, ThreadProfile, ToothProfile};
 
 pub(super) const THREADED_ROD: PrimitiveSpec = PrimitiveSpec {
     type_id: "threaded_rod",
@@ -52,6 +52,7 @@ pub(super) const SPUR_GEAR: PrimitiveSpec = PrimitiveSpec {
         ParamSpec::choice("hub", "Hub", NONE_OR_HUB),
         ParamSpec::positive_length("hub_diameter", "Hub diameter", 10.0).when("hub", 1),
         ParamSpec::positive_length("hub_height", "Hub height", 5.0).when("hub", 1),
+        ParamSpec::choice("hub_side", "Hub on", HUB_SIDE).when("hub", 1),
         ParamSpec::choice("keyway", "Keyway", NONE_OR_KEYWAY),
         ParamSpec::positive_length("key_width", "Keyway width", 2.0).when("keyway", 1),
         ParamSpec::positive_length("key_depth", "Keyway depth", 1.0).when("keyway", 1),
@@ -81,6 +82,7 @@ pub(super) fn gear_spec(p: &Params) -> GearSpec {
     spec.profile = ToothProfile::from_index(p.int("profile"));
     if p.int("hub") == 1 {
         spec.hub = (p.num("hub_diameter"), p.num("hub_height"));
+        spec.hub_side = HubSide::from_index(p.int("hub_side"));
     }
     if p.int("keyway") == 1 {
         spec.key = (p.num("key_width"), p.num("key_depth"));

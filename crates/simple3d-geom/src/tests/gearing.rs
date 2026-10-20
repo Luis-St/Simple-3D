@@ -88,3 +88,21 @@ pub(crate) fn a_sprocket_seats_its_rollers_on_the_pitch_circle() {
         assert!(seat > 2.5 && seat < 2.8 && wheel.signed_volume() > 0.0, "{teeth} teeth: seat {seat}");
     }
 }
+
+#[test]
+pub(crate) fn a_hub_stands_on_the_side_it_is_put() {
+    for (side, low, high) in [(HubSide::Top, -4.0, 1.0), (HubSide::Bottom, -1.0, 4.0), (HubSide::Both, -2.5, 2.5)] {
+        let mut spec = GearSpec::new(20, 1.0, 20.0, 5.0, 5.0);
+        spec.helix = 20.0;
+        spec.hub = (10.0, 3.0);
+        spec.hub_side = side;
+        let gear = gear_mesh(&spec);
+        assert_manifold("gear with a hub", &gear);
+        // The teeth's faces, the hub taking up the rest of the height.
+        let teeth: Vec<f64> = gear.positions.iter().filter(|p| p.x.hypot(p.y) > 10.5).map(|p| p.z).collect();
+        let (lo, hi) = teeth.iter().fold((f64::MAX, f64::MIN), |(a, b), &z| (a.min(z), b.max(z)));
+        let height = if side == HubSide::Both { 11.0 } else { 8.0 };
+        assert_bounds("gear with a hub", &gear, Vec3::new(22.0, 22.0, height), 1e-9);
+        assert!((lo - low).abs() < 1e-9 && (hi - high).abs() < 1e-9, "{side:?}: teeth from {lo} to {hi}");
+    }
+}

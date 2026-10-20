@@ -28,7 +28,7 @@ pub use fastener::{hex_nut_mesh, screw_hole_mesh, screw_hole_shaped_mesh, ScrewH
 mod gear;
 pub use gear::{
     bevel_gear_mesh, gear_mesh, internal_gear_mesh, rack_mesh, sprocket_mesh, spur_gear_mesh, worm_mesh, BevelSpec,
-    Body, GearSpec, RackSpec, SprocketSpec, ToothProfile,
+    Body, GearSpec, HubSide, RackSpec, SprocketSpec, ToothProfile,
 };
 mod spring;
 pub use spring::{coil_spring_mesh, spring_mesh, spring_pitch_for_height, SpringEnds};

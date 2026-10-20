@@ -4,7 +4,7 @@
 
 use super::super::*;
 use super::mechanics::gear_spec;
-use simple3d_geom::primitives::{self as gen, BevelSpec, Body, RackSpec, SprocketSpec, ToothProfile};
+use simple3d_geom::primitives::{self as gen, BevelSpec, Body, HubSide, RackSpec, SprocketSpec, ToothProfile};
 use std::f64::consts::PI;
 
 pub(super) const INTERNAL_GEAR: PrimitiveSpec = PrimitiveSpec {
@@ -139,6 +139,7 @@ pub(super) const SPROCKET: PrimitiveSpec = PrimitiveSpec {
         ParamSpec::choice("hub", "Hub", NONE_OR_HUB),
         ParamSpec::positive_length("hub_diameter", "Hub diameter", 12.0).when("hub", 1),
         ParamSpec::positive_length("hub_height", "Hub height", 5.0).when("hub", 1),
+        ParamSpec::choice("hub_side", "Hub on", HUB_SIDE).when("hub", 1),
         ParamSpec::choice("keyway", "Keyway", NONE_OR_KEYWAY),
         ParamSpec::positive_length("key_width", "Keyway width", 2.0).when("keyway", 1),
         ParamSpec::positive_length("key_depth", "Keyway depth", 1.0).when("keyway", 1),
@@ -160,6 +161,7 @@ fn sprocket_spec(p: &Params) -> SprocketSpec {
     let mut body = Body::new(p.num("thickness"), p.num("bore"));
     if p.int("hub") == 1 {
         body.hub = (p.num("hub_diameter"), p.num("hub_height"));
+        body.hub_side = HubSide::from_index(p.int("hub_side"));
     }
     if p.int("keyway") == 1 {
         body.key = (p.num("key_width"), p.num("key_depth"));

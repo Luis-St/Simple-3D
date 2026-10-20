@@ -9,7 +9,7 @@ mod sprocket;
 mod tooth;
 mod worm;
 pub use bevel::{bevel_gear_mesh, BevelSpec};
-pub use body::Body;
+pub use body::{Body, HubSide};
 pub use internal::internal_gear_mesh;
 pub use rack::{rack_mesh, RackSpec};
 pub use sprocket::{sprocket_mesh, SprocketSpec};
@@ -35,6 +35,7 @@ pub struct GearSpec {
     pub herringbone: bool,
     /// A collar on top: its diameter and height; none while either is 0 or it is no wider than the bore.
     pub hub: (f64, f64),
+    pub hub_side: HubSide,
     /// A keyway in the bore: its width and how far it reaches past the bore; none while either is 0.
     pub key: (f64, f64),
 }
@@ -51,6 +52,7 @@ impl GearSpec {
             helix: 0.0,
             herringbone: false,
             hub: (0.0, 0.0),
+            hub_side: HubSide::Top,
             key: (0.0, 0.0),
         }
     }
@@ -77,6 +79,7 @@ impl GearSpec {
             thickness: self.thickness,
             bore: self.bore,
             hub: self.hub,
+            hub_side: self.hub_side,
             key: self.key,
             twist: self.helix.to_radians().tan() / self.pitch_radius().max(1e-9),
             herringbone: self.herringbone,

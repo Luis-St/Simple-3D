@@ -6,6 +6,34 @@ use crate::revolve::grid_mesh;
 use crate::vec3::Vec3;
 use std::f64::consts::{PI, TAU};
 
+/// Which face of a wheel its hub stands on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HubSide {
+    Top,
+    Bottom,
+    Both,
+}
+
+impl HubSide {
+    /// From the registry's choice index, in declaration order.
+    pub fn from_index(index: u32) -> HubSide {
+        match index {
+            1 => HubSide::Bottom,
+            2 => HubSide::Both,
+            _ => HubSide::Top,
+        }
+    }
+
+    /// The hub's height above the top face and below the bottom one, for a hub `height` tall.
+    fn heights(self, height: f64) -> (f64, f64) {
+        match self {
+            HubSide::Top => (height, 0.0),
+            HubSide::Bottom => (0.0, height),
+            HubSide::Both => (height, height),
+        }
+    }
+}
+
 /// The wheel round a toothed outline; [`Body::mesh`] builds it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Body {
@@ -13,6 +41,7 @@ pub struct Body {
     pub bore: f64,
     /// A collar on top: its diameter and height; none while either is 0 or it is no wider than the bore.
     pub hub: (f64, f64),
+    pub hub_side: HubSide,
     /// A keyway in the bore: its width and how far it reaches past the bore; none while either is 0.
     pub key: (f64, f64),
     /// How far the teeth turn per unit of height, in radians: 0 for straight teeth.
@@ -24,7 +53,15 @@ pub struct Body {
 impl Body {
     /// A straight wheel of `thickness` round a bore, with no hub or keyway.
     pub fn new(thickness: f64, bore: f64) -> Body {
-        Body { thickness, bore, hub: (0.0, 0.0), key: (0.0, 0.0), twist: 0.0, herringbone: false }
+        Body {
+            thickness,
+            bore,
+            hub: (0.0, 0.0),
+            hub_side: HubSide::Top,
+            key: (0.0, 0.0),
+            twist: 0.0,
+            herringbone: false,
+        }
     }
 
     /// The bore's radius, narrowed to leave a rim under teeth whose roots are `root` out.
@@ -53,9 +90,10 @@ impl Body {
         (hole > 1e-6 && half > 1e-6 && reach > hole + 1e-6).then_some((half, reach))
     }
 
-    /// The whole height, the hub's included.
+    /// The whole height, the hub's included on each side it stands on.
     pub fn height(&self, root: f64) -> f64 {
-        self.thickness + self.hub_built(root).1
+        let (above, below) = self.hub_side.heights(self.hub_built(root).1);
+        self.thickness + above + below
     }
 
     /// How far the teeth have turned `t` up from the bottom face.
@@ -106,20 +144,27 @@ impl Body {
             })
             .collect();
         let (hub, hub_height) = self.hub_built(root);
-        let bottom = -self.height(root) / 2.0;
+        let (above, below) = self.hub_side.heights(hub_height);
+        let bottom = -self.height(root) / 2.0 + below;
         let top = bottom + self.thickness;
+        // The hub rings follow the teeth round, as the faces between them are paired point by point.
+        let collar: Vec<(f64, f64)> = directions.iter().map(|&a| (hub * a.cos(), hub * a.sin())).collect();
         let mut rings = self.levels(&outline, bottom);
         let mut summit = top;
-        if hub_height > 0.0 {
-            // The hub ring follows the top's teeth round, as the face between them is paired point by point.
-            let collar: Vec<(f64, f64)> = directions.iter().map(|&a| (hub * a.cos(), hub * a.sin())).collect();
+        if above > 0.0 {
             let turn = self.turn_at(self.thickness);
             rings.push(turned(&collar, turn, top));
-            summit = top + hub_height;
+            summit = top + above;
             rings.push(turned(&collar, turn, summit));
         }
+        let floor = bottom - below;
         rings.push(turned(&inner, 0.0, summit));
-        rings.push(turned(&inner, 0.0, bottom));
+        rings.push(turned(&inner, 0.0, floor));
+        if below > 0.0 {
+            // Back up round the hub below to the bottom face, which has not turned.
+            rings.push(turned(&collar, 0.0, floor));
+            rings.push(turned(&collar, 0.0, bottom));
+        }
         grid_mesh(&rings, true)
     }
 }

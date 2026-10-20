@@ -77,4 +77,6 @@ const GEAR_PROFILE: &[&str] = &["Involute", "Cycloidal", "Circular arc"];
 
 const NONE_OR_HUB: &[&str] = &["None", "Hub"];
 
+const HUB_SIDE: &[&str] = &["Top", "Bottom", "Both sides"];
+
 const NONE_OR_KEYWAY: &[&str] = &["None", "Keyway"];
