@@ -71,6 +71,8 @@ pub enum Glyph {
     ScrewHole,
     ThreadedRod,
     Gear,
+    /// A ring with teeth on its inside.
+    InternalGear,
     Spring,
 }
 
@@ -101,6 +103,7 @@ impl Glyph {
             "screw_hole" => Glyph::ScrewHole,
             "threaded_rod" => Glyph::ThreadedRod,
             "spur_gear" => Glyph::Gear,
+            "internal_gear" => Glyph::InternalGear,
             "spring" => Glyph::Spring,
             _ => Glyph::Box,
         }

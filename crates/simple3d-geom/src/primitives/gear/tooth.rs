@@ -1,6 +1,6 @@
 //! The tooth profiles a gear is cut with, each a flank of its own shape.
 
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 
 /// Points along each flank of a tooth.
 const FLANK_POINTS: usize = 6;
@@ -107,4 +107,38 @@ pub(super) fn flank(
                 .collect()
         }
     }
+}
+
+/// The outline of `teeth` teeth with `flank` as their trailing flank, counter-clockwise from the tooth
+/// on +X, every point further round than the last.
+pub(super) fn outline(flank: &[(f64, f64)], teeth: u32, root: f64, tip: f64) -> Vec<(f64, f64)> {
+    let z = teeth as f64;
+    // Kept off the middle, where the flanks of a small gear with a steep angle would cross, and short
+    // of the gap's middle, where a widened tooth would meet the next.
+    let flank: Vec<(f64, f64)> = flank.iter().map(|&(r, off)| (r, off.clamp(PI / (20.0 * z), PI / z * 0.95))).collect();
+    // Below its lowest point the flank drops radially to the root.
+    let (start, foot) = flank[0];
+    let polar = |r: f64, angle: f64| (r * angle.cos(), r * angle.sin());
+    let mut out = Vec::new();
+    for tooth in 0..teeth {
+        let middle = TAU * tooth as f64 / z;
+        // The tip's middle first, so the tooth on +X has its point on the axis.
+        out.push(polar(tip, middle));
+        for &(r, off) in flank.iter().rev() {
+            out.push(polar(r, middle + off));
+        }
+        if root < start {
+            out.push(polar(root, middle + foot));
+        }
+        // The gap's middle, then the next tooth's leading flank up to its tip.
+        let next = middle + TAU / z;
+        out.push(polar(root, (middle + next) / 2.0));
+        if root < start {
+            out.push(polar(root, next - foot));
+        }
+        for &(r, off) in &flank {
+            out.push(polar(r, next - off));
+        }
+    }
+    out
 }

@@ -3,6 +3,7 @@
 mod boxes;
 mod cones;
 mod flat;
+mod gearing;
 mod mechanics;
 mod polyhedra;
 mod printing;
@@ -44,5 +45,6 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
     printing::SCREW_HOLE,
     mechanics::THREADED_ROD,
     mechanics::SPUR_GEAR,
+    gearing::INTERNAL_GEAR,
     mechanics::SPRING,
 ];

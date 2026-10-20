@@ -7,6 +7,7 @@ mod boolean_disjoint;
 mod boolean_robust;
 mod boolean_shape;
 mod dimensions;
+mod gearing;
 mod planar;
 mod primitives;
 mod printing;
