@@ -1,5 +1,5 @@
 //! The gears that mesh with the spur gear (issue 123): an internal gear for planetary gearboxes, a rack
-//! for a straight push, and a bevel gear for shafts at a right angle.
+//! for a straight push, a bevel gear for shafts at a right angle, and a worm for a large reduction.
 
 use super::super::*;
 use super::mechanics::gear_spec;
@@ -102,3 +102,24 @@ fn bevel_spec(p: &Params) -> BevelSpec {
         bore: p.num("bore"),
     }
 }
+
+pub(super) const WORM: PrimitiveSpec = PrimitiveSpec {
+    type_id: "worm",
+    label: "Worm",
+    category: PRINTING,
+    // It drives a helical spur gear of its module, helix angle atan(module * starts / pitch diameter).
+    params: &[
+        ParamSpec::positive_length("module", "Module (pitch / pi)", 1.0),
+        ParamSpec::count("starts", "Starts", 1, 1, 8),
+        ParamSpec::positive_length("pitch_diameter", "Pitch diameter", 10.0),
+        ParamSpec::positive_length("length", "Length (Z)", 20.0),
+        ParamSpec::flag("left_hand", "Left-handed", false),
+    ],
+    segmented: true,
+    build: |p, seg| {
+        let (module, starts, length) = (p.num("module"), p.int("starts"), p.num("length"));
+        gen::worm_mesh(module, starts, p.num("pitch_diameter"), length, p.flag("left_hand"), seg)
+    },
+    // The thread winds past the axes between the rows it is drawn with, so only Z has a handle.
+    axes: |_p| [None, None, Some(AxisDriver::direct("length"))],
+};

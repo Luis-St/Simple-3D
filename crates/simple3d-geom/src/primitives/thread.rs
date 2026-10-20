@@ -75,12 +75,27 @@ pub fn thread_mesh(
     left_hand: bool,
     segments: u32,
 ) -> Mesh {
+    helix_mesh(diameter, pitch, 1, length, profile, left_hand, segments)
+}
+
+/// [`thread_mesh`] with `starts` threads wound side by side, each advancing that many pitches a turn,
+/// as a worm has.
+pub(super) fn helix_mesh(
+    diameter: f64,
+    pitch: f64,
+    starts: u32,
+    length: f64,
+    profile: ThreadProfile,
+    left_hand: bool,
+    segments: u32,
+) -> Mesh {
     let major = diameter / 2.0;
     let pitch = pitch.max(1e-3);
+    let lead = pitch * starts.max(1) as f64;
     let minor = (major - profile.depth).max(major * 0.1);
     let hand = if left_hand { -1.0 } else { 1.0 };
     let radius = |theta: f64, z: f64| {
-        let u = ((z - hand * pitch * theta / TAU) / pitch).rem_euclid(1.0);
+        let u = ((z - hand * lead * theta / TAU) / pitch).rem_euclid(1.0);
         major - (major - minor) * profile.depth_at(u)
     };
     let columns = segments.max(8) as usize;

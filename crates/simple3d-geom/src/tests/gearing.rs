@@ -54,3 +54,17 @@ pub(crate) fn a_bevel_gear_is_as_wide_as_its_tips_at_the_back() {
         }
     }
 }
+
+#[test]
+pub(crate) fn a_worm_reaches_a_module_past_its_pitch_diameter() {
+    for starts in [1, 3] {
+        let worm = worm_mesh(1.0, starts, 10.0, 20.0, false, 48);
+        assert_manifold("worm", &worm);
+        let (lo, hi) = worm.bounds().unwrap();
+        assert!((hi.z - lo.z - 20.0).abs() < 1e-9 && worm.signed_volume() > 0.0);
+        // Off the axis, where the end caps are fanned from.
+        let radii: Vec<f64> = worm.positions.iter().map(|p| p.x.hypot(p.y)).filter(|&r| r > 1e-9).collect();
+        let (inner, outer) = radii.iter().fold((f64::MAX, 0.0f64), |(a, b), &r| (a.min(r), b.max(r)));
+        assert!((outer - 6.0).abs() < 1e-9 && (inner - 3.75).abs() < 1e-9, "{starts} starts: {inner} to {outer}");
+    }
+}

@@ -37,6 +37,16 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
                 pen.line(&[(bottom, 0.78), (top, 0.30)]);
             }
         }
+        // A shaft lying across, its thread drawn as broad slanted crests standing past it.
+        Glyph::Worm => {
+            pen.line(&[(0.04, 0.50), (0.14, 0.50)]);
+            pen.line(&[(0.86, 0.50), (0.96, 0.50)]);
+            pen.closed(&[(0.14, 0.36), (0.86, 0.36), (0.86, 0.64), (0.14, 0.64)]);
+            for i in 0..4 {
+                let x = 0.20 + 0.18 * i as f32;
+                pen.closed(&[(x, 0.22), (x + 0.08, 0.22), (x + 0.12, 0.78), (x + 0.04, 0.78)]);
+            }
+        }
         _ => {}
     }
 }
