@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::primitives::*;
+use std::f64::consts::PI;
 
 #[test]
 pub(crate) fn an_internal_gear_has_its_teeth_inside_a_rim_of_its_diameter() {
@@ -14,5 +15,21 @@ pub(crate) fn an_internal_gear_has_its_teeth_inside_a_rim_of_its_diameter() {
         // The teeth end a module inside the pitch circle.
         let nearest = ring.positions.iter().map(|p| p.x.hypot(p.y)).fold(f64::MAX, f64::min);
         assert!((nearest - 14.0).abs() < 1e-9 && ring.signed_volume() > 0.0, "{profile:?}: teeth reach {nearest}");
+    }
+}
+
+#[test]
+pub(crate) fn a_rack_is_as_long_as_its_teeth_and_as_high_as_it_is_given() {
+    for profile in [ToothProfile::Involute, ToothProfile::Cycloidal, ToothProfile::CircularArc] {
+        let mut spec =
+            RackSpec { teeth: 10, module: 1.0, profile, thickness: 5.0, height: 8.0, helix: 0.0, herringbone: false };
+        let rack = rack_mesh(&spec);
+        assert_manifold("rack", &rack);
+        assert_bounds("rack", &rack, Vec3::new(10.0 * PI, 8.0, 5.0), 1e-9);
+        assert!(rack.signed_volume() > 0.0, "{profile:?} is inside out");
+        spec.helix = 20.0;
+        assert_manifold("helical rack", &rack_mesh(&spec));
+        spec.herringbone = true;
+        assert_manifold("herringbone rack", &rack_mesh(&spec));
     }
 }

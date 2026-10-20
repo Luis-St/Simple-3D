@@ -73,6 +73,8 @@ pub enum Glyph {
     Gear,
     /// A ring with teeth on its inside.
     InternalGear,
+    /// A straight bar of teeth.
+    Rack,
     Spring,
 }
 
@@ -104,6 +106,7 @@ impl Glyph {
             "threaded_rod" => Glyph::ThreadedRod,
             "spur_gear" => Glyph::Gear,
             "internal_gear" => Glyph::InternalGear,
+            "gear_rack" => Glyph::Rack,
             "spring" => Glyph::Spring,
             _ => Glyph::Box,
         }

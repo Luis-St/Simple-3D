@@ -26,7 +26,7 @@ pub use platonic::{dodecahedron_mesh, icosahedron_mesh, octahedron_mesh, tetrahe
 mod fastener;
 pub use fastener::{hex_nut_mesh, screw_hole_mesh, screw_hole_shaped_mesh, ScrewHead};
 mod gear;
-pub use gear::{gear_mesh, internal_gear_mesh, spur_gear_mesh, Body, GearSpec, ToothProfile};
+pub use gear::{gear_mesh, internal_gear_mesh, rack_mesh, spur_gear_mesh, Body, GearSpec, RackSpec, ToothProfile};
 mod spring;
 pub use spring::{coil_spring_mesh, spring_mesh, spring_pitch_for_height, SpringEnds};
 mod thread;

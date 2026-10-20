@@ -3,9 +3,11 @@
 
 mod body;
 mod internal;
+mod rack;
 mod tooth;
 pub use body::Body;
 pub use internal::internal_gear_mesh;
+pub use rack::{rack_mesh, RackSpec};
 pub use tooth::ToothProfile;
 
 use crate::mesh::Mesh;

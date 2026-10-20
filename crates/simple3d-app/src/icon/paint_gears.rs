@@ -20,6 +20,16 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             }
             pen.closed(&outline);
         }
+        // A bar seen from the side, its teeth along the top.
+        Glyph::Rack => {
+            let mut outline = vec![(0.08, 0.80), (0.08, 0.52)];
+            for i in 0..4 {
+                let x = 0.08 + 0.21 * i as f32;
+                outline.extend([(x + 0.03, 0.52), (x + 0.07, 0.26), (x + 0.14, 0.26), (x + 0.18, 0.52)]);
+            }
+            outline.extend([(0.92, 0.52), (0.92, 0.80)]);
+            pen.closed(&outline);
+        }
         _ => {}
     }
 }

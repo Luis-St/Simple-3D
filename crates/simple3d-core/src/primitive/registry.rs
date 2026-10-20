@@ -46,5 +46,6 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
     mechanics::THREADED_ROD,
     mechanics::SPUR_GEAR,
     gearing::INTERNAL_GEAR,
+    gearing::RACK,
     mechanics::SPRING,
 ];
