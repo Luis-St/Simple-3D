@@ -47,6 +47,25 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
                 pen.closed(&[(x, 0.22), (x + 0.08, 0.22), (x + 0.12, 0.78), (x + 0.04, 0.78)]);
             }
         }
+        // Pointed teeth round a wheel, a round seat for a roller between each two.
+        Glyph::Sprocket => {
+            let teeth = 8;
+            let mut outline = Vec::new();
+            for i in 0..teeth {
+                let middle = 2.0 * PI * i as f32 / teeth as f32;
+                let step = PI / teeth as f32;
+                outline.push((0.5 + 0.43 * middle.cos(), 0.5 + 0.43 * middle.sin()));
+                // The seat: a half circle sunk between this tooth and the next.
+                let seat = middle + step;
+                let (cx, cy) = (0.5 + 0.36 * seat.cos(), 0.5 + 0.36 * seat.sin());
+                for k in 0..=6 {
+                    let a = seat + 1.5 * PI - PI * k as f32 / 6.0;
+                    outline.push((cx + 0.08 * a.cos(), cy + 0.08 * a.sin()));
+                }
+            }
+            pen.closed(&outline);
+            pen.circle(0.5, 0.5, 0.10);
+        }
         _ => {}
     }
 }

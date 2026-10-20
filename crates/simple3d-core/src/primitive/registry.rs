@@ -49,5 +49,6 @@ pub static REGISTRY: &[PrimitiveSpec] = &[
     gearing::RACK,
     gearing::BEVEL_GEAR,
     gearing::WORM,
+    gearing::SPROCKET,
     mechanics::SPRING,
 ];

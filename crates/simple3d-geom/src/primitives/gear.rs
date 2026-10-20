@@ -5,12 +5,14 @@ mod bevel;
 mod body;
 mod internal;
 mod rack;
+mod sprocket;
 mod tooth;
 mod worm;
 pub use bevel::{bevel_gear_mesh, BevelSpec};
 pub use body::Body;
 pub use internal::internal_gear_mesh;
 pub use rack::{rack_mesh, RackSpec};
+pub use sprocket::{sprocket_mesh, SprocketSpec};
 pub use tooth::ToothProfile;
 pub use worm::worm_mesh;
 

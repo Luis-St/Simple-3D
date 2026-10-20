@@ -1,9 +1,10 @@
 //! The gears that mesh with the spur gear (issue 123): an internal gear for planetary gearboxes, a rack
-//! for a straight push, a bevel gear for shafts at a right angle, and a worm for a large reduction.
+//! for a straight push, a bevel gear for shafts at a right angle and a worm for a large reduction; and
+//! a sprocket for roller chain.
 
 use super::super::*;
 use super::mechanics::gear_spec;
-use simple3d_geom::primitives::{self as gen, BevelSpec, RackSpec, ToothProfile};
+use simple3d_geom::primitives::{self as gen, BevelSpec, Body, RackSpec, SprocketSpec, ToothProfile};
 use std::f64::consts::PI;
 
 pub(super) const INTERNAL_GEAR: PrimitiveSpec = PrimitiveSpec {
@@ -123,3 +124,45 @@ pub(super) const WORM: PrimitiveSpec = PrimitiveSpec {
     // The thread winds past the axes between the rows it is drawn with, so only Z has a handle.
     axes: |_p| [None, None, Some(AxisDriver::direct("length"))],
 };
+
+pub(super) const SPROCKET: PrimitiveSpec = PrimitiveSpec {
+    type_id: "sprocket",
+    label: "Chain sprocket",
+    category: PRINTING,
+    // Sized for ISO 05B chain, 8 mm pitch with 5 mm rollers.
+    params: &[
+        ParamSpec::count("teeth", "Teeth", 18, 6, 200),
+        ParamSpec::positive_length("pitch", "Chain pitch", 8.0),
+        ParamSpec::positive_length("roller", "Roller diameter", 5.0),
+        ParamSpec::positive_length("thickness", "Thickness (Z)", 2.8),
+        ParamSpec::length("bore", "Bore diameter (0 = solid)", 5.0),
+        ParamSpec::choice("hub", "Hub", NONE_OR_HUB),
+        ParamSpec::positive_length("hub_diameter", "Hub diameter", 12.0).when("hub", 1),
+        ParamSpec::positive_length("hub_height", "Hub height", 5.0).when("hub", 1),
+        ParamSpec::choice("keyway", "Keyway", NONE_OR_KEYWAY),
+        ParamSpec::positive_length("key_width", "Keyway width", 2.0).when("keyway", 1),
+        ParamSpec::positive_length("key_depth", "Keyway depth", 1.0).when("keyway", 1),
+    ],
+    segmented: false,
+    build: |p, _seg| gen::sprocket_mesh(&sprocket_spec(p)),
+    axes: |p| {
+        // Across the tips, where a tooth points both ways along the axis.
+        let spec = sprocket_spec(p);
+        let tips = Some(AxisDriver { param: "pitch", factor: 2.0 * spec.tip_radius() / spec.pitch });
+        let teeth = spec.teeth.max(6);
+        let z = (spec.body.hub_built(spec.root_radius()).1 == 0.0).then_some(AxisDriver::direct("thickness"));
+        [tips.filter(|_| teeth % 2 == 0), tips.filter(|_| teeth % 4 == 0), z]
+    },
+};
+
+/// The sprocket the parameters describe; a hidden hub or keyway keeps its values but builds nothing.
+fn sprocket_spec(p: &Params) -> SprocketSpec {
+    let mut body = Body::new(p.num("thickness"), p.num("bore"));
+    if p.int("hub") == 1 {
+        body.hub = (p.num("hub_diameter"), p.num("hub_height"));
+    }
+    if p.int("keyway") == 1 {
+        body.key = (p.num("key_width"), p.num("key_depth"));
+    }
+    SprocketSpec { teeth: p.int("teeth"), pitch: p.num("pitch").max(1e-9), roller: p.num("roller"), body }
+}

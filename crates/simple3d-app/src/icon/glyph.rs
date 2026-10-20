@@ -79,6 +79,8 @@ pub enum Glyph {
     BevelGear,
     /// A screw with deep, broad threads.
     Worm,
+    /// A wheel with round seats between its teeth.
+    Sprocket,
     Spring,
 }
 
@@ -113,6 +115,7 @@ impl Glyph {
             "gear_rack" => Glyph::Rack,
             "bevel_gear" => Glyph::BevelGear,
             "worm" => Glyph::Worm,
+            "sprocket" => Glyph::Sprocket,
             "spring" => Glyph::Spring,
             _ => Glyph::Box,
         }

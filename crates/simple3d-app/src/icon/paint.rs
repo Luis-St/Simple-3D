@@ -9,7 +9,9 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
         Glyph::HexNut | Glyph::HexStandoff | Glyph::ScrewHole | Glyph::ThreadedRod | Glyph::Gear | Glyph::Spring => {
             super::paint_printing::paint(pen, glyph)
         }
-        Glyph::InternalGear | Glyph::Rack | Glyph::BevelGear | Glyph::Worm => super::paint_gears::paint(pen, glyph),
+        Glyph::InternalGear | Glyph::Rack | Glyph::BevelGear | Glyph::Worm | Glyph::Sprocket => {
+            super::paint_gears::paint(pen, glyph)
+        }
         Glyph::Move => {
             pen.arrow((0.5, 0.5), (0.5, 0.08));
             pen.arrow((0.5, 0.5), (0.5, 0.92));

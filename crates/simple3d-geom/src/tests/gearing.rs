@@ -68,3 +68,23 @@ pub(crate) fn a_worm_reaches_a_module_past_its_pitch_diameter() {
         assert!((outer - 6.0).abs() < 1e-9 && (inner - 3.75).abs() < 1e-9, "{starts} starts: {inner} to {outer}");
     }
 }
+
+#[test]
+pub(crate) fn a_sprocket_seats_its_rollers_on_the_pitch_circle() {
+    for teeth in [6, 18, 40] {
+        let spec = SprocketSpec { teeth, pitch: 8.0, roller: 5.0, body: Body::new(2.8, 5.0) };
+        let wheel = sprocket_mesh(&spec);
+        assert_manifold("sprocket", &wheel);
+        // A tooth points both ways along X with an even count.
+        let (lo, hi) = wheel.bounds().unwrap();
+        let wide = 2.0 * spec.tip_radius();
+        assert!(
+            (hi.x - lo.x - wide).abs() < 1e-9 && (hi.z - lo.z - 2.8).abs() < 1e-9,
+            "{teeth} teeth: {lo:?} to {hi:?}"
+        );
+        // A roller's centre is half a pitch from the next, its seat a little wider than it.
+        let pitch = 8.0 / (2.0 * (PI / teeth as f64).sin());
+        let seat = (spec.root_radius() - pitch).abs();
+        assert!(seat > 2.5 && seat < 2.8 && wheel.signed_volume() > 0.0, "{teeth} teeth: seat {seat}");
+    }
+}
