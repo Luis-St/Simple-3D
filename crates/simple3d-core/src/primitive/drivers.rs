@@ -4,11 +4,12 @@ use super::*;
 use std::f64::consts::PI;
 
 /// Inner diameter of a tube or ring, per the wall/inner choice. Clamped so an over-thick wall
-/// degenerates to a solid instead of inverting.
+/// degenerates to a solid instead of inverting, and an inner diameter past the outer one leaves a
+/// hundredth of it as wall: a wall of nothing has no volume, which rounding can make negative.
 pub(crate) fn tube_inner(p: &Params) -> f64 {
     let outer = p.num("outer_diameter");
     let inner = if p.int("wall_mode") == 0 { outer - 2.0 * p.num("wall_thickness") } else { p.num("inner_diameter") };
-    inner.clamp(0.0, outer)
+    inner.clamp(0.0, outer * 0.99)
 }
 
 /// Whether a revolved shape is a full turn; a pie slice's width is not its diameter.
