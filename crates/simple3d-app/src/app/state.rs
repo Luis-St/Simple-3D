@@ -194,6 +194,10 @@ pub struct App {
     pub arrange_tool: Option<crate::arrange_tool::ArrangeTool>,
     /// The mirror tool's window (issue 122); see [`crate::mirror_tool`].
     pub mirror_tool: Option<crate::mirror_tool::MirrorTool>,
+    /// The cut-on-a-face tool's window (issue 130); see [`crate::cut_tool`].
+    pub cut_tool: Option<crate::cut_tool::CutTool>,
+    /// Objects being cut in two along a face's plane (issue 130).
+    pub cut_job: Option<crate::worker::CutJob>,
     /// Each original and its copy from the last duplicate, so duplicating a moved copy can repeat the
     /// move (issue 121).
     pub(crate) last_duplicate: Vec<(NodeId, NodeId)>,

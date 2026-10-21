@@ -144,6 +144,7 @@ impl App {
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
             );
             self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
+            self.command_item(ui, Command::CutOnFace, true);
             // Only on a split, the only thing that was cut up.
             self.command_item(
                 ui,

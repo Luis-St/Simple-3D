@@ -112,6 +112,8 @@ impl App {
             split_tool: None,
             arrange_tool: None,
             mirror_tool: None,
+            cut_tool: None,
+            cut_job: None,
             last_duplicate: Vec::new(),
             repeat_hold: false,
             simplify_tool: None,

@@ -51,6 +51,8 @@ impl Keymap {
         set(Reassemble, Chord::ctrl_shift("A"));
         // Split into pieces (issue 82): K for knife.
         set(SplitIntoPieces, Chord::ctrl_shift("K"));
+        // Cut on a face (issue 130): C for cut, free with Alt in every preset.
+        set(CutOnFace, Chord::alt("C"));
         // Rejoin (issue 82): J for join, one key along from K.
         set(Rejoin, Chord::ctrl_shift("J"));
         set(Rename, Chord::key("F2"));

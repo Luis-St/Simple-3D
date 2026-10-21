@@ -35,6 +35,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 // Spreading along a path, the clicks build the path (issue 70).
                 let view = app.current_view();
                 crate::arrange_tool::interact(app, ui, &response, &view);
+            } else if crate::cut_tool::wants_pointer(app) {
+                // Cutting on a face, the clicks pick the face (issue 130).
+                let view = app.current_view();
+                crate::cut_tool::interact(app, ui, &response, &view);
             } else if crate::mirror_tool::wants_pointer(app) {
                 // Mirroring, the clicks pick the edge or draw the line (issue 122).
                 let view = app.current_view();

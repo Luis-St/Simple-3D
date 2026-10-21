@@ -31,6 +31,7 @@ impl Command {
         Command::RoundEdges,
         Command::Reassemble,
         Command::SplitIntoPieces,
+        Command::CutOnFace,
         Command::Rejoin,
         Command::Rename,
         Command::ToggleVisibility,

@@ -68,6 +68,11 @@ impl App {
         self.split_tool = None;
         self.arrange_tool = None;
         self.mirror_tool = None;
+        self.cut_tool = None;
+        // A cut in flight is for the other document and could never apply here, so stop it.
+        if let Some(job) = self.cut_job.take() {
+            job.cancel();
+        }
         self.last_duplicate.clear();
         self.repeat_hold = false;
         self.simplify_tool = None;

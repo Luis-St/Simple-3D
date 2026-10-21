@@ -17,6 +17,8 @@ mod simplify;
 pub use simplify::SimplifyJob;
 mod split;
 pub use split::SplitJob;
+mod cut;
+pub use cut::{CutJob, CutTarget};
 #[cfg(test)]
 mod tests;
 

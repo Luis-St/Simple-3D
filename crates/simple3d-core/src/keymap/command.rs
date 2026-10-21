@@ -34,6 +34,7 @@ pub enum Command {
     RoundEdges,
     Reassemble,
     SplitIntoPieces,
+    CutOnFace,
     Rejoin,
     Rename,
     ToggleVisibility,

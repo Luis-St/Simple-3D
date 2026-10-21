@@ -5,6 +5,7 @@ pub mod mesh;
 pub mod number;
 pub mod path;
 pub mod planar;
+pub mod plane_cut;
 pub mod polyhedra;
 pub mod primitives;
 pub mod push_pull;

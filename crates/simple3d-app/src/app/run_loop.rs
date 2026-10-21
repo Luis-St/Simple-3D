@@ -49,6 +49,7 @@ impl App {
         self.poll_export();
         self.poll_import();
         self.poll_split();
+        self.poll_cut();
         self.poll_file_prompt();
         self.advance_camera();
         self.refresh_node_renderables();
@@ -113,6 +114,7 @@ impl App {
             || self.export_job.is_some()
             || self.export_preview.running.is_some()
             || self.split_job.is_some()
+            || self.cut_job.is_some()
             || self.simplify_tool.as_ref().is_some_and(|tool| tool.job.is_some())
             || self.reassemble_tool.as_ref().is_some_and(|tool| tool.job.is_some())
     }

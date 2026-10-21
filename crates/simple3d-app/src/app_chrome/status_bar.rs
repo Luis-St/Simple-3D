@@ -107,6 +107,24 @@ impl App {
                     {
                         job.cancel();
                     }
+                } else if let Some(job) = &self.cut_job {
+                    ui.add(egui::ProgressBar::new(job.fraction()).desired_width(110.0).show_percentage());
+                    let count = job.targets.len();
+                    ui.add(
+                        egui::Label::new(theme::value(format!(
+                            "Cutting {count} object{} in two ({}s)",
+                            crate::ui::plural(count),
+                            job.elapsed().as_secs()
+                        )))
+                        .selectable(false),
+                    );
+                    if ui
+                        .small_button("Stop")
+                        .on_hover_text("Abandon the cut. Nothing in the document is changed.")
+                        .clicked()
+                    {
+                        job.cancel();
+                    }
                 } else if let Some(job) = &self.export_job {
                     let fraction = job.fraction();
                     ui.add(egui::ProgressBar::new(fraction).desired_width(110.0).show_percentage());
@@ -213,11 +231,8 @@ impl App {
                     // The root is not a document node; counting it made an empty document report one.
                     let nodes = self.scene.len().saturating_sub(1);
                     ui.add(
-                        egui::Label::new(theme::numeric(ui::describe_counts(
-                            nodes,
-                            self.committed_triangle_count(),
-                        )))
-                        .selectable(false),
+                        egui::Label::new(theme::numeric(ui::describe_counts(nodes, self.committed_triangle_count())))
+                            .selectable(false),
                     )
                     .on_hover_text("Shapes and groups in the document, and the triangles the model came out as");
                     if let Some(elapsed) = self.worker.last_elapsed {

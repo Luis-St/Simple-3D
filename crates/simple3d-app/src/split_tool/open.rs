@@ -35,7 +35,7 @@ impl App {
     }
 
     /// The shape to cut in its own frame, and that frame's world placement for drawing cells.
-    pub(super) fn bake_for_split(&self, id: NodeId) -> (Mesh, Xform) {
+    pub(crate) fn bake_for_split(&self, id: NodeId) -> (Mesh, Xform) {
         let parent = self.evaluated.node_frames.get(&id).copied().unwrap_or(Xform::IDENTITY);
         simple3d_core::eval::baked_mesh_in_place(&self.scene, id, parent)
     }
