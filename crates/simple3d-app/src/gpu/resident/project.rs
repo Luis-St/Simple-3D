@@ -9,6 +9,11 @@ impl Resident {
         rows_at(view, placing.xform.point(self.origin))
     }
 
+    /// Where the stored positions' origin is drawn: what a line's own positions are relative to.
+    pub(in crate::gpu) fn placed_origin(&self, placing: &Placing) -> Vec3 {
+        placing.xform.point(self.origin)
+    }
+
     /// A plane as the shaders test it, positive where `Plane::depth` is.
     pub(in crate::gpu) fn plane(&self, plane: &Plane, placing: &Placing) -> [f32; 4] {
         let n = plane.normal;

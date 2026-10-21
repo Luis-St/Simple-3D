@@ -26,6 +26,7 @@ mod plan;
 mod project;
 mod upload;
 pub(super) use plan::{mark_planes, plan};
+pub(super) use upload::{bytes_of, table, Format};
 pub(super) use project::{front_face, rows_at, set_forward, set_projection, set_within};
 
 /// A vertex array and the element or vertex buffer it draws from.
@@ -76,7 +77,7 @@ pub(super) struct Needs {
 
 /// Where a resident is drawn this frame: moved by a drag, with a vertex range hidden.
 #[derive(Clone, Copy)]
-pub(super) struct Placing {
+pub(in crate::gpu) struct Placing {
     xform: Xform,
     hide: [u32; 2],
 }
@@ -134,17 +135,19 @@ pub(super) struct LineDraw {
     colour: Rgba,
     bias: f32,
     tag_base: Option<u16>,
+    /// Whether lines lying on a dragged cutter are left out: the model's edges (issue 129).
+    quiet: bool,
 }
 
 impl LineDraw {
     /// A tool's preview loops, biased towards the eye like `push_preview`.
     pub(super) fn preview(id: u64, colour: Rgba) -> LineDraw {
-        LineDraw { id, placing: Placing::NONE, colour, bias: PREVIEW_BIAS, tag_base: None }
+        LineDraw { id, placing: Placing::NONE, colour, bias: PREVIEW_BIAS, tag_base: None, quiet: false }
     }
 
     /// A tool template's edges, biased like `preview` since they may lie on a body's face.
     pub(super) fn template(id: u64, placing: Placing, colour: Rgba) -> LineDraw {
-        LineDraw { id, placing, colour, bias: PREVIEW_BIAS, tag_base: None }
+        LineDraw { id, placing, colour, bias: PREVIEW_BIAS, tag_base: None, quiet: false }
     }
 }
 

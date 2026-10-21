@@ -47,6 +47,7 @@ impl Gpu {
                 csg_half: None,
                 table_width,
                 resident: std::collections::HashMap::new(),
+                quiet: None,
                 preview: None,
                 target: None,
                 colour: None,
@@ -85,6 +86,7 @@ impl Gpu {
         self.preview = preview;
         self.csg_half = half;
         kept?;
+        unsafe { self.keep_quiet(&gl, &request.live)? };
         if request.live.csg.is_some() {
             self.refresh_half_space(request);
             unsafe {

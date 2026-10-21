@@ -93,7 +93,15 @@ pub(crate) fn paint_scene(
             .into_iter()
             .filter_map(|(id, moved)| app.node_renderables.get(&id).map(|renderable| (&**renderable, moved)))
             .collect();
-        live.quiet = cutters.clone();
+        // Also where each was last evaluated, since that is where the cut's edges are until the
+        // evaluation catches up (issue 129).
+        live.quiet = cutters
+            .iter()
+            .flat_map(|&(renderable, moved)| {
+                let then = (moved != simple3d_core::xform::Xform::IDENTITY).then_some((renderable, moved));
+                std::iter::once((renderable, simple3d_core::xform::Xform::IDENTITY)).chain(then)
+            })
+            .collect();
         // Ghosts before the selection outline, so the outline stays readable.
         let ghosts = app.ghosts();
         for (id, renderable) in &app.node_renderables {

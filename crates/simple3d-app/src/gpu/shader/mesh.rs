@@ -1,6 +1,6 @@
 //! Shaders for resident mesh faces and feature lines.
 
-use super::{resident, BOX_COMMON};
+use super::{resident, BOX_COMMON, QUIET_COMMON};
 
 /// Fragment shader for resident mesh lines: `SOLID_SOURCE` plus the per-pixel section test.
 pub(crate) fn line_fragment() -> String {
@@ -149,8 +149,7 @@ void main() {
 }
 
 pub(crate) fn line_geometry() -> String {
-    resident(
-        r#"
+    let stage = r#"
 layout(lines) in;
 layout(line_strip, max_vertices = 2) out;
 
@@ -198,7 +197,8 @@ float drawn_slope(int texel) {
 }
 
 void main() {
-    if (g_hidden[0] == 1 || g_hidden[1] == 1) {
+    // A line lying on a dragged cutter is the cut it makes, which its red shell shows (issue 129).
+    if (g_hidden[0] == 1 || g_hidden[1] == 1 || quieted(g_pos[0], g_pos[1])) {
         return;
     }
     float scale = (abs(g_screen[0].z) + abs(g_screen[1].z)) * 0.5;
@@ -217,6 +217,6 @@ void main() {
     }
     EndPrimitive();
 }
-"#,
-    )
+"#;
+    resident(&format!("{QUIET_COMMON}\n{stage}"))
 }

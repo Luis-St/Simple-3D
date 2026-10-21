@@ -127,7 +127,7 @@ fn far_corners(item: &Renderable, positions: &[[f32; 3]]) -> Vec<[f32; 4]> {
 
 /// How a table's texels are laid out.
 #[derive(Clone, Copy)]
-enum Format {
+pub(in crate::gpu) enum Format {
     Vec3,
     Vec4,
     UVec3,
@@ -150,7 +150,7 @@ impl Format {
 
 /// `count` texels as a texture `width` texels wide, filled row by row. The short last row is
 /// uploaded separately so nothing needs padding.
-unsafe fn table(
+pub(in crate::gpu) unsafe fn table(
     gl: &glow::Context,
     width: usize,
     format: Format,
@@ -214,7 +214,7 @@ unsafe fn indexed(gl: &glow::Context, vertices: &Vertices, indices: &[u8], count
     Ok(Batch { array, buffer, count })
 }
 
-fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
+pub(in crate::gpu) fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
     // Only ever handed plain numbers and arrays of them, which have no padding.
     unsafe { std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values)) }
 }

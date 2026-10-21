@@ -29,6 +29,7 @@ mod csg;
 mod depth;
 mod draw;
 mod ground;
+mod quiet;
 mod render;
 mod resident;
 pub(crate) use buffers::*;
@@ -65,6 +66,8 @@ pub struct Gpu {
     table_width: usize,
     /// The meshes kept on the card, by `Renderable::id`.
     resident: std::collections::HashMap<u64, resident::Resident>,
+    /// The dragged cutters whose surface quiets the model's edges (see `quiet.rs`).
+    quiet: Option<quiet::QuietTable>,
     /// A tool's preview loops as lines, with their source hash (see `ground::refresh_preview`).
     preview: Option<(u64, crate::render::Renderable)>,
     /// The offscreen target, remade when the viewport size changes.

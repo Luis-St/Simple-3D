@@ -83,12 +83,15 @@ impl Gpu {
             self.set_edge_slope(gl, program, resident, draw.bias > 0.0);
             set_i32(gl, program, "u_tagged", draw.tag_base.is_some() as i32);
             set_u32(gl, program, "u_tag_base", draw.tag_base.unwrap_or(0) as u32);
+            self.set_quiet(gl, program, resident, &draw.placing, draw.quiet);
             gl.bind_vertex_array(Some(edges.array));
             gl.draw_elements(glow::LINES, edges.count, glow::UNSIGNED_INT, 0);
         }
         gl.disable(glow::CLIP_DISTANCE0);
-        gl.active_texture(glow::TEXTURE1);
-        gl.bind_texture(glow::TEXTURE_2D, None);
+        for unit in [glow::TEXTURE1, glow::TEXTURE2] {
+            gl.active_texture(unit);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+        }
         gl.active_texture(glow::TEXTURE0);
         gl.bind_vertex_array(Some(self.buffer.array));
     }

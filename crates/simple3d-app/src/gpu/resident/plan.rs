@@ -16,9 +16,14 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
             Style::Solid => {
                 let solid = FaceDraw { id, placing, mode: SOLID, base: opaque(palette.solid), tag_base };
                 match request.mode {
-                    DisplayMode::Wireframe => {
-                        plan.lines.push(LineDraw { id, placing, colour: palette.wire, bias: 0.0, tag_base: None })
-                    }
+                    DisplayMode::Wireframe => plan.lines.push(LineDraw {
+                        id,
+                        placing,
+                        colour: palette.wire,
+                        bias: 0.0,
+                        tag_base: None,
+                        quiet: false,
+                    }),
                     DisplayMode::Shaded => plan.solids.push(solid),
                     DisplayMode::ShadedWithEdges => {
                         plan.solids.push(solid);
@@ -28,6 +33,7 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
                             colour: palette.edge,
                             bias: EDGE_BIAS,
                             tag_base: Some(tag_base),
+                            quiet: true,
                         });
                     }
                 }
@@ -82,6 +88,7 @@ pub(in crate::gpu) fn plan(request: &Request<'_>) -> Plan {
                         colour: palette.selected,
                         bias: SELECTION_BIAS,
                         tag_base: Some(tag_base),
+                        quiet: false,
                     });
                 } else {
                     plan.outlines.push(OutlineDraw {

@@ -6,10 +6,12 @@ mod csg;
 mod ground;
 mod mesh;
 mod outline;
+mod quiet;
 pub(crate) use csg::*;
 pub(crate) use ground::*;
 pub(crate) use mesh::*;
 pub(crate) use outline::*;
+pub(crate) use quiet::*;
 
 /// One vertex as the shaders take it: screen position in pixels, depth key, straight-alpha
 /// colour, body tag, and for an axis the segment index.
