@@ -72,7 +72,7 @@ pub(super) const SPUR_GEAR: PrimitiveSpec = PrimitiveSpec {
 
 /// The gear the parameters describe. Only the chosen options count: a hidden helix, hub or keyway keeps
 /// its values for when it is chosen again, but builds nothing.
-pub(super) fn gear_spec(p: &Params) -> GearSpec {
+pub(in crate::primitive) fn gear_spec(p: &Params) -> GearSpec {
     let module = p.num("module").max(1e-9);
     let mut spec = GearSpec::new(p.int("teeth"), module, 20.0, p.num("thickness"), p.num("bore"));
     if p.int("teeth_form") == 1 {

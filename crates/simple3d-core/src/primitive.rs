@@ -8,6 +8,7 @@ mod params;
 pub use params::{Params, ParamsExt};
 mod spec;
 pub use spec::{categories, lookup, AxisDriver, PrimitiveSpec};
+mod caps;
 mod drivers;
 pub(crate) use drivers::*;
 #[cfg(test)]

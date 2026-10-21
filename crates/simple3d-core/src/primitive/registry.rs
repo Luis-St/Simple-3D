@@ -10,6 +10,8 @@ mod printing;
 mod round;
 
 use super::*;
+pub(super) use gearing::sprocket_spec;
+pub(super) use mechanics::gear_spec;
 
 pub static REGISTRY: &[PrimitiveSpec] = &[
     // Boxes and prisms

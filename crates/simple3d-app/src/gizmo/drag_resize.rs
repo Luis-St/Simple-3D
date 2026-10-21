@@ -105,8 +105,15 @@ impl Drag {
                 return None;
             }
             let local_extent = target_extent / self.gizmo.axis_scale[axis];
-            let params = scene.get_mut(self.node)?.params_mut()?;
-            params.insert(driver.param.to_string(), ParamValue::Length(local_extent / driver.factor));
+            // The parameters no handle drives are held from where the drag began, so shrinking past a
+            // corner radius and growing back gives the radius back (issue 131).
+            let driven: Vec<&str> = self.gizmo.drivers.iter().flatten().map(|d| d.param).collect();
+            let node = scene.get_mut(self.node)?;
+            let params = node.params_mut()?;
+            for (key, value) in self.start_params.iter().filter(|(key, _)| !driven.contains(&key.as_str())) {
+                params.insert(key.clone(), *value);
+            }
+            node.set_param(driver.param, ParamValue::Length(local_extent / driver.factor));
         }
 
         // The box grows about the node's origin, so the held point drifts from `held` to `held * k`

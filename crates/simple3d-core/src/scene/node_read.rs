@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::mesh_data::MeshData;
-use crate::primitive::{self, Params, PrimitiveSpec};
+use crate::primitive::{self, ParamValue, Params, PrimitiveSpec};
 use simple3d_geom::tiling::SplitPlan;
 use simple3d_geom::Vec3;
 use std::sync::Arc;
@@ -171,6 +171,17 @@ impl Node {
         match &mut self.body {
             Body::Primitive { params, .. } | Body::Pattern { params } | Body::Extrusion { params, .. } => Some(params),
             _ => None,
+        }
+    }
+
+    /// Store one parameter and hold the others to what the shape can still follow (issue 131), so a
+    /// field never reads more than is built.
+    pub fn set_param(&mut self, key: &str, value: ParamValue) {
+        let spec = self.spec();
+        let Some(params) = self.params_mut() else { return };
+        params.insert(key.to_string(), value);
+        if let Some(spec) = spec {
+            spec.hold_to_caps(params);
         }
     }
 }

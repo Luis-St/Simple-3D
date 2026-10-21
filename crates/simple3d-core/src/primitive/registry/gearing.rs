@@ -157,7 +157,7 @@ pub(super) const SPROCKET: PrimitiveSpec = PrimitiveSpec {
 };
 
 /// The sprocket the parameters describe; a hidden hub or keyway keeps its values but builds nothing.
-fn sprocket_spec(p: &Params) -> SprocketSpec {
+pub(in crate::primitive) fn sprocket_spec(p: &Params) -> SprocketSpec {
     let mut body = Body::new(p.num("thickness"), p.num("bore"));
     if p.int("hub") == 1 {
         body.hub = (p.num("hub_diameter"), p.num("hub_height"));

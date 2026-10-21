@@ -52,9 +52,7 @@ impl Nudge {
             Nudge::Resize { driver, extent, shift, .. } => {
                 if let Some(node) = scene.get_mut(id) {
                     node.position = node.position + shift;
-                }
-                if let Some(params) = scene.get_mut(id).and_then(|n| n.params_mut()) {
-                    params.insert(driver.param.to_string(), ParamValue::Length(extent / driver.factor));
+                    node.set_param(driver.param, ParamValue::Length(extent / driver.factor));
                 }
             }
             Nudge::Scale { axis, factor, shift } => {

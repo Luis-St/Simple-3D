@@ -5,8 +5,8 @@ use simple3d_core::primitive::{ParamValue, ParamsExt};
 use simple3d_core::scene::NodeId;
 
 pub(crate) fn set_param(app: &mut App, id: NodeId, key: &str, value: ParamValue) {
-    if let Some(params) = app.scene.get_mut(id).and_then(|n| n.params_mut()) {
-        params.insert(key.to_string(), value);
+    if let Some(node) = app.scene.get_mut(id) {
+        node.set_param(key, value);
     }
 }
 
