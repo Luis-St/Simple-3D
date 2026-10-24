@@ -126,10 +126,9 @@ impl App {
         let Some((screen, _)) = view.project(at) else { return false };
         let (origin, dir) = view.ray(screen);
         let reach = (at - origin).dot(dir);
-        // A point on a surface is its own hit, so allow 0.01 mm, as `in_clear_view` does.
-        self.snap_bodies(exclude)
-            .iter()
-            .all(|(_, mesh)| crate::pick::ray_mesh(mesh, origin, dir).is_none_or(|hit| hit >= reach - 1e-2))
+        // A point on a surface is its own hit, so allow 0.01 mm, as `in_clear_view` does. One ray through
+        // the drawn model, not one per body, since this runs for every snap position in reach.
+        self.surface_hit_under(view, screen, exclude).is_none_or(|(hit, _, _)| (hit - origin).dot(dir) >= reach - 1e-2)
     }
 
     /// The model surface under the pointer with its triangle and its normal facing the eye, passing

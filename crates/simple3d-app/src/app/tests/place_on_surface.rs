@@ -117,40 +117,58 @@ fn box_on_a_box(app: &mut App, turn: f64) -> (NodeId, NodeId, crate::view::View,
     (base, new, view, top.z)
 }
 
+/// The bottom middle of `id` as evaluated.
+fn bottom_middle(app: &App, id: NodeId) -> Vec3 {
+    let (lo, hi) = app.evaluated.node_world_bounds[&id];
+    Vec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z)
+}
+
 #[test]
-pub(crate) fn near_the_middle_of_a_face_a_new_shape_sits_on_its_centre() {
-    // Issue 128: the face centre is caught without the snap key, off the grid step.
+pub(crate) fn without_the_snap_key_a_new_shape_does_not_catch_the_face_centre() {
+    // Issue 128: the face centre caught with and without Ctrl alike.
+    let mut app = headless_app();
+    app.scene.settings.grid_spacing = 7.0;
+    let (_, _, view, top) = box_on_a_box(&mut app, 0.0);
+    let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(3.0, -2.0);
+    app.follow_pointer(&view, over, false);
+    assert!(app.snap_indicator.is_none(), "caught the face centre without the snap key");
+}
+
+#[test]
+pub(crate) fn with_the_snap_key_near_the_middle_of_a_face_a_new_shape_sits_on_its_centre() {
+    // Issue 128: the face centre is caught off the grid step.
     let mut app = headless_app();
     app.scene.settings.grid_spacing = 7.0;
     let (_, new, view, top) = box_on_a_box(&mut app, 0.0);
+    app.snap_requested = true;
     let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(3.0, -2.0);
     app.follow_pointer(&view, over, false);
     app.reevaluate_for_test();
-    let (lo, hi) = app.evaluated.node_world_bounds[&new];
-    let middle = Vec3::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0, lo.z);
+    let middle = bottom_middle(&app, new);
     assert!((middle - Vec3::new(0.0, 0.0, top)).length() < 1e-6, "rests at {middle:?}, not on the face centre");
     assert!(app.snap_indicator.is_some(), "the caught centre is not shown");
 }
 
 #[test]
-pub(crate) fn near_a_corner_of_a_face_a_new_shape_sits_flush_in_it() {
-    // Issue 128: a corner puts the shape's own corner on it, the shape inside the face.
+pub(crate) fn with_the_snap_key_near_a_corner_of_a_face_a_new_shape_puts_its_middle_on_it() {
+    // Issue 128: the shape's middle on the corner, not the shape flush inside it.
     let mut app = headless_app();
     let (base, new, view, top) = box_on_a_box(&mut app, 0.0);
     let (blo, bhi) = app.evaluated.node_world_bounds[&base];
     let corner = Vec3::new(bhi.x, blo.y, top);
+    app.snap_requested = true;
     let over = view.project(corner + Vec3::new(-0.5, 0.5, 0.0)).unwrap().0;
     app.follow_pointer(&view, over, false);
     app.reevaluate_for_test();
-    let (lo, hi) = app.evaluated.node_world_bounds[&new];
-    assert!((hi.x - bhi.x).abs() < 1e-6 && (lo.y - blo.y).abs() < 1e-6, "not flush in the corner: {lo:?} {hi:?}");
-    assert!((lo.z - top).abs() < 1e-6 && hi.x - lo.x < bhi.x - blo.x, "not resting on the face: {lo:?} {hi:?}");
+    let middle = bottom_middle(&app, new);
+    assert!((middle - corner).length() < 1e-6, "rests at {middle:?}, not on the corner {corner:?}");
 }
 
 #[test]
 pub(crate) fn on_a_turned_face_a_new_shape_turns_along_its_edges() {
     let mut app = headless_app();
     let (_, new, view, top) = box_on_a_box(&mut app, 30.0);
+    app.snap_requested = true;
     let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(2.0, 2.0);
     app.follow_pointer(&view, over, false);
     let turned = app.scene.node(new).rotation.z.rem_euclid(90.0);
@@ -161,8 +179,54 @@ pub(crate) fn on_a_turned_face_a_new_shape_turns_along_its_edges() {
 pub(crate) fn alt_leaves_the_face_snaps_out() {
     let mut app = headless_app();
     let (_, new, view, top) = box_on_a_box(&mut app, 30.0);
+    app.snap_requested = true;
     let over = view.project(Vec3::new(0.0, 0.0, top)).unwrap().0 + egui::vec2(2.0, 2.0);
     app.follow_pointer(&view, over, true);
     assert_eq!(app.scene.node(new).rotation.z, 0.0, "turned along the face with Alt held");
     assert!(app.snap_indicator.is_none());
+}
+
+#[test]
+pub(crate) fn with_the_snap_key_a_new_shape_puts_its_middle_on_the_edge_of_a_face() {
+    let mut app = headless_app();
+    let (base, new, view, top) = box_on_a_box(&mut app, 0.0);
+    let (_, bhi) = app.evaluated.node_world_bounds[&base];
+    app.snap_requested = true;
+    let over = view.project(Vec3::new(bhi.x - 0.3, 3.0, top)).unwrap().0;
+    app.follow_pointer(&view, over, false);
+    app.reevaluate_for_test();
+    let middle = bottom_middle(&app, new);
+    assert!((middle.x - bhi.x).abs() < 1e-6 && (middle.z - top).abs() < 1e-6, "not on the edge: {middle:?}");
+}
+
+#[test]
+pub(crate) fn a_caught_corner_holds_with_the_pointer_just_past_it() {
+    // Issue 128: a corner caught only from inside the face, and let go of one pixel past it.
+    let mut app = headless_app();
+    let (base, new, view, top) = box_on_a_box(&mut app, 0.0);
+    let (blo, bhi) = app.evaluated.node_world_bounds[&base];
+    let corner = Vec3::new(bhi.x, blo.y, top);
+    app.snap_requested = true;
+    let inside = view.project(corner + Vec3::new(-0.5, 0.5, 0.0)).unwrap().0;
+    app.follow_pointer(&view, inside, false);
+    // 25 pixels diagonally off the face, past the 22 a corner is caught from.
+    let at = view.project(corner).unwrap().0;
+    let outward = view.project(corner + Vec3::new(1.0, -1.0, 0.0)).unwrap().0 - at;
+    app.follow_pointer(&view, at + outward.normalized() * 25.0, false);
+    app.reevaluate_for_test();
+    let middle = bottom_middle(&app, new);
+    assert!((middle - corner).length() < 1e-6, "let go of the corner: {middle:?}");
+}
+
+#[test]
+pub(crate) fn on_a_turned_face_a_new_shape_turns_with_it_without_the_snap_key() {
+    // Issue 128: turned only once caught, it spun on and off the face's edges as the pointer moved.
+    let mut app = headless_app();
+    let (base, new, view, top) = box_on_a_box(&mut app, 30.0);
+    let (blo, bhi) = app.evaluated.node_world_bounds[&base];
+    let centre = view.project(Vec3::new((blo.x + bhi.x) / 2.0, (blo.y + bhi.y) / 2.0, top)).unwrap().0;
+    app.follow_pointer(&view, centre, false);
+    assert!(app.snap_indicator.is_none(), "caught the centre without the snap key");
+    let turned = app.scene.node(new).rotation.z.rem_euclid(90.0);
+    assert!((turned - 30.0).abs() < 1e-6, "turned {turned} degrees, not along the face's edges");
 }

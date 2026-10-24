@@ -2,13 +2,14 @@
 //! just added follows the pointer, resting on whatever face of the model is under it -- turned so
 //! its bottom faces it -- or on the ground, until a click puts it down.
 //!
-//! On a flat face the shape catches the face's centre and corners (issue 128, `face`).
+//! On a flat face the shape turns along its edges, and with the snap key its middle catches the
+//! face's centre, corners and edges (issue 128, `face`).
 //!
 //! The shape is moved in the document as it follows, as a drag moves a body, and the GPU draws it
 //! moved without evaluating each step (`App::live_move`). Escape takes the addition back.
 
 use crate::app::{App, Status};
-use crate::snap::{on_grid, SnapMark};
+use crate::snap::{on_grid, SnapMark, DRAG_CATCH_PIXELS};
 use crate::view::View;
 use simple3d_core::config::Placement;
 use simple3d_core::scene::{Anchor, Node, NodeId};
@@ -16,7 +17,8 @@ use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
 
 mod face;
-use face::Caught;
+use face::Face;
+mod outline;
 
 /// The shape being put down.
 #[derive(Clone, Debug)]
@@ -29,6 +31,8 @@ pub(crate) struct Placing {
     frame: Xform,
     /// The undo history's revision just after the addition, so Escape only takes back that.
     revision: u64,
+    /// The face whose snap position was caught last frame, which keeps its catch a little longer.
+    held: Option<Face>,
 }
 
 impl App {
@@ -56,7 +60,7 @@ impl App {
             None => Xform::IDENTITY,
         };
         let name = node.name.clone();
-        self.placing = Some(Placing { id, local: (lo, hi), frame, revision: self.history.revision() });
+        self.placing = Some(Placing { id, local: (lo, hi), frame, revision: self.history.revision(), held: None });
         self.status = Status::Info(format!("Click a surface to put {name} down; Escape takes it back"));
     }
 
@@ -87,8 +91,11 @@ impl App {
     pub(crate) fn follow_pointer(&mut self, view: &View, cursor: egui::Pos2, free: bool) {
         let Some(placing) = self.placing.as_ref() else { return };
         let id = placing.id;
-        let Some(((position, rotation), mark)) = resting(self, placing, view, cursor, free) else { return };
+        let Some(Rest { position, rotation, mark, held }) = resting(self, placing, view, cursor, free) else { return };
         self.snap_indicator = mark;
+        if let Some(placing) = self.placing.as_mut() {
+            placing.held = held;
+        }
         let node = self.scene.node(id);
         if node.position != position || node.rotation != rotation {
             if let Some(node) = self.scene.get_mut(id) {
@@ -126,58 +133,65 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     }
 }
 
-/// The position and rotation that rest the shape on the surface under `cursor`, or on the ground
-/// away from the model, and the snap it caught. Its middle sits over the point: one snapped to while
-/// snapping is asked for (issue 126), else on the grid unless `free` (Alt), where the surface is
-/// square to an axis. Unless `free`, near the centre or a corner of a flat face it sits in the middle
-/// of the face or flush into the corner, its sides along the face's edges (issue 128).
-fn resting(
-    app: &App,
-    placing: &Placing,
-    view: &View,
-    cursor: egui::Pos2,
-    free: bool,
-) -> Option<((Vec3, Vec3), Option<SnapMark>)> {
+/// Where the shape rests, and what it caught.
+struct Rest {
+    position: Vec3,
+    rotation: Vec3,
+    mark: Option<SnapMark>,
+    /// The face whose snap position it caught, held on to the next frame.
+    held: Option<Face>,
+}
+
+/// How far the pointer may stray from a caught snap position before the shape lets go, in pixels:
+/// further than a new one is caught, so it does not flicker on and off at the edge of the reach.
+const RELEASE_PIXELS: f32 = DRAG_CATCH_PIXELS * 1.6;
+
+/// Where the shape rests on the surface under `cursor`, or on the ground away from the model, its
+/// middle over the point. Unless `free` (Alt), on a flat face it turns along the face's edges. Only
+/// while snapping is asked for (issue 126) does its middle catch a point: on a face the face's
+/// centre, corners and edges (issue 128), the face caught last frame keeping its catch a little
+/// further out, also with the pointer just past it; off a face whatever else is in reach. Otherwise
+/// it sits on the grid unless `free`, where the surface is square to an axis.
+fn resting(app: &App, placing: &Placing, view: &View, cursor: egui::Pos2, free: bool) -> Option<Rest> {
     let up = Vec3::new(0.0, 0.0, 1.0);
     let id = placing.id;
-    let hit = app
-        .surface_hit_under(view, cursor, &[id])
+    let surface = app.surface_hit_under(view, cursor, &[id]);
+    let hit = surface
         .map(|(at, _, normal)| (at, normal))
         .or_else(|| Some((view.ray_plane_ahead(cursor, Vec3::ZERO, up)?, up)))?;
-    // Turned to the surface under the pointer even when the point snaps, since that is what it rests on.
-    let caught = if app.snap_requested { app.snap_catch(view, cursor, &[id]) } else { None };
-    let on_face = match (&caught, free) {
-        (None, false) => app.face_at(hit.0, hit.1, &[id]).and_then(|face| Some((face.catch(view, cursor)?, face))),
+    let face = surface.filter(|_| !free).and_then(|(at, triangle, normal)| app.face_at(at, triangle, normal, &[id]));
+    let snapping = app.snap_requested && !free;
+    let held = placing.held.as_ref().filter(|_| snapping);
+    let on_face = match (&face, held) {
+        (Some(face), Some(held)) if face.same(held) => face.catch(view, cursor, RELEASE_PIXELS),
+        (Some(face), _) if snapping => face.catch(view, cursor, DRAG_CATCH_PIXELS),
+        _ => None,
+    }
+    .zip(face.clone())
+    .or_else(|| held.and_then(|held| Some((held.catch(view, cursor, RELEASE_PIXELS)?, held.clone()))));
+    // Off a face what else is in reach is caught, since on one only the face's own positions count.
+    let caught = match (&on_face, &face) {
+        (None, None) if snapping => app.snap_catch(view, cursor, &[id]),
         _ => None,
     };
-    let mut turn = Xform::turn_z_to(hit.1);
+    let turn = match (&on_face, &face) {
+        (Some(((_, how), face)), _) => face.aligned(Some(how)),
+        (None, Some(face)) => face.aligned(None),
+        (None, None) => Xform::turn_z_to(hit.1),
+    };
     let (lo, hi) = placing.local;
     let scale = Node::sane_scale(app.scene.node(id).scale);
-    let centre = (lo + hi) * 0.5;
-    let (at, mark) = match (&caught, on_face) {
-        (Some((point, mark)), _) => (point.at, Some(mark.clone().unwrap_or_else(|| SnapMark::at(point.at)))),
-        (None, Some(((at, how), face))) => {
-            turn = face.aligned(&turn, &how);
-            let mark = Some(face.mark(at));
-            match how {
-                Caught::Centre => (at, mark),
-                // Its middle off the corner by half its footprint along each side, towards the face.
-                Caught::Corner([a, b]) => {
-                    let inward = a + b;
-                    let half = (hi - lo) * 0.5;
-                    let side =
-                        |axis: usize, extent: f64| turn.axis(axis) * (extent * inward.dot(turn.axis(axis)).signum());
-                    (at + side(0, half.x * scale.x) + side(1, half.y * scale.y), mark)
-                }
-            }
-        }
+    let (at, mark) = match (&on_face, caught) {
+        (Some(((at, _), face)), _) => (*at, Some(face.mark(*at))),
+        (None, Some((point, mark))) => (point.at, Some(mark.unwrap_or_else(|| SnapMark::at(point.at)))),
         (None, None) => (on_grid(hit.0, Some(hit.1), if free { 0.0 } else { app.move_snap() }), None),
     };
     // From the point on the surface back to the origin: under the middle, down to the bottom.
+    let centre = (lo + hi) * 0.5;
     let offset = Vec3::new(-centre.x * scale.x, -centre.y * scale.y, -lo.z * scale.z);
     let world = at + turn.vector(offset);
     let inverse = placing.frame.inverse();
     let local = inverse.compose(&turn);
     let rotation = Xform::rotation_of_axes(local.axis(0), local.axis(1), local.axis(2));
-    Some(((inverse.point(world), rotation), mark))
+    Some(Rest { position: inverse.point(world), rotation, mark, held: on_face.map(|(_, face)| face) })
 }
