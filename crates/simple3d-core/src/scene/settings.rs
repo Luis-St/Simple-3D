@@ -39,6 +39,13 @@ pub struct SceneSettings {
     /// The sections after the first, all cutting at once.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub more_sections: Vec<SectionView>,
+    /// The workplanes put down in this component (issue 125); the ground grid is not one of them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workplanes: Vec<Workplane>,
+    /// The workplane shapes are added, moved and snapped on, or `None` for the ground. Not part of
+    /// undo, as the camera is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_workplane: Option<WorkplaneId>,
 }
 
 impl Default for SceneSettings {
@@ -58,6 +65,8 @@ impl Default for SceneSettings {
             preview_viewport: PreviewViewport::NoChange,
             section: SectionView::default(),
             more_sections: Vec::new(),
+            workplanes: Vec::new(),
+            active_workplane: None,
         }
     }
 }

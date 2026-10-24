@@ -39,6 +39,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 // Cutting on a face, the clicks pick the face (issue 130).
                 let view = app.current_view();
                 crate::cut_tool::interact(app, ui, &response, &view);
+            } else if crate::workplane_tool::wants_pointer(app) {
+                // Putting a workplane down, the clicks pick the face (issue 125).
+                let view = app.current_view();
+                crate::workplane_tool::interact(app, ui, &response, &view);
             } else if crate::mirror_tool::wants_pointer(app) {
                 // Mirroring, the clicks pick the edge or draw the line (issue 122).
                 let view = app.current_view();
@@ -111,6 +115,10 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     app.scene.settings.preview_viewport.hash(&mut hasher);
     app.scene.settings.grid_visible.hash(&mut hasher);
     app.scene.settings.grid_spacing.to_bits().hash(&mut hasher);
+    // The grid may be on a workplane instead, or on one being placed (issue 125).
+    if let Some(plane) = app.grid_plane() {
+        plane.hash_bits(&mut hasher);
+    }
     app.scene.settings.axes_visible.hash(&mut hasher);
     app.scene.settings.axis_style.hash(&mut hasher);
     app.scene.settings.plane_marks.hash(&mut hasher);

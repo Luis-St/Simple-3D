@@ -80,11 +80,14 @@ impl App {
         self.status = Status::Info(format!("Made {name} a component; open it to edit what is inside"));
     }
 
-    /// A new component's settings: the same units and detail, but no view state such as sections.
-    fn component_settings(&self) -> SceneSettings {
+    /// A new component's settings: the same units and detail, but no view state such as sections or
+    /// workplanes, which were put down in this component's frame.
+    pub(crate) fn component_settings(&self) -> SceneSettings {
         let mut settings = self.scene.settings.clone();
         settings.section = Default::default();
         settings.more_sections.clear();
+        settings.workplanes.clear();
+        settings.active_workplane = None;
         settings
     }
 

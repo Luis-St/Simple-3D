@@ -51,6 +51,7 @@ pub(crate) fn the_selection_outline_goes_all_the_way_round() {
                 axes: [false; 3],
                 style: AxisStyle::Origin,
                 plane_marks: false,
+                plane: None,
             },
             items,
             preview: Vec::new(),

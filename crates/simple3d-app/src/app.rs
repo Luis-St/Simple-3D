@@ -47,6 +47,7 @@ mod hints;
 mod import;
 mod persist;
 mod tool_popup;
+mod workplane;
 pub use hints::insertion_hint;
 pub(crate) use hints::*;
 mod frame;

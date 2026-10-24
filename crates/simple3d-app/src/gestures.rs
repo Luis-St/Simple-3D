@@ -33,6 +33,7 @@ mod snap;
 mod split_tool;
 mod tab_drag;
 mod view_cube;
+mod workplanes;
 
 use crate::app::App;
 use egui_kittest::Harness;

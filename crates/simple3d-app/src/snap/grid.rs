@@ -1,40 +1,46 @@
-//! The ground grid as something to snap to (issue 126): its crossings and lines near the pointer,
-//! and rounding a point onto the move grid.
+//! The grid as something to snap to (issue 126): its crossings and lines near the pointer, on the
+//! ground or the active workplane (issue 125), and rounding a point onto the move grid.
 
+use crate::render::GridPlane;
 use simple3d_geom::Vec3;
 
-/// How many grid lines either side of the one under the pointer are offered. On a tilted ground the
-/// nearest line on screen is not always the nearest on the ground.
+/// How many grid lines either side of the one under the pointer are offered. On a tilted grid the
+/// nearest line on screen is not always the nearest on the plane.
 const NEIGHBOURS: i64 = 3;
 
-/// The drawn ground grid: its spacing, and the square it covers around its centre.
+/// The drawn grid: its plane, its spacing, and the square it covers around its centre, in the
+/// plane's own coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GroundGrid {
+    pub plane: GridPlane,
     pub spacing: f64,
     pub centre: (f64, f64),
     pub half: f64,
 }
 
 impl GroundGrid {
-    /// The crossings and line segments around `ground`, the ground point under the pointer. Only what
-    /// lies on the drawn square, since a snap to a line that is not there would come out of nowhere.
+    /// The crossings and line segments around `ground`, the point on the grid's plane under the
+    /// pointer. Only what lies on the drawn square, since a snap to a line that is not there would come
+    /// out of nowhere.
     pub fn near(&self, ground: Vec3) -> (Vec<Vec3>, Vec<(Vec3, Vec3)>) {
         let s = self.spacing;
         if s <= 0.0 {
             return (Vec::new(), Vec::new());
         }
         let (cx, cy) = self.centre;
+        let (gx, gy) = self.plane.local(ground);
         let inside = |v: f64, c: f64| (v - c).abs() <= self.half + 1e-9;
-        let (ix, iy) = ((ground.x / s).round() as i64, (ground.y / s).round() as i64);
+        let (ix, iy) = ((gx / s).round() as i64, (gy / s).round() as i64);
         let xs: Vec<f64> = (-NEIGHBOURS..=NEIGHBOURS).map(|i| (ix + i) as f64 * s).filter(|&x| inside(x, cx)).collect();
         let ys: Vec<f64> = (-NEIGHBOURS..=NEIGHBOURS).map(|i| (iy + i) as f64 * s).filter(|&y| inside(y, cy)).collect();
-        let points = xs.iter().flat_map(|&x| ys.iter().map(move |&y| Vec3::new(x, y, 0.0))).collect();
+        let at = |x: f64, y: f64| self.plane.at(x, y);
+        let points = xs.iter().flat_map(|&x| ys.iter().map(move |&y| at(x, y))).collect();
         let mut lines = Vec::new();
         for &x in &xs {
-            lines.push((Vec3::new(x, cy - self.half, 0.0), Vec3::new(x, cy + self.half, 0.0)));
+            lines.push((at(x, cy - self.half), at(x, cy + self.half)));
         }
         for &y in &ys {
-            lines.push((Vec3::new(cx - self.half, y, 0.0), Vec3::new(cx + self.half, y, 0.0)));
+            lines.push((at(cx - self.half, y), at(cx + self.half, y)));
         }
         (points, lines)
     }

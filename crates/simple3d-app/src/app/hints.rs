@@ -50,7 +50,10 @@ pub fn insertion_hint(app: &App) -> String {
         unit.suffix()
     );
     match app.settings.placement {
-        Placement::Origin => format!("Lands at the origin: {where_}."),
+        Placement::Origin => match app.workplane() {
+            Some(plane) => format!("Lands at the middle of {}: {where_}.", plane.name),
+            None => format!("Lands at the origin: {where_}."),
+        },
         Placement::Cursor if app.cursor.is_some() => format!("Lands at the 3D cursor: {where_}."),
         Placement::Cursor => {
             format!("Lands at {where_}. Shift+right-click in the viewport to put the 3D cursor somewhere else.")

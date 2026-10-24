@@ -12,7 +12,14 @@ pub(crate) fn one_mesh_of_two_shapes_is_still_two_solids_to_an_axis() {
     // The scene arrives as one mesh, so solids are found as mesh bodies, not items; treating the mesh
     // as one solid drew all axes across everything (img2).
     let mut req = request(Vec::new(), DisplayMode::Shaded);
-    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    req.grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     // One box on the origin, one off to the side nearer the eye, covering part of the axes.
     let (right, up) = req.view.basis();
     let elsewhere =
@@ -114,7 +121,14 @@ pub(crate) fn the_spans_an_axis_is_inside_are_the_solids_it_passes_through() {
     let beside = Renderable::prepare(&primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(40.0, 0.0, 0.0)));
     let items =
         vec![Item { renderable: &centred, style: Style::Solid }, Item { renderable: &beside, style: Style::Solid }];
-    let grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    let grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     let material = axis_material(&items, &grid, &[]);
 
     let near = |a: f64, b: f64| (a - b).abs() < 1e-6;

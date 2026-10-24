@@ -69,6 +69,8 @@ impl App {
         self.arrange_tool = None;
         self.mirror_tool = None;
         self.cut_tool = None;
+        // A workplane being set up belongs to the other component's frame.
+        self.workplane_tool = None;
         // A cut in flight is for the other document and could never apply here, so stop it.
         if let Some(job) = self.cut_job.take() {
             job.cancel();

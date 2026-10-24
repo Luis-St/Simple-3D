@@ -48,5 +48,9 @@ pub(crate) const AXIS_BIAS: f32 = -5.0e-4;
 /// of magnitude above, they show through the far side.
 pub(crate) const MARK_BIAS: f32 = 3.0e-3;
 
+/// A workplane's grid (issue 125) lies on the face it was put on, so it beats that face as a plane
+/// mark does, rather than losing every tie as the ground grid must.
+pub(crate) const WORKPLANE_BIAS: f32 = MARK_BIAS;
+
 /// Preview loops lie on surfaces like plane marks, so the same bias and no more.
 pub(crate) const PREVIEW_BIAS: f32 = 3.0e-3;

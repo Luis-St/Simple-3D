@@ -20,6 +20,8 @@ mod settings;
 pub use settings::SceneSettings;
 mod camera;
 pub use camera::Camera;
+mod workplane;
+pub use workplane::{Workplane, WorkplaneId};
 mod component;
 pub use component::{link, reaches, ComponentId, Components, ROOT_COMPONENT};
 mod access;

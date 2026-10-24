@@ -16,6 +16,7 @@ impl App {
         }
         self.arrange_tool = None;
         self.mirror_tool = None;
+        self.workplane_tool = None;
         self.cut_tool = Some(CutTool::new());
         self.status = Status::Info("Cut on a face: click the face to cut along; nothing changes until Cut".into());
     }

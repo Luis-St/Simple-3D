@@ -43,7 +43,14 @@ pub(crate) fn zooming_out_brings_the_next_grid_decade_in_without_a_step() {
 pub(crate) fn hiding_the_grid_hides_it() {
     let empty = Renderable::empty();
     let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
-    req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    req.grid = Grid {
+        visible: false,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     let frame = render(&req);
     assert_eq!(frame.color.chunks_exact(4).filter(|p| *p == req.palette.grid).count(), 0);
     // The axes are not part of the grid toggle.

@@ -33,7 +33,8 @@ pub(crate) fn dragging_a_panel_header_into_the_other_dock_moves_the_panel_there(
     let layout = &harness.state().settings.layout;
     assert_eq!(layout.side_of(Panel::Primitives), Side::Right, "the panel did not move dock");
     assert_eq!(layout.right, vec![Panel::Primitives, Panel::Properties], "it landed in the wrong place");
-    assert_eq!(layout.left, vec![Panel::Outliner]);
+    // The workplanes stay where they were, rolled up (issue 125).
+    assert_eq!(layout.left, vec![Panel::Outliner, Panel::Workplanes]);
     assert!(harness.state().dock_drag.panel.is_none(), "the drag was left running after the button came up");
     assert!(!layout.is_collapsed(Panel::Primitives), "a drag also rolled the panel up");
 

@@ -2,7 +2,8 @@
 
 use super::resident;
 
-/// The ground grid, computed per pixel over one ground quad instead of `push_grid`'s lines.
+/// The grid, computed per pixel over one quad on its plane instead of `push_grid`'s lines: the
+/// ground, or a workplane's (issue 125), whose two directions the quad spans.
 ///
 /// A pixel is on a line when within half a pixel of it across the line on screen. The two levels
 /// are `grid_levels`' (the finer faded by its strength, every tenth coarse line in the major
@@ -14,11 +15,13 @@ pub(crate) fn grid_vertex() -> String {
 layout(location = 0) in vec2 in_uv;
 
 uniform float u_bias;
+uniform vec4 u_span_u;
+uniform vec4 u_span_v;
 
 out vec2 v_uv;
 
 void main() {
-    vec3 screen = project(vec3(in_uv, 0.0));
+    vec3 screen = project(in_uv.x * u_span_u.xyz + in_uv.y * u_span_v.xyz);
     gl_Position = place(screen.xy, screen.z + u_bias * abs(screen.z));
     v_uv = in_uv;
 }

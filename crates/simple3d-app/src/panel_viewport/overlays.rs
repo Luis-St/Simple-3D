@@ -65,6 +65,9 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // The plane the model is cut along (issue 130).
     crate::cut_tool::draw(app, ui, &painter, view);
 
+    // The workplane being put down or worked on (issue 125).
+    crate::workplane_tool::draw(app, ui, &painter, view);
+
     // Only the held tool is shown; projection and handle frame were dropped as they never change
     // (issue 100). The measure tool is named while open.
     let tool = if app.measure.active { "Measure" } else { app.mode.label() };

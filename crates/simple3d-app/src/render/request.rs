@@ -19,6 +19,9 @@ pub struct Grid {
     pub style: AxisStyle,
     /// Whether to mark where each principal plane cuts solids; each follows its axis's switch.
     pub plane_marks: bool,
+    /// The workplane the grid is drawn on instead of the ground, at its own spacing (issue 125).
+    /// The origin axes and plane marks stay on the ground's.
+    pub plane: Option<GridPlane>,
 }
 
 /// One thing to draw, in world space.

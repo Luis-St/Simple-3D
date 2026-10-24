@@ -18,13 +18,13 @@ fn a_panel_moves_between_docks_and_reorders_within_one() {
     assert_eq!(layout.side_of(Panel::Properties), Side::Right);
 
     layout.move_to(Panel::Properties, Side::Left, 0);
-    assert_eq!(layout.left, vec![Panel::Properties, Panel::Outliner, Panel::Primitives]);
+    assert_eq!(layout.left, vec![Panel::Properties, Panel::Outliner, Panel::Primitives, Panel::Workplanes]);
     assert!(layout.right.is_empty());
     assert_eq!(layout.side_of(Panel::Properties), Side::Left);
 
     // The index is read after the panel is lifted out, so this moves it one place down.
     layout.move_to(Panel::Properties, Side::Left, 1);
-    assert_eq!(layout.left, vec![Panel::Outliner, Panel::Properties, Panel::Primitives]);
+    assert_eq!(layout.left, vec![Panel::Outliner, Panel::Properties, Panel::Primitives, Panel::Workplanes]);
 
     // Past the end lands at the end, not a panic.
     layout.move_to(Panel::Outliner, Side::Right, 99);
@@ -60,7 +60,26 @@ fn a_layout_that_lost_or_duplicated_a_panel_is_repaired_rather_than_left_unreach
     };
     duplicated.repair();
     assert_eq!(duplicated.left, vec![Panel::Outliner, Panel::Properties]);
-    assert_eq!(duplicated.right, vec![Panel::Primitives]);
+    // The workplanes follow the primitives into whichever dock they are in (issue 125).
+    assert_eq!(duplicated.right, vec![Panel::Primitives, Panel::Workplanes]);
+}
+
+#[test]
+fn a_layout_saved_before_workplanes_gets_them_rolled_up_under_the_primitives() {
+    // Issue 125: the panel is new, so every layout on disk lacks it.
+    let mut old = Layout {
+        left: vec![Panel::Primitives, Panel::Outliner],
+        right: vec![Panel::Properties],
+        collapsed: vec![Panel::Outliner],
+        docks_hidden: false,
+    };
+    old.repair();
+    assert_eq!(old.left, vec![Panel::Primitives, Panel::Workplanes, Panel::Outliner]);
+    assert!(old.is_collapsed(Panel::Workplanes), "the new panel did not start rolled up");
+    assert!(old.is_collapsed(Panel::Outliner), "the panel rolled up before was opened");
+    let fresh = Layout::default();
+    assert_eq!(fresh.left, vec![Panel::Outliner, Panel::Primitives, Panel::Workplanes]);
+    assert!(fresh.is_collapsed(Panel::Workplanes), "the panel does not start rolled up");
 }
 
 #[test]

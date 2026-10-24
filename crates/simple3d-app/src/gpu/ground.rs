@@ -1,12 +1,12 @@
-//! The grid, origin axes and tool preview, drawn on the card.
+//! The grid (on the ground or a workplane) and origin axes, drawn on the card.
 //!
 //! The CPU renderer builds these as primitives in `render.rs`; the GPU gets only the deciding
 //! parameters and computes every pixel itself.
 
 use super::*;
 use crate::render::{
-    axis_layout, axis_material_live, effective_grid_spacing, grid_levels, grid_radius, Renderable, Request, AXIS_BIAS,
-    GRID_BIAS,
+    axis_layout, axis_material_live, effective_grid_spacing, grid_levels_on, grid_radius, grid_radius_on, Request,
+    AXIS_BIAS, GRID_BIAS, WORKPLANE_BIAS,
 };
 use crate::view::View;
 use eframe::glow::{self, HasContext};
@@ -23,6 +23,12 @@ pub(super) struct Ground {
 struct GridDraw {
     /// The coarse level's snapped centre, which the quad is placed around.
     origin: Vec3,
+    /// The plane's two directions, which the quad spans (issue 125).
+    u: Vec3,
+    v: Vec3,
+    /// Whether it is a workplane's, drawn on the model rather than under it, and its depth bias.
+    on_model: bool,
+    bias: f32,
     /// How far the quad reaches each way.
     reach: f64,
     fine: f64,
@@ -56,27 +62,35 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
     };
 
     let grid_draw = grid.visible.then(|| {
-        let (fine, coarse, strength) = grid_levels(view, grid.spacing);
-        let radius = grid_radius(view);
+        let plane = grid.plane.unwrap_or_else(|| crate::render::GridPlane::ground(grid.spacing));
+        let (fine, coarse, strength) = grid_levels_on(view, &plane);
+        let radius = grid_radius_on(view, &plane);
         let level_half = |spacing: f64| spacing * ((radius / spacing).ceil()).clamp(1.0, 400.0);
         let half = [level_half(fine), level_half(coarse)];
-        let target = view.camera().target;
-        let origin = Vec3::new((target.x / coarse).round() * coarse, (target.y / coarse).round() * coarse, 0.0);
+        let (s, t) = plane.local(view.camera().target);
+        let centre = ((s / coarse).round() * coarse, (t / coarse).round() * coarse);
+        let origin = plane.at(centre.0, centre.1);
         let reach = half[0].max(half[1]) + coarse;
+        let on_model = grid.plane.is_some();
+        let bias = if on_model { WORKPLANE_BIAS } else { GRID_BIAS };
         for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
-            let key = key_of(origin + Vec3::new(x * reach, y * reach, 0.0));
+            let key = key_of(origin + plane.u * (x * reach) + plane.v * (y * reach));
             passes.saw(key);
-            passes.saw(key + GRID_BIAS * key.abs());
+            passes.saw(key + bias * key.abs());
         }
         let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
         GridDraw {
             origin,
+            u: plane.u,
+            v: plane.v,
+            on_model,
+            bias,
             reach,
             fine,
             coarse,
             strength,
             half,
-            major: [(origin.x / coarse).round().rem_euclid(10.0), (origin.y / coarse).round().rem_euclid(10.0)],
+            major: [(centre.0 / coarse).round().rem_euclid(10.0), (centre.1 / coarse).round().rem_euclid(10.0)],
             minor: as_float(request.palette.grid),
             major_colour: as_float(request.palette.grid_major),
             fade: half_diagonal * 1.08,
@@ -114,9 +128,16 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
     Ground { grid: grid_draw, axes, spans }
 }
 
+impl Ground {
+    /// Whether the grid is a workplane's, drawn over the finished model rather than under it.
+    pub(super) fn grid_on_model(&self) -> bool {
+        self.grid.as_ref().is_some_and(|grid| grid.on_model)
+    }
+}
+
 impl Gpu {
-    /// The grid: under the model, blended, writing neither depth nor tag. Expects the model pass's
-    /// framebuffer with only colour drawn to.
+    /// The grid: blended, writing neither depth nor tag, under the model or, a workplane's, on it.
+    /// Expects the model pass's framebuffer with only colour drawn to.
     pub(super) unsafe fn draw_grid(
         &self,
         gl: &glow::Context,
@@ -133,7 +154,7 @@ impl Gpu {
             set4(gl, program, name, &row);
         }
         let floats = [
-            ("u_bias", GRID_BIAS),
+            ("u_bias", grid.bias),
             ("u_fine", grid.fine as f32),
             ("u_coarse", grid.coarse as f32),
             ("u_strength", grid.strength as f32),
@@ -153,6 +174,9 @@ impl Gpu {
         }
         for (name, value) in [("u_minor_colour", grid.minor), ("u_major_colour", grid.major_colour)] {
             set4(gl, program, name, &value);
+        }
+        for (name, axis) in [("u_span_u", grid.u), ("u_span_v", grid.v)] {
+            set4(gl, program, name, &[axis.x as f32, axis.y as f32, axis.z as f32, 0.0]);
         }
         let r = grid.reach as f32;
         let quad: [[f32; 2]; 6] = [[-r, -r], [r, -r], [r, r], [-r, -r], [r, r], [-r, r]];
@@ -231,35 +255,6 @@ impl Gpu {
         }
         gl.active_texture(glow::TEXTURE0);
         gl.bind_vertex_array(Some(self.buffer.array));
-    }
-
-    /// A tool's preview loops as card-resident lines, rebuilt only when the loops change.
-    pub(super) fn refresh_preview(&mut self, request: &Request<'_>) {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        for loop_ in &request.preview {
-            loop_.len().hash(&mut hasher);
-            for p in loop_ {
-                [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()].hash(&mut hasher);
-            }
-        }
-        let key = hasher.finish();
-        if request.preview.is_empty() {
-            self.preview = None;
-            return;
-        }
-        if self.preview.as_ref().is_some_and(|(held, _)| *held == key) {
-            return;
-        }
-        let mut positions = Vec::new();
-        let mut edges = Vec::new();
-        for loop_ in &request.preview {
-            let first = positions.len() as u32;
-            positions.extend_from_slice(loop_);
-            let count = loop_.len() as u32;
-            edges.extend((0..count).map(|index| [first + index, first + (index + 1) % count]));
-        }
-        self.preview = Some((key, Renderable::lines(positions, edges)));
     }
 }
 

@@ -153,6 +153,8 @@ pub(crate) fn paint_scene(
                 },
                 style: app.scene.settings.axis_style,
                 plane_marks: app.scene.settings.plane_marks,
+                // The workplane's grid replaces the ground's (issue 125).
+                plane: app.grid_plane(),
             },
             items,
             templates,

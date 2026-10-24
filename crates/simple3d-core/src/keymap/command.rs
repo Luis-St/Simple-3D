@@ -57,6 +57,7 @@ pub enum Command {
     ToggleAxisY,
     ToggleAxisZ,
     ToggleSection,
+    AddWorkplane,
     DisplayShaded,
     DisplayShadedEdges,
     DisplayWireframe,

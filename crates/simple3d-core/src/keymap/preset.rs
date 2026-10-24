@@ -80,6 +80,8 @@ impl Keymap {
         set(ToggleAxisZ, Chord::alt("Z"));
         // The last free number on the view-toggle row, beside the grid.
         set(ToggleSection, Chord::key("4"));
+        // Add a workplane (issue 125): W for workplane, free with Alt in every preset.
+        set(AddWorkplane, Chord::alt("W"));
         set(DisplayShaded, Chord::key("8"));
         set(DisplayShadedEdges, Chord::key("9"));
         set(DisplayWireframe, Chord::key("6"));

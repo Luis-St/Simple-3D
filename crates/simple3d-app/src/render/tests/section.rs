@@ -104,7 +104,14 @@ pub(crate) fn what_the_cut_removed_no_longer_hides_an_origin_axis() {
     let mesh = primitives::box_mesh(40.0, 40.0, 40.0);
     let prepared = Renderable::prepare(&mesh);
     let items = vec![Item { renderable: &prepared, style: Style::Solid }];
-    let grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    let grid = Grid {
+        visible: false,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     let whole = axis_material(&items, &grid, &[]);
     let cut = axis_material(&items, &grid, &[section_at(2, 0.0)]);
     let top = |material: &AxisMaterial| material.inside[2].iter().fold(f64::MIN, |m: f64, span| m.max(span.1));
@@ -131,8 +138,14 @@ pub(crate) fn a_shape_the_ground_plane_cuts_is_marked_where_it_cuts_it() {
     let clear = Renderable::prepare(&primitives::box_mesh(40.0, 40.0, 40.0).translated(Vec3::new(0.0, 0.0, 60.0)));
     let marks = |renderable: &Renderable, on: bool| {
         let mut req = request(vec![Item { renderable, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid =
-            Grid { visible: false, spacing: 10.0, axes: [false, false, true], style: AxisStyle::Grid, plane_marks: on };
+        req.grid = Grid {
+            visible: false,
+            spacing: 10.0,
+            axes: [false, false, true],
+            style: AxisStyle::Grid,
+            plane_marks: on,
+            plane: None,
+        };
         pixels_of(&render(&req), req.palette.axis_z)
     };
     // Measured as the switch's difference, since the Z axis is drawn in the same colour.
@@ -155,6 +168,7 @@ pub(crate) fn a_plane_mark_follows_the_switch_of_the_axis_it_is_drawn_as() {
             axes: [true, false, false],
             style: AxisStyle::Grid,
             plane_marks: marked,
+            plane: None,
         };
         pixels_of(&render(&req), colour)
     };

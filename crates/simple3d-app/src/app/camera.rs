@@ -110,6 +110,11 @@ impl App {
     pub fn gizmo_for(&self, id: NodeId) -> Option<Gizmo> {
         let mut gizmo = Gizmo::build(&self.scene, &self.evaluated, id, self.mode)?;
         gizmo.anchor = self.settings.size_anchor;
+        // Moving goes along the active workplane (issue 125). Turning and sizing keep the shape's own
+        // axes, since a ring turns one of its angles and a resize writes one of its dimensions.
+        if let Some(plane) = self.workplane().filter(|_| self.mode == crate::gizmo::Mode::Move) {
+            gizmo.axes = plane.axes();
+        }
         Some(gizmo)
     }
 

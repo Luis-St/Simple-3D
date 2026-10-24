@@ -84,7 +84,7 @@ pub(crate) fn prepare(request: &Request<'_>) -> Vec<Step> {
 pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     let view = request.view;
     let mut steps = Vec::new();
-    if request.grid.visible {
+    if request.grid.visible && request.grid.plane.is_none() {
         push_grid(&mut steps, &view, &request.grid, &request.palette);
     }
     let cut = &request.section[..];
@@ -137,6 +137,10 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
     for item in request.items.iter().filter(|item| item.style == Style::Glow) {
         let screen = if cut.is_empty() { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         push_glow(&mut steps, &view, item.renderable, &screen, request.palette.glow, cut);
+    }
+    if request.grid.visible && request.grid.plane.is_some() {
+        // On the finished model, since it lies on a face (issue 125).
+        push_grid(&mut steps, &view, &request.grid, &request.palette);
     }
     push_preview(&mut steps, &view, &request.preview, request.palette.selected, cut);
     if request.grid.plane_marks && request.mode != DisplayMode::Wireframe {

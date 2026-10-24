@@ -14,7 +14,14 @@ pub(crate) fn the_grid_never_draws_over_geometry_it_is_coplanar_with() {
     let prepared = Renderable::prepare(&primitives::box_mesh(60.0, 40.0, 4.0));
     let build = |grid: bool| {
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-        req.grid = Grid { visible: grid, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+        req.grid = Grid {
+            visible: grid,
+            spacing: 10.0,
+            axes: [true; 3],
+            style: AxisStyle::Origin,
+            plane_marks: false,
+            plane: None,
+        };
         req.view = req.view.with_camera(Camera { pitch: 10.0, ..req.view.camera() });
         // Axes are hidden so only the grid's effect on the coplanar model is tested.
         for axis in [&mut req.palette.axis_x, &mut req.palette.axis_y, &mut req.palette.axis_z] {
@@ -49,7 +56,14 @@ pub(crate) fn ground_only(pitch: f64) -> (Image, Palette) {
         size: [w, h],
         mode: DisplayMode::Shaded,
         palette: Palette::dark(),
-        grid: Grid { visible: true, spacing: 10.0, axes: [false; 3], style: AxisStyle::Grid, plane_marks: false },
+        grid: Grid {
+            visible: true,
+            spacing: 10.0,
+            axes: [false; 3],
+            style: AxisStyle::Grid,
+            plane_marks: false,
+            plane: None,
+        },
         items: Vec::new(),
         preview: Vec::new(),
         templates: Vec::new(),

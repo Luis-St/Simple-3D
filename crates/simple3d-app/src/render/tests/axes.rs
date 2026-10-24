@@ -17,7 +17,7 @@ pub(crate) fn along_the_grid_the_axes_travel_with_the_view_and_pinned_ones_do_no
     let drawn = |style: AxisStyle| {
         let mut req = request(Vec::new(), DisplayMode::Shaded);
         req.view = View::new(far, egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(160.0, 120.0)));
-        req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style, plane_marks: false };
+        req.grid = Grid { visible: false, spacing: 10.0, axes: [true; 3], style, plane_marks: false, plane: None };
         let frame = render(&req);
         pixels_of(&frame, req.palette.axis_x)
     };
@@ -30,7 +30,14 @@ pub(crate) fn the_z_axis_stays_at_the_origin_in_both_styles() {
     // Z has no ground line, so neither style moves it off zero.
     let drawn = |style: AxisStyle| {
         let mut req = request(Vec::new(), DisplayMode::Shaded);
-        req.grid = Grid { visible: false, spacing: 10.0, axes: [false, false, true], style, plane_marks: false };
+        req.grid = Grid {
+            visible: false,
+            spacing: 10.0,
+            axes: [false, false, true],
+            style,
+            plane_marks: false,
+            plane: None,
+        };
         let frame = render(&req);
         let mut columns: Vec<usize> = Vec::new();
         for i in 0..frame.width * frame.height {
@@ -56,7 +63,14 @@ pub(crate) fn the_two_axis_styles_are_two_different_pictures() {
     // grid style runs the ground's width. Reach counts any non-background pixel, since axes fade.
     let reach = |style: AxisStyle| {
         let mut req = request(Vec::new(), DisplayMode::Shaded);
-        req.grid = Grid { visible: false, spacing: 10.0, axes: [true, false, false], style, plane_marks: false };
+        req.grid = Grid {
+            visible: false,
+            spacing: 10.0,
+            axes: [true, false, false],
+            style,
+            plane_marks: false,
+            plane: None,
+        };
         let frame = render(&req);
         let centre = ((frame.width / 2) as f64, (frame.height / 2) as f64);
         (0..frame.width * frame.height)
@@ -91,7 +105,14 @@ pub(crate) fn each_origin_axis_can_be_turned_off_on_its_own() {
     // Three independent switches.
     let colours = |axes: [bool; 3]| {
         let mut req = request(Vec::new(), DisplayMode::Shaded);
-        req.grid = Grid { visible: false, spacing: 10.0, axes, style: AxisStyle::Origin, plane_marks: false };
+        req.grid = Grid {
+            visible: false,
+            spacing: 10.0,
+            axes,
+            style: AxisStyle::Origin,
+            plane_marks: false,
+            plane: None,
+        };
         let frame = render(&req);
         let mut found: Vec<Rgba> = (0..frame.width * frame.height)
             .filter(|&i| !is_background(&frame, i, &req.palette))
@@ -128,7 +149,14 @@ pub(crate) fn the_grid_and_axes_draw_in_their_own_colours() {
     let mut req = request(vec![Item { renderable: &empty, style: Style::Solid }], DisplayMode::Shaded);
     // Close enough that a 10 mm grid is at full strength, with lines either side of the axes.
     req.view = req.view.with_camera(Camera { distance: 30.0, ..req.view.camera() });
-    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    req.grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     let frame = render(&req);
     for (name, colour) in
         [("X axis", req.palette.axis_x), ("Y axis", req.palette.axis_y), ("Z axis", req.palette.axis_z)]

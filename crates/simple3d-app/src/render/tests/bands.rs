@@ -21,7 +21,14 @@ pub(crate) fn bands_draw_the_very_same_frame_as_one_thread() {
         let items = vec![Item { renderable: &prepared, style: Style::Solid }];
         let mut req = request(items, mode);
         // Grid, axes and plane marks cross every band boundary.
-        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Grid, plane_marks: true };
+        req.grid = Grid {
+            visible: true,
+            spacing: 10.0,
+            axes: [true; 3],
+            style: AxisStyle::Grid,
+            plane_marks: true,
+            plane: None,
+        };
         let prepared = prepare_frame(&req);
         let one = render_in_bands(&req, &prepared, 1);
         for bands in [2, 3, 7, 16] {
@@ -45,7 +52,14 @@ pub(crate) fn rendering_the_same_scene_twice_gives_the_same_image() {
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 20.0, 10.0));
     let build = || {
         let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::ShadedWithEdges);
-        req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+        req.grid = Grid {
+            visible: true,
+            spacing: 10.0,
+            axes: [true; 3],
+            style: AxisStyle::Origin,
+            plane_marks: false,
+            plane: None,
+        };
         render(&req).color
     };
     assert_eq!(build(), build());
@@ -104,7 +118,14 @@ pub(crate) fn bands_sorted_on_many_threads_still_draw_the_frame_one_thread_draws
         simple3d_core::scene::Camera { yaw: -40.0, pitch: 25.0, distance: 120.0, ..Default::default() },
         egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 360.0)),
     );
-    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Grid, plane_marks: true };
+    req.grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Grid,
+        plane_marks: true,
+        plane: None,
+    };
     let prepared = prepare_frame(&req);
     assert!(
         prepared.steps.len() > 4 * 16_384,

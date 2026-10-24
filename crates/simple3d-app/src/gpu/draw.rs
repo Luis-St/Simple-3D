@@ -55,12 +55,14 @@ impl Gpu {
         let viewport = [width as f32, height as f32];
         let depth = [offset, scale];
 
-        // The grid: under the model, blended, writing neither depth nor tag (`write_depth: false`).
+        // The ground grid: under the model, blended, writing neither depth nor tag (`write_depth: false`).
         gl.enable(glow::BLEND);
         gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
         gl.depth_mask(false);
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
-        self.draw_grid(&gl, ground, view, viewport, depth);
+        if !ground.grid_on_model() {
+            self.draw_grid(&gl, ground, view, viewport, depth);
+        }
 
         // The model: opaque, writing depth and the body tag axes ask about.
         gl.disable(glow::BLEND);
@@ -90,6 +92,10 @@ impl Gpu {
         gl.draw_buffers(&[glow::COLOR_ATTACHMENT0, glow::NONE]);
         self.draw_faces(&gl, &plan.ghosts, view, section, viewport, depth);
         self.draw_lines(&gl, &plan.overlays, view, section, viewport, depth);
+        // A workplane's grid lies on a face, so on the model like the preview (issue 125).
+        if ground.grid_on_model() {
+            self.draw_grid(&gl, ground, view, viewport, depth);
+        }
         // Tool templates (issue 70) like ghosts, pulled towards the eye so a face lying on a body's
         // face does not fight it, and their edges where seen. Nothing of them is drawn through a body:
         // that made the body look removed.

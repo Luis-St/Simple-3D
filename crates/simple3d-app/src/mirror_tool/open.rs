@@ -18,6 +18,7 @@ impl App {
         }
         self.arrange_tool = None;
         self.cut_tool = None;
+        self.workplane_tool = None;
         let tool = MirrorTool::on(self.mirror_targets());
         self.status = Status::Info(match tool.choosing {
             true => "Mirror: select the objects to mirror, then choose what to mirror them across".into(),

@@ -34,6 +34,7 @@ impl Command {
             Reassemble => "Reassemble into objects",
             SplitIntoPieces => "Split into smaller pieces",
             CutOnFace => "Cut on a face",
+            AddWorkplane => "Add a workplane",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
             ToggleVisibility => "Toggle visibility",
@@ -90,7 +91,8 @@ impl Command {
             | SplitIntoPieces | CutOnFace | Rejoin | Rename | ToggleVisibility | ToggleNegative | MoveUp | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
-            | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks | ResetLayout => {
+            | AddWorkplane | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks
+            | ResetLayout => {
                 Area::View
             }
             ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | MeasureTool | AlignDistribute

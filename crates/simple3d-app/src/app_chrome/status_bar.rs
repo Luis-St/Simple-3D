@@ -26,12 +26,21 @@ impl App {
                 // Step and grid are different numbers, both shown, so a jump of 10 can be explained.
                 let unit = self.unit();
                 let step = simple3d_core::unit::format_length(self.move_snap(), unit);
-                let grid = simple3d_core::unit::format_length(self.scene.settings.grid_spacing, unit);
+                // The grid drawn: the active workplane's, at its own spacing (issue 125), or the ground's.
+                let (spacing, grid_hover) = match self.workplane() {
+                    Some(plane) => {
+                        (plane.sane_spacing(), format!("{} grid spacing; set it by changing the workplane", plane.name))
+                    }
+                    None => {
+                        (self.scene.settings.grid_spacing, "Ground grid spacing; set it in the Document panel".into())
+                    }
+                };
+                let grid = simple3d_core::unit::format_length(spacing, unit);
                 ui.add(egui::Label::new(theme::numeric(format!("Step {step} {}", unit.suffix()))).selectable(false))
                     .on_hover_text("How far one nudge, and one snapped step of a drag, goes. Set it in Transform.");
                 dot(ui);
                 ui.add(egui::Label::new(theme::numeric(format!("Grid {grid} {}", unit.suffix()))).selectable(false))
-                    .on_hover_text("Ground grid spacing; set it in the Document panel");
+                    .on_hover_text(grid_hover);
                 dot(ui);
 
                 // The unit is a click away, since every field reads it.

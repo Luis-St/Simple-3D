@@ -61,16 +61,19 @@ pub enum Panel {
     Outliner,
     Primitives,
     Properties,
+    /// The workplanes, under the primitives (issue 125).
+    Workplanes,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 3] = [Panel::Outliner, Panel::Primitives, Panel::Properties];
+    pub const ALL: [Panel; 4] = [Panel::Outliner, Panel::Primitives, Panel::Properties, Panel::Workplanes];
 
     pub fn label(self) -> &'static str {
         match self {
             Panel::Outliner => "Outliner",
             Panel::Primitives => "Primitives",
             Panel::Properties => "Properties",
+            Panel::Workplanes => "Workplanes",
         }
     }
 }
@@ -89,9 +92,10 @@ pub struct Layout {
 impl Default for Layout {
     fn default() -> Self {
         Layout {
-            left: vec![Panel::Outliner, Panel::Primitives],
+            left: vec![Panel::Outliner, Panel::Primitives, Panel::Workplanes],
             right: vec![Panel::Properties],
-            collapsed: Vec::new(),
+            // Rolled up until wanted, since the ground is all most models need.
+            collapsed: vec![Panel::Workplanes],
             docks_hidden: false,
         }
     }
@@ -148,7 +152,8 @@ impl Layout {
     }
 
     /// Repair a layout from disk: a panel named twice or missing is returned to its starting dock, so
-    /// none becomes unreachable.
+    /// none becomes unreachable. Workplanes, missing from layouts saved before them, go under the
+    /// primitives wherever those are, rolled up as they start (issue 125).
     pub fn repair(&mut self) {
         let mut seen: Vec<Panel> = Vec::new();
         for list in [&mut self.left, &mut self.right] {
@@ -163,10 +168,21 @@ impl Layout {
         }
         let default = Layout::default();
         for panel in Panel::ALL {
-            if !seen.contains(&panel) {
-                let side = default.side_of(panel);
-                self.panels_mut(side).push(panel);
+            if seen.contains(&panel) {
+                continue;
             }
+            if panel == Panel::Workplanes {
+                let side = self.side_of(Panel::Primitives);
+                let list = self.panels_mut(side);
+                let at = list.iter().position(|p| *p == Panel::Primitives).map_or(list.len(), |at| at + 1);
+                list.insert(at, panel);
+                if !self.collapsed.contains(&panel) {
+                    self.collapsed.push(panel);
+                }
+                continue;
+            }
+            let side = default.side_of(panel);
+            self.panels_mut(side).push(panel);
         }
         self.collapsed.retain(|p| Panel::ALL.contains(p));
         self.collapsed.dedup();

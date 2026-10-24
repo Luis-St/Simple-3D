@@ -1,4 +1,5 @@
-//! The glyphs of the modelling tools added after the first set (issues 73, 88, 122).
+//! The glyphs of the modelling tools added after the first set (issues 73, 88, 122), and the pencil
+//! that changes a list entry (issue 125).
 
 use super::*;
 
@@ -35,6 +36,12 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             }
             pen.closed(&[(0.40, 0.22), (0.40, 0.80), (0.08, 0.80)]);
             pen.closed(&[(0.60, 0.22), (0.60, 0.80), (0.92, 0.80)]);
+        }
+        // A pencil lying from bottom left to top right, its point at the bottom.
+        Glyph::Edit => {
+            pen.closed(&[(0.70, 0.10), (0.90, 0.30), (0.34, 0.86), (0.14, 0.66)]);
+            pen.line(&[(0.14, 0.66), (0.10, 0.90), (0.34, 0.86)]);
+            pen.line(&[(0.58, 0.22), (0.78, 0.42)]);
         }
         _ => {}
     }

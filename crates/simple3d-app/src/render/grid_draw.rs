@@ -1,37 +1,44 @@
-//! Drawing the ground grid, faded out at its edge.
+//! Drawing the ground grid, or a workplane's (issue 125), faded out at its edge.
 
 use super::*;
 use crate::raster::Rgba;
 use crate::view::View;
 use simple3d_geom::Vec3;
 
+/// The ground grid is drawn first and loses every tie, so the model hides it; a workplane's is drawn
+/// after the model and beats the face it lies on, so it shows there and is hidden behind other bodies
+/// (issue 125).
 pub(crate) fn push_grid(steps: &mut Vec<Step>, view: &View, grid: &Grid, palette: &Palette) {
-    let (fine, coarse, strength) = grid_levels(view, grid.spacing);
-    let radius = grid_radius(view);
+    let plane = grid.plane.unwrap_or_else(|| GridPlane::ground(grid.spacing));
+    let bias = if grid.plane.is_some() { WORKPLANE_BIAS } else { GRID_BIAS };
+    let (fine, coarse, strength) = grid_levels_on(view, &plane);
+    let radius = grid_radius_on(view, &plane);
     // Both levels cover the same ground; a shorter fine reach looked like a detail patch around the
     // origin. `grid_levels` fades the fine level across the whole ground.
     if strength > 0.03 {
-        push_grid_level(steps, view, fine, radius, strength, false, palette);
+        push_grid_level(steps, view, &plane, (fine, bias), radius, strength, false, palette);
     }
-    push_grid_level(steps, view, coarse, radius, 1.0, true, palette);
+    push_grid_level(steps, view, &plane, (coarse, bias), radius, 1.0, true, palette);
 }
 
-/// One grid decade centred on the camera target, snapped to its spacing so lines sit on whole
-/// multiples and the axes lie along the grid.
+/// One grid decade on `plane` centred on the camera target, snapped to its spacing so lines sit on
+/// whole multiples and the axes lie along the grid.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn push_grid_level(
     steps: &mut Vec<Step>,
     view: &View,
-    spacing: f64,
+    plane: &GridPlane,
+    (spacing, bias): (f64, f32),
     radius: f64,
     strength: f64,
     majors: bool,
     palette: &Palette,
 ) {
-    let ((cx, cy), half) = grid_square(view, spacing, radius);
+    let ((cx, cy), half) = grid_square_on(view, plane, spacing, radius);
     let lines = (half / spacing).round() as i64;
-    // Every tenth line is major, counted from the world origin so majors stay put while panning.
-    let shade = |world: f64| {
-        let index = (world / spacing).round() as i64;
+    // Every tenth line is major, counted from the plane's origin so majors stay put while panning.
+    let shade = |along: f64| {
+        let index = (along / spacing).round() as i64;
         let colour = if majors && index.rem_euclid(10) == 0 { palette.grid_major } else { palette.grid };
         [colour[0], colour[1], colour[2], (colour[3] as f64 * strength).round() as u8]
     };
@@ -40,18 +47,18 @@ pub(crate) fn push_grid_level(
         push_faded_line(
             steps,
             view,
-            Vec3::new(cx + offset, cy - half, 0.0),
-            Vec3::new(cx + offset, cy + half, 0.0),
+            plane.at(cx + offset, cy - half),
+            plane.at(cx + offset, cy + half),
             shade(cx + offset),
-            GRID_BIAS,
+            bias,
         );
         push_faded_line(
             steps,
             view,
-            Vec3::new(cx - half, cy + offset, 0.0),
-            Vec3::new(cx + half, cy + offset, 0.0),
+            plane.at(cx - half, cy + offset),
+            plane.at(cx + half, cy + offset),
             shade(cy + offset),
-            GRID_BIAS,
+            bias,
         );
     }
 }

@@ -68,7 +68,7 @@ impl App {
             self.status = Status::Warning(format!("\u{201C}{name}\u{201D} has nothing in it"));
             return;
         };
-        let Some(scene) = Scene::from_root(&root, self.scene.settings.clone()) else {
+        let Some(scene) = Scene::from_root(&root, self.component_settings()) else {
             self.status = Status::Warning(format!("\u{201C}{name}\u{201D} could not be read"));
             return;
         };

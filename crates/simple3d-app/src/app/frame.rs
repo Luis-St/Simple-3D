@@ -61,6 +61,7 @@ impl App {
         crate::arrange_tool::show(self, ctx);
         crate::mirror_tool::show(self, ctx);
         crate::cut_tool::show(self, ctx);
+        crate::workplane_tool::show(self, ctx);
         crate::size_tool::show(self, ctx);
         crate::simplify_tool::show(self, ctx);
         crate::reassemble_tool::show(self, ctx);

@@ -89,7 +89,8 @@ impl App {
             }
             ui.separator();
             for (on, command, label) in [
-                (self.scene.settings.grid_visible, Command::ToggleGrid, "Ground grid"),
+                // The ground's grid, or the active workplane's in its place (issue 125).
+                (self.scene.settings.grid_visible, Command::ToggleGrid, "Grid"),
                 (self.scene.settings.axes_visible[0], Command::ToggleAxisX, "X axis"),
                 (self.scene.settings.axes_visible[1], Command::ToggleAxisY, "Y axis"),
                 (self.scene.settings.axes_visible[2], Command::ToggleAxisZ, "Z axis"),
@@ -103,6 +104,7 @@ impl App {
                     ui.close();
                 }
             }
+            self.slotted_command_item(ui, Command::AddWorkplane, true);
             ui.separator();
             // Panel placement is a view decision.
             ui.menu_button(ui::marked(ui, false, "Panels"), |ui| {

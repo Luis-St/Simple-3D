@@ -154,11 +154,14 @@ impl History {
 
 /// Restore a snapshot, keeping the current camera, since undo is about the model, not the view.
 /// Integrated components are also kept as they are now (issue 113), since they are edited in
-/// their own tabs and a snapshot's copies would be stale.
+/// their own tabs and a snapshot's copies would be stale. The active workplane is kept too while
+/// the snapshot still has it (issue 125), since choosing one is not an edit.
 pub(crate) fn restore(scene: &mut Scene, snapshot: Scene) {
     let camera = scene.camera;
     let components = std::mem::take(&mut scene.components);
+    let active = scene.settings.active_workplane;
     *scene = snapshot;
     scene.camera = camera;
     scene.components = components;
+    scene.settings.active_workplane = active.filter(|&id| scene.settings.workplane(id).is_some());
 }

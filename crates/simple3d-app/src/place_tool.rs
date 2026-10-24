@@ -1,6 +1,7 @@
 //! Putting a new shape down on a surface (issue 117): under the "On a surface" placement, a shape
 //! just added follows the pointer, resting on whatever face of the model is under it -- turned so
-//! its bottom faces it -- or on the ground, until a click puts it down.
+//! its bottom faces it -- or on the ground or the active workplane (issue 125), until a click puts
+//! it down.
 //!
 //! On a flat face the shape turns along its edges, and with the snap key its middle catches the
 //! face's centre, corners and edges (issue 128, `face`).
@@ -9,6 +10,7 @@
 //! moved without evaluating each step (`App::live_move`). Escape takes the addition back.
 
 use crate::app::{App, Status};
+use crate::render::GridPlane;
 use crate::snap::{on_grid, SnapMark, DRAG_CATCH_PIXELS};
 use crate::view::View;
 use simple3d_core::config::Placement;
@@ -153,12 +155,14 @@ const RELEASE_PIXELS: f32 = DRAG_CATCH_PIXELS * 1.6;
 /// further out, also with the pointer just past it; off a face whatever else is in reach. Otherwise
 /// it sits on the grid unless `free`, where the surface is square to an axis.
 fn resting(app: &App, placing: &Placing, view: &View, cursor: egui::Pos2, free: bool) -> Option<Rest> {
-    let up = Vec3::new(0.0, 0.0, 1.0);
     let id = placing.id;
+    // Off the model it rests on the active workplane (issue 125), turned as it is, else the ground.
+    let work = app.workplane().cloned();
+    let ground = work.as_ref().map_or_else(|| GridPlane::ground(1.0), GridPlane::of);
     let surface = app.surface_hit_under(view, cursor, &[id]);
     let hit = surface
         .map(|(at, _, normal)| (at, normal))
-        .or_else(|| Some((view.ray_plane_ahead(cursor, Vec3::ZERO, up)?, up)))?;
+        .or_else(|| Some((ground.under(view, cursor)?, ground.normal())))?;
     let face = surface.filter(|_| !free).and_then(|(at, triangle, normal)| app.face_at(at, triangle, normal, &[id]));
     let snapping = app.snap_requested && !free;
     let held = placing.held.as_ref().filter(|_| snapping);
@@ -177,14 +181,23 @@ fn resting(app: &App, placing: &Placing, view: &View, cursor: egui::Pos2, free: 
     let turn = match (&on_face, &face) {
         (Some(((_, how), face)), _) => face.aligned(Some(how)),
         (None, Some(face)) => face.aligned(None),
-        (None, None) => Xform::turn_z_to(hit.1),
+        (None, None) => match (&work, surface) {
+            (Some(plane), None) => Xform::from_pos_rot(Vec3::ZERO, plane.rotation()),
+            _ => Xform::turn_z_to(hit.1),
+        },
     };
     let (lo, hi) = placing.local;
     let scale = Node::sane_scale(app.scene.node(id).scale);
     let (at, mark) = match (&on_face, caught) {
         (Some(((at, _), face)), _) => (*at, Some(face.mark(*at))),
         (None, Some((point, mark))) => (point.at, Some(mark.unwrap_or_else(|| SnapMark::at(point.at)))),
-        (None, None) => (on_grid(hit.0, Some(hit.1), if free { 0.0 } else { app.move_snap() }), None),
+        (None, None) => {
+            let step = if free { 0.0 } else { app.move_snap() };
+            match (&work, surface) {
+                (Some(_), None) => (ground.round(hit.0, step), None),
+                _ => (on_grid(hit.0, Some(hit.1), step), None),
+            }
+        }
     };
     // From the point on the surface back to the origin: under the middle, down to the bottom.
     let centre = (lo + hi) * 0.5;

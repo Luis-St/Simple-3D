@@ -53,6 +53,7 @@ impl Command {
         Command::ToggleAxisY,
         Command::ToggleAxisZ,
         Command::ToggleSection,
+        Command::AddWorkplane,
         Command::DisplayShaded,
         Command::DisplayShadedEdges,
         Command::DisplayWireframe,

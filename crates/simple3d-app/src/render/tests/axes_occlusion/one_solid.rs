@@ -14,7 +14,14 @@ pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_
     // off makes, since faded, blended lines never match the axis colour exactly.
     let prepared = Renderable::prepare(&primitives::box_mesh(30.0, 30.0, 30.0));
     let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
-    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    req.grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     let frame = render(&req);
 
     for axis in 0..3 {
@@ -63,7 +70,14 @@ pub(crate) fn an_axis_arrives_at_the_solid_it_enters_and_stays_behind_it_on_the_
 pub(crate) fn a_solid_an_axis_does_not_run_through_hides_it_like_anything_else() {
     // Issue 47: the see-through exception is per axis and per solid; other solids hide axes normally.
     let mut req = request(Vec::new(), DisplayMode::Shaded);
-    req.grid = Grid { visible: true, spacing: 10.0, axes: [true; 3], style: AxisStyle::Origin, plane_marks: false };
+    req.grid = Grid {
+        visible: true,
+        spacing: 10.0,
+        axes: [true; 3],
+        style: AxisStyle::Origin,
+        plane_marks: false,
+        plane: None,
+    };
     // Between the eye and the origin: the axes cross its silhouette without touching it.
     let between = primitives::box_mesh(30.0, 30.0, 30.0).translated(req.view.offset_dir() * 40.0);
     let prepared = Renderable::prepare(&between);
@@ -134,7 +148,8 @@ pub(crate) fn the_axis_in_a_hole_through_a_body_is_behind_the_wall_in_front_of_i
             let mut req = request(vec![Item { renderable: &prepared, style: Style::Solid }], DisplayMode::Shaded);
             req.view = view;
             req.size = [w, h];
-            req.grid = Grid { visible: true, spacing: 10.0, axes, style: AxisStyle::Grid, plane_marks: false };
+            req.grid =
+                Grid { visible: true, spacing: 10.0, axes, style: AxisStyle::Grid, plane_marks: false, plane: None };
             render(&req)
         };
         let (with, without) = (frame([true; 3]), frame([false, true, true]));

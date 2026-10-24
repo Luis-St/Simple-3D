@@ -18,6 +18,8 @@ pub enum Glyph {
     /// A shape and its mirror image across a dashed line: the mirror tool (issue 122).
     Mirror,
     Pattern,
+    /// A pencil: change what a list entry holds, such as a workplane (issue 125).
+    Edit,
     // Object actions.
     Group,
     Delete,

@@ -54,8 +54,13 @@ impl App {
         };
         // Asked only now, with the node in the scene, since its size is part of the answer.
         let at = self.landing_in(placement, parent, self.near_face(placement, &[id]).unwrap_or(0.0));
+        // A shape lies on the active workplane (issue 125); a group has nothing to lay down yet.
+        let turn = type_id.and_then(|_| self.work_rotation_in(parent));
         if let Some(node) = self.scene.get_mut(id) {
             node.position = at;
+            if let Some(rotation) = turn {
+                node.rotation = rotation;
+            }
         }
         // A pattern's first child lets it be sized, as when dropped or pasted in.
         self.size_fresh_patterns();
@@ -97,15 +102,20 @@ impl App {
         self.landing(self.settings.placement, near_face)
     }
 
-    /// [`App::insertion_point_world`] under `placement` rather than the document's.
+    /// [`App::insertion_point_world`] under `placement` rather than the document's. The origin is the
+    /// active workplane's (issue 125), and the view centre is found on it.
     pub(crate) fn landing(&self, placement: Placement, near_face: f64) -> Vec3 {
+        let origin = self.work_origin();
         match placement {
-            Placement::Origin => Vec3::ZERO,
+            Placement::Origin => origin,
             // Put down where it is first, until the pointer carries it onto a surface.
-            Placement::Cursor | Placement::OnSurface => self.cursor.unwrap_or(Vec3::ZERO),
+            Placement::Cursor | Placement::OnSurface => self.cursor.unwrap_or(origin),
             Placement::ViewCentre => {
                 let step = self.move_snap();
                 let t = self.scene.camera.target;
+                if let Some(plane) = self.workplane().map(crate::render::GridPlane::of) {
+                    return plane.round(t, step);
+                }
                 Vec3::new((t.x / step).round() * step, (t.y / step).round() * step, (t.z / step).round() * step)
             }
             Placement::BesideSelection => match self.selection_bounds() {
@@ -117,7 +127,7 @@ impl App {
                     at.set(axis, side - near_face);
                     at
                 }
-                None => Vec3::ZERO,
+                None => origin,
             },
         }
     }
@@ -131,17 +141,7 @@ impl App {
     /// [`App::insertion_point_in`] under `placement` rather than the document's.
     pub(crate) fn landing_in(&self, placement: Placement, parent: NodeId, near_face: f64) -> Vec3 {
         let world = self.landing(placement, near_face);
-        match self.evaluated.node_frames.get(&parent) {
-            // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
-            Some(frame) => {
-                let node = self.scene.node(parent);
-                let scale = simple3d_core::scene::Node::sane_scale(node.scale);
-                frame
-                    .compose(&simple3d_core::xform::Xform::from_pos_rot_scale(node.position, node.rotation, scale))
-                    .inverse()
-                    .point(world)
-            }
-            None => world,
-        }
+        // The stored frame is the parent's; a child of `parent` lives in that composed with its transform.
+        self.child_frame(parent).inverse().point(world)
     }
 }

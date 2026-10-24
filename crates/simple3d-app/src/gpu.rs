@@ -29,6 +29,7 @@ mod csg;
 mod depth;
 mod draw;
 mod ground;
+mod preview;
 mod quiet;
 mod render;
 mod resident;

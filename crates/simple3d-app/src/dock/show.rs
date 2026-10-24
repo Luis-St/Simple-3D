@@ -101,5 +101,6 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui, panel: Panel) {
         Panel::Outliner => crate::panel_outliner::show_inside(app, ui),
         Panel::Primitives => crate::panel_primitives::show_inside(app, ui),
         Panel::Properties => crate::panel_properties::show_inside(app, ui),
+        Panel::Workplanes => crate::panel_workplanes::show_inside(app, ui),
     }
 }

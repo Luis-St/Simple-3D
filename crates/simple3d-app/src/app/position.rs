@@ -9,6 +9,7 @@
 //! ground.
 
 use super::*;
+use crate::render::GridPlane;
 use crate::snap::{Feature, FeatureKind, GroundGrid, SnapMark};
 use crate::view::View;
 use simple3d_core::config::DisplayMode;
@@ -44,7 +45,7 @@ impl App {
         } else {
             self.surface_hit_under(view, cursor, exclude).map(|(at, _, _)| at)
         };
-        let at = surface.or_else(|| ground_under(view, cursor))?;
+        let at = surface.or_else(|| self.work_ground_under(view, cursor))?;
         Some((MeasurePoint { at, kind: None }, None))
     }
 
@@ -60,7 +61,7 @@ impl App {
         }
         let (points, lines) = self
             .ground_grid(view)
-            .zip(ground_under(view, cursor))
+            .and_then(|grid| Some((grid, grid.plane.under(view, cursor)?)))
             .map_or_else(|| (Vec::new(), Vec::new()), |(grid, ground)| grid.near(ground));
         if let Some((at, kind, _, (a, b))) = self.nearest_line(view, cursor, exclude) {
             // An axis is a grid line too, so near one of its grid points the point wins.
@@ -100,16 +101,19 @@ impl App {
         Some((MeasurePoint { at: feature.point, kind: Some(feature.kind) }, Some(SnapMark::at(feature.point))))
     }
 
-    /// The ground grid as drawn at this zoom, or `None` while it is hidden. The level snapped to is the
-    /// one the eye reads: the finer once it has mostly faded in.
+    /// The grid as drawn at this zoom, on the ground or the active workplane (issue 125), or `None`
+    /// while it is hidden. The level snapped to is the one the eye reads: the finer once it has mostly
+    /// faded in.
     pub(crate) fn ground_grid(&self, view: &View) -> Option<GroundGrid> {
         if !self.scene.settings.grid_visible {
             return None;
         }
-        let (fine, coarse, strength) = crate::render::grid_levels(view, self.scene.settings.grid_spacing);
+        let plane = self.grid_plane().unwrap_or_else(|| GridPlane::ground(self.scene.settings.grid_spacing));
+        let (fine, coarse, strength) = crate::render::grid_levels_on(view, &plane);
         let spacing = if strength >= 0.5 { fine } else { coarse };
-        let (centre, half) = crate::render::grid_square(view, spacing, crate::render::grid_radius(view));
-        Some(GroundGrid { spacing, centre, half })
+        let radius = crate::render::grid_radius_on(view, &plane);
+        let (centre, half) = crate::render::grid_square_on(view, &plane, spacing, radius);
+        Some(GroundGrid { plane, spacing, centre, half })
     }
 
     /// Whether a pick can see this point. With nothing left out, whether the picture shows it; axes
@@ -146,9 +150,4 @@ impl App {
             exclude.iter().any(|&id| id == owner || self.scene.is_ancestor_of(id, owner))
         })
     }
-}
-
-/// The ground point under the pointer, in front of the eye.
-fn ground_under(view: &View, cursor: egui::Pos2) -> Option<Vec3> {
-    view.ray_plane_ahead(cursor, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))
 }

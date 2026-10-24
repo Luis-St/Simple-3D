@@ -55,6 +55,7 @@ impl App {
             Reassemble => self.open_reassemble_tool(),
             SplitIntoPieces => self.open_split_tool(),
             CutOnFace => self.toggle_cut_tool(),
+            AddWorkplane => self.toggle_workplane_tool(),
             Rejoin => self.rejoin_selection(),
             Rename => {
                 if let Some(id) = self.primary() {

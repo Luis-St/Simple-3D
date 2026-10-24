@@ -198,6 +198,8 @@ pub struct App {
     pub cut_tool: Option<crate::cut_tool::CutTool>,
     /// Objects being cut in two along a face's plane (issue 130).
     pub cut_job: Option<crate::worker::CutJob>,
+    /// The tool putting a workplane down or changing one (issue 125); see [`crate::workplane_tool`].
+    pub workplane_tool: Option<crate::workplane_tool::WorkplaneTool>,
     /// Each original and its copy from the last duplicate, so duplicating a moved copy can repeat the
     /// move (issue 121).
     pub(crate) last_duplicate: Vec<(NodeId, NodeId)>,
