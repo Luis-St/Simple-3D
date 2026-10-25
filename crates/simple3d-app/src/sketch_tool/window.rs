@@ -30,7 +30,10 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
     let Some(mut tool) = app.sketch_tool.take() else { return };
     if tool.frame.is_none() {
         let plane = app.workplane().map_or("the ground".to_string(), |plane| plane.name.clone());
-        let hint = format!("Click a face of the model to sketch on it, or anywhere else to sketch on {plane}.");
+        let hint = format!(
+            "Click one of the orange origin planes or a face of the model to sketch on it, or anywhere else to \
+             sketch on {plane}."
+        );
         ui.add(egui::Label::new(theme::hint(hint)).selectable(false));
         app.sketch_tool = Some(tool);
         return;

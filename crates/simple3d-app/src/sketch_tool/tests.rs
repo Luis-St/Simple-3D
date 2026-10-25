@@ -179,3 +179,36 @@ fn the_window_and_overlays_draw_in_every_state() {
     draw_one_frame(&mut app);
     assert!(app.sketch_tool.is_some());
 }
+
+#[test]
+fn a_click_on_an_orange_origin_plane_puts_the_sketch_on_it_and_faces_it() {
+    let mut app = headless_app();
+    app.selection.clear();
+    app.toggle_sketch_tool();
+    // Looking in from the positive corner, where none of the squares covers another.
+    app.scene.camera.yaw = 45.0;
+    app.scene.camera.pitch = 30.0;
+    let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+    for (plane, normal) in [
+        (super::origin::OriginPlane::XY, Vec3::new(0.0, 0.0, 1.0)),
+        (super::origin::OriginPlane::XZ, Vec3::new(0.0, -1.0, 0.0)),
+        (super::origin::OriginPlane::YZ, Vec3::new(1.0, 0.0, 0.0)),
+    ] {
+        let (at, _) = view.project(plane.middle(&view)).unwrap();
+        assert_eq!(super::origin::plane_at(&view, at), Some(plane));
+        app.sketch_tool.as_mut().unwrap().frame = None;
+        super::pointer::pick_plane(&mut app, &view, at);
+        let frame = app.sketch_tool.as_ref().unwrap().frame.expect("the click did not pick the plane");
+        assert!((frame.axis(2) - normal).length() < 1e-9, "{plane:?} faces {:?}", frame.axis(2));
+        assert!(frame.t.length() < 1e-9, "{plane:?} is not through the origin");
+        assert_eq!(app.sketch_tool.as_ref().unwrap().owner, None);
+    }
+    // They stay in the positive corner when the view turns, the nearer one caught where they overlap.
+    let mut camera = app.scene.camera;
+    camera.yaw = -135.0;
+    let behind = crate::view::View::new(camera, app.viewport_rect);
+    let middle = super::origin::OriginPlane::XY.middle(&behind);
+    assert!(middle.x > 0.0 && middle.y > 0.0, "the XY square moved out of the positive corner");
+    // Far from the squares there is no origin plane to catch.
+    assert_eq!(super::origin::plane_at(&view, app.viewport_rect.left_top() + egui::vec2(5.0, 5.0)), None);
+}

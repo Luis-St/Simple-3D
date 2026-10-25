@@ -19,7 +19,9 @@ impl App {
         }
         self.open_sketch_tool(SketchTool::new());
         let plane = self.workplane().map_or("the ground".to_string(), |plane| plane.name.clone());
-        self.status = Status::Info(format!("Sketch: click a face to draw on it, or anywhere else to draw on {plane}"));
+        self.status = Status::Info(format!(
+            "Sketch: click an orange origin plane or a face to draw on it, or anywhere else for {plane}"
+        ));
     }
 
     /// Open the editor on sketch node `id`, looking straight at its plane.

@@ -1,8 +1,9 @@
 //! The sketch editor (issue 74): drawing a 2D profile on the ground, a workplane or a face,
 //! constraining it, picking the regions to keep and turning them into a solid.
 //!
-//! The editor is a mode of its own. It starts by picking the plane -- a click on a face of the model
-//! sketches on that face, a click anywhere else on the plane being worked on -- then turns the camera
+//! The editor is a mode of its own. It starts by picking the plane -- a click on one of the orange
+//! origin planes sketches on it, on a face of the model on that face, anywhere else on the plane being
+//! worked on -- then turns the camera
 //! to look straight at it and shows its grid. The viewport's clicks then draw, select and drag in the
 //! sketch, and the window holds the drawing tools, the constraints, the list of what is constrained
 //! and the feature settings. Nothing enters the document until Finish, which adds the sketch node,
@@ -13,6 +14,7 @@ mod constrain;
 mod drawing;
 mod hit;
 mod open;
+mod origin;
 mod overlay;
 pub(crate) use overlay::*;
 mod glyphs;

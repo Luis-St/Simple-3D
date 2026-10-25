@@ -17,8 +17,11 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
     let hover = ui.input(|i| i.pointer.hover_pos()).filter(|at| painter.clip_rect().contains(*at));
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     if tool.frame.is_none() {
-        // The face a click would put the sketch on.
-        if let Some(face) = hover.and_then(|cursor| crate::cut_tool::face_under(app, view, cursor)) {
+        // The origin planes, and the face a click would put the sketch on when it is on none of them.
+        let plane = hover.and_then(|cursor| super::origin::plane_at(view, cursor));
+        super::origin::draw(painter, view, plane);
+        let face = hover.filter(|_| plane.is_none()).and_then(|cursor| crate::cut_tool::face_under(app, view, cursor));
+        if let Some(face) = face {
             let (u, v) = face.axes();
             let size = 14.0 / view.pixels_per_mm().max(1e-9);
             let corner = |s: f64, t: f64| view.project(face.point + u * (s * size) + v * (t * size)).map(|p| p.0);

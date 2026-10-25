@@ -73,9 +73,14 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     }
 }
 
-/// The first click: a face of the model puts the sketch on it, anywhere else on the plane being worked
-/// on (the active workplane, or the ground).
-fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
+/// The first click: an origin plane or a face of the model puts the sketch on it, anywhere else on the
+/// plane being worked on (the active workplane, or the ground). The origin planes are drawn over the
+/// model, so they win over the face behind them.
+pub(crate) fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
+    if let Some(plane) = super::origin::plane_at(view, cursor) {
+        app.place_sketch(plane.frame(), None);
+        return;
+    }
     match app.face_under(view, cursor) {
         Some((Ok(hit), _)) => {
             let face = CutPlane { point: hit.captured.origin, normal: hit.captured.normal };
