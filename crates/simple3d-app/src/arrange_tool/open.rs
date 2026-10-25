@@ -74,6 +74,7 @@ impl App {
         self.mirror_tool = None;
         self.cut_tool = None;
         self.workplane_tool = None;
+        self.sketch_tool = None;
         let key = self.primary().filter(|id| targets.contains(id));
         let mut tool = ArrangeTool::on(targets, key);
         // A lone group is most likely meant as what it holds, which is what lining up needs.

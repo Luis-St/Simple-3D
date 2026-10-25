@@ -14,6 +14,7 @@ mod arrange_tool;
 mod mirror_tool;
 mod cut_tool;
 mod workplane_tool;
+mod sketch_tool;
 mod panel_workplanes;
 #[cfg(test)]
 mod gestures;

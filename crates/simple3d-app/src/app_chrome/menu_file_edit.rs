@@ -145,6 +145,7 @@ impl App {
             );
             self.command_item(ui, Command::SplitIntoPieces, self.selection.len() == 1);
             self.command_item(ui, Command::CutOnFace, true);
+            self.command_item(ui, Command::Sketch, true);
             // Only on a split, the only thing that was cut up.
             self.command_item(
                 ui,

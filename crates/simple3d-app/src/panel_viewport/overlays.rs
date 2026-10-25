@@ -22,7 +22,8 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
         }
     }
 
-    if let Some(id) = app.primary() {
+    // While sketching the clicks are the sketch's, so the manipulator would only be in the way.
+    if let Some(id) = app.primary().filter(|_| app.sketch_tool.is_none()) {
         if let Some(gizmo) = app.gizmo_for(id) {
             draw_gizmo(app, &painter, ui, &gizmo, view, app.scene.node(id).is_group() || app.scene.node(id).is_split());
         }
@@ -68,9 +69,18 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
     // The workplane being put down or worked on (issue 125).
     crate::workplane_tool::draw(app, ui, &painter, view);
 
+    // The sketch being drawn (issue 74).
+    crate::sketch_tool::draw(app, ui, &painter, view);
+
     // Only the held tool is shown; projection and handle frame were dropped as they never change
     // (issue 100). The measure tool is named while open.
-    let tool = if app.measure.active { "Measure" } else { app.mode.label() };
+    let tool = if app.sketch_tool.is_some() {
+        "Sketch"
+    } else if app.measure.active {
+        "Measure"
+    } else {
+        app.mode.label()
+    };
     let galley =
         painter.layout_no_wrap(tool.to_string(), egui::FontId::proportional(theme::font::SMALL), token::TEXT_LO);
     let at = rect.left_top() + egui::vec2(10.0, 8.0);

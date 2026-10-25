@@ -43,7 +43,8 @@ impl App {
             | Body::Mesh { .. }
             | Body::Component { .. }
             | Body::Pattern { .. }
-            | Body::Extrusion { .. } => true,
+            | Body::Extrusion { .. }
+            | Body::Sketch { .. } => true,
         };
         let holds_excluded = exclude.iter().any(|&dragged| self.scene.is_ancestor_of(id, dragged));
         if whole && !holds_excluded {

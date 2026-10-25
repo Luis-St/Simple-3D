@@ -57,6 +57,9 @@ pub struct NodeData {
     /// An `extrusion` node's captured outline (issue 73); its distance is in `params`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<Outline>,
+    /// A `sketch` node's drawing, constraints and picks (issue 74); its feature is in `params`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sketch: Option<simple3d_sketch::Sketch>,
     /// The component a `component` node stands for (issue 113); its own operation override is in `op`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<ComponentId>,

@@ -21,6 +21,7 @@ impl Scene {
         let mut tiling: Option<SplitPlan> = None;
         let mut component: Option<ComponentId> = None;
         let mut outline: Option<simple3d_geom::push_pull::Outline> = None;
+        let mut sketch: Option<simple3d_sketch::Sketch> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -41,6 +42,10 @@ impl Scene {
             Body::Extrusion { outline: shape, params } => {
                 outline = Some((**shape).clone());
                 ("extrusion".to_string(), None, params.clone())
+            }
+            Body::Sketch { sketch: drawn, params } => {
+                sketch = Some((**drawn).clone());
+                ("sketch".to_string(), None, params.clone())
             }
         };
         Some(NodeData {
@@ -63,6 +68,7 @@ impl Scene {
             tiling,
             component,
             outline,
+            sketch,
             params,
             edits: node.edits.clone(),
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
@@ -87,6 +93,11 @@ impl Scene {
             "extrusion" => Body::Extrusion {
                 outline: Arc::new(data.outline.clone()?),
                 params: crate::scene::extrusion_params(&data.params),
+            },
+            // A sketch naming points or curves it does not hold is refused rather than half-drawn.
+            "sketch" => Body::Sketch {
+                sketch: Arc::new(data.sketch.clone().filter(simple3d_sketch::Sketch::is_consistent)?),
+                params: crate::scene::sketch_params(&data.params),
             },
             type_id => {
                 let spec = primitive::lookup(type_id)?;

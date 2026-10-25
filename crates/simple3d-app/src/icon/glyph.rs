@@ -18,6 +18,8 @@ pub enum Glyph {
     /// A shape and its mirror image across a dashed line: the mirror tool (issue 122).
     Mirror,
     Pattern,
+    /// An outline of a line, an arc and corner points on a grid: the sketch tool (issue 74).
+    Sketch,
     /// A pencil: change what a list entry holds, such as a workplane (issue 125).
     Edit,
     // Object actions.
@@ -49,6 +51,8 @@ pub enum Glyph {
     Component,
     /// An outline swept into a solid by push/pull (issue 73).
     Extrusion,
+    /// A sketch and the solid made from it (issue 74).
+    SketchSolid,
     // Primitive silhouettes.
     Box,
     RoundedBox,

@@ -113,6 +113,14 @@ impl Evaluator {
                 hash_outline(hasher, outline);
                 crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
             }
+            Body::Sketch { sketch, params } => {
+                "sketch".hash(&mut hasher.0);
+                hash_params(hasher, params);
+                // The stored form covers every point, curve, constraint and pick; a sketch is small.
+                serde_json::to_string(&**sketch).unwrap_or_default().hash(&mut hasher.0);
+                scene.segments_for(id).hash(&mut hasher.0);
+                crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
+            }
             Body::Mesh { mesh } => {
                 "mesh".hash(&mut hasher.0);
                 // Stored meshes are immutable, so their allocation and size identify them; hashing every vertex

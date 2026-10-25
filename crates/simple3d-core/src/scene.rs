@@ -45,6 +45,8 @@ pub use round_join::RoundJoin;
 mod node_data;
 mod paint;
 mod rebuild;
+mod sketch;
+pub use sketch::{sketch_frame, sketch_mesh, sketch_param_shown, sketch_params, EXTENTS, FEATURES, SKETCH_PARAMS};
 mod split;
 mod subtree;
 pub use node_data::NodeData;

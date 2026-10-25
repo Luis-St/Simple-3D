@@ -35,6 +35,7 @@ pub enum Command {
     Reassemble,
     SplitIntoPieces,
     CutOnFace,
+    Sketch,
     Rejoin,
     Rename,
     ToggleVisibility,

@@ -42,6 +42,9 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 Body::Extrusion { .. } if targets.len() == 1 => {
                     section(ui, "Extrusion", |ui| extrusion_body(app, ui, primary))
                 }
+                Body::Sketch { .. } if targets.len() == 1 => {
+                    section(ui, "Sketch", |ui| sketch_body(app, ui, primary, &mut command))
+                }
                 Body::Component { .. } if targets.len() == 1 => {
                     section(ui, "Component", |ui| component_body(app, ui, primary, &mut open_component))
                 }

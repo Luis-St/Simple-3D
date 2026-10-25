@@ -5,9 +5,13 @@ use crate::theme::token;
 
 pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
     match glyph {
-        Glyph::PushPull | Glyph::Round | Glyph::Extrusion | Glyph::Mirror | Glyph::Edit => {
-            super::paint_tools::paint(pen, glyph)
-        }
+        Glyph::PushPull
+        | Glyph::Round
+        | Glyph::Extrusion
+        | Glyph::Mirror
+        | Glyph::Edit
+        | Glyph::Sketch
+        | Glyph::SketchSolid => super::paint_tools::paint(pen, glyph),
         Glyph::HexNut | Glyph::HexStandoff | Glyph::ScrewHole | Glyph::ThreadedRod | Glyph::Gear | Glyph::Spring => {
             super::paint_printing::paint(pen, glyph)
         }

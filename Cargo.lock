@@ -2488,6 +2488,7 @@ dependencies = [
  "simple3d-export",
  "simple3d-geom",
  "simple3d-import",
+ "simple3d-sketch",
  "winit",
  "winresource",
 ]
@@ -2499,6 +2500,7 @@ dependencies = [
  "serde",
  "serde_json",
  "simple3d-geom",
+ "simple3d-sketch",
 ]
 
 [[package]]
@@ -2522,6 +2524,15 @@ name = "simple3d-import"
 version = "0.0.0"
 dependencies = [
  "simple3d-export",
+ "simple3d-geom",
+]
+
+[[package]]
+name = "simple3d-sketch"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "simple3d-geom",
 ]
 

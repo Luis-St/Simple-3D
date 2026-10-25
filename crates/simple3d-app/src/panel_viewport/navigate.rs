@@ -49,7 +49,9 @@ pub(crate) fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         response.dragged_by(egui::PointerButton::Secondary),
     ];
     // A manipulator drag owns the pointer while it runs.
-    let gesture = if app.drag.is_some() { None } else { nav_gesture(&nav, held, ctrl, shift, alt) };
+    // So does a drag in the sketch (issue 74).
+    let owned = app.drag.is_some() || crate::sketch_tool::owns_drag(app);
+    let gesture = if owned { None } else { nav_gesture(&nav, held, ctrl, shift, alt) };
 
     // A locked view centre pins the orbit point: orbit and zoom still work, but pan and the
     // zoom-to-pointer walk leave it alone.

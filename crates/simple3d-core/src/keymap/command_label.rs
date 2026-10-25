@@ -34,6 +34,7 @@ impl Command {
             Reassemble => "Reassemble into objects",
             SplitIntoPieces => "Split into smaller pieces",
             CutOnFace => "Cut on a face",
+            Sketch => "Sketch",
             AddWorkplane => "Add a workplane",
             Rejoin => "Join the pieces back together",
             Rename => "Rename",
@@ -88,7 +89,8 @@ impl Command {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | RepeatDuplicate | Delete | Group | Pattern
             | MakeComponent | NewComponent | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble
-            | SplitIntoPieces | CutOnFace | Rejoin | Rename | ToggleVisibility | ToggleNegative | MoveUp | MoveDown => Area::Edit,
+            | SplitIntoPieces | CutOnFace | Sketch | Rejoin | Rename | ToggleVisibility | ToggleNegative | MoveUp
+            | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | AddWorkplane | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox | ToggleDocks

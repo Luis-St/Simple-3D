@@ -15,6 +15,7 @@ mod edits;
 mod hash;
 mod negative;
 mod run;
+mod ranges;
 mod subtree;
 mod walk;
 pub use hash::source_of;

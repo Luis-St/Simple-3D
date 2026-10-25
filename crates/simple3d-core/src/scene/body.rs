@@ -55,6 +55,12 @@ pub enum Body {
         outline: Arc<Outline>,
         params: Params,
     },
+    /// A 2D sketch in the node's XY plane and the solid made from it (issue 74), extruded or revolved
+    /// by `params`. Behind an `Arc` so undo snapshots share it.
+    Sketch {
+        sketch: Arc<simple3d_sketch::Sketch>,
+        params: Params,
+    },
     /// A component placed here (issue 113), standing for another component's whole tree. `op`, if set,
     /// overrides the component's own operation; placement, visibility and colour are the node's own.
     Component {

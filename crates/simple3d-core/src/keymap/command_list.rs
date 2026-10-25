@@ -32,6 +32,7 @@ impl Command {
         Command::Reassemble,
         Command::SplitIntoPieces,
         Command::CutOnFace,
+        Command::Sketch,
         Command::Rejoin,
         Command::Rename,
         Command::ToggleVisibility,

@@ -1,5 +1,5 @@
-//! The glyphs of the modelling tools added after the first set (issues 73, 88, 122), and the pencil
-//! that changes a list entry (issue 125).
+//! The glyphs of the modelling tools added after the first set (issues 73, 74, 88, 122), and the
+//! pencil that changes a list entry (issue 125).
 
 use super::*;
 
@@ -42,6 +42,23 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.closed(&[(0.70, 0.10), (0.90, 0.30), (0.34, 0.86), (0.14, 0.66)]);
             pen.line(&[(0.14, 0.66), (0.10, 0.90), (0.34, 0.86)]);
             pen.line(&[(0.58, 0.22), (0.78, 0.42)]);
+        }
+        // A profile of three lines and an arc, its corners marked as the points it is drawn from.
+        Glyph::Sketch => {
+            pen.line(&[(0.40, 0.86), (0.14, 0.86), (0.14, 0.14), (0.40, 0.14)]);
+            pen.ellipse(0.40, 0.50, 0.46, 0.36, -TAU * 0.25, TAU * 0.25);
+            for (x, y) in [(0.14, 0.86), (0.14, 0.14), (0.40, 0.14), (0.40, 0.86)] {
+                pen.disc(x, y, 0.06, pen.colour);
+            }
+        }
+        // The same profile lifted into a slab.
+        Glyph::SketchSolid => {
+            pen.line(&[(0.30, 0.90), (0.10, 0.90), (0.10, 0.40), (0.30, 0.40)]);
+            pen.ellipse(0.30, 0.65, 0.30, 0.25, -TAU * 0.25, TAU * 0.25);
+            let (dx, dy) = (0.26, -0.26);
+            pen.line(&[(0.10, 0.40), (0.10 + dx, 0.40 + dy), (0.30 + dx, 0.40 + dy)]);
+            pen.ellipse(0.30 + dx, 0.65 + dy, 0.30, 0.25, -TAU * 0.25, 0.0);
+            pen.line(&[(0.60, 0.65), (0.60 + dx, 0.65 + dy)]);
         }
         _ => {}
     }

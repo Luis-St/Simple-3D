@@ -15,9 +15,14 @@ impl App {
         self.scene.settings.active_workplane()
     }
 
-    /// The grid drawn and snapped to, when it is not the ground: the workplane being placed while the
-    /// tool has a face, else the active one.
+    /// The grid drawn and snapped to, when it is not the ground: the sketch plane while sketching, the
+    /// workplane being placed while the tool has a face, else the active one.
     pub(crate) fn grid_plane(&self) -> Option<GridPlane> {
+        // While sketching the grid is the sketch plane's (issue 74).
+        if let Some(frame) = self.sketch_tool.as_ref().and_then(|tool| tool.frame) {
+            let spacing = self.scene.settings.grid_spacing;
+            return Some(GridPlane { origin: frame.t, u: frame.axis(0), v: frame.axis(1), spacing });
+        }
         let placing = self.workplane_tool.as_ref().and_then(|tool| tool.preview());
         placing.or_else(|| self.workplane().cloned()).map(|plane| GridPlane::of(&plane))
     }

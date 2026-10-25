@@ -51,6 +51,16 @@ impl App {
             self.close_cut_tool();
             return;
         }
+        // Esc in a sketch ends the gesture or drops the selection; leaving takes Cancel, so a stray Esc
+        // cannot throw a drawing away (issue 74).
+        if let Some(tool) = self.sketch_tool.as_mut().filter(|_| ctx.input(|i| i.key_pressed(egui::Key::Escape))) {
+            if tool.clicks.is_empty() {
+                tool.selection.clear();
+            } else {
+                tool.end_gesture();
+            }
+            return;
+        }
         if self.workplane_tool.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.close_workplane_tool();
             return;

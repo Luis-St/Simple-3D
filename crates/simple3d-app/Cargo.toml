@@ -16,6 +16,7 @@ simple3d-core = { path = "../simple3d-core" }
 simple3d-export = { path = "../simple3d-export" }
 simple3d-import = { path = "../simple3d-import" }
 simple3d-geom = { path = "../simple3d-geom" }
+simple3d-sketch = { path = "../simple3d-sketch" }
 # The viewport is a from-scratch software rasterizer (see src/raster.rs), so
 # eframe only has to give us a window and 2D drawing. `default-features = false`
 # plus `glow` keeps wgpu, persistence and the web backend out of the build.

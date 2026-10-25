@@ -31,6 +31,7 @@ impl App {
         self.arrange_tool = None;
         self.mirror_tool = None;
         self.cut_tool = None;
+        self.sketch_tool = None;
         self.workplane_tool = Some(tool);
     }
 

@@ -1,0 +1,15 @@
+[package]
+name = "simple3d-sketch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "2D sketches: curves, geometric constraints and their solver, the regions they enclose, and the solids extruded or revolved from them."
+
+[dependencies]
+simple3d-geom = { path = "../simple3d-geom" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

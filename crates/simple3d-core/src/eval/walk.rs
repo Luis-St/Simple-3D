@@ -61,7 +61,11 @@ impl Evaluator {
             }
             // A stored mesh or an integration (issue 113): its own world geometry, picked, outlined and moved as one.
             // A primitive with push/pull edits too, since its geometry is no longer the shared generated mesh.
-            Body::Mesh { .. } | Body::Component { .. } | Body::Extrusion { .. } | Body::Primitive { .. } => {
+            Body::Mesh { .. }
+            | Body::Component { .. }
+            | Body::Extrusion { .. }
+            | Body::Sketch { .. }
+            | Body::Primitive { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 let inv =
                     Xform::from_pos_rot_scale(node.position, node.rotation, crate::scene::Node::sane_scale(node.scale))

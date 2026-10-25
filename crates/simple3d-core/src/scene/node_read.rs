@@ -72,6 +72,19 @@ impl Node {
         matches!(self.body, Body::Extrusion { .. })
     }
 
+    /// Whether this node is a sketch and the solid made from it (issue 74).
+    pub fn is_sketch(&self) -> bool {
+        matches!(self.body, Body::Sketch { .. })
+    }
+
+    /// The sketch a sketch node holds.
+    pub fn sketch(&self) -> Option<&Arc<simple3d_sketch::Sketch>> {
+        match &self.body {
+            Body::Sketch { sketch, .. } => Some(sketch),
+            _ => None,
+        }
+    }
+
     /// Whether this node is an integration of a component (issue 113).
     pub fn is_component(&self) -> bool {
         matches!(self.body, Body::Component { .. })
@@ -127,6 +140,7 @@ impl Node {
             Body::Split { .. } => "split",
             Body::Component { .. } => "component",
             Body::Extrusion { .. } => "extrusion",
+            Body::Sketch { .. } => "sketch",
         }
     }
 
@@ -162,14 +176,20 @@ impl Node {
 
     pub fn params(&self) -> Option<&Params> {
         match &self.body {
-            Body::Primitive { params, .. } | Body::Pattern { params } | Body::Extrusion { params, .. } => Some(params),
+            Body::Primitive { params, .. }
+            | Body::Pattern { params }
+            | Body::Extrusion { params, .. }
+            | Body::Sketch { params, .. } => Some(params),
             _ => None,
         }
     }
 
     pub fn params_mut(&mut self) -> Option<&mut Params> {
         match &mut self.body {
-            Body::Primitive { params, .. } | Body::Pattern { params } | Body::Extrusion { params, .. } => Some(params),
+            Body::Primitive { params, .. }
+            | Body::Pattern { params }
+            | Body::Extrusion { params, .. }
+            | Body::Sketch { params, .. } => Some(params),
             _ => None,
         }
     }

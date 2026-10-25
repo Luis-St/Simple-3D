@@ -24,6 +24,10 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             if app.placing.is_some() {
                 let view = app.current_view();
                 crate::place_tool::interact(app, ui, &response, &view);
+            } else if crate::sketch_tool::wants_pointer(app) {
+                // Sketching, the clicks draw in the sketch (issue 74).
+                let view = app.current_view();
+                crate::sketch_tool::interact(app, ui, &response, &view);
             } else if app.measure.active {
                 let view = app.current_view();
                 measure_interact(app, ui, &response, &view);

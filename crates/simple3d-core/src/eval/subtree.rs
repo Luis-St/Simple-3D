@@ -3,8 +3,6 @@
 use super::*;
 use crate::scene::{Anchor, Body, GroupOp, NodeId, Scene};
 use simple3d_geom::{Mesh, Vec3};
-use std::collections::BTreeMap;
-use std::ops::Range;
 use std::sync::Arc;
 
 impl Evaluator {
@@ -75,10 +73,13 @@ impl Evaluator {
 impl Evaluator {
     /// A node's own-frame result from its body and children, or the errors so far if abandoned.
     ///
-    /// Groups, splits and patterns are cached by content (`Evaluator::locals`), so a moved node hits
+    /// Groups, splits, patterns and sketches are cached by content (`Evaluator::locals`), so a moved node hits
     /// the cache. Primitives and stored meshes are recoloured copies, cheaper to redo than keep.
     fn local(&mut self, scene: &Scene, id: NodeId, cancel: &Cancel) -> Result<Arc<LocalResult>, Vec<NodeError>> {
-        let cached = matches!(scene.node(id).body, Body::Group { .. } | Body::Split { .. } | Body::Pattern { .. });
+        let cached = matches!(
+            scene.node(id).body,
+            Body::Group { .. } | Body::Split { .. } | Body::Pattern { .. } | Body::Sketch { .. }
+        );
         let key = cached.then(|| self.content_key(scene, id));
         if let Some(hit) = key.and_then(|key| self.locals.get(&key)) {
             if hit.errors.is_empty() || hit.node == id {
@@ -102,6 +103,19 @@ impl Evaluator {
                 let mut mesh = simple3d_geom::push_pull::extrude_outline(outline, params.num("distance"));
                 mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                 mesh
+            }
+            // A sketch that makes no solid says why on the node, as a boolean that fails does.
+            Body::Sketch { sketch, params } => {
+                match crate::scene::sketch_mesh(sketch, params, scene.segments_for(id)) {
+                    Ok(mut mesh) => {
+                        mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
+                        mesh
+                    }
+                    Err(message) => {
+                        errors.push(NodeError { node: id, name: node.name.clone(), message });
+                        Mesh::new()
+                    }
+                }
             }
             Body::Primitive { .. } => {
                 // The generated mesh is shared between identical primitives, so colour goes on this copy only.
@@ -238,28 +252,5 @@ impl Evaluator {
             self.locals.insert(key, local.clone());
         }
         Ok(local)
-    }
-}
-
-impl Evaluator {
-    /// Which vertices of `id`'s mesh each node below it owns ([`Evaluated::ranges`]), with `id`
-    /// starting at `start`. Walked from the tree, since cached results are shared across nodes.
-    pub(super) fn ranges(
-        &mut self,
-        scene: &Scene,
-        id: NodeId,
-        start: u32,
-        cancel: &Cancel,
-        out: &mut BTreeMap<NodeId, Range<u32>>,
-    ) {
-        let result = self.subtree(scene, id, cancel);
-        out.insert(id, start..start + result.mesh.positions.len() as u32);
-        let visible: Vec<NodeId> =
-            scene.node(id).children.iter().copied().filter(|&child| scene.node(child).visible).collect();
-        for &(place, offset) in &result.passed {
-            if let Some(&child) = visible.get(place) {
-                self.ranges(scene, child, start + offset, cancel, out);
-            }
-        }
     }
 }

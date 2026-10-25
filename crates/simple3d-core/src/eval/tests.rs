@@ -14,6 +14,7 @@ mod round_edits;
 mod round_extend;
 mod round_extract;
 mod scale;
+mod sketch;
 
 use super::*;
 use crate::primitive::ParamValue;

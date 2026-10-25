@@ -23,6 +23,8 @@ mod pattern;
 pub(crate) use pattern::*;
 mod body;
 pub(crate) use body::*;
+mod sketch;
+pub(crate) use sketch::*;
 mod face_edits;
 pub(crate) use face_edits::*;
 mod component;

@@ -25,6 +25,10 @@ impl App {
 
     pub fn run(&mut self, command: Command) {
         use Command::*;
+        // The sketch editor keeps its own undo and selection while it is open (issue 74).
+        if self.run_in_sketch(command) {
+            return;
+        }
         match command {
             New => self.new_project(),
             Open => self.open_dialog(),
@@ -55,6 +59,7 @@ impl App {
             Reassemble => self.open_reassemble_tool(),
             SplitIntoPieces => self.open_split_tool(),
             CutOnFace => self.toggle_cut_tool(),
+            Sketch => self.toggle_sketch_tool(),
             AddWorkplane => self.toggle_workplane_tool(),
             Rejoin => self.rejoin_selection(),
             Rename => {
