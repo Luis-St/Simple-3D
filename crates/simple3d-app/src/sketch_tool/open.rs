@@ -32,6 +32,7 @@ impl App {
         let name = node.name.clone();
         let tool = SketchTool::editing(id, (**sketch).clone(), params.clone(), frame);
         self.open_sketch_tool(tool);
+        self.scene.camera.target = frame.t;
         self.look_at_sketch();
         self.status = Status::Info(format!("Changing {name}; Finish puts it back"));
     }
@@ -53,6 +54,7 @@ impl App {
         let Some(tool) = self.sketch_tool.as_mut() else { return };
         tool.frame = Some(frame);
         tool.owner = owner;
+        self.scene.camera.target = frame.t;
         self.look_at_sketch();
         self.status = Status::Info(match owner {
             Some(owner) => format!("Sketching on a face of {}", self.scene.node(owner).name),
@@ -60,14 +62,22 @@ impl App {
         });
     }
 
-    /// Turn the camera to look straight down onto the sketch plane, its X running right.
+    /// Turn the camera to look straight down onto the sketch plane, its X running right and its Y up.
+    /// Only turns: the view centre stays where it was, dropped onto the plane.
     pub(crate) fn look_at_sketch(&mut self) {
-        let Some(frame) = self.sketch_tool.as_ref().and_then(|tool| tool.frame) else { return };
+        if let Some(frame) = self.sketch_tool.as_ref().and_then(|tool| tool.frame) {
+            self.look_at_frame(frame);
+        }
+    }
+
+    /// [`App::look_at_sketch`] for the sketch plane `frame`.
+    pub(crate) fn look_at_frame(&mut self, frame: Xform) {
         let (x, normal) = (frame.axis(0), frame.axis(2));
         let pitch = normal.z.clamp(-1.0, 1.0).asin().to_degrees();
         // Screen right is (-sin yaw, cos yaw, 0); looking straight up or down, X picks the yaw.
         let yaw = if normal.z.abs() > 0.999 { (-x.x).atan2(x.y) } else { normal.y.atan2(normal.x) }.to_degrees();
-        self.scene.camera.target = frame.t;
+        let target = self.scene.camera.target;
+        self.scene.camera.target = target - normal * normal.dot(target - frame.t);
         self.turn_camera_to(yaw, pitch);
     }
 

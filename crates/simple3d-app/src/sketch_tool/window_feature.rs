@@ -1,73 +1,77 @@
-//! The window's feature section: what the picked regions become, how far, and whether the solid
-//! adds to the model or is cut out of it. The same parameters stay editable in the properties panel
-//! once the sketch is kept.
+//! The panel's feature section: what the picked regions become, how far, and whether the solid
+//! adds to the model or is cut out of it, in the properties panel's rows. The same parameters stay
+//! editable in the properties panel once the sketch is kept.
 
-use super::window::heading;
+use super::window::group;
 use super::*;
 use crate::app::App;
-use crate::popup;
+use crate::panel_properties::{field_row, field_row_boxed, named, room_left};
+use crate::{popup, theme};
 use simple3d_core::primitive::{ParamKind, ParamValue, ParamsExt};
 use simple3d_core::scene::{sketch_param_shown, EXTENTS, FEATURES, SKETCH_PARAMS};
 
-const FIELD_WIDTH: f32 = 90.0;
-
-/// Buttons choosing one of `options` for parameter `key`.
+/// Chips choosing one of `options` for parameter `key`.
 fn choice(ui: &mut egui::Ui, tool: &mut SketchTool, key: &str, options: &[&str]) {
     let current = tool.params.int(key);
-    ui.horizontal(|ui| {
-        for (index, option) in options.iter().enumerate() {
-            if ui.add(egui::Button::selectable(current == index as u32, *option)).clicked() {
-                tool.params.insert(key.into(), ParamValue::Choice(index as u32));
-            }
+    for (index, option) in options.iter().enumerate() {
+        if theme::choice(ui, current == index as u32, option).clicked() {
+            tool.params.insert(key.into(), ParamValue::Choice(index as u32));
         }
-    });
+    }
 }
 
 pub(crate) fn feature(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
-    heading(ui, "Make");
-    choice(ui, tool, "feature", FEATURES);
-    if tool.params.int("feature") == 0 {
-        choice(ui, tool, "extent", EXTENTS);
+    group(ui, "Make", |ui| make(app, ui, tool));
+}
+
+fn make(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
+    let revolve = tool.params.int("feature") == 1;
+    field_row_boxed(ui, "Feature", "What the picked regions become.", |ui| choice(ui, tool, "feature", FEATURES));
+    if !revolve {
+        field_row_boxed(ui, "Extent", "Which way the solid runs from the sketch plane.", |ui| {
+            choice(ui, tool, "extent", EXTENTS)
+        });
     }
     let unit = app.unit().suffix();
-    egui::Grid::new("sketch-feature").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        for spec in
-            SKETCH_PARAMS.iter().filter(|spec| matches!(spec.kind, ParamKind::Length { .. } | ParamKind::Angle { .. }))
-        {
-            if !sketch_param_shown(spec.key, &tool.params) {
-                continue;
-            }
-            let suffix = if matches!(spec.kind, ParamKind::Length { .. }) { unit } else { "deg" };
-            popup::label(ui, &format!("{} ({suffix})", spec.label), hover(spec.key));
+    for spec in
+        SKETCH_PARAMS.iter().filter(|spec| matches!(spec.kind, ParamKind::Length { .. } | ParamKind::Angle { .. }))
+    {
+        if !sketch_param_shown(spec.key, &tool.params) {
+            continue;
+        }
+        let length = matches!(spec.kind, ParamKind::Length { .. });
+        let label = named(spec.label, if length { unit } else { "deg" });
+        field_row(ui, &label, hover(spec.key), |ui| {
             let mut value = tool.params.num(spec.key);
-            popup::number(app, ui, ("sketch-feature", spec.key), FIELD_WIDTH, spec.kind, &mut value);
-            let stored = match spec.kind {
-                ParamKind::Length { .. } => ParamValue::Length(value),
-                _ => ParamValue::Angle(value),
-            };
+            let width = room_left(ui).max(40.0);
+            popup::number(app, ui, ("sketch-feature", spec.key), width, spec.kind, &mut value);
+            let stored = if length { ParamValue::Length(value) } else { ParamValue::Angle(value) };
             tool.params.insert(spec.key.into(), stored);
-            ui.end_row();
+        });
+    }
+    let reverse = if revolve { "Turn the other way" } else { "Run the other way" };
+    field_row(ui, "Direction", "Flip the solid to the other side of the sketch plane.", |ui| {
+        let mut flip = tool.params.flag("flip");
+        if theme::toggle(ui, &mut flip, reverse).changed() {
+            tool.params.insert("flip".into(), ParamValue::Bool(flip));
         }
     });
-    let mut flip = tool.params.flag("flip");
-    let reverse = if tool.params.int("feature") == 1 { "Turn the other way" } else { "Run the other way" };
-    if ui.checkbox(&mut flip, reverse).changed() {
-        tool.params.insert("flip".into(), ParamValue::Bool(flip));
-    }
-    if tool.params.int("feature") == 1 {
+    if revolve {
         let axis = match tool.sketch.axis {
-            Some(_) => "Revolves about the dashed line; Revolve axis picks another.",
-            None => "Pick the line to revolve about with Revolve axis.",
+            Some(_) => "Revolves about the dashed line; the Revolve axis tool picks another.",
+            None => "Pick the line to revolve about with the Revolve axis tool.",
         };
-        ui.add(egui::Label::new(crate::theme::hint(axis)).selectable(false));
+        field_row_boxed(ui, "Axis", "", |ui| {
+            ui.add(egui::Label::new(theme::hint(axis)).selectable(false).wrap());
+        });
     }
     if tool.editing.is_none() {
-        ui.horizontal(|ui| {
+        field_row_boxed(ui, "Result", "Whether the solid adds to the model or is cut out of it.", |ui| {
             for (placing, label, hover) in [
                 (Placing::Add, "Add", "The solid adds to the model."),
                 (Placing::Cut, "Cut", "The solid is cut out of the object the sketch is on, or out of everything."),
             ] {
-                if ui.add(egui::Button::selectable(tool.placing == placing, label)).on_hover_text(hover).clicked() {
+                if theme::choice(ui, tool.placing == placing, label).on_hover_text(hover).clicked() {
                     tool.placing = placing;
                 }
             }

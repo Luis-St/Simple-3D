@@ -1,5 +1,6 @@
 //! What is drawn over the picture while sketching: the picked regions, the curves and points coloured
-//! by how far the constraints hold them, the gesture in progress, and the constraint labels.
+//! by how far the constraints hold them, every line's length, the gesture in progress, and the
+//! constraint labels.
 
 use super::*;
 use crate::app::App;
@@ -10,7 +11,7 @@ use simple3d_sketch::sample_curve;
 /// Copied model edges, apart from what is drawn.
 const REFERENCE: egui::Color32 = egui::Color32::from_rgb(0xB0, 0x8C, 0xE0);
 /// Pieces a full circle is drawn with.
-const DRAWN_SEGMENTS: u32 = 96;
+pub(crate) const DRAWN_SEGMENTS: u32 = 96;
 
 pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: &View) {
     let unit = app.unit();
@@ -57,7 +58,8 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
         };
         painter.rect_filled(egui::Rect::from_center_size(at, egui::Vec2::splat(5.0)), 1.0, colour);
     }
-    draw_gesture(app, painter, view, hover);
+    super::readout::lengths(tool, painter, view);
+    super::gesture::draw(app, painter, view, hover);
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     for label in super::glyphs::labels(tool, view) {
         let pick = Pick::Constraint(label.id);
@@ -161,42 +163,5 @@ fn draw_curve(tool: &SketchTool, painter: &egui::Painter, view: &View, curve: &s
         painter.extend(egui::Shape::dashed_line(&points, stroke, 7.0, 4.0));
     } else {
         painter.add(egui::Shape::line(points, stroke));
-    }
-}
-
-/// The curve the gesture in progress would add, from its clicks to the pointer.
-fn draw_gesture(app: &App, painter: &egui::Painter, view: &View, hover: Option<egui::Pos2>) {
-    let Some(tool) = app.sketch_tool.as_ref() else { return };
-    if tool.clicks.is_empty() {
-        return;
-    }
-    let spacing = if app.snap_requested { app.ground_grid(view).map(|grid| grid.spacing) } else { None };
-    let Some(next) = hover.and_then(|cursor| tool.click_at(view, cursor, spacing)) else { return };
-    let mut sketch = Sketch::default();
-    let ids: Vec<PointId> = tool.clicks.iter().chain(std::iter::once(&next)).map(|c| sketch.add_point(c.at)).collect();
-    use simple3d_sketch::Shape;
-    let shapes: Vec<Shape> = match tool.draw {
-        Draw::Line => vec![Shape::Line { a: ids[ids.len() - 2], b: ids[ids.len() - 1] }],
-        Draw::Rectangle => {
-            let (a, b) = (tool.clicks[0].at, next.at);
-            let corners = [a, [b[0], a[1]], b, [a[0], b[1]]].map(|at| sketch.add_point(at));
-            (0..4).map(|i| Shape::Line { a: corners[i], b: corners[(i + 1) % 4] }).collect()
-        }
-        Draw::Circle => {
-            let (c, p) = (tool.clicks[0].at, next.at);
-            vec![Shape::Circle { center: ids[0], radius: (p[0] - c[0]).hypot(p[1] - c[1]) }]
-        }
-        Draw::Arc if ids.len() == 3 => vec![Shape::Arc { center: ids[0], start: ids[1], end: ids[2] }],
-        Draw::Arc => vec![Shape::Line { a: ids[0], b: ids[1] }],
-        Draw::Spline => vec![Shape::Spline { points: ids.clone(), closed: false }],
-        Draw::Bspline => vec![Shape::Bspline { points: ids.clone(), closed: false }],
-        _ => Vec::new(),
-    };
-    let stroke = egui::Stroke::new(1.5_f32, token::ACCENT.gamma_multiply(0.8));
-    for shape in shapes {
-        let curve = simple3d_sketch::Curve { id: 0, shape, construction: false, reference: false };
-        let line: Vec<egui::Pos2> =
-            sample_curve(&sketch, &curve, DRAWN_SEGMENTS).points.iter().filter_map(|&p| tool.screen(view, p)).collect();
-        painter.extend(egui::Shape::dashed_line(&line, stroke, 6.0, 3.0));
     }
 }

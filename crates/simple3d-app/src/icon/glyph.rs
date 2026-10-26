@@ -22,6 +22,27 @@ pub enum Glyph {
     Sketch,
     /// A pencil: change what a list entry holds, such as a workplane (issue 125).
     Edit,
+    // Sketch tools (issue 74), drawn as what each puts down, with its clicked points as dots.
+    SketchLine,
+    SketchRectangle,
+    SketchCentreRectangle,
+    SketchCircle,
+    SketchThreePointCircle,
+    SketchArc,
+    SketchThreePointArc,
+    SketchPolygon,
+    SketchSpline,
+    SketchControlSpline,
+    SketchPoint,
+    /// The pointer: select and drag what is drawn.
+    SketchSelect,
+    SketchTrim,
+    SketchFillet,
+    SketchDimension,
+    /// A closed area filled in: pick the regions a solid is made from.
+    SketchRegions,
+    SketchAxis,
+    SketchCopyEdges,
     // Object actions.
     Group,
     Delete,

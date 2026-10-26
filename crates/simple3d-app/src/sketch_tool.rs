@@ -5,14 +5,30 @@
 //! origin planes sketches on it, on a face of the model on that face, anywhere else on the plane being
 //! worked on -- then turns the camera
 //! to look straight at it and shows its grid. The viewport's clicks then draw, select and drag in the
-//! sketch, and the window holds the drawing tools, the constraints, the list of what is constrained
-//! and the feature settings. Nothing enters the document until Finish, which adds the sketch node,
+//! sketch, and the editor's panel holds the drawing and modifying tools, the constraints, the list of
+//! what is constrained and the feature settings; while the docks are shown it takes the right dock's place, else it floats
+//! over the viewport. Clicking a curve, point or constraint opens a small popup beside it to change
+//! that one thing. Nothing enters the document until Finish, which adds the sketch node,
 //! or puts the changed sketch back on the node being edited, as one undo step; the editor keeps its
 //! own undo while it is open.
 
 mod constrain;
+mod dock;
+pub(crate) use dock::*;
 mod drawing;
+mod gesture;
 mod hit;
+mod inspect;
+mod inspect_fields;
+mod keys;
+mod modify;
+mod picks;
+mod readout;
+mod shapes;
+mod tools;
+pub(crate) use tools::Draw;
+mod view;
+pub(crate) use view::held_back;
 mod open;
 mod origin;
 mod overlay;
@@ -24,8 +40,15 @@ mod window;
 pub(crate) use window::*;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_tools;
+#[cfg(test)]
+mod tests_grid;
+#[cfg(test)]
+mod tests_view;
 mod window_feature;
 mod window_list;
+mod window_tools;
 
 use simple3d_core::primitive::Params;
 use simple3d_core::scene::{NodeId, Placing};
@@ -36,69 +59,13 @@ use simple3d_sketch::{ConstraintId, CurveId, PointId, Sketch};
 
 /// The popup's key, which also remembers where it was dragged.
 const KEY: &str = "sketch-tool";
-/// The window width: two columns of tool buttons and the constraint list beside its values.
+/// The floating window's width, when the docks are hidden: the constraint list beside its values.
 const WIDTH: f32 = 340.0;
+/// The fillet radius and polygon side count a new editor starts with.
+const FILLET_RADIUS: f64 = 2.0;
+const POLYGON_SIDES: u32 = 6;
 /// How many steps the editor's own undo keeps.
 const UNDO_DEPTH: usize = 200;
-
-/// What a click in the viewport does while the sketch is open.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Draw {
-    Select,
-    Line,
-    Rectangle,
-    Circle,
-    Arc,
-    /// A spline through the clicked points.
-    Spline,
-    /// A spline pulled toward the clicked points.
-    Bspline,
-    Point,
-    /// Click regions to make the solid from.
-    Regions,
-    /// Click the line a revolve turns about.
-    Axis,
-    /// Click a face of the model to copy its edges into the sketch.
-    CopyEdges,
-}
-
-impl Draw {
-    pub(crate) const DRAWING: [Draw; 8] =
-        [Draw::Select, Draw::Line, Draw::Rectangle, Draw::Circle, Draw::Arc, Draw::Spline, Draw::Bspline, Draw::Point];
-
-    pub(crate) fn label(self) -> &'static str {
-        match self {
-            Draw::Select => "Select",
-            Draw::Line => "Line",
-            Draw::Rectangle => "Rectangle",
-            Draw::Circle => "Circle",
-            Draw::Arc => "Arc",
-            Draw::Spline => "Spline",
-            Draw::Bspline => "Control spline",
-            Draw::Point => "Point",
-            Draw::Regions => "Pick regions",
-            Draw::Axis => "Revolve axis",
-            Draw::CopyEdges => "Copy face edges",
-        }
-    }
-
-    /// What to do next with this tool, for the window's hint line.
-    pub(crate) fn hint(self) -> &'static str {
-        match self {
-            Draw::Select => "Click points, curves or constraints to select them, Shift adds; drag to move.",
-            Draw::Line => "Click to put lines down one after another; right-click or Esc ends the chain.",
-            Draw::Rectangle => "Click two opposite corners.",
-            Draw::Circle => "Click the centre, then a point on the circle.",
-            Draw::Arc => "Click the centre, the start, then the end; the arc runs counter-clockwise.",
-            Draw::Spline => "Click the points it passes through; right-click ends it, a click on the first closes it.",
-            Draw::Bspline => "Click the points that pull on it; right-click ends it, a click on the first closes it.",
-            Draw::Point => "Click to put a point down.",
-            Draw::Regions => "Click the closed areas to make the solid from; click again to drop one.",
-            Draw::Axis => "Click the line to revolve about.",
-            Draw::CopyEdges => "Click a face of the model to copy its edges onto the sketch.",
-        }
-    }
-}
 
 /// Something in the sketch that can be selected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -148,6 +115,18 @@ pub struct SketchTool {
     pub(crate) copy_as_helper: bool,
     /// The display unit, for dimension labels; kept up to date while the editor is drawn.
     pub(crate) unit: simple3d_core::unit::Unit,
+    /// What the popup beside the pointer changes, if one is open.
+    pub(crate) inspect: Option<Pick>,
+    /// Where on screen the popup was asked for, until it has been placed there.
+    pub(crate) inspect_at: Option<egui::Pos2>,
+    /// The radius the fillet tool rounds corners with, in millimetres.
+    pub(crate) fillet_radius: f64,
+    /// How many sides the polygon tool draws.
+    pub(crate) polygon_sides: u32,
+    /// The popup field the last undo step came from, so a drag on one field is one step.
+    pub(crate) field_step: Option<String>,
+    /// The 2D lock: the view stays straight on the sketch, with orbiting and view changes held back.
+    pub(crate) flat: bool,
 }
 
 impl SketchTool {
@@ -181,6 +160,12 @@ impl SketchTool {
             conflicts: Vec::new(),
             copy_as_helper: true,
             unit: simple3d_core::unit::Unit::default(),
+            inspect: None,
+            inspect_at: None,
+            fillet_radius: FILLET_RADIUS,
+            polygon_sides: POLYGON_SIDES,
+            field_step: None,
+            flat: true,
         }
     }
 
@@ -215,6 +200,18 @@ impl SketchTool {
             self.undo.remove(0);
         }
         self.redo.clear();
+        self.field_step = None;
+    }
+
+    /// [`SketchTool::remember`] for a change from popup field `field`: changes from the same field
+    /// one after another, as a drag on it makes every frame, are one undo step.
+    pub(crate) fn remember_field(&mut self, before: Sketch, field: &str) {
+        if self.field_step.as_deref() == Some(field) {
+            self.redo.clear();
+            return;
+        }
+        self.remember(before);
+        self.field_step = Some(field.to_string());
     }
 
     /// Re-read what the constraints leave free, and drop what no longer exists from the selection.
@@ -222,11 +219,15 @@ impl SketchTool {
         self.analysis = self.sketch.analyse();
         self.conflicts.clear();
         let sketch = &self.sketch;
-        self.selection.retain(|pick| match *pick {
+        let exists = |pick: &Pick| match *pick {
             Pick::Point(id) => sketch.point(id).is_some(),
             Pick::Curve(id) => sketch.curve(id).is_some(),
             Pick::Constraint(id) => sketch.constraint(id).is_some(),
-        });
+        };
+        self.selection.retain(exists);
+        if !self.inspect.as_ref().is_some_and(exists) {
+            self.inspect = None;
+        }
         self.hover = None;
     }
 
@@ -250,6 +251,15 @@ impl SketchTool {
     pub(crate) fn set_draw(&mut self, draw: Draw) {
         self.draw = draw;
         self.clicks.clear();
+    }
+
+    /// Open the popup on `pick`, beside screen point `at`.
+    pub(crate) fn open_inspect(&mut self, pick: Pick, at: egui::Pos2) {
+        if self.inspect != Some(pick) {
+            self.field_step = None;
+        }
+        self.inspect = Some(pick);
+        self.inspect_at = Some(at);
     }
 }
 

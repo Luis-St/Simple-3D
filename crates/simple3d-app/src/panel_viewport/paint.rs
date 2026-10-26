@@ -148,7 +148,7 @@ pub(crate) fn paint_scene(
                 visible: app.scene.settings.grid_visible && (preview.is_none() || mode.keeps_grid()),
                 spacing: app.scene.settings.grid_spacing,
                 axes: match preview.is_none() || mode.keeps_axes() {
-                    true => app.scene.settings.axes_visible,
+                    true => app.shown_axes(),
                     false => [false; 3],
                 },
                 style: app.scene.settings.axis_style,

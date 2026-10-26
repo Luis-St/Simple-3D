@@ -77,7 +77,9 @@ pub(crate) fn view_cube_interact(app: &mut App, ui: &mut egui::Ui, rect: egui::R
     if response.clicked() {
         // After a click the cube follows the camera again: a spin only reaches a view.
         app.cube_spin = None;
-        if over_centre {
+        if app.sketch_flat() {
+            app.look_at_sketch_locked();
+        } else if over_centre {
             app.set_view(crate::view::ViewPreset::Isometric);
         } else if let Some(zone) = hovered_zone {
             let (to_yaw, to_pitch) = crate::view::cube_zone_angles(zone, app.scene.camera.yaw);

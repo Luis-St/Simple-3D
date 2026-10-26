@@ -6,7 +6,7 @@ use super::resident;
 /// ground, or a workplane's (issue 125), whose two directions the quad spans.
 ///
 /// A pixel is on a line when within half a pixel of it across the line on screen. The two levels
-/// are `grid_levels`' (the finer faded by its strength, every tenth coarse line in the major
+/// are `grid_levels`' (the finer faded by its strength, every `u_every`th coarse line in the major
 /// colour), and pixels fade with distance from the frame centre. The quad is positioned relative
 /// to the coarse level's snapped centre, a multiple of both spacings.
 pub(crate) fn grid_vertex() -> String {
@@ -38,8 +38,14 @@ uniform float u_fine;
 uniform float u_coarse;
 uniform float u_strength;
 uniform vec2 u_half;
-// Which coarse line through the centre each way is, in tens, so majors fall on multiples of ten.
+// Which coarse line through the centre each way is, counted in majors, so majors fall on multiples
+// of `u_every` lines.
 uniform vec2 u_major;
+uniform float u_every;
+// How heavy the emphasised lines are, 0 to 1, and whether every coarse line is one rather than only
+// the majors (`GridPlane::bold`). A heavy line is up to two pixels wide, toward the major colour.
+uniform float u_bold;
+uniform float u_bold_all;
 uniform vec4 u_minor_colour;
 uniform vec4 u_major_colour;
 // The distance from the frame centre, in pixels, at which the grid has faded out.
@@ -54,7 +60,7 @@ float pixels_off(float w, float spacing) {
 }
 
 bool major(float w, float spacing, float centre) {
-    return mod(round(w / spacing) + centre, 10.0) == 0.0;
+    return mod(round(w / spacing) + centre, u_every) == 0.0;
 }
 
 void main() {
@@ -71,11 +77,21 @@ void main() {
         }
     }
     if (reach <= u_half.y) {
-        bool along_x = pixels_off(v_uv.x, u_coarse) <= 0.5;
-        bool along_y = pixels_off(v_uv.y, u_coarse) <= 0.5;
-        if (along_x || along_y) {
-            bool is_major = (along_x && major(v_uv.x, u_coarse, u_major.x)) || (along_y && major(v_uv.y, u_coarse, u_major.y));
+        float off_x = pixels_off(v_uv.x, u_coarse);
+        float off_y = pixels_off(v_uv.y, u_coarse);
+        bool major_x = major(v_uv.x, u_coarse, u_major.x);
+        bool major_y = major(v_uv.y, u_coarse, u_major.y);
+        float heavy = 0.5 + 0.5 * u_bold;
+        bool bold_x = u_bold > 0.0 && (u_bold_all > 0.5 || major_x) && off_x <= heavy;
+        bool bold_y = u_bold > 0.0 && (u_bold_all > 0.5 || major_y) && off_y <= heavy;
+        bool along_x = off_x <= 0.5;
+        bool along_y = off_y <= 0.5;
+        if (along_x || along_y || bold_x || bold_y) {
+            bool is_major = (along_x && major_x) || (along_y && major_y);
             vec4 line = is_major ? u_major_colour : u_minor_colour;
+            if (!is_major && (bold_x || bold_y)) {
+                line = mix(u_minor_colour, u_major_colour, u_bold);
+            }
             // Over the finer line, as the CPU draws it after.
             float alpha = line.a + colour.a * (1.0 - line.a);
             vec3 rgb = alpha > 0.0 ? (line.rgb * line.a + colour.rgb * colour.a * (1.0 - line.a)) / alpha : line.rgb;

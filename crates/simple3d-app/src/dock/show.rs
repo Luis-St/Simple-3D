@@ -11,7 +11,9 @@ pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
         return;
     }
     let panels = app.settings.layout.panels(side).to_vec();
-    if panels.is_empty() {
+    // While sketching the editor's panel takes the right dock's place, whatever it holds (issue 74).
+    let sketching = side == Side::Right && crate::sketch_tool::in_dock(app);
+    if panels.is_empty() && !sketching {
         // An empty dock is still a drop target, or panels could never return.
         if app.dock_drag.panel.is_none() {
             return;
@@ -35,6 +37,11 @@ pub fn show(app: &mut App, ctx: &egui::Context, side: Side) {
             ui.expand_to_include_rect(ui.max_rect());
             ui.set_min_width(new_width);
             ui.spacing_mut().item_spacing = egui::vec2(metric::GAP, 2.0);
+            if sketching {
+                crate::sketch_tool::dock_panel(app, ui);
+                app.dock_headers.push((side, Vec::new()));
+                return;
+            }
             let filler = app.settings.layout.filler(side);
             let mut centres: Vec<f32> = Vec::new();
 

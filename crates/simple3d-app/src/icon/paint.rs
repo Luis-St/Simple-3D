@@ -4,6 +4,9 @@ use super::*;
 use crate::theme::token;
 
 pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
+    if super::paint_sketch::paint(pen, glyph) {
+        return;
+    }
     match glyph {
         Glyph::PushPull
         | Glyph::Round
@@ -290,5 +293,7 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.ellipse(0.78, 0.50, r, r, TAU * 0.75, TAU * 1.25);
             pen.ellipse(0.22, 0.50, r, r, TAU * 0.25, TAU * 0.75);
         }
+        // Drawn by `paint_sketch` above.
+        _ => {}
     }
 }

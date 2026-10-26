@@ -89,10 +89,19 @@ pub fn choice(ui: &mut egui::Ui, chosen: bool, text: &str) -> egui::Response {
     chip(ui, chosen, text)
 }
 
+/// [`choice`] at least `width` wide, so a row of options shares its room evenly.
+pub fn choice_sized(ui: &mut egui::Ui, chosen: bool, text: &str, width: f32) -> egui::Response {
+    chip_sized(ui, chosen, text, width)
+}
+
 /// The chip both are drawn as. `frame_when_inactive` keeps an unselected one looking like a
 /// control; the on state is egui's own selected button.
 pub(crate) fn chip(ui: &mut egui::Ui, on: bool, text: &str) -> egui::Response {
-    let mut button = egui::Button::selectable(on, text).frame_when_inactive(true);
+    chip_sized(ui, on, text, 0.0)
+}
+
+fn chip_sized(ui: &mut egui::Ui, on: bool, text: &str, width: f32) -> egui::Response {
+    let mut button = egui::Button::selectable(on, text).frame_when_inactive(true).min_size(egui::vec2(width, 0.0));
     if !on {
         // The divider grey: enough to read as a control without competing with an on chip.
         button = button.stroke(Stroke::new(1.0_f32, token::SURFACE_3));

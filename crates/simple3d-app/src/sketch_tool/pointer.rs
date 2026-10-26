@@ -1,12 +1,12 @@
 //! The viewport's pointer while the sketch is open: picking the plane, then drawing, selecting,
 //! dragging and picking regions in it.
 
+use super::picks::*;
 use super::*;
 use crate::app::{App, Status};
 use crate::view::View;
 use simple3d_core::keymap::Command;
 use simple3d_geom::plane_cut::CutPlane;
-use simple3d_sketch::Shape;
 
 /// Whether the editor takes the viewport's clicks: always while it is out.
 pub(crate) fn wants_pointer(app: &App) -> bool {
@@ -26,7 +26,13 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     let cursor = ui.input(|i| i.pointer.hover_pos()).filter(|at| response.rect.contains(*at));
     if response.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
+        // The pointer only selects, so it shows the plain arrow, a hand over what it would pick.
+        let icon = match (tool.draw, tool.hover) {
+            (Draw::Select, Some(_)) if tool.frame.is_some() => egui::CursorIcon::PointingHand,
+            (Draw::Select, None) if tool.frame.is_some() => egui::CursorIcon::Default,
+            _ => egui::CursorIcon::Crosshair,
+        };
+        ui.ctx().set_cursor_icon(icon);
     }
     if tool.frame.is_none() {
         if response.clicked_by(egui::PointerButton::Primary) {
@@ -36,13 +42,15 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         }
         return;
     }
-    let spacing = if app.snap_requested { app.ground_grid(view).map(|grid| grid.spacing) } else { None };
+    let spacing = grid_step(app, view);
     let shift = ui.input(|i| i.modifiers.shift);
     let Some(tool) = app.sketch_tool.as_mut() else { return };
     if tool.drag.is_none() {
         tool.hover = match (tool.draw, cursor) {
             (Draw::Select, Some(cursor)) => tool.pick_at(view, cursor),
-            (Draw::Axis, Some(cursor)) => tool.curve_at(view, cursor).map(Pick::Curve),
+            (Draw::Axis | Draw::Trim, Some(cursor)) => tool.curve_at(view, cursor).map(Pick::Curve),
+            (Draw::Dimension, Some(cursor)) => tool.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_))),
+            (Draw::Regions | Draw::CopyEdges, _) => None,
             (_, Some(cursor)) => tool.point_at(view, cursor, &[]).map(Pick::Point),
             _ => None,
         };
@@ -51,14 +59,17 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         tool.end_gesture();
         return;
     }
+    let clicked = response.clicked_by(egui::PointerButton::Primary);
     match tool.draw {
-        Draw::Select => select(tool, response, view, cursor, shift),
-        Draw::Regions | Draw::Axis | Draw::CopyEdges => {
-            if let (true, Some(cursor)) = (response.clicked_by(egui::PointerButton::Primary), cursor) {
-                let draw = tool.draw;
+        Draw::Select => select(tool, response, view, cursor, (shift, spacing)),
+        draw if !draw.draws() => {
+            if let (true, Some(cursor)) = (clicked, cursor) {
                 match draw {
                     Draw::Regions => app.status = toggle_region(tool, view, cursor),
                     Draw::Axis => app.status = pick_axis(tool, view, cursor),
+                    Draw::Trim => app.status = trim_at(tool, view, cursor),
+                    Draw::Fillet => app.status = fillet_at(tool, view, cursor),
+                    Draw::Dimension => app.status = dimension_at(tool, view, cursor),
                     _ => copy_edges(app, view, cursor),
                 }
             }
@@ -84,7 +95,7 @@ pub(crate) fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
     match app.face_under(view, cursor) {
         Some((Ok(hit), _)) => {
             let face = CutPlane { point: hit.captured.origin, normal: hit.captured.normal };
-            let (u, v) = face.axes();
+            let (u, v) = sketch_axes(face.normal);
             let frame = plane_frame(face.point, u, v);
             app.place_sketch(frame, Some(hit.owner));
         }
@@ -99,6 +110,26 @@ pub(crate) fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
     }
 }
 
+/// The grid step clicks and drags snap to: the finest level drawn, as in other CAD programs without
+/// a key held, so none while the grid is hidden. A point under the pointer still wins over it.
+pub(crate) fn grid_step(app: &App, view: &View) -> Option<f64> {
+    app.ground_grid(view).map(|grid| grid.spacing).filter(|step| *step > 0.0)
+}
+
+/// The axes of a sketch on a face facing `normal`: its X level, so that looking straight at it, as
+/// the camera does without rolling, puts X to the right and Y up. Only a face looking straight up or
+/// down has no level direction of its own; there X is the world's, turned to keep the frame
+/// right-handed as seen from the face's side, as the origin planes are.
+pub(crate) fn sketch_axes(normal: Vec3) -> (Vec3, Vec3) {
+    let n = normal.normalized();
+    let u = if n.z.abs() > 0.999 {
+        Vec3::new(n.z.signum(), 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, 1.0).cross(n).normalized()
+    };
+    (u, n.cross(u))
+}
+
 /// A frame with origin `origin` and axes `u`, `v` and their normal.
 pub(crate) fn plane_frame(origin: Vec3, u: Vec3, v: Vec3) -> Xform {
     let rotation = Xform::rotation_of_axes(u, v, u.cross(v));
@@ -106,7 +137,13 @@ pub(crate) fn plane_frame(origin: Vec3, u: Vec3, v: Vec3) -> Xform {
 }
 
 /// Selecting by click and moving by drag.
-fn select(tool: &mut SketchTool, response: &egui::Response, view: &View, cursor: Option<egui::Pos2>, shift: bool) {
+fn select(
+    tool: &mut SketchTool,
+    response: &egui::Response,
+    view: &View,
+    cursor: Option<egui::Pos2>,
+    (shift, step): (bool, Option<f64>),
+) {
     let Some(cursor) = cursor else { return };
     if response.drag_started_by(egui::PointerButton::Primary) {
         if let Some(pick @ (Pick::Point(_) | Pick::Curve(_))) = tool.hover {
@@ -121,7 +158,7 @@ fn select(tool: &mut SketchTool, response: &egui::Response, view: &View, cursor:
     }
     if let Some(drag) = tool.drag.as_ref() {
         if let Some(at) = tool.under(view, cursor) {
-            let delta = [at[0] - drag.start[0], at[1] - drag.start[1]];
+            let delta = snapped_delta(drag, [at[0] - drag.start[0], at[1] - drag.start[1]], step);
             let moves: Vec<(PointId, [f64; 2])> =
                 drag.points.iter().map(|&(id, from)| (id, [from[0] + delta[0], from[1] + delta[1]])).collect();
             tool.sketch.drag(&moves);
@@ -143,11 +180,28 @@ fn select(tool: &mut SketchTool, response: &egui::Response, view: &View, cursor:
                 }
                 None => tool.selection.push(pick),
             },
-            Some(pick) => tool.selection = vec![pick],
-            None if !shift => tool.selection.clear(),
+            // A plain click also opens the popup that changes what was clicked.
+            Some(pick) => {
+                tool.selection = vec![pick];
+                tool.open_inspect(pick, cursor);
+            }
+            None if !shift => {
+                tool.selection.clear();
+                tool.inspect = None;
+            }
             None => {}
         }
     }
+}
+
+/// How far a drag moves its points: as far as the pointer, or with a grid step, as far as puts the
+/// point nearest where the drag began onto the grid, so the shape lands on it and keeps its form.
+pub(crate) fn snapped_delta(drag: &Dragging, delta: [f64; 2], step: Option<f64>) -> [f64; 2] {
+    let Some(step) = step else { return delta };
+    let gap = |p: [f64; 2]| (p[0] - drag.start[0]).hypot(p[1] - drag.start[1]);
+    let Some(&(_, from)) = drag.points.iter().min_by(|a, b| gap(a.1).total_cmp(&gap(b.1))) else { return delta };
+    let to = [from[0] + delta[0], from[1] + delta[1]].map(|v| (v / step).round() * step);
+    [to[0] - from[0], to[1] - from[1]]
 }
 
 /// Start dragging every selected point and the points of every selected curve.
@@ -171,70 +225,6 @@ fn start_drag(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) {
         return;
     }
     tool.drag = Some(Dragging { start, points, before: tool.sketch.clone() });
-}
-
-/// Pick or drop the region under the pointer.
-fn toggle_region(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) -> Status {
-    let Some(at) = tool.under(view, cursor) else { return Status::Info(String::new()) };
-    let regions = simple3d_sketch::regions::find(&tool.sketch, 64);
-    let Some(index) = regions.at(at) else {
-        return Status::Info("No closed region there; close the outline first".into());
-    };
-    let held = tool.sketch.regions.iter().position(|pick| regions.resolve(pick) == Some(index));
-    let pick = regions.pick(index, at);
-    tool.change(|sketch| match held {
-        Some(k) => {
-            sketch.regions.remove(k);
-        }
-        None => sketch.regions.push(pick),
-    });
-    Status::Info(if held.is_some() { "Dropped the region" } else { "Picked the region" }.into())
-}
-
-/// Make the line under the pointer the revolve axis.
-fn pick_axis(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) -> Status {
-    match tool.curve_at(view, cursor) {
-        Some(id) if tool.sketch.curve(id).is_some_and(|c| matches!(c.shape, Shape::Line { .. })) => {
-            tool.change(|sketch| sketch.axis = Some(id));
-            tool.params.insert("feature".into(), simple3d_core::primitive::ParamValue::Choice(1));
-            Status::Info("The solid now revolves about that line".into())
-        }
-        _ => Status::Info("Click a line to revolve about".into()),
-    }
-}
-
-/// Copy the edges of the face under the pointer onto the sketch, dropped onto its plane.
-fn copy_edges(app: &mut App, view: &View, cursor: egui::Pos2) {
-    let hit = match app.face_under(view, cursor) {
-        Some((Ok(hit), _)) => hit,
-        Some((Err(why), _)) => {
-            app.status = Status::Warning(why.into());
-            return;
-        }
-        None => {
-            app.status = Status::Info("Click a face of the model to copy its edges".into());
-            return;
-        }
-    };
-    let Some(tool) = app.sketch_tool.as_mut() else { return };
-    let face = hit.captured.clone();
-    let helper = tool.copy_as_helper;
-    let to_sketch = |p: [f64; 2]| tool.local(face.origin + face.u * p[0] + face.v * p[1]);
-    let loops: Vec<Vec<[f64; 2]>> = std::iter::once(&face.outline.outer)
-        .chain(face.outline.holes.iter())
-        .map(|points| points.iter().map(|&p| to_sketch(p)).collect())
-        .collect();
-    let added = tool.change(|sketch| {
-        let mut added = 0;
-        for points in &loops {
-            for i in 0..points.len() {
-                added +=
-                    sketch.add_reference_line(points[i], points[(i + 1) % points.len()], helper).is_some() as usize;
-            }
-        }
-        added
-    });
-    app.status = Status::Info(format!("Copied {added} edges of the face"));
 }
 
 impl App {

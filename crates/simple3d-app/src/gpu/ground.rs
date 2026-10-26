@@ -36,6 +36,11 @@ struct GridDraw {
     strength: f64,
     half: [f64; 2],
     major: [f64; 2],
+    /// Coarse lines per major line.
+    every: f64,
+    /// How heavy the emphasised lines are, and whether every coarse line is one (`GridPlane::bold`).
+    bold: f64,
+    bold_all: bool,
     minor: [f32; 4],
     major_colour: [f32; 4],
     fade: f64,
@@ -79,6 +84,7 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
             passes.saw(key + bias * key.abs());
         }
         let half_diagonal = ((view.size.x as f64).hypot(view.size.y as f64) / 2.0).max(1.0);
+        let (bold, bold_all) = plane.bold(fine, coarse, strength);
         GridDraw {
             origin,
             u: plane.u,
@@ -90,7 +96,13 @@ pub(super) fn prepare(request: &Request<'_>, passes: &mut Passes) -> Ground {
             coarse,
             strength,
             half,
-            major: [(centre.0 / coarse).round().rem_euclid(10.0), (centre.1 / coarse).round().rem_euclid(10.0)],
+            major: [
+                (centre.0 / coarse).round().rem_euclid(plane.every()),
+                (centre.1 / coarse).round().rem_euclid(plane.every()),
+            ],
+            every: plane.every(),
+            bold,
+            bold_all,
             minor: as_float(request.palette.grid),
             major_colour: as_float(request.palette.grid_major),
             fade: half_diagonal * 1.08,
@@ -159,6 +171,9 @@ impl Gpu {
             ("u_coarse", grid.coarse as f32),
             ("u_strength", grid.strength as f32),
             ("u_fade", grid.fade as f32),
+            ("u_every", grid.every as f32),
+            ("u_bold", grid.bold as f32),
+            ("u_bold_all", if grid.bold_all { 1.0 } else { 0.0 }),
         ];
         for (name, value) in floats {
             set_f32(gl, program, name, value);

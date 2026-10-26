@@ -76,6 +76,10 @@ impl App {
     }
 
     pub fn set_view(&mut self, preset: ViewPreset) {
+        if self.sketch_flat() {
+            self.look_at_sketch_locked();
+            return;
+        }
         let (yaw, pitch) = preset.angles();
         self.turn_camera_to(yaw, pitch);
         self.status = Status::Info(format!("View: {}", preset.label()));

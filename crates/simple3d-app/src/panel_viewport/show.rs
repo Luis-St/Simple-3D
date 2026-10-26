@@ -123,7 +123,7 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     if let Some(plane) = app.grid_plane() {
         plane.hash_bits(&mut hasher);
     }
-    app.scene.settings.axes_visible.hash(&mut hasher);
+    app.shown_axes().hash(&mut hasher);
     app.scene.settings.axis_style.hash(&mut hasher);
     app.scene.settings.plane_marks.hash(&mut hasher);
     // The cut is part of the picture, so every number that moves it redraws it.

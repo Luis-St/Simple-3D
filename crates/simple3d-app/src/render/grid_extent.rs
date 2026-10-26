@@ -73,13 +73,13 @@ pub fn grid_levels_on(view: &View, plane: &GridPlane) -> (f64, f64, f64) {
         if coarse * pixels_per_mm >= CELL_FULL {
             break;
         }
-        coarse *= 10.0;
+        coarse *= plane.every();
     }
     if coarse <= spacing * 1.000_001 {
         // The document's spacing is already wide enough: no finer decade to fade in.
         return (spacing, spacing, 0.0);
     }
-    let fine = coarse / 10.0;
+    let fine = coarse / plane.every();
     let cell = fine * pixels_per_mm;
     let t = ((cell - CELL_FADE_OUT) / (CELL_FULL - CELL_FADE_OUT)).clamp(0.0, 1.0);
     // Smoothstep, so the fine grid arrives and leaves without an edge.

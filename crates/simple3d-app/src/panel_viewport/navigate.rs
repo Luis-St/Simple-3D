@@ -57,7 +57,9 @@ pub(crate) fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     // zoom-to-pointer walk leave it alone.
     let locked = app.settings.lock_view_centre;
     if let Some(gesture) = gesture {
-        if locked && gesture == Gesture::Pan {
+        if gesture == Gesture::Orbit && app.sketch_flat() {
+            app.status = crate::sketch_tool::held_back();
+        } else if locked && gesture == Gesture::Pan {
             // Said out loud, or the drag would seem broken.
             app.status = Status::Info("The view centre is locked, so the pan moved nothing".into());
         } else {

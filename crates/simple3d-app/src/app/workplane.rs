@@ -9,6 +9,9 @@ use simple3d_core::scene::{Node, NodeId, Workplane};
 use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
 
+/// The sketch grid's finest spacing, in millimetres.
+const SKETCH_GRID: f64 = 1.0;
+
 impl App {
     /// The workplane shapes are added, moved and snapped on, or `None` for the ground.
     pub(crate) fn workplane(&self) -> Option<&Workplane> {
@@ -18,13 +21,37 @@ impl App {
     /// The grid drawn and snapped to, when it is not the ground: the sketch plane while sketching, the
     /// workplane being placed while the tool has a face, else the active one.
     pub(crate) fn grid_plane(&self) -> Option<GridPlane> {
-        // While sketching the grid is the sketch plane's (issue 74).
+        // While sketching the grid is the sketch plane's, 1 mm fine with a heavier line every grid
+        // spacing (issue 74).
         if let Some(frame) = self.sketch_tool.as_ref().and_then(|tool| tool.frame) {
-            let spacing = self.scene.settings.grid_spacing;
-            return Some(GridPlane { origin: frame.t, u: frame.axis(0), v: frame.axis(1), spacing });
+            let every = (self.scene.settings.grid_spacing / SKETCH_GRID).round().clamp(2.0, 1000.0) as u32;
+            return Some(GridPlane {
+                origin: frame.t,
+                u: frame.axis(0),
+                v: frame.axis(1),
+                spacing: SKETCH_GRID,
+                major_every: every,
+                emphasise: true,
+            });
         }
         let placing = self.workplane_tool.as_ref().and_then(|tool| tool.preview());
         placing.or_else(|| self.workplane().cloned()).map(|plane| GridPlane::of(&plane))
+    }
+
+    /// The origin axes drawn: the document's, less the one pointing straight out of the sketch plane
+    /// while sketching, since the sketch is a 2D view and that axis is only a dot or a stray line.
+    pub(crate) fn shown_axes(&self) -> [bool; 3] {
+        let mut axes = self.scene.settings.axes_visible;
+        if let Some(frame) = self.sketch_tool.as_ref().and_then(|tool| tool.frame) {
+            let normal = frame.axis(2);
+            for (axis, shown) in axes.iter_mut().enumerate() {
+                let along = [normal.x, normal.y, normal.z][axis].abs();
+                if along > 1.0 - 1e-6 {
+                    *shown = false;
+                }
+            }
+        }
+        axes
     }
 
     /// Where a new shape lands when nothing else says: the workplane's origin, or the world's.

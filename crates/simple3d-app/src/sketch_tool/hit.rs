@@ -80,6 +80,9 @@ impl SketchTool {
         if let Some(step) = spacing.filter(|step| *step > 0.0) {
             at = at.map(|v| (v / step).round() * step);
         }
-        Some(Click { at, point: None })
+        // A click snapped onto a point out of the pointer's reach is that point, not a second one
+        // on top of it that the solver would later pull apart.
+        let point = self.sketch.points.iter().find(|p| (p.at[0] - at[0]).hypot(p.at[1] - at[1]) < 1e-9).map(|p| p.id);
+        Some(Click { at, point })
     }
 }

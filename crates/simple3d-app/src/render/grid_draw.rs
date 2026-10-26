@@ -16,9 +16,10 @@ pub(crate) fn push_grid(steps: &mut Vec<Step>, view: &View, grid: &Grid, palette
     // Both levels cover the same ground; a shorter fine reach looked like a detail patch around the
     // origin. `grid_levels` fades the fine level across the whole ground.
     if strength > 0.03 {
-        push_grid_level(steps, view, &plane, (fine, bias), radius, strength, false, palette);
+        push_grid_level(steps, view, &plane, (fine, bias), radius, strength, (false, (0.0, false)), palette);
     }
-    push_grid_level(steps, view, &plane, (coarse, bias), radius, 1.0, true, palette);
+    let bold = plane.bold(fine, coarse, strength);
+    push_grid_level(steps, view, &plane, (coarse, bias), radius, 1.0, (true, bold), palette);
 }
 
 /// One grid decade on `plane` centred on the camera target, snapped to its spacing so lines sit on
@@ -31,36 +32,46 @@ pub(crate) fn push_grid_level(
     (spacing, bias): (f64, f32),
     radius: f64,
     strength: f64,
-    majors: bool,
+    (majors, (bold, every_line)): (bool, (f64, bool)),
     palette: &Palette,
 ) {
     let ((cx, cy), half) = grid_square_on(view, plane, spacing, radius);
     let lines = (half / spacing).round() as i64;
-    // Every tenth line is major, counted from the plane's origin so majors stay put while panning.
+    // Every `major_every`th line is major, counted from the plane's origin so majors stay put while
+    // panning. `bold` makes the majors heavier, or every line when `every_line`.
+    let every = plane.every() as i64;
+    let major = |along: f64| majors && ((along / spacing).round() as i64).rem_euclid(every) == 0;
+    let heavy = |along: f64| bold > 0.0 && (every_line || major(along));
     let shade = |along: f64| {
-        let index = (along / spacing).round() as i64;
-        let colour = if majors && index.rem_euclid(10) == 0 { palette.grid_major } else { palette.grid };
+        let colour = match () {
+            _ if major(along) => palette.grid_major,
+            _ if heavy(along) => mix(palette.grid, palette.grid_major, bold),
+            _ => palette.grid,
+        };
         [colour[0], colour[1], colour[2], (colour[3] as f64 * strength).round() as u8]
     };
+    // A heavy line is drawn twice, a pixel apart, the second as strong as it is heavy.
+    let pixel = 1.0 / view.pixels_per_mm().max(1e-9);
+    let twin = |colour: Rgba| [colour[0], colour[1], colour[2], (colour[3] as f64 * bold).round() as u8];
     for i in -lines..=lines {
         let offset = i as f64 * spacing;
-        push_faded_line(
-            steps,
-            view,
-            plane.at(cx + offset, cy - half),
-            plane.at(cx + offset, cy + half),
-            shade(cx + offset),
-            bias,
-        );
-        push_faded_line(
-            steps,
-            view,
-            plane.at(cx - half, cy + offset),
-            plane.at(cx + half, cy + offset),
-            shade(cy + offset),
-            bias,
-        );
+        let (s, t) = (cx + offset, cy + offset);
+        push_faded_line(steps, view, plane.at(s, cy - half), plane.at(s, cy + half), shade(s), bias);
+        push_faded_line(steps, view, plane.at(cx - half, t), plane.at(cx + half, t), shade(t), bias);
+        if heavy(s) {
+            let (from, to) = (plane.at(s + pixel, cy - half), plane.at(s + pixel, cy + half));
+            push_faded_line(steps, view, from, to, twin(shade(s)), bias);
+        }
+        if heavy(t) {
+            let (from, to) = (plane.at(cx - half, t + pixel), plane.at(cx + half, t + pixel));
+            push_faded_line(steps, view, from, to, twin(shade(t)), bias);
+        }
     }
+}
+
+/// `a` turned toward `b` by `t`, from 0 to 1.
+fn mix(a: Rgba, b: Rgba, t: f64) -> Rgba {
+    std::array::from_fn(|i| (a[i] as f64 + (b[i] as f64 - a[i] as f64) * t.clamp(0.0, 1.0)).round() as u8)
 }
 
 /// How many pieces a grid line is cut into to fade it: invisible steps, still cheap.
