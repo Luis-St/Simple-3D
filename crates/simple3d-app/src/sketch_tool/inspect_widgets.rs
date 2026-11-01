@@ -63,10 +63,10 @@ fn padlock(painter: &egui::Painter, rect: egui::Rect, colour: egui::Color32) {
 /// The lock beside a size: lit while a dimension holds it. Whether it was clicked.
 pub(super) fn lock(ui: &mut egui::Ui, locked: bool) -> bool {
     let hover = if locked { "Held by a dimension; click to free it" } else { "Hold this size with a dimension" };
-    ui.add(egui::Button::selectable(locked, "Lock")).on_hover_text(hover).clicked()
+    crate::theme::choice(ui, locked, "Lock").on_hover_text(hover).clicked()
 }
 
-/// A switch in the row under the fields; whether it was clicked.
+/// A switch in the row under the fields, framed as a button whether on or off; whether it was clicked.
 pub(super) fn switch(ui: &mut egui::Ui, on: bool, label: &str, hover: &str) -> bool {
-    ui.add(egui::Button::selectable(on, label)).on_hover_text(hover).clicked()
+    crate::theme::choice(ui, on, label).on_hover_text(hover).clicked()
 }

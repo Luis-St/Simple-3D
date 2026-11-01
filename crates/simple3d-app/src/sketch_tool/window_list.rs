@@ -118,8 +118,14 @@ fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Op
     let bin = egui::Rect::from_center_size(egui::pos2(rect.right() - 12.0, rect.center().y), egui::Vec2::splat(ICON));
     let drop = ui.interact(bin, id.with("drop"), egui::Sense::click()).on_hover_text("Remove this constraint");
     drop.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Remove this constraint"));
-    let ink = if drop.hovered() { token::DANGER } else { token::TEXT_LO };
-    icon::draw(ui.painter(), bin.shrink(1.0), Glyph::Delete, ink);
+    // Framed as a button, so it reads as one beside the plain row text.
+    let frame = bin.expand(2.0);
+    let (fill, edge, ink) = match drop.hovered() {
+        true => (token::DANGER.gamma_multiply(0.16), token::DANGER, token::DANGER),
+        false => (token::SURFACE_2, token::SURFACE_3, token::TEXT_HI),
+    };
+    ui.painter().rect(frame, 3.0, fill, egui::Stroke::new(1.0_f32, edge), egui::StrokeKind::Inside);
+    icon::draw(ui.painter(), bin.shrink(2.0), Glyph::Delete, ink);
     if drop.clicked() {
         asked = Asked::Drop;
     }
