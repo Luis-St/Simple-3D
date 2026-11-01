@@ -20,6 +20,7 @@ mod gesture;
 mod hit;
 mod inspect;
 mod inspect_fields;
+mod inspect_widgets;
 mod keys;
 mod modify;
 mod picks;
