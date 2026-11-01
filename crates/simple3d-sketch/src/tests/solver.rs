@@ -128,3 +128,28 @@ fn a_spline_is_tangent_where_it_ends_on_a_line() {
     let refused = sketch.constrain(ConstraintKind::OnCurve { point: away, curve: spline });
     assert!(matches!(refused, Err(Refusal::Unsupported(_))));
 }
+
+#[test]
+fn a_constraint_moves_the_loose_end_and_leaves_the_joined_one() {
+    // Two lines joined at a corner; making the second horizontal turns it about the corner.
+    let mut sketch = Sketch::default();
+    let [a, corner, end] = [[0.0, 0.0], [10.0, 0.0], [20.0, 4.0]].map(|at| sketch.add_point(at));
+    sketch.add_curve(Shape::Line { a, b: corner }, false);
+    let second = sketch.add_curve(Shape::Line { a: corner, b: end }, false);
+    sketch.constrain(ConstraintKind::Horizontal { line: second }).unwrap();
+    let (c, e) = (sketch.at(corner), sketch.at(end));
+    assert!(near(c[0], 10.0) && near(c[1], 0.0), "the joined corner moved to {c:?}");
+    assert!(near(e[1], 0.0), "the loose end did not come level: {e:?}");
+    // A coincidence pulls the loose end onto the joined point, not both halfway.
+    let lone = sketch.add_point([12.0, 3.0]);
+    let other = sketch.add_point([30.0, 3.0]);
+    sketch.add_curve(Shape::Line { a: lone, b: other }, false);
+    sketch.constrain(ConstraintKind::Coincident { a: corner, b: lone }).unwrap();
+    assert!(near(sketch.at(corner)[0], 10.0) && near(sketch.at(corner)[1], 0.0), "the corner gave way");
+    // A line alone still meets it halfway, both ends being loose.
+    let mut single = Sketch::default();
+    let [p, q] = [[0.0, 0.0], [10.0, 2.0]].map(|at| single.add_point(at));
+    let line = single.add_curve(Shape::Line { a: p, b: q }, false);
+    single.constrain(ConstraintKind::Horizontal { line }).unwrap();
+    assert!(near(single.at(p)[1], 1.0) && near(single.at(q)[1], 1.0));
+}

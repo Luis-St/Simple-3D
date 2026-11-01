@@ -12,6 +12,7 @@ pub use equations::angle_between;
 mod linalg;
 mod system;
 mod tangent;
+mod weights;
 
 use crate::constraint::{ConstraintId, ConstraintKind};
 use crate::curve::CurveId;
@@ -120,11 +121,12 @@ fn newton(sys: &System, eqs: &[Equation], weights: &[f64]) -> Option<Vec<f64>> {
 impl Sketch {
     /// Move the points until every constraint holds; `false`, with nothing moved, if they cannot.
     pub fn solve(&mut self) -> bool {
-        self.solve_weighted(&[])
+        let connected = self.connected_points();
+        self.solve_weighted(&[], &connected)
     }
 
-    fn solve_weighted(&mut self, heavy: &[PointId]) -> bool {
-        match self.solved(heavy) {
+    fn solve_weighted(&mut self, heavy: &[PointId], connected: &HashSet<PointId>) -> bool {
+        match self.solved(heavy, connected) {
             Some(solved) => {
                 *self = solved;
                 true
@@ -133,14 +135,32 @@ impl Sketch {
         }
     }
 
-    /// A copy with every constraint met, the points in `heavy` moved most reluctantly.
-    fn solved(&self, heavy: &[PointId]) -> Option<Sketch> {
+    /// A copy with every constraint met, the points in `heavy` moved most reluctantly and those in
+    /// `connected` more so than loose ends.
+    fn solved(&self, heavy: &[PointId], connected: &HashSet<PointId>) -> Option<Sketch> {
+        // Met by the loose ends alone where that can be done, as long as nothing is dragged.
+        if heavy.is_empty() {
+            if let Some(solved) = self.solved_pinned(connected) {
+                return Some(solved);
+            }
+        }
+        self.solved_weighted(heavy, connected)
+    }
+
+    /// [`Sketch::solved`] with every point free to give way, by its weight.
+    fn solved_weighted(&self, heavy: &[PointId], connected: &HashSet<PointId>) -> Option<Sketch> {
         let sys = System::new(self);
         let eqs = sys.equations().ok()?;
         let mut weights = vec![1.0; sys.len()];
+        for &point in connected {
+            for k in sys.point_vars(point) {
+                weights[k] = weights::CONNECTED;
+            }
+        }
+        // Above the joined points by as much as it was above every point before they were weighed.
         for &point in heavy {
             for k in sys.point_vars(point) {
-                weights[k] = DRAGGED;
+                weights[k] = DRAGGED * weights::CONNECTED;
             }
         }
         let x = newton(&sys, &eqs, &weights)?;
@@ -159,7 +179,8 @@ impl Sketch {
             }
         }
         let ids: Vec<PointId> = moves.iter().map(|m| m.0).collect();
-        if self.solve_weighted(&ids) {
+        let connected = self.connected_points();
+        if self.solve_weighted(&ids, &connected) {
             return true;
         }
         *self = before;
@@ -169,6 +190,9 @@ impl Sketch {
     /// Add a constraint and solve, unless it cannot hold, cannot be met or adds nothing.
     pub fn constrain(&mut self, kind: ConstraintKind) -> Result<ConstraintId, Refusal> {
         let before = self.clone();
+        // Joined as it was before this constraint, so a coincidence moves the loose end onto the
+        // joined point rather than meeting it halfway.
+        let connected = self.connected_points();
         let id = self.push_constraint(kind);
         let refuse = |sketch: &mut Sketch, why: Refusal| {
             *sketch = before.clone();
@@ -178,7 +202,7 @@ impl Sketch {
         if let Some(why) = unsupported {
             return refuse(self, Refusal::Unsupported(why));
         }
-        let solved = self.solve();
+        let solved = self.solve_weighted(&[], &connected);
         if let Some(others) = self.repeated_by(id) {
             return refuse(self, Refusal::Redundant(others));
         }
