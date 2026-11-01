@@ -128,3 +128,21 @@ fn an_area_drawn_right_takes_what_is_inside_and_drawn_left_what_it_touches() {
     let crossing = tool.in_area(&view, Area { start: rect.right_top(), end: rect.left_bottom() });
     assert_eq!(crossing, vec![Pick::Curve(short), Pick::Curve(long), Pick::Point(lone)]);
 }
+
+#[test]
+fn the_sketch_arms_are_left_out_only_where_a_shown_world_axis_runs() {
+    let on_ground = sketching_on(Xform::from_translation(Vec3::ZERO));
+    let tool = on_ground.sketch_tool.as_ref().unwrap();
+    assert!(super::on_world_axis(tool, 0, [true; 3]) && super::on_world_axis(tool, 1, [true; 3]));
+    // A hidden world axis leaves the arm to mark the direction.
+    assert!(!super::on_world_axis(tool, 0, [false, true, true]));
+    // Off the origin no world axis runs along them.
+    let raised = sketching_on(Xform::from_translation(Vec3::new(0.0, 0.0, 5.0)));
+    let tool = raised.sketch_tool.as_ref().unwrap();
+    assert!(!super::on_world_axis(tool, 0, [true; 3]) && !super::on_world_axis(tool, 1, [true; 3]));
+    // On the XZ plane the arms run along X and Z.
+    let xz = sketching_on(plane_frame(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0)));
+    let tool = xz.sketch_tool.as_ref().unwrap();
+    assert!(super::on_world_axis(tool, 1, [true, false, true]));
+    assert!(!super::on_world_axis(tool, 1, [true, true, false]));
+}

@@ -40,7 +40,7 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
         tool.unit = unit;
     }
     let Some(tool) = app.sketch_tool.as_ref() else { return };
-    draw_axes(tool, painter, view);
+    draw_axes(tool, painter, view, app.shown_axes());
     draw_regions(tool, painter, view, hover);
     for curve in &tool.sketch.curves {
         draw_curve(tool, painter, view, curve);
@@ -106,11 +106,16 @@ pub(crate) fn snap_landing(app: &App, view: &View, cursor: egui::Pos2) -> Option
     (click.point.is_some() || step.is_some()).then_some(click.at)
 }
 
-/// The sketch's origin and its X and Y, so the plane reads as a plane before anything is drawn.
-fn draw_axes(tool: &SketchTool, painter: &egui::Painter, view: &View) {
+/// The sketch's origin and its X and Y, so the plane reads as a plane before anything is drawn. An
+/// arm a shown world axis already runs along is left out: drawn over it a pixel off, it made the
+/// axis look twice as thick near the origin.
+fn draw_axes(tool: &SketchTool, painter: &egui::Painter, view: &View, shown: [bool; 3]) {
     let Some(origin) = tool.screen(view, [0.0, 0.0]) else { return };
     let arm = 40.0 / view.pixels_per_mm().max(1e-9);
     for (axis, end) in [(0, [arm, 0.0]), (1, [0.0, arm])] {
+        if on_world_axis(tool, axis, shown) {
+            continue;
+        }
         if let Some(end) = tool.screen(view, end) {
             painter.line_segment(
                 [origin, end],
@@ -118,6 +123,17 @@ fn draw_axes(tool: &SketchTool, painter: &egui::Painter, view: &View) {
             );
         }
     }
+}
+
+/// Whether sketch axis `axis` (0 for X, 1 for Y) lies along a world axis that is drawn.
+pub(crate) fn on_world_axis(tool: &SketchTool, axis: usize, shown: [bool; 3]) -> bool {
+    let Some(frame) = tool.frame else { return false };
+    let (origin, direction) = (frame.t, frame.axis(axis));
+    (0..3).any(|world| {
+        let along = direction.get(world).abs() > 1.0 - 1e-6;
+        let through = (0..3).filter(|&k| k != world).all(|k| origin.get(k).abs() < 1e-6);
+        shown[world] && along && through
+    })
 }
 
 /// The picked regions filled, and in the region tool the one under the pointer faintly.
