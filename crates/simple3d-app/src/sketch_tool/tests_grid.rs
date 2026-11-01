@@ -87,3 +87,24 @@ fn a_click_snapped_onto_a_point_out_of_reach_reuses_it() {
     assert_eq!(click.at, [10.0, 0.0]);
     assert_eq!(click.point, Some(corner));
 }
+
+#[test]
+fn the_constraint_list_shows_only_what_holds_everything_selected() {
+    use simple3d_sketch::{ConstraintKind as K, Shape};
+    let mut app = sketching_on(Xform::from_translation(Vec3::ZERO));
+    let tool = app.sketch_tool.as_mut().unwrap();
+    let ids: Vec<PointId> = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]].map(|at| tool.sketch.add_point(at)).to_vec();
+    let first = tool.sketch.add_curve(Shape::Line { a: ids[0], b: ids[1] }, false);
+    let second = tool.sketch.add_curve(Shape::Line { a: ids[1], b: ids[2] }, false);
+    let level = K::Horizontal { line: first };
+    let square = K::Perpendicular { a: first, b: second };
+    let length = K::Distance { a: ids[0], b: ids[1], value: 10.0 };
+    let shown = |tool: &SketchTool| [&level, &square, &length].map(|k| tool.holds_all_selected(k));
+    assert_eq!(shown(tool), [true; 3], "nothing selected must list everything");
+    tool.selection = vec![Pick::Curve(first)];
+    assert_eq!(shown(tool), [true, true, true]);
+    tool.selection = vec![Pick::Curve(first), Pick::Curve(second)];
+    assert_eq!(shown(tool), [false, true, false]);
+    tool.selection = vec![Pick::Point(ids[0])];
+    assert_eq!(shown(tool), [false, false, true]);
+}

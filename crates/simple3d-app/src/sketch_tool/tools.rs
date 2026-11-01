@@ -117,8 +117,8 @@ impl Draw {
     pub(crate) fn hint(self) -> &'static str {
         match self {
             Draw::Select => {
-                "Click points, curves or constraints to select them and change them in place, Shift adds; drag to \
-                 move."
+                "Click points, curves or constraints to select them and change them in place, Shift adds without \
+                 opening the popup; drag to move."
             }
             Draw::Line => "Click to put lines down one after another; right-click or Esc ends the chain.",
             Draw::Rectangle => "Click two opposite corners.",

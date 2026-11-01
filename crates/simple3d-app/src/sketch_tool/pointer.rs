@@ -178,12 +178,16 @@ fn select(
     }
     if response.clicked_by(egui::PointerButton::Primary) {
         match tool.hover {
-            Some(pick) if shift => match tool.selection.iter().position(|p| *p == pick) {
-                Some(at) => {
-                    tool.selection.remove(at);
+            // Shift marks without the popup, and closes one left open, which would only show one of them.
+            Some(pick) if shift => {
+                match tool.selection.iter().position(|p| *p == pick) {
+                    Some(at) => {
+                        tool.selection.remove(at);
+                    }
+                    None => tool.selection.push(pick),
                 }
-                None => tool.selection.push(pick),
-            },
+                tool.inspect = None;
+            }
             // A plain click also opens the popup that changes what was clicked.
             Some(pick) => {
                 tool.selection = vec![pick];

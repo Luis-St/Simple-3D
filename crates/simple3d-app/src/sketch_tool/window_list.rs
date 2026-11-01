@@ -20,17 +20,26 @@ const ANGLE: ParamKind = ParamKind::Angle { min: 0.0, max: 180.0, wrap: false };
 
 pub(crate) fn list(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
     let count = tool.sketch.constraints.len();
-    let header = format!("Constraints ({count})");
+    let shown: Vec<_> = tool.sketch.constraints.iter().filter(|c| tool.holds_all_selected(&c.kind)).cloned().collect();
+    let header = match shown.len() == count {
+        true => format!("Constraints ({count})"),
+        false => format!("Constraints ({} of {count})", shown.len()),
+    };
     super::window::group(ui, &header, |ui| {
         if count == 0 {
             let hint = "Select points or curves and use the Constrain buttons, or the Dimension tool.";
             ui.add(egui::Label::new(theme::hint(hint)).selectable(false));
             return;
         }
+        if shown.is_empty() {
+            let hint = "No constraint holds everything selected.";
+            ui.add(egui::Label::new(theme::hint(hint)).selectable(false));
+            return;
+        }
         let mut dropped = None;
         let mut retyped = None;
         ui.spacing_mut().item_spacing.y = 0.0;
-        for constraint in tool.sketch.constraints.clone() {
+        for constraint in shown {
             let pick = Pick::Constraint(constraint.id);
             let marked = tool.conflicts.contains(&constraint.id) || tool.analysis.redundant.contains(&constraint.id);
             let selected = tool.selection.contains(&pick);
@@ -124,4 +133,25 @@ fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Op
         asked = Asked::Retype(typed);
     }
     asked
+}
+
+impl SketchTool {
+    /// Whether the list shows constraint `kind`: with points or curves selected, only when it holds
+    /// every one of them; otherwise always. It holds a point it names, and a curve it names or whose
+    /// points are all it names, as a line's length or a fix on its end does, but not a dimension
+    /// that only shares a corner with it.
+    pub(crate) fn holds_all_selected(&self, kind: &simple3d_sketch::ConstraintKind) -> bool {
+        let (points, curves) = (kind.points(), kind.curves());
+        self.selection.iter().all(|pick| match *pick {
+            Pick::Point(id) => points.contains(&id),
+            Pick::Curve(id) => {
+                curves.contains(&id)
+                    || self.sketch.curve(id).is_some_and(|c| {
+                        let own = c.shape.points();
+                        !points.is_empty() && points.iter().all(|p| own.contains(p))
+                    })
+            }
+            Pick::Constraint(_) => true,
+        })
+    }
 }
