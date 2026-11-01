@@ -52,14 +52,7 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     let origin = ui.input(|i| i.pointer.press_origin()).filter(|_| !camera_drag);
     let Some(tool) = app.sketch_tool.as_mut() else { return };
     if tool.drag.is_none() {
-        tool.hover = match (tool.draw, cursor) {
-            (Draw::Select, Some(cursor)) => tool.pick_at(view, cursor),
-            (Draw::Axis | Draw::Trim, Some(cursor)) => tool.curve_at(view, cursor).map(Pick::Curve),
-            (Draw::Dimension, Some(cursor)) => tool.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_))),
-            (Draw::Regions | Draw::CopyEdges, _) => None,
-            (_, Some(cursor)) => tool.point_at(view, cursor, &[]).map(Pick::Point),
-            _ => None,
-        };
+        tool.hover = cursor.and_then(|cursor| tool.hover_at(view, cursor, shift));
     }
     if response.clicked_by(egui::PointerButton::Secondary) {
         tool.end_gesture();
@@ -79,6 +72,13 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
                     Draw::Axis => app.status = pick_axis(tool, view, cursor),
                     Draw::Trim => app.status = trim_at(tool, view, cursor),
                     Draw::Fillet => app.status = fillet_at(tool, view, cursor),
+                    Draw::Chamfer => app.status = super::picks_more::chamfer_at(tool, view, cursor),
+                    Draw::Extend | Draw::Split | Draw::Offset => {
+                        app.status = super::picks_more::curve_tool_at(tool, view, cursor)
+                    }
+                    draw if draw.uses_selection() => {
+                        app.status = super::picks_more::selection_tool_at(tool, view, cursor, (shift, spacing))
+                    }
                     Draw::Dimension => app.status = dimension_at(tool, view, cursor),
                     _ => copy_edges(app, view, cursor),
                 }

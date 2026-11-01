@@ -52,7 +52,7 @@ pub(crate) fn copy_edges(app: &mut App, view: &View, cursor: egui::Pos2) {
     };
     let Some(tool) = app.sketch_tool.as_mut() else { return };
     let face = hit.captured.clone();
-    let helper = tool.copy_as_helper;
+    let helper = tool.settings.copy_as_helper;
     let to_sketch = |p: [f64; 2]| tool.local(face.origin + face.u * p[0] + face.v * p[1]);
     let loops: Vec<Vec<[f64; 2]>> = std::iter::once(&face.outline.outer)
         .chain(face.outline.holes.iter())
@@ -90,7 +90,7 @@ pub(crate) fn fillet_at(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) 
     let Some(corner) = tool.point_at(view, cursor, &[]) else {
         return Status::Info("Click a corner where two lines meet".into());
     };
-    let radius = tool.fillet_radius;
+    let radius = tool.settings.fillet_radius;
     let before = tool.sketch.clone();
     match super::modify::fillet(&mut tool.sketch, corner, radius) {
         Ok(_) if tool.sketch.solve() => {
@@ -147,6 +147,20 @@ pub(crate) fn dimension_at(tool: &mut SketchTool, view: &View, cursor: egui::Pos
 }
 
 impl SketchTool {
+    /// What the tool in use would act on under the pointer, lit while it hovers there.
+    pub(crate) fn hover_at(&self, view: &View, cursor: egui::Pos2, shift: bool) -> Option<Pick> {
+        let curve = || self.curve_at(view, cursor).map(Pick::Curve);
+        let point = || self.point_at(view, cursor, &[]).map(Pick::Point);
+        match self.draw {
+            Draw::Select => self.pick_at(view, cursor),
+            Draw::Axis | Draw::Trim | Draw::Extend | Draw::Split | Draw::Offset | Draw::Mirror => curve(),
+            draw if draw.uses_selection() && (shift || self.clicks.is_empty()) => curve().or_else(point),
+            Draw::Dimension => self.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_))),
+            Draw::Regions | Draw::CopyEdges => None,
+            _ => point(),
+        }
+    }
+
     /// The dimension sizing curve `id`: a line's length or a round curve's radius.
     pub(crate) fn dimension_of(&self, id: CurveId) -> Option<ConstraintId> {
         let ends = self.sketch.curve(id).and_then(|c| match c.shape {

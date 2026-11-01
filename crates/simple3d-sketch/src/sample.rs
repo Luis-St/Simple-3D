@@ -49,6 +49,21 @@ pub fn sample_curve(sketch: &Sketch, curve: &Curve, segments: u32) -> Samples {
             points.push(e);
             Samples { points, closed: false }
         }
+        Shape::Ellipse { center, major, minor } => {
+            let e = crate::Ellipse::new(at(*center), at(*major), *minor);
+            let points = (0..segments).map(|i| e.at(TAU * i as f64 / segments as f64)).collect();
+            Samples { points, closed: true }
+        }
+        Shape::EllipseArc { center, major, minor, start, end } => {
+            let e = crate::Ellipse::new(at(*center), at(*major), *minor);
+            let (s, end) = (at(*start), at(*end));
+            let (t0, sweep) = crate::ellipse::arc_span(&e, s, end);
+            let n = ((segments as f64 * sweep / TAU).ceil() as usize).max(2);
+            let mut points: Vec<[f64; 2]> = (0..n).map(|i| e.at(t0 + sweep * i as f64 / n as f64)).collect();
+            points[0] = s;
+            points.push(end);
+            Samples { points, closed: false }
+        }
         Shape::Spline { points, closed } => {
             let p: Vec<[f64; 2]> = points.iter().map(|&id| at(id)).collect();
             Samples { points: catmull_rom(&p, *closed, per_span(segments)), closed: *closed }

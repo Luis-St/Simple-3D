@@ -25,6 +25,21 @@ pub enum Shape {
         center: PointId,
         radius: f64,
     },
+    /// Its major axis runs from `center` out to `major`; `minor` is the other half-axis, a solver
+    /// unknown of its own like a circle's radius.
+    Ellipse {
+        center: PointId,
+        major: PointId,
+        minor: f64,
+    },
+    /// Counter-clockwise along the ellipse from `start` to `end`; the solver keeps both on it.
+    EllipseArc {
+        center: PointId,
+        major: PointId,
+        minor: f64,
+        start: PointId,
+        end: PointId,
+    },
     /// A smooth curve through every one of `points` (a centripetal Catmull-Rom spline), closed back
     /// onto the first when `closed`.
     Spline {
@@ -61,6 +76,8 @@ impl Shape {
             Shape::Line { a, b } => vec![*a, *b],
             Shape::Arc { center, start, end } => vec![*center, *start, *end],
             Shape::Circle { center, .. } => vec![*center],
+            Shape::Ellipse { center, major, .. } => vec![*center, *major],
+            Shape::EllipseArc { center, major, start, end, .. } => vec![*center, *major, *start, *end],
             Shape::Spline { points, .. } | Shape::Bspline { points, .. } => points.clone(),
         }
     }
@@ -70,7 +87,8 @@ impl Shape {
         match self {
             Shape::Line { a, b } => Some((*a, *b)),
             Shape::Arc { start, end, .. } => Some((*start, *end)),
-            Shape::Circle { .. } => None,
+            Shape::Circle { .. } | Shape::Ellipse { .. } => None,
+            Shape::EllipseArc { start, end, .. } => Some((*start, *end)),
             Shape::Spline { points, closed } => (!closed).then(|| (points[0], points[points.len() - 1])),
             Shape::Bspline { points, closed } => (!closed).then(|| (points[0], points[points.len() - 1])),
         }
@@ -79,6 +97,28 @@ impl Shape {
     /// Whether the curve is round (an arc or a circle), which radius and tangent constraints need.
     pub fn is_round(&self) -> bool {
         matches!(self, Shape::Arc { .. } | Shape::Circle { .. })
+    }
+
+    /// Whether the curve is an ellipse or a piece of one.
+    pub fn is_elliptic(&self) -> bool {
+        matches!(self, Shape::Ellipse { .. } | Shape::EllipseArc { .. })
+    }
+
+    /// A circle's radius or an ellipse's minor half-axis: the size of its own the solver moves.
+    pub fn own_size(&self) -> Option<f64> {
+        match *self {
+            Shape::Circle { radius, .. } => Some(radius),
+            Shape::Ellipse { minor, .. } | Shape::EllipseArc { minor, .. } => Some(minor),
+            _ => None,
+        }
+    }
+
+    pub fn own_size_mut(&mut self) -> Option<&mut f64> {
+        match self {
+            Shape::Circle { radius, .. } => Some(radius),
+            Shape::Ellipse { minor, .. } | Shape::EllipseArc { minor, .. } => Some(minor),
+            _ => None,
+        }
     }
 
     pub fn is_line(&self) -> bool {
@@ -95,6 +135,8 @@ impl Shape {
             Shape::Line { .. } => "line",
             Shape::Arc { .. } => "arc",
             Shape::Circle { .. } => "circle",
+            Shape::Ellipse { .. } => "ellipse",
+            Shape::EllipseArc { .. } => "elliptical arc",
             Shape::Spline { .. } => "spline",
             Shape::Bspline { .. } => "control-point spline",
         }

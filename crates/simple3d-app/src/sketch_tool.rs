@@ -17,18 +17,27 @@ mod constrain;
 mod dock;
 pub(crate) use dock::*;
 mod drawing;
+mod drawing_more;
+mod drawing_tangent;
 mod gesture;
 mod hit;
 mod inspect;
+mod inspect_ellipse;
 mod inspect_fields;
 mod inspect_widgets;
 mod keys;
 mod modify;
+mod modify_copy;
+mod modify_ends;
+mod modify_offset;
 mod picks;
+mod picks_more;
 mod readout;
 mod shapes;
 mod tools;
-pub(crate) use tools::Draw;
+pub(crate) use tools::{Draw, Family};
+mod settings;
+mod tools_text;
 mod view;
 pub(crate) use view::held_back;
 mod open;
@@ -43,9 +52,13 @@ pub(crate) use window::*;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
+mod tests_grid;
+#[cfg(test)]
+mod tests_modify;
+#[cfg(test)]
 mod tests_tools;
 #[cfg(test)]
-mod tests_grid;
+mod tests_variants;
 #[cfg(test)]
 mod tests_view;
 mod window_feature;
@@ -63,9 +76,6 @@ use simple3d_sketch::{ConstraintId, CurveId, PointId, Sketch};
 const KEY: &str = "sketch-tool";
 /// The floating window's width, when the docks are hidden: the constraint list beside its values.
 const WIDTH: f32 = 340.0;
-/// The fillet radius and polygon side count a new editor starts with.
-const FILLET_RADIUS: f64 = 2.0;
-const POLYGON_SIDES: u32 = 6;
 /// How many steps the editor's own undo keeps.
 const UNDO_DEPTH: usize = 200;
 
@@ -115,18 +125,14 @@ pub struct SketchTool {
     pub(crate) analysis: Analysis,
     /// Constraints the last refused one would have fought, marked until the next change.
     pub(crate) conflicts: Vec<ConstraintId>,
-    /// Whether copied face edges come in as helper geometry rather than as part of the profile.
-    pub(crate) copy_as_helper: bool,
     /// The display unit, for dimension labels; kept up to date while the editor is drawn.
     pub(crate) unit: simple3d_core::unit::Unit,
     /// What the popup beside the pointer changes, if one is open.
     pub(crate) inspect: Option<Pick>,
     /// Where on screen the popup was asked for, until it has been placed there.
     pub(crate) inspect_at: Option<egui::Pos2>,
-    /// The radius the fillet tool rounds corners with, in millimetres.
-    pub(crate) fillet_radius: f64,
-    /// How many sides the polygon tool draws.
-    pub(crate) polygon_sides: u32,
+    /// What the tools are set to.
+    pub(crate) settings: settings::Settings,
     /// The popup field the last undo step came from, so a drag on one field is one step.
     pub(crate) field_step: Option<String>,
     /// The 2D lock: the view stays straight on the sketch, with orbiting and view changes held back.
@@ -163,12 +169,10 @@ impl SketchTool {
             redo: Vec::new(),
             analysis,
             conflicts: Vec::new(),
-            copy_as_helper: true,
             unit: simple3d_core::unit::Unit::default(),
             inspect: None,
             inspect_at: None,
-            fillet_radius: FILLET_RADIUS,
-            polygon_sides: POLYGON_SIDES,
+            settings: settings::Settings::default(),
             field_step: None,
             flat: true,
         }
@@ -255,6 +259,7 @@ impl SketchTool {
     /// Pick another tool, dropping a gesture half done.
     pub(crate) fn set_draw(&mut self, draw: Draw) {
         self.draw = draw;
+        self.settings.remember(draw);
         self.clicks.clear();
     }
 

@@ -86,7 +86,10 @@ impl Elimination {
             let mut reduced = row.clone();
             elimination.reduce(&mut reduced, Some(&mut combo));
             let (pivot, size) =
-                reduced.iter().enumerate().fold((0, 0.0_f64), |best, (k, v)| if v.abs() > best.1 { (k, v.abs()) } else { best });
+                reduced
+                    .iter()
+                    .enumerate()
+                    .fold((0, 0.0_f64), |best, (k, v)| if v.abs() > best.1 { (k, v.abs()) } else { best });
             if size <= 1e-9 * scale.max(1e-12) || scale == 0.0 {
                 let made_of = (0..m).filter(|&k| combo[k].abs() > 1e-9).collect();
                 elimination.redundant.push((index, made_of));

@@ -130,6 +130,10 @@ impl Sketch {
                 Shape::Line { a, b } => [a, b].into_iter().for_each(swap),
                 Shape::Arc { center, start, end } => [center, start, end].into_iter().for_each(swap),
                 Shape::Circle { center, .. } => swap(center),
+                Shape::Ellipse { center, major, .. } => [center, major].into_iter().for_each(swap),
+                Shape::EllipseArc { center, major, start, end, .. } => {
+                    [center, major, start, end].into_iter().for_each(swap)
+                }
                 Shape::Spline { points, .. } | Shape::Bspline { points, .. } => points.iter_mut().for_each(swap),
             }
         }

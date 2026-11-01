@@ -5,8 +5,8 @@
 //! a hole in it, so a circle inside a rectangle makes a ring and a disc. A pick is remembered by the
 //! sides of the curves around the region ([`RegionPick`]), and found again after edits by those.
 
-mod graph;
 mod faces;
+mod graph;
 pub(crate) use faces::{contains, signed_area};
 mod profile;
 
@@ -120,9 +120,9 @@ pub fn find(sketch: &Sketch, segments: u32) -> Regions {
 impl Regions {
     /// The smallest region `p` lies in.
     pub fn at(&self, p: [f64; 2]) -> Option<usize> {
-        (0..self.list.len()).filter(|&k| self.list[k].contains(p)).min_by(|&a, &b| {
-            self.list[a].area.total_cmp(&self.list[b].area)
-        })
+        (0..self.list.len())
+            .filter(|&k| self.list[k].contains(p))
+            .min_by(|&a, &b| self.list[a].area.total_cmp(&self.list[b].area))
     }
 
     /// How to remember region `index`.

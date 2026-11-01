@@ -28,7 +28,8 @@ impl Label {
     }
 }
 
-/// The middle of a curve: a line's midpoint, a round curve's rim at 45 degrees, a spline's first point.
+/// The middle of a curve: a line's midpoint, a round curve's or ellipse's rim at 45 degrees, a spline's
+/// first point.
 fn middle(sketch: &Sketch, curve: CurveId) -> [f64; 2] {
     let Some(curve) = sketch.curve(curve) else { return [0.0; 2] };
     match curve.shape {
@@ -44,6 +45,10 @@ fn middle(sketch: &Sketch, curve: CurveId) -> [f64; 2] {
             let (c, s) = (sketch.at(center), sketch.at(start));
             let r = (s[0] - c[0]).hypot(s[1] - c[1]);
             [c[0] + r * std::f64::consts::FRAC_1_SQRT_2, c[1] + r * std::f64::consts::FRAC_1_SQRT_2]
+        }
+        Shape::Ellipse { center, major, minor } | Shape::EllipseArc { center, major, minor, .. } => {
+            let e = simple3d_sketch::Ellipse::new(sketch.at(center), sketch.at(major), minor);
+            e.at(std::f64::consts::FRAC_PI_4)
         }
         Shape::Spline { ref points, .. } | Shape::Bspline { ref points, .. } => sketch.at(points[0]),
     }

@@ -1,3 +1,4 @@
+mod ellipse;
 mod features;
 mod regions;
 mod solver;

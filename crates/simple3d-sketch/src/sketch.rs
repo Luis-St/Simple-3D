@@ -84,8 +84,14 @@ impl Sketch {
             grow(point.at, 0.0);
         }
         for curve in &self.curves {
-            if let crate::Shape::Circle { center, radius } = curve.shape {
-                grow(self.at(center), radius.abs());
+            match curve.shape {
+                crate::Shape::Circle { center, radius } => grow(self.at(center), radius.abs()),
+                crate::Shape::Ellipse { center, major, minor }
+                | crate::Shape::EllipseArc { center, major, minor, .. } => {
+                    let c = self.at(center);
+                    grow(c, crate::distance(c, self.at(major)).max(minor.abs()));
+                }
+                _ => {}
             }
         }
         (lo[0] <= hi[0]).then_some((lo, hi))
@@ -106,9 +112,10 @@ impl Sketch {
             };
             enough && points.iter().all(|&p| has_point(p))
         });
-        let constraints_ok = self.constraints.iter().all(|c| {
-            c.kind.points().iter().all(|&p| has_point(p)) && c.kind.curves().iter().all(|&k| has_curve(k))
-        });
+        let constraints_ok = self
+            .constraints
+            .iter()
+            .all(|c| c.kind.points().iter().all(|&p| has_point(p)) && c.kind.curves().iter().all(|&k| has_curve(k)));
         curves_ok && constraints_ok && self.axis.is_none_or(has_curve)
     }
 }

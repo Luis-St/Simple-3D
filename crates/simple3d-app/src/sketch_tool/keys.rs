@@ -1,9 +1,22 @@
 //! The keyboard while sketching: Esc steps back one thing at a time, single letters pick tools as in
-//! other CAD programs, V toggles the 2D lock and Home turns back to the sketch, all winning over the
-//! keymap while the sketch is open.
+//! other CAD programs -- pressed again they step through the family's variants -- Q switches new
+//! curves to helper geometry and back, V toggles the 2D lock and Home turns back to the sketch, all
+//! winning over the keymap while the sketch is open.
 
 use super::*;
 use crate::app::App;
+
+/// Switches the drawing tools between profile and helper geometry.
+pub(crate) const CONSTRUCTION_KEY: egui::Key = egui::Key::Q;
+
+/// The tool a family's key picks: its remembered variant, or the next one when the family is in use
+/// already.
+pub(crate) fn next_variant(current: Draw, remembered: Draw, family: &[Draw]) -> Draw {
+    match family.iter().position(|&d| d == current) {
+        Some(i) => family[(i + 1) % family.len()],
+        None => remembered,
+    }
+}
 
 impl App {
     /// Take Esc and the tool keys while the sketch is open; `true` when one was taken, so the keymap
@@ -37,10 +50,14 @@ impl App {
             return true;
         }
         let Some(tool) = self.sketch_tool.as_mut() else { return false };
+        if plain && ctx.input(|i| i.key_pressed(CONSTRUCTION_KEY)) {
+            tool.settings.construction = !tool.settings.construction;
+            return true;
+        }
         let pressed = Draw::keyed().find(|&(_, key)| plain && ctx.input(|i| i.key_pressed(key)));
         match pressed {
-            Some((draw, _)) => {
-                tool.set_draw(draw);
+            Some((family, _)) => {
+                tool.set_draw(next_variant(tool.draw, tool.settings.variant(family), family));
                 true
             }
             None => false,

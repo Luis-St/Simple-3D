@@ -1,5 +1,6 @@
 //! The modifying tools: trimming a curve back to the curves crossing it, and rounding a corner
-//! where two lines meet.
+//! where two lines meet. Extending, splitting and chamfering are in `modify_ends`, offsetting in
+//! `modify_offset`, mirroring, patterns and moving the selection in `modify_copy`.
 
 use super::shapes::{angle_of, ccw, crossing, fraction_along, gap, lerp, on_circle};
 use super::*;
@@ -13,7 +14,7 @@ const AT_END: f64 = 1e-6;
 
 /// A line, arc or circle as trimming sees it: a run from 0 to 1.
 #[derive(Clone, Copy)]
-enum Track {
+pub(crate) enum Track {
     Line {
         a: [f64; 2],
         b: [f64; 2],
@@ -29,7 +30,7 @@ enum Track {
 }
 
 impl Track {
-    fn of(sketch: &Sketch, id: CurveId) -> Option<Track> {
+    pub(crate) fn of(sketch: &Sketch, id: CurveId) -> Option<Track> {
         let at = |p: PointId| sketch.at(p);
         Some(match sketch.curve(id)?.shape {
             Shape::Line { a, b } => Track::Line { a: at(a), b: at(b) },
@@ -48,14 +49,14 @@ impl Track {
     }
 
     /// How far along the run `p` lies, or the nearest place on it.
-    fn place(&self, p: [f64; 2]) -> f64 {
+    pub(crate) fn place(&self, p: [f64; 2]) -> f64 {
         match *self {
             Track::Line { a, b } => fraction_along(a, b, p),
             Track::Round { centre, from, sweep, .. } => ccw(from, angle_of(centre, p)) / sweep,
         }
     }
 
-    fn at(&self, t: f64) -> [f64; 2] {
+    pub(crate) fn at(&self, t: f64) -> [f64; 2] {
         match *self {
             Track::Line { a, b } => lerp(a, b, t),
             Track::Round { centre, radius, from, sweep, .. } => on_circle(centre, radius, from + sweep * t),
@@ -158,7 +159,7 @@ pub(crate) fn trim(sketch: &mut Sketch, id: CurveId, at: [f64; 2]) -> Result<(),
 }
 
 /// Curve `id` ending on `with` where it ended on `old`, and `old` gone if nothing else uses it.
-fn replace_end(sketch: &mut Sketch, id: CurveId, old: PointId, with: PointId) {
+pub(crate) fn replace_end(sketch: &mut Sketch, id: CurveId, old: PointId, with: PointId) {
     if let Some(curve) = sketch.curve_mut(id) {
         match &mut curve.shape {
             Shape::Line { a, b } => {
@@ -216,21 +217,7 @@ pub(crate) fn fillet(sketch: &mut Sketch, corner: PointId, radius: f64) -> Resul
     if radius <= 0.0 {
         return Err("Set a fillet radius above zero");
     }
-    let lines: Vec<(CurveId, PointId)> = sketch
-        .curves
-        .iter()
-        .filter_map(|c| match c.shape {
-            Shape::Line { a, b } if a == corner => Some((c.id, b)),
-            Shape::Line { a, b } if b == corner => Some((c.id, a)),
-            _ => None,
-        })
-        .collect();
-    let &[(first, far1), (second, far2)] = &lines[..] else {
-        return Err("Click a corner where exactly two lines meet");
-    };
-    if sketch.curves.iter().filter(|c| c.shape.points().contains(&corner)).count() > 2 {
-        return Err("Click a corner where exactly two lines meet");
-    }
+    let ((first, far1), (second, far2)) = super::modify_ends::corner_lines(sketch, corner)?;
     let p = sketch.at(corner);
     let away = |far: PointId| {
         let q = sketch.at(far);

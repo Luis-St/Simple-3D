@@ -51,6 +51,14 @@ fn lies_on(sketch: &Sketch, shape: &Shape, p: [f64; 2]) -> bool {
             let along = ((p[1] - c[1]).atan2(p[0] - c[0]) - a0).rem_euclid(std::f64::consts::TAU);
             (distance(p, c) - distance(s, c)).abs() < crate::EPS && along < sweep
         }
+        Shape::Ellipse { center, major, minor } => {
+            crate::Ellipse::new(sketch.at(center), sketch.at(major), minor).residual(p).abs() < crate::EPS
+        }
+        Shape::EllipseArc { center, major, minor, start, end } => {
+            let e = crate::Ellipse::new(sketch.at(center), sketch.at(major), minor);
+            let (t0, sweep) = crate::ellipse::arc_span(&e, sketch.at(start), sketch.at(end));
+            e.residual(p).abs() < crate::EPS && (e.angle_of(p) - t0).rem_euclid(std::f64::consts::TAU) < sweep
+        }
         _ => false,
     }
 }
@@ -175,11 +183,8 @@ pub(crate) fn build(sketch: &Sketch, segments: u32) -> Graph {
     for segment in &mut list {
         segment.cuts.sort_by(f64::total_cmp);
         let d = sub(segment.b, segment.a);
-        let ids: Vec<usize> = segment
-            .cuts
-            .iter()
-            .map(|&t| vertex(crate::add(segment.a, crate::scale(d, t)), &mut graph))
-            .collect();
+        let ids: Vec<usize> =
+            segment.cuts.iter().map(|&t| vertex(crate::add(segment.a, crate::scale(d, t)), &mut graph)).collect();
         for pair in ids.windows(2) {
             let (u, v) = (pair[0], pair[1]);
             if u == v || seen.insert((u.min(v), u.max(v)), ()).is_some() {

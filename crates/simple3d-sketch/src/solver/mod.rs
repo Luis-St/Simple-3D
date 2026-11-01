@@ -1,7 +1,8 @@
 //! Moving a sketch's points until every constraint holds.
 //!
-//! The unknowns are each free point's X and Y and each circle's radius. Each Newton step changes them
-//! as little as it can while making every equation hold to first order, so an under-constrained
+//! The unknowns are each free point's X and Y, each circle's radius and each ellipse's minor
+//! half-axis. Each Newton step changes them as little as it can while making every equation hold to
+//! first order, so an under-constrained
 //! sketch stays where it was drawn instead of jumping, and a dragged point, weighed heavily, is the
 //! one the rest gives way to. Elimination on the Jacobian at the solution says which unknowns the
 //! constraints pin down -- what is still free to move is drawn differently -- and which constraints
@@ -46,7 +47,9 @@ impl Refusal {
     pub fn message(&self) -> String {
         match self {
             Refusal::Unsupported(why) => why.to_string(),
-            Refusal::Redundant(_) => "That would over-constrain the sketch: the marked constraints already decide it".into(),
+            Refusal::Redundant(_) => {
+                "That would over-constrain the sketch: the marked constraints already decide it".into()
+            }
             Refusal::Unsolvable => "The sketch cannot be made to meet that".into(),
         }
     }

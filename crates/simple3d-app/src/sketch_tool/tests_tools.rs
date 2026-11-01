@@ -69,7 +69,7 @@ fn a_centre_rectangle_stays_centred_on_its_centre_point_when_a_corner_is_dragged
 #[test]
 fn a_polygon_keeps_its_sides_equal_when_a_corner_is_dragged() {
     let mut app = sketching();
-    app.sketch_tool.as_mut().unwrap().polygon_sides = 6;
+    app.sketch_tool.as_mut().unwrap().settings.polygon_sides = 6;
     draw(&mut app, Draw::Polygon, &[[0.0, 0.0], [10.0, 0.0]]);
     let tool = app.sketch_tool.as_mut().unwrap();
     let sides = lines(tool);

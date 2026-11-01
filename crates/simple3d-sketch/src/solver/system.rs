@@ -1,5 +1,5 @@
-//! A sketch as unknowns and equations: every free point's X and Y and every circle's radius, and
-//! one equation per thing that must hold.
+//! A sketch as unknowns and equations: every free point's X and Y, every circle's radius and every
+//! ellipse's minor half-axis, and one equation per thing that must hold.
 
 use crate::constraint::ConstraintId;
 use crate::curve::{CurveId, Shape};
@@ -38,9 +38,9 @@ impl<'a> System<'a> {
         }
         let mut radii = HashMap::new();
         for curve in &sketch.curves {
-            if let Shape::Circle { radius, .. } = curve.shape {
+            if let Some(size) = curve.shape.own_size() {
                 radii.insert(curve.id, start.len());
-                start.push(radius);
+                start.push(size);
             }
         }
         System { sketch, points, radii, start }
@@ -63,7 +63,7 @@ impl<'a> System<'a> {
         self.points.get(&id).map_or(Vec::new(), |&i| vec![i, i + 1])
     }
 
-    /// The unknowns a curve is made of: its points and a circle's radius.
+    /// The unknowns a curve is made of: its points and a circle's radius or an ellipse's minor half-axis.
     pub fn curve_vars(&self, id: CurveId) -> Vec<usize> {
         let Some(curve) = self.sketch.curve(id) else { return Vec::new() };
         let mut vars: Vec<usize> = curve.shape.points().into_iter().flat_map(|p| self.point_vars(p)).collect();
@@ -86,6 +86,16 @@ impl<'a> System<'a> {
             Shape::Arc { center, start, .. } => {
                 let c = self.pos(x, center);
                 Some((c, crate::distance(self.pos(x, start), c)))
+            }
+            _ => None,
+        }
+    }
+
+    /// An ellipse's or elliptical arc's geometry at `x`.
+    pub fn ellipse(&self, x: &[f64], id: CurveId) -> Option<crate::Ellipse> {
+        match self.sketch.curve(id)?.shape {
+            Shape::Ellipse { center, major, .. } | Shape::EllipseArc { center, major, .. } => {
+                Some(crate::Ellipse::new(self.pos(x, center), self.pos(x, major), x[self.radii[&id]]))
             }
             _ => None,
         }
@@ -115,7 +125,11 @@ impl<'a> System<'a> {
                     None
                 }
             }
-            Shape::Circle { .. } => None,
+            Shape::EllipseArc { .. } => {
+                let e = self.ellipse(x, id)?;
+                Some(e.tangent(e.angle_of(self.pos(x, at))))
+            }
+            Shape::Circle { .. } | Shape::Ellipse { .. } => None,
         }
         .filter(|_| at == first || at == last)
     }
@@ -137,6 +151,18 @@ impl<'a> System<'a> {
                     }),
                 });
             }
+            if let Shape::EllipseArc { start, end, .. } = curve.shape {
+                let id = curve.id;
+                for point in [start, end] {
+                    out.push(Equation {
+                        owner: None,
+                        deps: self.curve_vars(id),
+                        eval: Box::new(move |s: &System, x: &[f64]| {
+                            s.ellipse(x, id).map_or(0.0, |e| e.residual(s.pos(x, point)))
+                        }),
+                    });
+                }
+            }
         }
         for constraint in &self.sketch.constraints {
             let equations = super::equations::of(self, &constraint.kind).map_err(|why| (constraint.id, why))?;
@@ -153,8 +179,8 @@ impl<'a> System<'a> {
             }
         }
         for curve in &mut into.curves {
-            if let (Shape::Circle { radius, .. }, Some(&i)) = (&mut curve.shape, self.radii.get(&curve.id)) {
-                *radius = x[i];
+            if let (Some(size), Some(&i)) = (curve.shape.own_size_mut(), self.radii.get(&curve.id)) {
+                *size = x[i];
             }
         }
     }

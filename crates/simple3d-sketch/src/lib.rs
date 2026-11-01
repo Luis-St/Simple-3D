@@ -4,8 +4,8 @@
 //!
 //! The pieces stand on each other in this order:
 //!
-//! * [`Sketch`] is the stored drawing: points, curves (lines, arcs, circles and two kinds of
-//!   spline), constraints, the picked regions and the revolve axis. Everything refers to everything
+//! * [`Sketch`] is the stored drawing: points, curves (lines, arcs, circles, ellipses, elliptical arcs
+//!   and two kinds of spline), constraints, the picked regions and the revolve axis. Everything refers to everything
 //!   else by id, so deleting a point takes what hangs off it along.
 //! * [`solver`] moves the points until every constraint holds, keeping them as close to where they
 //!   were as it can, and says which points are still free and which constraints fight each other.
@@ -19,6 +19,8 @@ pub use constraint::{Constraint, ConstraintId, ConstraintKind};
 mod curve;
 pub use curve::{Curve, CurveId, Shape};
 mod edit;
+mod ellipse;
+pub use ellipse::Ellipse;
 mod point;
 pub use point::{Point, PointId};
 mod sample;

@@ -10,7 +10,7 @@ use crate::theme;
 use simple3d_core::primitive::ParamKind;
 use simple3d_sketch::{ConstraintKind, Shape};
 
-const LENGTH: ParamKind = ParamKind::Length { min: 0.0 };
+pub(super) const LENGTH: ParamKind = ParamKind::Length { min: 0.0 };
 const DIRECTION: ParamKind = ParamKind::Angle { min: 0.0, max: 360.0, wrap: true };
 const ANGLE: ParamKind = ParamKind::Angle { min: 0.0, max: 180.0, wrap: false };
 
@@ -28,6 +28,9 @@ pub(crate) fn curve(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool, id:
                 Shape::Arc { center, start, end } => {
                     let radius = gap(tool.sketch.at(center), tool.sketch.at(start));
                     round_rows(app, ui, tool, id, center, radius, Some((start, end)))
+                }
+                Shape::Ellipse { center, major, minor } | Shape::EllipseArc { center, major, minor, .. } => {
+                    super::inspect_ellipse::rows(app, ui, tool, id, (center, major), minor)
                 }
                 _ => None,
             };
@@ -180,11 +183,12 @@ fn round_rows(
     message
 }
 
-/// A free circle's radius set straight, since no point lies on it to move.
-fn resize_circle(tool: &mut SketchTool, field: &str, id: CurveId, value: f64) -> Option<Status> {
+/// A free circle's radius or an ellipse's minor half-axis set straight, since no point lies on it to
+/// move.
+pub(super) fn resize_circle(tool: &mut SketchTool, field: &str, id: CurveId, value: f64) -> Option<Status> {
     let before = tool.sketch.clone();
-    if let Some(Shape::Circle { radius, .. }) = tool.sketch.curve_mut(id).map(|c| &mut c.shape) {
-        *radius = value;
+    if let Some(size) = tool.sketch.curve_mut(id).and_then(|c| c.shape.own_size_mut()) {
+        *size = value;
     }
     if !tool.sketch.solve() {
         tool.sketch = before;
@@ -196,7 +200,13 @@ fn resize_circle(tool: &mut SketchTool, field: &str, id: CurveId, value: f64) ->
 }
 
 /// A point's two coordinates as rows named after `name`.
-fn place_rows(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool, point: PointId, name: &str) -> Option<Status> {
+pub(super) fn place_rows(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    tool: &mut SketchTool,
+    point: PointId,
+    name: &str,
+) -> Option<Status> {
     let mut message = None;
     let at = tool.sketch.at(point);
     let held = tool.all_fixed(&[point]);

@@ -1,4 +1,5 @@
-//! The drawing tools: what each click of a gesture adds to the sketch.
+//! The drawing tools: what each click of a gesture adds to the sketch. The newer variants are built
+//! in `drawing_more`, the tangent arc in `drawing_tangent`.
 
 use super::shapes::{arc_through, centred_rectangle, circle_through, gap, polygon};
 use super::*;
@@ -6,22 +7,44 @@ use simple3d_sketch::{ConstraintKind, Shape};
 
 /// Two clicks this close, in millimetres, are one place: a double click, not a line.
 const SAME_PLACE: f64 = 1e-6;
-/// The most sides the polygon tool draws.
-pub(crate) const MAX_SIDES: u32 = 64;
 
 /// The sketch point a click stands for: the one it landed on, else a new one where it fell.
-fn point_for(sketch: &mut Sketch, click: Click) -> PointId {
+pub(crate) fn point_for(sketch: &mut Sketch, click: Click) -> PointId {
     click.point.filter(|&id| sketch.point(id).is_some()).unwrap_or_else(|| sketch.add_point(click.at))
 }
 
 impl SketchTool {
-    /// Take one click of the current drawing tool.
+    /// Take one click of the current drawing tool; what it adds is helper geometry while the tool
+    /// is set to draw that.
     pub(crate) fn click(&mut self, click: Click) {
+        let newest = self.sketch.curves.iter().map(|c| c.id).max().unwrap_or(0);
+        self.click_plain(click);
+        if self.settings.construction {
+            for curve in self.sketch.curves.iter_mut().filter(|c| c.id > newest) {
+                curve.construction = true;
+            }
+        }
+    }
+
+    fn click_plain(&mut self, click: Click) {
         let last = self.clicks.last().copied();
         if last.is_some_and(|last| gap(last.at, click.at) < SAME_PLACE) {
             return;
         }
+        if let Some(needed) = super::drawing_more::clicks_needed(self.draw) {
+            self.clicks.push(click);
+            if self.clicks.len() >= needed {
+                let clicks = std::mem::take(&mut self.clicks);
+                let (draw, settings) = (self.draw, &self.settings);
+                let mut sketch = self.sketch.clone();
+                if super::drawing_more::build(draw, &mut sketch, &clicks, settings).is_some() {
+                    self.change(|s| *s = sketch);
+                }
+            }
+            return;
+        }
         match self.draw {
+            Draw::TangentArc => self.tangent_click(click),
             Draw::Line => match last {
                 Some(start) => {
                     let (a, b) = self.change(|sketch| {
@@ -44,7 +67,9 @@ impl SketchTool {
                     if (lo[0] - hi[0]).abs() < SAME_PLACE || (lo[1] - hi[1]).abs() < SAME_PLACE {
                         return;
                     }
-                    self.change(|sketch| rectangle(sketch, corner, click));
+                    self.change(|sketch| {
+                        rectangle(sketch, corner, click);
+                    });
                 }
                 None => self.clicks.push(click),
             },
@@ -98,7 +123,7 @@ impl SketchTool {
                     if gap(centre.at, click.at) < SAME_PLACE {
                         return;
                     }
-                    let sides = self.polygon_sides.clamp(3, MAX_SIDES);
+                    let sides = self.settings.sides();
                     self.change(|sketch| regular(sketch, centre, click, sides));
                 }
                 None => self.clicks.push(click),
@@ -177,8 +202,9 @@ impl SketchTool {
     }
 }
 
-/// A rectangle from corner `a` to corner `b`, kept square to the sketch's axes by its constraints.
-fn rectangle(sketch: &mut Sketch, a: Click, b: Click) {
+/// A rectangle from corner `a` to corner `b`, kept square to the sketch's axes by its constraints;
+/// its corners, counter-clockwise from `a` when `b` is up and to the right.
+pub(crate) fn rectangle(sketch: &mut Sketch, a: Click, b: Click) -> [PointId; 4] {
     let p0 = point_for(sketch, a);
     let p2 = point_for(sketch, b);
     let p1 = sketch.add_point([b.at[0], a.at[1]]);
@@ -189,6 +215,7 @@ fn rectangle(sketch: &mut Sketch, a: Click, b: Click) {
         let kind = if i % 2 == 0 { ConstraintKind::Horizontal { line } } else { ConstraintKind::Vertical { line } };
         sketch.push_constraint(kind);
     }
+    corners
 }
 
 /// A rectangle about the centre click out to the corner click: square to the sketch's axes, with
@@ -210,7 +237,7 @@ fn centred(sketch: &mut Sketch, centre: Click, corner: Click) {
 
 /// A regular polygon of `sides` about the centre click, a corner at the corner click: its corners
 /// held on a helper circle and its sides equal, so it stays regular as it is dragged.
-fn regular(sketch: &mut Sketch, centre: Click, corner: Click, sides: u32) {
+pub(crate) fn regular(sketch: &mut Sketch, centre: Click, corner: Click, sides: u32) {
     let at = polygon(centre.at, corner.at, sides);
     let center = point_for(sketch, centre);
     let first = point_for(sketch, corner);

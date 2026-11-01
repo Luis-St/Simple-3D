@@ -99,7 +99,7 @@ pub(crate) fn snap_landing(app: &App, view: &View, cursor: egui::Pos2) -> Option
         let delta = super::pointer::snapped_delta(drag, [at[0] - drag.start[0], at[1] - drag.start[1]], Some(step));
         return Some([from[0] + delta[0], from[1] + delta[1]]);
     }
-    if !tool.draw.draws() {
+    if !tool.draw.draws() && tool.draw.selection_clicks() == 0 {
         return None;
     }
     let click = tool.click_at(view, cursor, step)?;

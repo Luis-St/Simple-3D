@@ -12,12 +12,30 @@ use simple3d_sketch::{sample_curve, Shape};
 
 pub(crate) fn draw(app: &App, painter: &egui::Painter, view: &View, hover: Option<egui::Pos2>) {
     let Some(tool) = app.sketch_tool.as_ref() else { return };
+    if !tool.clicks.is_empty() && tool.draw.selection_clicks() > 0 {
+        return selection_preview(app, tool, painter, view, hover);
+    }
     if tool.clicks.is_empty() || !tool.draw.draws() {
         return;
     }
     let spacing = super::grid_step(app, view);
     let Some(cursor) = hover else { return };
     let Some(next) = tool.click_at(view, cursor, spacing) else { return };
+    let stroke = egui::Stroke::new(1.5_f32, token::ACCENT.gamma_multiply(0.8));
+    let dashed = |sketch: &Sketch, curve: &simple3d_sketch::Curve| {
+        let line: Vec<egui::Pos2> =
+            sample_curve(sketch, curve, DRAWN_SEGMENTS).points.iter().filter_map(|&p| tool.screen(view, p)).collect();
+        painter.extend(egui::Shape::dashed_line(&line, stroke, 6.0, 3.0));
+    };
+    if let Some((sketch, newest)) = preview_more(tool, next) {
+        for curve in sketch.curves.iter().filter(|c| c.id > newest) {
+            dashed(&sketch, curve);
+        }
+        let from = tool.clicks[tool.clicks.len() - 1].at;
+        let readout = format_length(gap(from, next.at), tool.unit);
+        super::readout::tag(painter, cursor + egui::vec2(16.0, 18.0), &readout, token::ACCENT);
+        return;
+    }
     let mut sketch = Sketch::default();
     let ats: Vec<[f64; 2]> = tool.clicks.iter().chain(std::iter::once(&next)).map(|c| c.at).collect();
     let ids: Vec<PointId> = ats.iter().map(|&at| sketch.add_point(at)).collect();
@@ -47,7 +65,7 @@ pub(crate) fn draw(app: &App, painter: &egui::Painter, view: &View, hover: Optio
         }
         Draw::Polygon => {
             readout = format!("R {}", length(gap(first, last)));
-            loop_of(&mut sketch, polygon(first, last, tool.polygon_sides.clamp(3, super::drawing::MAX_SIDES)))
+            loop_of(&mut sketch, polygon(first, last, tool.settings.sides()))
         }
         Draw::Circle => {
             readout = format!("R {}", length(gap(first, last)));
@@ -80,14 +98,63 @@ pub(crate) fn draw(app: &App, painter: &egui::Painter, view: &View, hover: Optio
         Draw::Bspline => vec![Shape::Bspline { points: ids.clone(), closed: false }],
         _ => Vec::new(),
     };
-    let stroke = egui::Stroke::new(1.5_f32, token::ACCENT.gamma_multiply(0.8));
     for shape in shapes {
-        let curve = simple3d_sketch::Curve { id: 0, shape, construction: false, reference: false };
-        let line: Vec<egui::Pos2> =
-            sample_curve(&sketch, &curve, DRAWN_SEGMENTS).points.iter().filter_map(|&p| tool.screen(view, p)).collect();
-        painter.extend(egui::Shape::dashed_line(&line, stroke, 6.0, 3.0));
+        dashed(&sketch, &simple3d_sketch::Curve { id: 0, shape, construction: false, reference: false });
     }
     if !readout.is_empty() {
         super::readout::tag(painter, cursor + egui::vec2(16.0, 18.0), &readout, token::ACCENT);
+    }
+}
+
+/// The newer variants' preview: what the clicks so far and `next` build, into a copy of the sketch,
+/// with the newest curve id before it so only what they add is drawn; lines between the clicks until
+/// there are enough of them. `None` for the tools previewed above.
+fn preview_more(tool: &SketchTool, next: Click) -> Option<(Sketch, CurveId)> {
+    let needed = super::drawing_more::clicks_needed(tool.draw);
+    if needed.is_none() && tool.draw != Draw::TangentArc {
+        return None;
+    }
+    let mut sketch = tool.sketch.clone();
+    let newest = sketch.curves.iter().map(|c| c.id).max().unwrap_or(0);
+    let clicks: Vec<Click> = tool.clicks.iter().copied().chain(std::iter::once(next)).collect();
+    let built = match needed {
+        None => tool.tangent_preview(&mut sketch, next),
+        Some(needed) if clicks.len() >= needed => {
+            super::drawing_more::build(tool.draw, &mut sketch, &clicks, &tool.settings).is_some()
+        }
+        Some(_) => false,
+    };
+    if !built {
+        sketch = tool.sketch.clone();
+        let ids: Vec<PointId> = clicks.iter().map(|c| sketch.add_point(c.at)).collect();
+        for pair in ids.windows(2) {
+            sketch.add_curve(Shape::Line { a: pair[0], b: pair[1] }, false);
+        }
+    }
+    Some((sketch, newest))
+}
+
+/// The selection tools' preview: the copies or the moved curves the next click would make, dashed.
+fn selection_preview(app: &App, tool: &SketchTool, painter: &egui::Painter, view: &View, hover: Option<egui::Pos2>) {
+    let Some(cursor) = hover else { return };
+    let Some(next) = tool.click_at(view, cursor, super::grid_step(app, view)) else { return };
+    let at: Vec<[f64; 2]> = tool.clicks.iter().chain(std::iter::once(&next)).map(|c| c.at).collect();
+    let stroke = egui::Stroke::new(1.5_f32, token::ACCENT.gamma_multiply(0.8));
+    if at.len() < tool.draw.selection_clicks() {
+        let line: Vec<egui::Pos2> = at.iter().filter_map(|&p| tool.screen(view, p)).collect();
+        painter.extend(egui::Shape::dashed_line(&line, stroke, 6.0, 3.0));
+        return;
+    }
+    let (curves, points) = super::modify_copy::selected(tool);
+    let mut sketch = tool.sketch.clone();
+    let newest = sketch.curves.iter().map(|c| c.id).max().unwrap_or(0);
+    if !super::picks_more::apply(&mut sketch, tool.draw, (&curves, &points), &at, &tool.settings) {
+        return;
+    }
+    let moved = matches!(tool.draw, Draw::Move | Draw::Rotate | Draw::Scale);
+    for curve in sketch.curves.iter().filter(|c| c.id > newest || (moved && curves.contains(&c.id))) {
+        let line: Vec<egui::Pos2> =
+            sample_curve(&sketch, curve, DRAWN_SEGMENTS).points.iter().filter_map(|&p| tool.screen(view, p)).collect();
+        painter.extend(egui::Shape::dashed_line(&line, stroke, 6.0, 3.0));
     }
 }

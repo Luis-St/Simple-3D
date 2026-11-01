@@ -4,7 +4,7 @@
 use super::*;
 
 /// A clicked point.
-const DOT: f32 = 0.1;
+pub(super) const DOT: f32 = 0.1;
 
 /// Draw `glyph` if it is a sketch tool's; whether it was.
 pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) -> bool {
@@ -134,19 +134,19 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) -> bool {
                 dashed(pen, from, to, 2);
             }
         }
-        _ => return false,
+        _ => return super::paint_sketch_more::paint(pen, glyph),
     }
     true
 }
 
 /// A helper line: the construction a shape is drawn from, or what a tool takes away.
-fn faint(pen: &Pen<'_>, from: (f32, f32), to: (f32, f32)) {
+pub(super) fn faint(pen: &Pen<'_>, from: (f32, f32), to: (f32, f32)) {
     let stroke = egui::Stroke::new(pen.stroke.width, pen.colour.gamma_multiply(0.4));
     pen.painter.line_segment([pen.at(from.0, from.1), pen.at(to.0, to.1)], stroke);
 }
 
 /// A line drawn as `dashes` dashes with gaps between them.
-fn dashed(pen: &Pen<'_>, from: (f32, f32), to: (f32, f32), dashes: usize) {
+pub(super) fn dashed(pen: &Pen<'_>, from: (f32, f32), to: (f32, f32), dashes: usize) {
     let pieces = dashes * 2 - 1;
     let at = |t: f32| (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t);
     for dash in 0..dashes {

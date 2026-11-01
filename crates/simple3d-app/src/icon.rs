@@ -11,6 +11,7 @@ mod paint;
 mod paint_gears;
 mod paint_printing;
 mod paint_sketch;
+mod paint_sketch_more;
 mod paint_tools;
 pub(crate) use paint::*;
 mod button;
