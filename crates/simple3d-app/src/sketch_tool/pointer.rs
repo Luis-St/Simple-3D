@@ -18,6 +18,7 @@ pub(crate) fn wants_pointer(app: &App) -> bool {
 pub(crate) fn owns_drag(app: &App) -> bool {
     app.sketch_tool.as_ref().is_some_and(|tool| {
         tool.drag.is_some()
+            || tool.area.is_some()
             || (tool.draw == Draw::Select && tool.hover.is_some_and(|h| !matches!(h, Pick::Constraint(_))))
     })
 }
@@ -43,7 +44,12 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         return;
     }
     let spacing = grid_step(app, view);
-    let shift = ui.input(|i| i.modifiers.shift);
+    let (shift, mods) = ui.input(|i| (i.modifiers.shift, i.modifiers));
+    // A left drag over empty space selects by area, unless the camera is bound to it.
+    let camera_drag =
+        crate::panel_viewport::nav_gesture(&app.keymap.nav, [true, false, false], mods.command, mods.shift, mods.alt)
+            .is_some();
+    let origin = ui.input(|i| i.pointer.press_origin()).filter(|_| !camera_drag);
     let Some(tool) = app.sketch_tool.as_mut() else { return };
     if tool.drag.is_none() {
         tool.hover = match (tool.draw, cursor) {
@@ -61,7 +67,11 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     }
     let clicked = response.clicked_by(egui::PointerButton::Primary);
     match tool.draw {
-        Draw::Select => select(tool, response, view, cursor, (shift, spacing)),
+        Draw::Select => {
+            if !tool.area_select(response, view, cursor, (origin, shift)) {
+                select(tool, response, view, cursor, (shift, spacing));
+            }
+        }
         draw if !draw.draws() => {
             if let (true, Some(cursor)) = (clicked, cursor) {
                 match draw {

@@ -118,7 +118,7 @@ impl Draw {
         match self {
             Draw::Select => {
                 "Click points, curves or constraints to select them and change them in place, Shift adds without \
-                 opening the popup; drag to move."
+                 opening the popup; drag to move, or from empty space to select by area."
             }
             Draw::Line => "Click to put lines down one after another; right-click or Esc ends the chain.",
             Draw::Rectangle => "Click two opposite corners.",

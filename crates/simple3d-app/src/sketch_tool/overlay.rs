@@ -61,6 +61,9 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
     }
     super::readout::lengths(tool, painter, view);
     super::gesture::draw(app, painter, view, hover);
+    if let Some(tool) = app.sketch_tool.as_ref() {
+        super::area::draw(tool, painter);
+    }
     // Where a click or drag lands, marked as every other snap is.
     if let Some(at) = hover.and_then(|cursor| snap_landing(app, view, cursor)) {
         if let Some(tool) = app.sketch_tool.as_ref() {

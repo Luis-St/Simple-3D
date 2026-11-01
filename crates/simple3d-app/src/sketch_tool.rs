@@ -12,6 +12,7 @@
 //! or puts the changed sketch back on the node being edited, as one undo step; the editor keeps its
 //! own undo while it is open.
 
+mod area;
 mod constrain;
 mod dock;
 pub(crate) use dock::*;
@@ -107,6 +108,8 @@ pub struct SketchTool {
     pub(crate) selection: Vec<Pick>,
     pub(crate) hover: Option<Pick>,
     pub(crate) drag: Option<Dragging>,
+    /// The area selection being drawn, if any.
+    pub(crate) area: Option<area::Area>,
     pub(crate) undo: Vec<Sketch>,
     pub(crate) redo: Vec<Sketch>,
     pub(crate) analysis: Analysis,
@@ -155,6 +158,7 @@ impl SketchTool {
             selection: Vec::new(),
             hover: None,
             drag: None,
+            area: None,
             undo: Vec::new(),
             redo: Vec::new(),
             analysis,

@@ -108,3 +108,23 @@ fn the_constraint_list_shows_only_what_holds_everything_selected() {
     tool.selection = vec![Pick::Point(ids[0])];
     assert_eq!(shown(tool), [false, false, true]);
 }
+
+#[test]
+fn an_area_drawn_right_takes_what_is_inside_and_drawn_left_what_it_touches() {
+    use super::area::Area;
+    use simple3d_sketch::Shape;
+    let mut app = sketching_on(Xform::from_translation(Vec3::ZERO));
+    let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+    let tool = app.sketch_tool.as_mut().unwrap();
+    let ids: Vec<PointId> = [[0.0, 0.0], [10.0, 0.0], [40.0, 0.0]].map(|at| tool.sketch.add_point(at)).to_vec();
+    let short = tool.sketch.add_curve(Shape::Line { a: ids[0], b: ids[1] }, false);
+    let long = tool.sketch.add_curve(Shape::Line { a: ids[1], b: ids[2] }, false);
+    let lone = tool.sketch.add_point([5.0, 5.0]);
+    // The area on screen round the sketch square from (-2, -2) to (20, 8), whichever way the view turns it.
+    let corners = [[-2.0, -2.0], [20.0, -2.0], [20.0, 8.0], [-2.0, 8.0]].map(|p| tool.screen(&view, p).unwrap());
+    let rect = egui::Rect::from_points(&corners);
+    let window = tool.in_area(&view, Area { start: rect.left_top(), end: rect.right_bottom() });
+    assert_eq!(window, vec![Pick::Curve(short), Pick::Point(lone)]);
+    let crossing = tool.in_area(&view, Area { start: rect.right_top(), end: rect.left_bottom() });
+    assert_eq!(crossing, vec![Pick::Curve(short), Pick::Curve(long), Pick::Point(lone)]);
+}
