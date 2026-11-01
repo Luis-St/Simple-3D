@@ -50,11 +50,13 @@ fn the_grid_spacing_lines_are_heavy_only_against_the_millimetre_lines() {
 }
 
 #[test]
-fn clicks_snap_to_the_grid_without_a_key_and_not_while_it_is_hidden() {
+fn clicks_snap_to_the_grid_only_with_the_snap_key_and_not_while_it_is_hidden() {
     let mut app = sketching_on(Xform::from_translation(Vec3::ZERO));
     let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
+    assert_eq!(super::grid_step(&app, &view), None, "snapped without the snap key held");
+    app.snap_requested = true;
     let step = super::grid_step(&app, &view).expect("the grid is shown");
-    assert!(!app.snap_requested && step > 0.0);
+    assert!(step > 0.0);
     app.scene.settings.grid_visible = false;
     assert_eq!(super::grid_step(&app, &view), None);
 }

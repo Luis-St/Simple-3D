@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::app::App;
+use crate::snap::SnapMark;
 use crate::theme::token;
 use crate::view::View;
 use simple3d_sketch::sample_curve;
@@ -60,6 +61,12 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
     }
     super::readout::lengths(tool, painter, view);
     super::gesture::draw(app, painter, view, hover);
+    // Where a click or drag lands, marked as every other snap is.
+    if let Some(at) = hover.and_then(|cursor| snap_landing(app, view, cursor)) {
+        if let Some(tool) = app.sketch_tool.as_ref() {
+            crate::panel_viewport::draw_snap_mark(painter, view, &SnapMark::at(tool.world(at)), token::ACCENT);
+        }
+    }
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     for label in super::glyphs::labels(tool, view) {
         let pick = Pick::Constraint(label.id);
@@ -76,6 +83,24 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
         painter.rect_filled(rect, 3.0, token::SURFACE_1.gamma_multiply(0.85));
         painter.text(rect.center(), egui::Align2::CENTER_CENTER, &label.text, egui::FontId::monospace(11.0), colour);
     }
+}
+
+/// Where a click or drag at `cursor` snaps to, in sketch coordinates: a sketch point caught by a
+/// drawing click, or with the snap key held the grid crossing a click or the dragged point lands on.
+/// `None` when nothing snaps.
+pub(crate) fn snap_landing(app: &App, view: &View, cursor: egui::Pos2) -> Option<[f64; 2]> {
+    let tool = app.sketch_tool.as_ref()?;
+    let step = super::grid_step(app, view);
+    if let Some(drag) = &tool.drag {
+        let (step, from, at) = (step?, drag.anchor()?, tool.under(view, cursor)?);
+        let delta = super::pointer::snapped_delta(drag, [at[0] - drag.start[0], at[1] - drag.start[1]], Some(step));
+        return Some([from[0] + delta[0], from[1] + delta[1]]);
+    }
+    if !tool.draw.draws() {
+        return None;
+    }
+    let click = tool.click_at(view, cursor, step)?;
+    (click.point.is_some() || step.is_some()).then_some(click.at)
 }
 
 /// The sketch's origin and its X and Y, so the plane reads as a plane before anything is drawn.

@@ -110,9 +110,13 @@ pub(crate) fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
     }
 }
 
-/// The grid step clicks and drags snap to: the finest level drawn, as in other CAD programs without
-/// a key held, so none while the grid is hidden. A point under the pointer still wins over it.
+/// The grid step clicks and drags snap to: the level drawn, only while snapping is asked for (the snap
+/// key held, as for every other snap), so none without it or while the grid is hidden. A point under
+/// the pointer still wins over it.
 pub(crate) fn grid_step(app: &App, view: &View) -> Option<f64> {
+    if !app.snap_requested {
+        return None;
+    }
     app.ground_grid(view).map(|grid| grid.spacing).filter(|step| *step > 0.0)
 }
 
@@ -198,10 +202,18 @@ fn select(
 /// point nearest where the drag began onto the grid, so the shape lands on it and keeps its form.
 pub(crate) fn snapped_delta(drag: &Dragging, delta: [f64; 2], step: Option<f64>) -> [f64; 2] {
     let Some(step) = step else { return delta };
-    let gap = |p: [f64; 2]| (p[0] - drag.start[0]).hypot(p[1] - drag.start[1]);
-    let Some(&(_, from)) = drag.points.iter().min_by(|a, b| gap(a.1).total_cmp(&gap(b.1))) else { return delta };
+    let Some(from) = drag.anchor() else { return delta };
     let to = [from[0] + delta[0], from[1] + delta[1]].map(|v| (v / step).round() * step);
     [to[0] - from[0], to[1] - from[1]]
+}
+
+impl Dragging {
+    /// Where the dragged point nearest where the drag began started out: the one a snapped drag puts
+    /// onto the grid.
+    pub(crate) fn anchor(&self) -> Option<[f64; 2]> {
+        let gap = |p: [f64; 2]| (p[0] - self.start[0]).hypot(p[1] - self.start[1]);
+        self.points.iter().min_by(|a, b| gap(a.1).total_cmp(&gap(b.1))).map(|&(_, from)| from)
+    }
 }
 
 /// Start dragging every selected point and the points of every selected curve.
