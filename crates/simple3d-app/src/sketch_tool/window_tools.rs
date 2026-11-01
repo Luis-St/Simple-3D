@@ -1,5 +1,5 @@
 //! The panel's tools: the pointer, which only selects, then a row of tiles each for drawing,
-//! modifying and picking -- one tile per family of tools, showing the variant it picks, the one in
+//! modifying, constraining and picking -- one tile per family of tools, showing the variant it picks, the one in
 //! use lit -- with the variants of the family in use straight under its row, and under them all the
 //! settings of the tool in use: the fillet's radius, the polygon's side count, the pattern's count
 //! and so on.
@@ -28,13 +28,23 @@ pub(crate) fn tools(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
         });
         for (name, hover, families) in [
             ("Draw", "Put new lines, curves and points down.", &Draw::DRAWING[..]),
-            ("Modify", "Cut, round, copy, move and dimension what is drawn.", &Draw::MODIFY[..]),
+            ("Modify", "Cut, round, copy and move what is drawn.", &Draw::MODIFY[..]),
+            (
+                "Constrain",
+                "Dimension what is drawn and hold it in shape; with what a constraint needs selected, its tile puts \
+                 it straight on.",
+                &Draw::CONSTRAIN[..],
+            ),
             ("Pick", "Pick what the solid is made from, or copy edges in from the model.", &Draw::PICKING[..]),
         ] {
-            field_row_boxed(ui, name, hover, |ui| tiles(ui, tool, families));
+            let mut said = None;
+            field_row_boxed(ui, name, hover, |ui| said = tiles(ui, tool, families));
             // The kinds go straight under the row their family's tile is in.
             if families.contains(&tool.draw.family()) {
-                variants(ui, tool);
+                said = variants(ui, tool).or(said);
+            }
+            if let Some(status) = said {
+                app.status = status;
             }
         }
         settings(app, ui, tool);
@@ -50,38 +60,42 @@ fn pointer_tile(ui: &mut egui::Ui, tool: &mut SketchTool) {
 }
 
 /// One tile per family, showing the variant it picks; the one in use filled with the accent, its
-/// name and key in the tooltip.
-fn tiles(ui: &mut egui::Ui, tool: &mut SketchTool, families: &[Family]) {
+/// name and key in the tooltip. What choosing one said, if anything.
+fn tiles(ui: &mut egui::Ui, tool: &mut SketchTool, families: &[Family]) -> Option<crate::app::Status> {
     ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+    let mut said = None;
     for &family in families {
         let draw = if family.contains(&tool.draw) { tool.draw } else { tool.settings.variant(family) };
         let response = icon::button(ui, draw.glyph(), TILE, family.contains(&tool.draw), true);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, draw.label()));
         let more = if family.len() > 1 { "\nThe kinds of it are shown under the tools." } else { "" };
         if response.on_hover_text(format!("{}\n{}{more}", draw.named(), draw.hint())).clicked() {
-            tool.set_draw(draw);
+            said = tool.choose(draw);
         }
     }
+    said
 }
 
 /// The variants of the family in use, as smaller tiles, with the one in use named beside them.
-fn variants(ui: &mut egui::Ui, tool: &mut SketchTool) {
+fn variants(ui: &mut egui::Ui, tool: &mut SketchTool) -> Option<crate::app::Status> {
     let family = tool.draw.family();
     if family.len() < 2 {
-        return;
+        return None;
     }
+    let mut said = None;
     field_row(ui, "Kind", "Which kind of this tool to use; its key steps through them.", |ui| {
         ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
         for &draw in family {
             let response = icon::button(ui, draw.glyph(), VARIANT_TILE, tool.draw == draw, true);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, draw.label()));
             if response.on_hover_text(format!("{}\n{}", draw.label(), draw.hint())).clicked() {
-                tool.set_draw(draw);
+                said = tool.choose(draw);
             }
         }
         ui.add_space(6.0);
         ui.add(egui::Label::new(theme::hint(tool.draw.label())).selectable(false));
     });
+    said
 }
 
 /// A length setting's row.

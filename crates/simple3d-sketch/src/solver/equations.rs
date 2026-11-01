@@ -195,6 +195,10 @@ pub(crate) fn of(sys: &System, kind: &ConstraintKind) -> Result<Vec<(Vec<usize>,
             round(curve)?;
             out.push((cv(curve), Box::new(move |s, x| s.round(x, curve).unwrap().1 - value)));
         }
+        Diameter { curve, value } => {
+            round(curve)?;
+            out.push((cv(curve), Box::new(move |s, x| 2.0 * s.round(x, curve).unwrap().1 - value)));
+        }
     }
     Ok(out)
 }

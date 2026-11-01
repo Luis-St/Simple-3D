@@ -132,6 +132,7 @@ impl Sketch {
         match self.solved(heavy, connected) {
             Some(solved) => {
                 *self = solved;
+                self.measure_driven();
                 true
             }
             None => false,
@@ -218,6 +219,9 @@ impl Sketch {
     /// Change a dimension's value and solve; refused, with nothing changed, if it cannot be met.
     pub fn set_value(&mut self, id: ConstraintId, value: f64) -> Result<(), Refusal> {
         let before = self.clone();
+        if self.constraint(id).is_some_and(|c| c.driven) {
+            return Err(Refusal::Unsupported("A reference dimension follows the sketch; make it driving to change it"));
+        }
         let Some(slot) = self.constraint_mut(id).and_then(|c| c.kind.value_mut()) else {
             return Err(Refusal::Unsupported("That constraint has no value"));
         };
@@ -230,7 +234,7 @@ impl Sketch {
     }
 
     /// The other constraints constraint `id` only repeats, if it adds nothing of its own.
-    fn repeated_by(&self, id: ConstraintId) -> Option<Vec<ConstraintId>> {
+    pub(crate) fn repeated_by(&self, id: ConstraintId) -> Option<Vec<ConstraintId>> {
         let sys = System::new(self);
         let eqs = sys.equations().ok()?;
         let elimination = Elimination::of(&jacobian(&sys, &eqs, &sys.start));

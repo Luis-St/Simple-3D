@@ -1,5 +1,6 @@
 //! The keyboard while sketching: Esc steps back one thing at a time, single letters pick tools as in
-//! other CAD programs -- pressed again they step through the family's variants -- Q switches new
+//! other CAD programs -- pressed again they step through the family's variants, and a constraint's
+//! key puts it straight on what is selected when that fits -- Q switches new
 //! curves to helper geometry and back, V toggles the 2D lock and Home turns back to the sketch, all
 //! winning over the keymap while the sketch is open.
 
@@ -57,7 +58,9 @@ impl App {
         let pressed = Draw::keyed().find(|&(_, key)| plain && ctx.input(|i| i.key_pressed(key)));
         match pressed {
             Some((family, _)) => {
-                tool.set_draw(next_variant(tool.draw, tool.settings.variant(family), family));
+                if let Some(status) = tool.choose(next_variant(tool.draw, tool.settings.variant(family), family)) {
+                    self.status = status;
+                }
                 true
             }
             None => false,

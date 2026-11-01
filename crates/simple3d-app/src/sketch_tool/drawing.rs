@@ -189,6 +189,11 @@ impl SketchTool {
             self.commit_spline(false);
         }
         self.clicks.clear();
+        self.inferred.clear();
+        // The picks of a dimension or constraint in progress go with it.
+        if matches!(self.draw, Draw::Dimension | Draw::Constrain(_)) {
+            self.selection.clear();
+        }
     }
 
     fn commit_spline(&mut self, closed: bool) {

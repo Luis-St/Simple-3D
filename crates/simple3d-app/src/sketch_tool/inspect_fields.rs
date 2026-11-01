@@ -12,7 +12,6 @@ use simple3d_sketch::{ConstraintKind, Shape};
 
 pub(super) const LENGTH: ParamKind = ParamKind::Length { min: 0.0 };
 const DIRECTION: ParamKind = ParamKind::Angle { min: 0.0, max: 360.0, wrap: true };
-const ANGLE: ParamKind = ParamKind::Angle { min: 0.0, max: 180.0, wrap: false };
 
 pub(crate) fn curve(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool, id: CurveId) -> Option<Status> {
     let curve = tool.sketch.curve(id)?.clone();
@@ -237,24 +236,5 @@ pub(crate) fn point(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool, id:
     if switch(ui, tool.all_fixed(&[id]), "Fixed", "Hold the point where it is") {
         tool.toggle_fix(&[id]);
     }
-    message
-}
-
-pub(crate) fn constraint(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool, id: ConstraintId) -> Option<Status> {
-    let kind = tool.sketch.constraint(id)?.kind.clone();
-    let Some(value) = kind.value() else {
-        let hint = "Holds while it is there; Delete drops it.";
-        ui.add(egui::Label::new(theme::hint(hint)).selectable(false));
-        return None;
-    };
-    let mut message = None;
-    egui::Grid::new(("sketch-inspect-constraint", id)).num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        let field = format!("value-{id}");
-        let (label, kind) = if kind.is_angle() { ("Angle", ANGLE) } else { ("Value", LENGTH) };
-        if let Some(shown) = number(app, ui, (&field, label), kind, value.abs(), false) {
-            message = tool.retype(&field, id, if value < 0.0 { -shown } else { shown });
-        }
-        ui.end_row();
-    });
     message
 }

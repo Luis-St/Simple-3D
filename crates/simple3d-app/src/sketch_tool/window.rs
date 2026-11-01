@@ -1,12 +1,11 @@
 //! The editor's panel: the tool in use and what to do with it, then the tools with their settings
-//! (`window_tools.rs`), the view, the constraint buttons and what the constraints leave free, the
+//! (`window_tools.rs`), the view, the selection and what the constraints leave free, the
 //! constraint list and the feature (in their own files), and the buttons. It fills the right dock
 //! while the docks are shown (`dock.rs`), else it floats over the viewport as an in-place popup.
 
-use super::constrain::Rule;
 use super::open::finish_blocked;
 use super::*;
-use crate::app::{App, Status};
+use crate::app::App;
 use crate::popup::{PopupEvent, PopupSpec};
 use crate::theme::{self, token};
 
@@ -72,11 +71,7 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
     }
     super::window_tools::tools(app, ui, &mut tool);
     super::view::group(app, ui, &mut tool);
-    group(ui, "Constrain", |ui| {
-        if let Some(message) = rule_grid(ui, &mut tool) {
-            app.status = message;
-        }
-        ui.add_space(4.0);
+    group(ui, "Selection", |ui| {
         selection_row(ui, &mut tool);
         freedom(ui, &tool);
     });
@@ -91,44 +86,8 @@ pub(crate) fn button_width(ui: &egui::Ui, columns: usize) -> f32 {
     ((ui.available_width() - gap * (columns as f32 - 1.0)) / columns as f32).floor().max(40.0)
 }
 
-/// The narrowest a button holds "H dimension" in; below it the three dimensions take two rows.
-const DIMENSION_BUTTON: f32 = 84.0;
-
 /// The narrowest the selection row fits on one line in; below it the count goes above the buttons.
 const SELECTION_ROW: f32 = 260.0;
-
-/// The constraint buttons, the ten geometric ones two to a row and the three dimensions on a row of
-/// their own, or Dimension above the other two in a narrow dock, dimmed with what to select when the
-/// selection does not fit. The status line to show after a click, if any.
-fn rule_grid(ui: &mut egui::Ui, tool: &mut SketchTool) -> Option<Status> {
-    let (geometric, dimensions) = Rule::ALL.split_at(Rule::ALL.len() - 3);
-    let dimension_rows = match button_width(ui, 3) >= DIMENSION_BUTTON {
-        true => vec![(dimensions, 3)],
-        false => vec![(&dimensions[..1], 1), (&dimensions[1..], 2)],
-    };
-    let rows = geometric.chunks(2).map(|row| (row, 2)).chain(dimension_rows);
-    let mut message = None;
-    for (row, columns) in rows {
-        let width = button_width(ui, columns);
-        ui.horizontal(|ui| {
-            for &rule in row {
-                let fits = tool.kinds_for(rule).is_some();
-                let button = egui::Button::new(rule.label()).min_size(egui::vec2(width, 0.0));
-                let response = ui
-                    .add_enabled(fits, button)
-                    .on_hover_text(rule.needs())
-                    .on_disabled_hover_text(format!("Select {}", rule.needs().to_lowercase()));
-                if response.clicked() {
-                    message = Some(match tool.apply(rule) {
-                        Ok(_) => Status::Info(format!("Added {}", rule.label().to_lowercase())),
-                        Err(why) => Status::Warning(why),
-                    });
-                }
-            }
-        });
-    }
-    message
-}
 
 /// How much is selected on the left, or above in a narrow dock; the helper-geometry switch for
 /// selected curves and Delete on the right.

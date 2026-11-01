@@ -11,6 +11,13 @@ pub struct Constraint {
     pub id: ConstraintId,
     #[serde(flatten)]
     pub kind: ConstraintKind,
+    /// A reference dimension: it only measures, following the sketch instead of driving it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
+    /// Where a dimension's value is drawn, as an offset from the place it measures, in millimetres;
+    /// `None` until it is placed or dragged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<[f64; 2]>,
 }
 
 /// What a constraint holds. The ones with a `value` are dimensions: lengths in millimetres, angles
@@ -95,6 +102,11 @@ pub enum ConstraintKind {
         curve: CurveId,
         value: f64,
     },
+    /// A round curve's size across.
+    Diameter {
+        curve: CurveId,
+        value: f64,
+    },
     /// The angle from line `a` to line `b`, in degrees.
     Angle {
         a: CurveId,
@@ -128,7 +140,7 @@ impl ConstraintKind {
                 vec![*a, *b]
             }
             Symmetric { line, .. } | Midpoint { line, .. } | PointLineDistance { line, .. } => vec![*line],
-            OnCurve { curve, .. } | Radius { curve, .. } => vec![*curve],
+            OnCurve { curve, .. } | Radius { curve, .. } | Diameter { curve, .. } => vec![*curve],
             _ => Vec::new(),
         }
     }
@@ -142,6 +154,7 @@ impl ConstraintKind {
             | VerticalDistance { value, .. }
             | PointLineDistance { value, .. }
             | Radius { value, .. }
+            | Diameter { value, .. }
             | Angle { value, .. } => Some(*value),
             _ => None,
         }
@@ -155,6 +168,7 @@ impl ConstraintKind {
             | VerticalDistance { value, .. }
             | PointLineDistance { value, .. }
             | Radius { value, .. }
+            | Diameter { value, .. }
             | Angle { value, .. } => Some(value),
             _ => None,
         }
@@ -185,6 +199,7 @@ impl ConstraintKind {
             VerticalDistance { .. } => "Vertical distance",
             PointLineDistance { .. } => "Distance from line",
             Radius { .. } => "Radius",
+            Diameter { .. } => "Diameter",
             Angle { .. } => "Angle",
         }
     }

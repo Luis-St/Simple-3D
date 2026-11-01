@@ -70,7 +70,7 @@ impl Sketch {
     /// Add a constraint without checking it; see [`Sketch::constrain`] for the checked way.
     pub fn push_constraint(&mut self, kind: ConstraintKind) -> ConstraintId {
         let id = self.next_constraint_id();
-        self.constraints.push(Constraint { id, kind });
+        self.constraints.push(Constraint { id, kind, driven: false, label: None });
         id
     }
 

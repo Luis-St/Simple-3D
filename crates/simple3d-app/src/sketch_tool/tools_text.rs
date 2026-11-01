@@ -42,6 +42,7 @@ impl Draw {
             Draw::Rotate => "Rotate",
             Draw::Scale => "Scale",
             Draw::Dimension => "Dimension",
+            Draw::Constrain(rule) => rule.label(),
             Draw::Regions => "Pick regions",
             Draw::Axis => "Revolve axis",
             Draw::CopyEdges => "Copy face edges",
@@ -87,6 +88,7 @@ impl Draw {
             Draw::Rotate => Glyph::SketchRotate,
             Draw::Scale => Glyph::SketchScale,
             Draw::Dimension => Glyph::SketchDimension,
+            Draw::Constrain(rule) => rule.glyph(),
             Draw::Regions => Glyph::SketchRegions,
             Draw::Axis => Glyph::SketchAxis,
             Draw::CopyEdges => Glyph::SketchCopyEdges,
@@ -149,9 +151,10 @@ impl Draw {
             Draw::Rotate => "Select what to turn, then click the centre, a start and where it turns to.",
             Draw::Scale => "Select what to scale, then click the centre, a start and where it grows to.",
             Draw::Dimension => {
-                "Click a line or a circle to dimension it, or two points, or a point and then a line, for the \
-                 distance between them."
+                "Click a line, a circle or arc, two points, a point and a line, or two lines for their angle, then \
+                 click where the dimension goes; beside a slanted line it measures across or up."
             }
+            Draw::Constrain(rule) => rule.hint(),
             Draw::Regions => "Click the closed areas to make the solid from; click again to drop one.",
             Draw::Axis => "Click the line to revolve about.",
             Draw::CopyEdges => "Click a face of the model to copy its edges onto the sketch.",

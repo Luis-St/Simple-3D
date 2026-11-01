@@ -1,5 +1,6 @@
 mod ellipse;
 mod features;
+mod measure;
 mod regions;
 mod solver;
 

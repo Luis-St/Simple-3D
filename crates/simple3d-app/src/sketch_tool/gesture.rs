@@ -20,7 +20,7 @@ pub(crate) fn draw(app: &App, painter: &egui::Painter, view: &View, hover: Optio
     }
     let spacing = super::grid_step(app, view);
     let Some(cursor) = hover else { return };
-    let Some(next) = tool.click_at(view, cursor, spacing) else { return };
+    let Some((next, _)) = tool.drawing_click(view, cursor, spacing) else { return };
     let stroke = egui::Stroke::new(1.5_f32, token::ACCENT.gamma_multiply(0.8));
     let dashed = |sketch: &Sketch, curve: &simple3d_sketch::Curve| {
         let line: Vec<egui::Pos2> =

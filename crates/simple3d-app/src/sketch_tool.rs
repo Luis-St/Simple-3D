@@ -14,18 +14,27 @@
 
 mod area;
 mod constrain;
+mod constrain_pick;
+mod constrain_text;
+mod dimension;
+mod dimension_draw;
 mod dock;
 pub(crate) use dock::*;
 mod drawing;
 mod drawing_more;
 mod drawing_tangent;
 mod gesture;
+mod history;
 mod hit;
+mod infer;
+mod infer_draw;
 mod inspect;
+mod inspect_constraint;
 mod inspect_ellipse;
 mod inspect_fields;
 mod inspect_widgets;
 mod keys;
+mod label_drag;
 mod modify;
 mod modify_copy;
 mod modify_ends;
@@ -45,12 +54,16 @@ mod origin;
 mod overlay;
 pub(crate) use overlay::*;
 mod glyphs;
+mod plane_pick;
+pub(crate) use plane_pick::*;
 mod pointer;
 pub(crate) use pointer::*;
 mod window;
 pub(crate) use window::*;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_constrain;
 #[cfg(test)]
 mod tests_grid;
 #[cfg(test)]
@@ -137,6 +150,15 @@ pub struct SketchTool {
     pub(crate) field_step: Option<String>,
     /// The 2D lock: the view stays straight on the sketch, with orbiting and view changes held back.
     pub(crate) flat: bool,
+    /// Whether Ctrl is held, drawing freely without inferring constraints; kept up to date while
+    /// the pointer is over the viewport.
+    pub(crate) free: bool,
+    /// Constraints inferred by the gesture's clicks, waiting for the click that adds what they hold.
+    pub(crate) inferred: Vec<infer::Infer>,
+    /// The constraint the panel's list is pointing at, lit up in the sketch.
+    pub(crate) list_hover: Option<ConstraintId>,
+    /// The dimension label being dragged, with the sketch as the drag began.
+    pub(crate) label_drag: Option<(ConstraintId, Sketch)>,
 }
 
 impl SketchTool {
@@ -175,6 +197,10 @@ impl SketchTool {
             settings: settings::Settings::default(),
             field_step: None,
             flat: true,
+            free: false,
+            inferred: Vec::new(),
+            list_hover: None,
+            label_drag: None,
         }
     }
 
@@ -212,17 +238,6 @@ impl SketchTool {
         self.field_step = None;
     }
 
-    /// [`SketchTool::remember`] for a change from popup field `field`: changes from the same field
-    /// one after another, as a drag on it makes every frame, are one undo step.
-    pub(crate) fn remember_field(&mut self, before: Sketch, field: &str) {
-        if self.field_step.as_deref() == Some(field) {
-            self.redo.clear();
-            return;
-        }
-        self.remember(before);
-        self.field_step = Some(field.to_string());
-    }
-
     /// Re-read what the constraints leave free, and drop what no longer exists from the selection.
     pub(crate) fn refresh(&mut self) {
         self.analysis = self.sketch.analyse();
@@ -240,27 +255,12 @@ impl SketchTool {
         self.hover = None;
     }
 
-    pub(crate) fn undo_step(&mut self) {
-        if let Some(before) = self.undo.pop() {
-            self.redo.push(std::mem::replace(&mut self.sketch, before));
-            self.clicks.clear();
-            self.refresh();
-        }
-    }
-
-    pub(crate) fn redo_step(&mut self) {
-        if let Some(after) = self.redo.pop() {
-            self.undo.push(std::mem::replace(&mut self.sketch, after));
-            self.clicks.clear();
-            self.refresh();
-        }
-    }
-
     /// Pick another tool, dropping a gesture half done.
     pub(crate) fn set_draw(&mut self, draw: Draw) {
         self.draw = draw;
         self.settings.remember(draw);
         self.clicks.clear();
+        self.inferred.clear();
     }
 
     /// Open the popup on `pick`, beside screen point `at`.

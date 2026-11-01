@@ -64,6 +64,18 @@ pub enum Glyph {
     SketchRegions,
     SketchAxis,
     SketchCopyEdges,
+    // Sketch constraints (issue 74): the tool tiles and the marks drawn beside what they hold.
+    ConstrainCoincident,
+    ConstrainOnCurve,
+    ConstrainMidpoint,
+    ConstrainHorizontal,
+    ConstrainVertical,
+    ConstrainParallel,
+    ConstrainPerpendicular,
+    ConstrainTangent,
+    ConstrainEqual,
+    ConstrainSymmetric,
+    ConstrainFix,
     // Object actions.
     Group,
     Delete,

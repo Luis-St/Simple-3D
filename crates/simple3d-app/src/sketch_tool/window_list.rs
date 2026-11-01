@@ -1,6 +1,7 @@
-//! The panel's list of constraints, one row each as the workplane list's: its name, red when it
-//! repeats or fights another, a dimension's value typed or scrubbed at the right, and a bin to drop
-//! it. A click on the row selects it.
+//! The panel's list of constraints, one row each as the workplane list's: its name and what it holds,
+//! red when it repeats or fights another, a dimension's value typed or scrubbed at the right (a
+//! reference dimension's in brackets, as it only measures), and a bin to drop it. A click on the row
+//! selects it; pointing at it lights up what it holds in the sketch.
 
 use super::*;
 use crate::app::{App, Status};
@@ -19,6 +20,7 @@ const LENGTH: ParamKind = ParamKind::Length { min: 0.0 };
 const ANGLE: ParamKind = ParamKind::Angle { min: 0.0, max: 180.0, wrap: false };
 
 pub(crate) fn list(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
+    tool.list_hover = None;
     let count = tool.sketch.constraints.len();
     let shown: Vec<_> = tool.sketch.constraints.iter().filter(|c| tool.holds_all_selected(&c.kind)).cloned().collect();
     let header = match shown.len() == count {
@@ -27,7 +29,8 @@ pub(crate) fn list(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
     };
     super::window::group(ui, &header, |ui| {
         if count == 0 {
-            let hint = "Select points or curves and use the Constrain buttons, or the Dimension tool.";
+            let hint = "Use the Constrain tools, or draw: lines nearly level or upright and clicks on curves are \
+                        held so as they go down.";
             ui.add(egui::Label::new(theme::hint(hint)).selectable(false));
             return;
         }
@@ -43,15 +46,26 @@ pub(crate) fn list(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
             let pick = Pick::Constraint(constraint.id);
             let marked = tool.conflicts.contains(&constraint.id) || tool.analysis.redundant.contains(&constraint.id);
             let selected = tool.selection.contains(&pick);
-            let row = Row { id: constraint.id, name: constraint.kind.label(), marked, selected };
-            let asked = show_row(ui, row, |ui| {
+            let name = format!("{}  {}", constraint.kind.label(), names(&tool.sketch, &constraint.kind));
+            let dimension = constraint.kind.value().is_some();
+            let row = Row { id: constraint.id, name, marked, selected, dimension };
+            let unit = tool.unit;
+            let (asked, hovered) = show_row(ui, row, |ui| {
                 let value = constraint.kind.value()?;
+                if constraint.driven {
+                    let said = super::dimension_draw::text(&constraint.kind, value, true, unit);
+                    ui.add(egui::Label::new(theme::hint(said)).selectable(false));
+                    return None;
+                }
                 let mut shown = value.abs();
                 let name = format!("sketch-constraint-{}", constraint.id);
                 let kind = if constraint.kind.is_angle() { ANGLE } else { LENGTH };
                 popup::number(app, ui, ("sketch-constraint", &name), FIELD_WIDTH, kind, &mut shown);
                 ((shown - value.abs()).abs() > 1e-12).then_some(if value < 0.0 { -shown } else { shown })
             });
+            if hovered {
+                tool.list_hover = Some(constraint.id);
+            }
             match asked {
                 Asked::Select => tool.selection = vec![pick],
                 Asked::Drop => dropped = Some(constraint.id),
@@ -78,7 +92,9 @@ pub(crate) fn list(app: &mut App, ui: &mut egui::Ui, tool: &mut SketchTool) {
 /// One constraint's row as drawn.
 struct Row {
     id: ConstraintId,
-    name: &'static str,
+    name: String,
+    /// Whether it has a value field, which the name must leave room for.
+    dimension: bool,
     marked: bool,
     selected: bool,
 }
@@ -92,8 +108,9 @@ enum Asked {
 }
 
 /// The row: marked as the outliner marks a selected row, the name at the left, then `value` (the
-/// dimension's field, handing back a typed value) and the bin at the right.
-fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Option<f64>) -> Asked {
+/// dimension's field, handing back a typed value) and the bin at the right. Whether the pointer is on
+/// it, as well.
+fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Option<f64>) -> (Asked, bool) {
     let height = metric::INPUT_ROW + 2.0;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
     let id = egui::Id::new(("sketch-constraint-row", row.id));
@@ -107,10 +124,13 @@ fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Op
         painter.rect_filled(rect, 0.0, token::SURFACE_3);
     }
     let colour = if row.marked { token::DANGER } else { token::TEXT_HI };
-    painter.text(
+    // Cut off short of the value and the bin, so a long name never runs under them.
+    let room = if row.dimension { FIELD_WIDTH + 34.0 } else { 28.0 };
+    let name_rect = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right() - room, rect.bottom()));
+    painter.with_clip_rect(name_rect).text(
         egui::pos2(rect.left() + 6.0, rect.center().y),
         egui::Align2::LEFT_CENTER,
-        row.name,
+        &row.name,
         egui::FontId::proportional(theme::font::VALUE),
         colour,
     );
@@ -138,7 +158,17 @@ fn show_row(ui: &mut egui::Ui, row: Row, value: impl FnOnce(&mut egui::Ui) -> Op
     if let Some(typed) = value(&mut child) {
         asked = Asked::Retype(typed);
     }
-    asked
+    (asked, ui.rect_contains_pointer(rect))
+}
+
+/// What a constraint holds, by name: "line 3, line 7".
+pub(crate) fn names(sketch: &Sketch, kind: &simple3d_sketch::ConstraintKind) -> String {
+    let curves = kind.curves().into_iter().map(|id| {
+        let label = sketch.curve(id).map_or("curve", |c| c.shape.label());
+        format!("{label} {id}")
+    });
+    let points = kind.points().into_iter().map(|id| format!("point {id}"));
+    points.chain(curves).collect::<Vec<_>>().join(", ")
 }
 
 impl SketchTool {

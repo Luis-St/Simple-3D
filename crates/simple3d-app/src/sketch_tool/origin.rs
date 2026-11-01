@@ -5,7 +5,7 @@
 //! in the +X +Y +Z direction whatever the view; where two cover each other the nearer one is hit. They keep one size on screen whatever the zoom, and a click on one
 //! wins over the face of the model behind it.
 
-use super::pointer::plane_frame;
+use super::plane_pick::plane_frame;
 use super::*;
 use crate::theme::token;
 use crate::view::View;

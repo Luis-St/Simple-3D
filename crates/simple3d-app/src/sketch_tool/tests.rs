@@ -103,7 +103,7 @@ fn a_line_chain_closes_back_onto_its_first_point() {
 }
 
 #[test]
-fn a_constraint_button_fits_the_selection_and_a_repeat_is_refused_with_the_other_marked() {
+fn a_constraint_fits_the_selection_and_a_repeat_is_refused_with_the_other_marked() {
     let mut app = sketching();
     let tool = app.sketch_tool.as_mut().unwrap();
     tool.set_draw(Draw::Line);
@@ -117,8 +117,6 @@ fn a_constraint_button_fits_the_selection_and_a_repeat_is_refused_with_the_other
     let held = tool.sketch.constraints[0].id;
     assert!(tool.apply(Rule::Horizontal).is_err());
     assert_eq!(tool.conflicts, vec![held]);
-    tool.apply(Rule::Dimension).unwrap();
-    assert!(matches!(tool.selection[..], [Pick::Constraint(_)]), "the new dimension is not selected");
 }
 
 #[test]
@@ -143,7 +141,7 @@ fn a_sketch_on_a_face_cuts_the_object_under_it_and_reopens_on_its_plane() {
     app.toggle_sketch_tool();
     let (_, hi) = app.evaluated.node_world_bounds[&a];
     let frame =
-        super::pointer::plane_frame(Vec3::new(0.0, 0.0, hi.z), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+        super::plane_pick::plane_frame(Vec3::new(0.0, 0.0, hi.z), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
     app.place_sketch(frame, Some(a));
     draw_and_pick(&mut app);
     let tool = app.sketch_tool.as_mut().unwrap();
@@ -197,7 +195,7 @@ fn a_click_on_an_orange_origin_plane_puts_the_sketch_on_it_and_faces_it() {
         let (at, _) = view.project(plane.middle(&view)).unwrap();
         assert_eq!(super::origin::plane_at(&view, at), Some(plane));
         app.sketch_tool.as_mut().unwrap().frame = None;
-        super::pointer::pick_plane(&mut app, &view, at);
+        super::plane_pick::pick_plane(&mut app, &view, at);
         let frame = app.sketch_tool.as_ref().unwrap().frame.expect("the click did not pick the plane");
         assert!((frame.axis(2) - normal).length() < 1e-9, "{plane:?} faces {:?}", frame.axis(2));
         assert!(frame.t.length() < 1e-9, "{plane:?} is not through the origin");

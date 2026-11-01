@@ -4,7 +4,7 @@ use super::*;
 use crate::theme::token;
 
 pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
-    if super::paint_sketch::paint(pen, glyph) {
+    if super::paint_sketch::paint(pen, glyph) || super::paint_constraints::paint(pen, glyph) {
         return;
     }
     match glyph {

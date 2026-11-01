@@ -21,6 +21,7 @@ pub use curve::{Curve, CurveId, Shape};
 mod edit;
 mod ellipse;
 pub use ellipse::Ellipse;
+mod measure;
 mod point;
 pub use point::{Point, PointId};
 mod sample;

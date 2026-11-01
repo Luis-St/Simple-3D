@@ -1,5 +1,5 @@
 //! Every line's length, written beside it, so the drawing reads as a drawing with sizes before
-//! anything is dimensioned. A line held by a length dimension shows that instead.
+//! anything is dimensioned. A line whose ends a dimension measures shows that instead.
 
 use super::*;
 use crate::theme::token;
@@ -25,10 +25,12 @@ pub(crate) fn tag(painter: &egui::Painter, at: egui::Pos2, text: &str, colour: e
 /// hang up and to the right.
 pub(crate) fn lengths(tool: &SketchTool, painter: &egui::Painter, view: &View) {
     let dimensioned = |p: PointId, q: PointId| {
-        tool.sketch
-            .constraints
-            .iter()
-            .any(|c| matches!(c.kind, ConstraintKind::Distance { a, b, .. } if (a, b) == (p, q) || (a, b) == (q, p)))
+        tool.sketch.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::Distance { a, b, .. }
+            | ConstraintKind::HorizontalDistance { a, b, .. }
+            | ConstraintKind::VerticalDistance { a, b, .. } => (a, b) == (p, q) || (a, b) == (q, p),
+            _ => false,
+        })
     };
     for curve in &tool.sketch.curves {
         let Shape::Line { a, b } = curve.shape else { continue };

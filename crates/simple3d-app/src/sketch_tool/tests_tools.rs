@@ -153,18 +153,22 @@ fn a_fillet_rounds_a_rectangle_corner_with_a_tangent_arc_of_its_radius() {
 }
 
 #[test]
-fn the_dimension_tool_dimensions_a_clicked_line_and_opens_its_popup() {
+fn the_dimension_tool_dimensions_a_clicked_line_where_it_is_placed() {
     let mut app = sketching();
     draw(&mut app, Draw::Line, &[[0.0, 0.0], [10.0, 0.0]]);
     let view = crate::view::View::new(app.scene.camera, app.viewport_rect);
     let tool = app.sketch_tool.as_mut().unwrap();
     tool.set_draw(Draw::Dimension);
     let line = tool.sketch.curves[0].id;
-    let at = tool.screen(&view, [5.0, 0.0]).unwrap();
-    super::picks::dimension_at(tool, &view, at);
-    assert!(tool.dimension_of(line).is_some(), "no length dimension");
-    assert!(tool.inspect.is_some(), "the popup did not open");
-    let dimension = tool.dimension_of(line).unwrap();
+    let on = tool.screen(&view, [5.0, 0.0]).unwrap();
+    let (_, placed) = super::dimension::dimension_at(tool, &view, on);
+    assert!(placed.is_none(), "the first click placed the dimension before it was put anywhere");
+    let aside = tool.screen(&view, [5.0, -8.0]).unwrap();
+    let (_, placed) = super::dimension::dimension_at(tool, &view, aside);
+    let dimension = placed.expect("a click aside did not place it");
+    assert_eq!(tool.dimension_of(line), Some(dimension), "no length dimension");
+    let label = tool.sketch.constraint(dimension).unwrap().label.expect("not placed where clicked");
+    assert!(label[0].abs() < 1e-4 && (label[1] + 8.0).abs() < 1e-4, "placed at {label:?}");
     assert!(tool.retype("value", dimension, 25.0).is_none());
     assert!((length(lines(tool)[0]) - 25.0).abs() < 1e-6);
 }

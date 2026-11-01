@@ -164,7 +164,8 @@ impl<'a> System<'a> {
                 }
             }
         }
-        for constraint in &self.sketch.constraints {
+        // A reference dimension only measures, so it holds nothing.
+        for constraint in self.sketch.constraints.iter().filter(|c| !c.driven) {
             let equations = super::equations::of(self, &constraint.kind).map_err(|why| (constraint.id, why))?;
             out.extend(equations.into_iter().map(|(deps, eval)| Equation { owner: Some(constraint.id), deps, eval }));
         }

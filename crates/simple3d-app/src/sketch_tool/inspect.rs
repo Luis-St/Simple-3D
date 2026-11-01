@@ -66,7 +66,7 @@ fn body(app: &mut App, ui: &mut egui::Ui) {
         let message = match pick {
             Pick::Curve(id) => super::inspect_fields::curve(app, ui, &mut tool, id),
             Pick::Point(id) => super::inspect_fields::point(app, ui, &mut tool, id),
-            Pick::Constraint(id) => super::inspect_fields::constraint(app, ui, &mut tool, id),
+            Pick::Constraint(id) => super::inspect_constraint::constraint(app, ui, &mut tool, id),
         };
         if let Some(message) = message {
             app.status = message;

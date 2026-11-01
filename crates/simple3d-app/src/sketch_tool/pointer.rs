@@ -3,10 +3,9 @@
 
 use super::picks::*;
 use super::*;
-use crate::app::{App, Status};
+use crate::app::App;
 use crate::view::View;
 use simple3d_core::keymap::Command;
-use simple3d_geom::plane_cut::CutPlane;
 
 /// Whether the editor takes the viewport's clicks: always while it is out.
 pub(crate) fn wants_pointer(app: &App) -> bool {
@@ -19,7 +18,12 @@ pub(crate) fn owns_drag(app: &App) -> bool {
     app.sketch_tool.as_ref().is_some_and(|tool| {
         tool.drag.is_some()
             || tool.area.is_some()
-            || (tool.draw == Draw::Select && tool.hover.is_some_and(|h| !matches!(h, Pick::Constraint(_))))
+            || tool.label_drag.is_some()
+            || (tool.draw == Draw::Select
+                && tool.hover.is_some_and(|h| match h {
+                    Pick::Constraint(id) => tool.sketch.constraint(id).is_some_and(|c| c.kind.value().is_some()),
+                    _ => true,
+                }))
     })
 }
 
@@ -51,7 +55,8 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
             .is_some();
     let origin = ui.input(|i| i.pointer.press_origin()).filter(|_| !camera_drag);
     let Some(tool) = app.sketch_tool.as_mut() else { return };
-    if tool.drag.is_none() {
+    tool.free = mods.command;
+    if tool.drag.is_none() && tool.label_drag.is_none() {
         tool.hover = cursor.and_then(|cursor| tool.hover_at(view, cursor, shift));
     }
     if response.clicked_by(egui::PointerButton::Secondary) {
@@ -79,43 +84,29 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
                     draw if draw.uses_selection() => {
                         app.status = super::picks_more::selection_tool_at(tool, view, cursor, (shift, spacing))
                     }
-                    Draw::Dimension => app.status = dimension_at(tool, view, cursor),
+                    Draw::Dimension => {
+                        let (status, typed) = super::dimension::dimension_at(tool, view, cursor);
+                        app.status = status;
+                        if let Some(id) = typed {
+                            let at = super::dimension_draw::all(tool, view)
+                                .into_iter()
+                                .find(|(d, _)| *d == id)
+                                .map_or(cursor, |(_, shape)| shape.at);
+                            tool.open_inspect(Pick::Constraint(id), at);
+                            app.fields.open_typing(super::inspect_constraint::value_field(id));
+                        }
+                    }
+                    Draw::Constrain(rule) => app.status = super::constrain_pick::constrain_at(tool, view, cursor, rule),
                     _ => copy_edges(app, view, cursor),
                 }
             }
         }
         _ => {
             if let (true, Some(cursor)) = (response.clicked_by(egui::PointerButton::Primary), cursor) {
-                if let Some(click) = tool.click_at(view, cursor, spacing) {
-                    tool.click(click);
+                if let Some((click, inferred)) = tool.drawing_click(view, cursor, spacing) {
+                    tool.click_inferred(click, inferred);
                 }
             }
-        }
-    }
-}
-
-/// The first click: an origin plane or a face of the model puts the sketch on it, anywhere else on the
-/// plane being worked on (the active workplane, or the ground). The origin planes are drawn over the
-/// model, so they win over the face behind them.
-pub(crate) fn pick_plane(app: &mut App, view: &View, cursor: egui::Pos2) {
-    if let Some(plane) = super::origin::plane_at(view, cursor) {
-        app.place_sketch(plane.frame(), None);
-        return;
-    }
-    match app.face_under(view, cursor) {
-        Some((Ok(hit), _)) => {
-            let face = CutPlane { point: hit.captured.origin, normal: hit.captured.normal };
-            let (u, v) = sketch_axes(face.normal);
-            let frame = plane_frame(face.point, u, v);
-            app.place_sketch(frame, Some(hit.owner));
-        }
-        Some((Err(why), _)) => app.status = Status::Warning(why.into()),
-        None => {
-            let frame = match app.workplane() {
-                Some(plane) => plane.frame(),
-                None => Xform::from_translation(Vec3::ZERO),
-            };
-            app.place_sketch(frame, None);
         }
     }
 }
@@ -130,26 +121,6 @@ pub(crate) fn grid_step(app: &App, view: &View) -> Option<f64> {
     app.ground_grid(view).map(|grid| grid.spacing).filter(|step| *step > 0.0)
 }
 
-/// The axes of a sketch on a face facing `normal`: its X level, so that looking straight at it, as
-/// the camera does without rolling, puts X to the right and Y up. Only a face looking straight up or
-/// down has no level direction of its own; there X is the world's, turned to keep the frame
-/// right-handed as seen from the face's side, as the origin planes are.
-pub(crate) fn sketch_axes(normal: Vec3) -> (Vec3, Vec3) {
-    let n = normal.normalized();
-    let u = if n.z.abs() > 0.999 {
-        Vec3::new(n.z.signum(), 0.0, 0.0)
-    } else {
-        Vec3::new(0.0, 0.0, 1.0).cross(n).normalized()
-    };
-    (u, n.cross(u))
-}
-
-/// A frame with origin `origin` and axes `u`, `v` and their normal.
-pub(crate) fn plane_frame(origin: Vec3, u: Vec3, v: Vec3) -> Xform {
-    let rotation = Xform::rotation_of_axes(u, v, u.cross(v));
-    Xform::from_pos_rot(origin, rotation)
-}
-
 /// Selecting by click and moving by drag.
 fn select(
     tool: &mut SketchTool,
@@ -159,6 +130,9 @@ fn select(
     (shift, step): (bool, Option<f64>),
 ) {
     let Some(cursor) = cursor else { return };
+    if super::label_drag::drag_label(tool, response, view, cursor) {
+        return;
+    }
     if response.drag_started_by(egui::PointerButton::Primary) {
         if let Some(pick @ (Pick::Point(_) | Pick::Curve(_))) = tool.hover {
             if !tool.selection.contains(&pick) {

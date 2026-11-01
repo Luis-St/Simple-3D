@@ -31,7 +31,7 @@ fn looking_at_a_sketch_puts_its_x_right_and_its_y_up() {
     }
     // A sloping face, steep enough that its old axes had X running uphill.
     for normal in [Vec3::new(0.0, -0.3, 0.95), Vec3::new(0.6, 0.2, -0.5), Vec3::new(0.0, 0.0, -1.0)] {
-        let (u, v) = pointer::sketch_axes(normal);
+        let (u, v) = plane_pick::sketch_axes(normal);
         assert!(near(u.cross(v), normal.normalized()), "the axes of {normal:?} do not face it");
         let frame = plane_frame(Vec3::ZERO, u, v);
         let app = sketching_on(frame);

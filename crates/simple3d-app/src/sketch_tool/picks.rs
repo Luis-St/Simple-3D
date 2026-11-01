@@ -1,7 +1,6 @@
 //! The clicks of the tools that pick something rather than draw: regions, the revolve axis, face
-//! edges to copy, and the trim, fillet and dimension tools.
+//! edges to copy, and the trim and fillet tools.
 
-use super::constrain::Rule;
 use super::*;
 use crate::app::{App, Status};
 use crate::view::View;
@@ -109,43 +108,6 @@ pub(crate) fn fillet_at(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) 
     }
 }
 
-/// The dimension tool's click: a line or round curve dimensioned at once, a point waiting for a
-/// second point or a line. The new dimension's popup opens, so its value can be typed.
-pub(crate) fn dimension_at(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) -> Status {
-    let first = tool.clicks.first().and_then(|c| c.point);
-    let picked = match (tool.pick_at(view, cursor), first) {
-        (Some(Pick::Point(b)), Some(a)) if a != b => vec![Pick::Point(a), Pick::Point(b)],
-        (Some(Pick::Point(a)), _) => {
-            tool.clicks = vec![Click { at: tool.sketch.at(a), point: Some(a) }];
-            return Status::Info("Now click a second point, or a line".into());
-        }
-        (Some(Pick::Curve(line)), Some(a)) => vec![Pick::Point(a), Pick::Curve(line)],
-        (Some(Pick::Curve(curve)), None) => {
-            if let Some(existing) = tool.dimension_of(curve) {
-                tool.selection = vec![Pick::Constraint(existing)];
-                tool.open_inspect(Pick::Curve(curve), cursor);
-                return Status::Info("Already dimensioned; type its value".into());
-            }
-            vec![Pick::Curve(curve)]
-        }
-        _ => {
-            tool.clicks.clear();
-            return Status::Info("Click a line, a circle or a point".into());
-        }
-    };
-    tool.clicks.clear();
-    tool.selection = picked;
-    match tool.apply(Rule::Dimension) {
-        Ok(_) => {
-            if let Some(&pick) = tool.selection.first() {
-                tool.open_inspect(pick, cursor);
-            }
-            Status::Info("Dimensioned; type its value in the popup".into())
-        }
-        Err(why) => Status::Warning(why),
-    }
-}
-
 impl SketchTool {
     /// What the tool in use would act on under the pointer, lit while it hovers there.
     pub(crate) fn hover_at(&self, view: &View, cursor: egui::Pos2, shift: bool) -> Option<Pick> {
@@ -155,7 +117,9 @@ impl SketchTool {
             Draw::Select => self.pick_at(view, cursor),
             Draw::Axis | Draw::Trim | Draw::Extend | Draw::Split | Draw::Offset | Draw::Mirror => curve(),
             draw if draw.uses_selection() && (shift || self.clicks.is_empty()) => curve().or_else(point),
-            Draw::Dimension => self.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_))),
+            Draw::Dimension | Draw::Constrain(_) => {
+                self.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_)))
+            }
             Draw::Regions | Draw::CopyEdges => None,
             _ => point(),
         }

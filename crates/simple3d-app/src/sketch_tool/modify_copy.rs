@@ -71,6 +71,7 @@ fn remap_constraint(
         VerticalDistance { a, b, value } => VerticalDistance { a: p(a), b: p(b), value },
         PointLineDistance { point, line, value } => PointLineDistance { point: p(point), line: c(line), value },
         Radius { curve, value } => Radius { curve: c(curve), value },
+        Diameter { curve, value } => Diameter { curve: c(curve), value },
         Angle { a, b, value } => Angle { a: c(a), b: c(b), value },
     }
 }

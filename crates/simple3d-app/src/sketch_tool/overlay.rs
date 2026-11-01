@@ -1,6 +1,6 @@
 //! What is drawn over the picture while sketching: the picked regions, the curves and points coloured
-//! by how far the constraints hold them, every line's length, the gesture in progress, and the
-//! constraint labels.
+//! by how far the constraints hold them, every line's length, the gesture in progress, the
+//! constraint marks and dimensions, and what a click would infer or place.
 
 use super::*;
 use crate::app::App;
@@ -42,13 +42,14 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     draw_axes(tool, painter, view, app.shown_axes());
     draw_regions(tool, painter, view, hover);
+    let (lit_curves, lit_points) = super::glyphs::lit(tool);
     for curve in &tool.sketch.curves {
-        draw_curve(tool, painter, view, curve);
+        draw_curve(tool, painter, view, curve, lit_curves.contains(&curve.id));
     }
     for point in &tool.sketch.points {
         let Some(at) = tool.screen(view, point.at) else { continue };
         let pick = Pick::Point(point.id);
-        let colour = if tool.selection.contains(&pick) || tool.hover == Some(pick) {
+        let colour = if tool.selection.contains(&pick) || tool.hover == Some(pick) || lit_points.contains(&point.id) {
             token::ACCENT
         } else if point.fixed {
             REFERENCE
@@ -71,20 +72,9 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
         }
     }
     let Some(tool) = app.sketch_tool.as_ref() else { return };
-    for label in super::glyphs::labels(tool, view) {
-        let pick = Pick::Constraint(label.id);
-        let colour = if tool.conflicts.contains(&label.id) || tool.analysis.redundant.contains(&label.id) {
-            token::DANGER
-        } else if tool.selection.contains(&pick) || tool.hover == Some(pick) {
-            token::ACCENT
-        } else if label.dimension {
-            token::MEASURE
-        } else {
-            token::TEXT_LO
-        };
-        let rect = label.rect();
-        painter.rect_filled(rect, 3.0, token::SURFACE_1.gamma_multiply(0.85));
-        painter.text(rect.center(), egui::Align2::CENTER_CENTER, &label.text, egui::FontId::monospace(11.0), colour);
+    super::glyphs::draw(tool, painter, view);
+    if let Some(cursor) = hover {
+        super::infer_draw::draw(app, painter, view, cursor);
     }
 }
 
@@ -102,8 +92,8 @@ pub(crate) fn snap_landing(app: &App, view: &View, cursor: egui::Pos2) -> Option
     if !tool.draw.draws() && tool.draw.selection_clicks() == 0 {
         return None;
     }
-    let click = tool.click_at(view, cursor, step)?;
-    (click.point.is_some() || step.is_some()).then_some(click.at)
+    let (click, inferred) = tool.drawing_click(view, cursor, step)?;
+    (click.point.is_some() || step.is_some() || !inferred.is_empty()).then_some(click.at)
 }
 
 /// The sketch's origin and its X and Y, so the plane reads as a plane before anything is drawn. An
@@ -184,14 +174,14 @@ fn fill_outline(
     painter.add(egui::Shape::mesh(mesh));
 }
 
-fn draw_curve(tool: &SketchTool, painter: &egui::Painter, view: &View, curve: &simple3d_sketch::Curve) {
+fn draw_curve(tool: &SketchTool, painter: &egui::Painter, view: &View, curve: &simple3d_sketch::Curve, lit: bool) {
     let samples = sample_curve(&tool.sketch, curve, DRAWN_SEGMENTS);
     let mut points: Vec<egui::Pos2> = samples.points.iter().filter_map(|&p| tool.screen(view, p)).collect();
     if samples.closed && !points.is_empty() {
         points.push(points[0]);
     }
     let pick = Pick::Curve(curve.id);
-    let colour = if tool.selection.contains(&pick) || tool.hover == Some(pick) {
+    let colour = if tool.selection.contains(&pick) || tool.hover == Some(pick) || lit {
         token::ACCENT
     } else if curve.reference {
         REFERENCE

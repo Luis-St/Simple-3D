@@ -8,6 +8,7 @@ mod pen;
 pub use pen::draw;
 pub(crate) use pen::*;
 mod paint;
+mod paint_constraints;
 mod paint_gears;
 mod paint_printing;
 mod paint_sketch;

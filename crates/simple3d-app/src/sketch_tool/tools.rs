@@ -2,6 +2,8 @@
 //! one tile per family, its variants in a row under the tiles -- and the key that picks each family
 //! while sketching. Their names, hints and glyphs are in `tools_text`.
 
+use super::constrain::Rule;
+
 /// What a click in the viewport does while the sketch is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Draw {
@@ -66,8 +68,10 @@ pub(crate) enum Draw {
     Move,
     Rotate,
     Scale,
-    /// Click a curve, or two points, to dimension it.
+    /// Click what to measure, then where the dimension goes.
     Dimension,
+    /// Click the points and curves a geometric constraint goes on.
+    Constrain(Rule),
     /// Click regions to make the solid from.
     Regions,
     /// Click the line a revolve turns about.
@@ -92,21 +96,31 @@ impl Draw {
         &[Draw::Point],
     ];
 
-    pub(crate) const MODIFY: [Family; 7] = [
+    pub(crate) const MODIFY: [Family; 6] = [
         &[Draw::Trim, Draw::Extend, Draw::Split],
         &[Draw::Fillet, Draw::Chamfer],
         &[Draw::Offset],
         &[Draw::Mirror],
         &[Draw::LinearPattern, Draw::CircularPattern],
         &[Draw::Move, Draw::Rotate, Draw::Scale],
+    ];
+
+    pub(crate) const CONSTRAIN: [Family; 8] = [
         &[Draw::Dimension],
+        &[Draw::Constrain(Rule::Coincident), Draw::Constrain(Rule::Midpoint)],
+        &[Draw::Constrain(Rule::Horizontal), Draw::Constrain(Rule::Vertical)],
+        &[Draw::Constrain(Rule::Parallel), Draw::Constrain(Rule::Perpendicular)],
+        &[Draw::Constrain(Rule::Tangent)],
+        &[Draw::Constrain(Rule::Equal)],
+        &[Draw::Constrain(Rule::Symmetric)],
+        &[Draw::Constrain(Rule::Fix)],
     ];
 
     pub(crate) const PICKING: [Family; 3] = [&[Draw::Regions], &[Draw::Axis], &[Draw::CopyEdges]];
 
     /// Every family, in panel order.
     pub(crate) fn families() -> impl Iterator<Item = Family> {
-        Draw::DRAWING.into_iter().chain(Draw::MODIFY).chain(Draw::PICKING)
+        Draw::DRAWING.into_iter().chain(Draw::MODIFY).chain(Draw::CONSTRAIN).chain(Draw::PICKING)
     }
 
     /// The family the tool belongs to; the pointer is one of its own.
@@ -132,6 +146,9 @@ impl Draw {
             Draw::Mirror => egui::Key::I,
             Draw::Move => egui::Key::M,
             Draw::Dimension => egui::Key::D,
+            Draw::Constrain(Rule::Coincident) => egui::Key::X,
+            Draw::Constrain(Rule::Horizontal) => egui::Key::H,
+            Draw::Constrain(Rule::Equal) => egui::Key::U,
             _ => return None,
         })
     }

@@ -39,6 +39,13 @@ pub struct Field {
 }
 
 impl FieldBuffers {
+    /// Turn field `id` into its text field, focused with its whole value selected, the next time it
+    /// is drawn, as a click on it does: a value can then be typed straight away.
+    pub fn open_typing(&mut self, id: egui::Id) {
+        self.editing.insert(id);
+        self.opening.insert(id);
+    }
+
     /// A value field that is its own slider.
     ///
     /// Until clicked it is a drawing of its value that carries the drag; clicking turns it into a
