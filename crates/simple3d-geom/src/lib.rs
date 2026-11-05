@@ -17,6 +17,7 @@ pub mod rounding;
 pub mod section;
 pub mod simplify;
 pub mod tiling;
+pub mod topology;
 pub mod vec3;
 
 mod tests;

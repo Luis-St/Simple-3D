@@ -8,7 +8,7 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 mod topology;
-use topology::{bodies_of, EdgeTable};
+use topology::{bodies_of, border_edges_of, EdgeTable};
 #[cfg(test)]
 pub(super) use topology::{border_edges, feature_edges};
 
@@ -96,7 +96,7 @@ impl Renderable {
             (table.join().expect("the edge table panicked"), bodies, parts.join().expect("the parts panicked"))
         });
         let ((edges, edge_faces), outline, axis_spans) = std::thread::scope(|scope| {
-            let outline = scope.spawn(|| if outlined { table.border_edges() } else { Vec::new() });
+            let outline = scope.spawn(|| if outlined { border_edges_of(&table) } else { Vec::new() });
             let spans = scope.spawn(|| std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis)));
             let edges = table.feature_edges(&normals, 20.0);
             (edges, outline.join().expect("the outline panicked"), spans.join().expect("the axis spans panicked"))
