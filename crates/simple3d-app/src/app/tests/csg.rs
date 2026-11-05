@@ -35,7 +35,8 @@ fn nodes(leaves: &[PlannedLeaf]) -> Vec<NodeId> {
 
 fn evaluated(app: &mut App) {
     app.reevaluate_for_test();
-    app.scene_renderable = crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges);
+    app.scene_renderable =
+        crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges, &app.evaluated.smooth);
 }
 
 #[test]

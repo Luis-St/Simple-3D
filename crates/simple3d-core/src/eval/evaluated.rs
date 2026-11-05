@@ -4,7 +4,7 @@ use super::*;
 use crate::scene::NodeId;
 use crate::xform::Xform;
 use simple3d_geom::{Mesh, Vec3};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -35,6 +35,9 @@ pub struct Evaluated {
     /// Each node's placement in its parent's frame for this evaluation; with `node_frames`, tells how
     /// far a node has moved since.
     pub placements: BTreeMap<NodeId, Xform>,
+    /// The triangle sources ([`source_of`]) drawn smooth-shaded: the mesh bodies'. A converted or
+    /// imported surface is a tessellation of something curved, which flat shading shows facet by facet.
+    pub smooth: BTreeSet<u32>,
     /// Nodes whose own evaluation failed. Non-empty means export must refuse.
     pub errors: Vec<NodeError>,
     /// Set when the run was superseded by a later edit; the result is partial and should be discarded.

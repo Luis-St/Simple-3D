@@ -202,7 +202,8 @@ fn a_small_window_inside_a_body_still_cuts_it() {
 #[test]
 fn several_sections_cut_at_once_and_one_clear_of_the_model_does_not() {
     let mut app = crate::app::tests::headless_app();
-    app.scene_renderable = crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges);
+    app.scene_renderable =
+        crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges, &app.evaluated.smooth);
     app.run(simple3d_core::keymap::Command::ToggleSection);
     let (lo, hi) = app.evaluated.bounds.expect("the plate is in the scene");
     let forward = Vec3::new(0.3, 0.2, -1.0);

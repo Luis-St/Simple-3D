@@ -1,5 +1,5 @@
 use super::*;
-use crate::primitives::{box_mesh, ellipsoid_mesh};
+use crate::primitives::{box_mesh, cylinder_mesh, ellipsoid_mesh};
 use crate::vec3::Vec3;
 
 fn cube() -> Mesh {
@@ -140,4 +140,69 @@ fn an_empty_mesh_has_empty_tables() {
     assert!(topology.edges.is_empty());
     assert!(topology.neighbours.is_empty());
     assert!(topology.boundary_vertices().is_empty());
+}
+
+/// Corner normals of `mesh` at a 30 degree crease, every triangle smooth.
+fn smoothed(mesh: &Mesh) -> Vec<[Vec3; 3]> {
+    let topology = Topology::of(mesh);
+    corner_normals(mesh, &topology.edges, &topology.faces, 30.0, &vec![true; mesh.indices.len()])
+}
+
+#[test]
+fn a_cube_stays_sharp_with_each_corner_along_its_own_face() {
+    let mesh = cube();
+    for (tri, corners) in mesh.indices.iter().zip(smoothed(&mesh)) {
+        let face = mesh.triangle_normal(*tri);
+        for n in corners {
+            assert!((n - face).length() < 1e-9, "{n:?} on a face facing {face:?}");
+        }
+    }
+}
+
+#[test]
+fn a_cylinder_side_shades_round_and_its_caps_stay_flat() {
+    let mesh = cylinder_mesh(20.0, 20.0, 10.0, 32).weld();
+    let (lo, hi) = mesh.bounds().expect("not empty");
+    let axis = (lo + hi) * 0.5;
+    for (tri, corners) in mesh.indices.iter().zip(smoothed(&mesh)) {
+        let face = mesh.triangle_normal(*tri);
+        for (k, n) in corners.into_iter().enumerate() {
+            if face.z.abs() > 0.99 {
+                assert!((n - face).length() < 1e-9, "a cap corner leans: {n:?}");
+            } else {
+                let p = mesh.positions[tri[k] as usize];
+                let radial = Vec3::new(p.x - axis.x, p.y - axis.y, 0.0).normalized();
+                assert!((n - radial).length() < 1e-9, "a side corner at {p:?} has {n:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_sphere_corner_matches_its_vertex_normal() {
+    let mesh = ellipsoid_mesh(20.0, 20.0, 20.0, 32).weld();
+    let vertex = vertex_normals(&mesh);
+    for (tri, corners) in mesh.indices.iter().zip(smoothed(&mesh)) {
+        for k in 0..3 {
+            assert!((corners[k] - vertex[tri[k] as usize]).length() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn a_triangle_left_out_has_no_corners_and_cuts_the_smoothing_off() {
+    let mesh = ellipsoid_mesh(20.0, 20.0, 20.0, 32).weld();
+    let topology = Topology::of(&mesh);
+    let mut smooth = vec![true; mesh.indices.len()];
+    smooth[0] = false;
+    let corners = corner_normals(&mesh, &topology.edges, &topology.faces, 30.0, &smooth);
+    assert_eq!(corners[0], [Vec3::ZERO; 3]);
+    // Its corners' other triangles no longer average it in.
+    let vertex = vertex_normals(&mesh);
+    let shared = mesh.indices[0][0];
+    let (face, at) = (1..mesh.indices.len())
+        .find_map(|f| mesh.indices[f].iter().position(|&c| c == shared).map(|k| (f, k)))
+        .expect("another triangle at the corner");
+    assert!(corners[face][at].length() > 0.999);
+    assert!((corners[face][at] - vertex[shared as usize]).length() > 1e-6);
 }

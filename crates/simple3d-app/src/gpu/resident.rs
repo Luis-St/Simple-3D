@@ -26,8 +26,8 @@ mod plan;
 mod project;
 mod upload;
 pub(super) use plan::{mark_planes, plan};
-pub(super) use upload::{bytes_of, table, Format};
 pub(super) use project::{front_face, rows_at, set_forward, set_projection, set_within};
+pub(super) use upload::{bytes_of, table, Format};
 
 /// A vertex array and the element or vertex buffer it draws from.
 pub(super) struct Batch {
@@ -42,7 +42,8 @@ struct Vertices {
     bodies: glow::Buffer,
 }
 
-/// The mesh laid out in textures, for stages that look up neighbouring triangles (the outline).
+/// The mesh laid out in textures, for stages that look up neighbouring triangles (the outline) or
+/// a pixel's own triangle's corners (smooth shading).
 struct Tables {
     positions: glow::Texture,
     triangles: glow::Texture,
@@ -59,6 +60,9 @@ pub(crate) struct Resident {
     pub(super) faces: Option<Batch>,
     /// One colour tag per triangle, when any triangle is painted.
     pub(super) paint: Option<glow::Texture>,
+    /// Three normals per triangle, its corners' (`Renderable::corner_normals`), when any triangle
+    /// shades smooth.
+    corners: Option<glow::Texture>,
     pub(super) edges: Option<Batch>,
     /// Per feature edge, the far corner of each triangle beside it, for the edge's slope bias
     /// (`line_geometry`, issue 115). `None` for lines without faces.

@@ -45,6 +45,10 @@ winresource = "0.1"
 # only a pointer can perform are executed by a test rather than only reasoned
 # about. Pinned to the release built against the egui version above.
 egui_kittest = { version = "=0.32.3", default-features = false }
+# A headless EGL context on the GPU itself, so a test can draw through the GPU
+# renderer on real hardware without a window (`render/tests/gpu.rs`). Already in
+# the tree under eframe; tests skip where there is no hardware GPU.
+glutin = { version = "0.32", default-features = false, features = ["egl"] }
 # `egui_kittest` drives the interface through AccessKit, which is a feature of
 # egui and of the window integration under it. Naming it here rather than above
 # keeps it out of the shipped binary: with resolver 2 a dev-dependency's features

@@ -4,22 +4,37 @@ use super::*;
 impl Frame<'_> {
     /// Fill a screen-space triangle in either winding; culling is the caller's decision in world space.
     pub fn triangle(&mut self, v: [Vertex; 3], rgba: Rgba, write_depth: bool) {
-        self.triangle_inner(v, rgba, write_depth, true);
+        self.triangle_inner(v, |_| rgba, write_depth, true);
+    }
+
+    /// The same with a colour per corner, blended across the triangle: a smooth-shaded face.
+    pub fn triangle_blended(&mut self, v: [Vertex; 3], colours: [Rgba; 3], write_depth: bool) {
+        self.triangle_inner(v, |w| blend(colours, w), write_depth, true);
     }
 
     /// A triangle drawn over everything with depth ignored both ways, for a body buried inside another.
     pub fn triangle_over(&mut self, v: [Vertex; 3], rgba: Rgba) {
-        self.triangle_inner(v, rgba, false, false);
+        self.triangle_inner(v, |_| rgba, false, false);
     }
 
-    pub(super) fn triangle_inner(&mut self, v: [Vertex; 3], rgba: Rgba, write_depth: bool, test_depth: bool) {
+    /// `colour` gets each pixel's weights of `v`'s corners, summing to 1; generic so a flat fill's
+    /// constant colour costs nothing per pixel.
+    pub(super) fn triangle_inner(
+        &mut self,
+        v: [Vertex; 3],
+        colour: impl Fn([f32; 3]) -> Rgba,
+        write_depth: bool,
+        test_depth: bool,
+    ) {
         let (p0, p1, p2) = (v[0].pos, v[1].pos, v[2].pos);
         let area = edge(p0, p1, p2);
         if area.abs() < 1e-9 {
             return;
         }
-        // A consistent winding, so the inside test is a single sign.
-        let (v, area) = if area < 0.0 { ([v[0], v[2], v[1]], -area) } else { (v, area) };
+        // A consistent winding, so the inside test is a single sign. `flipped` maps the weights back
+        // to the caller's corners for the colour.
+        let flipped = area < 0.0;
+        let (v, area) = if flipped { ([v[0], v[2], v[1]], -area) } else { (v, area) };
         let (p0, p1, p2) = (v[0].pos, v[1].pos, v[2].pos);
 
         // Rounded without `floor`/`ceil`, which are libm calls on baseline x86-64 and cost an eighth of the
@@ -70,6 +85,8 @@ impl Frame<'_> {
                     continue;
                 }
                 let key = (w0 * v[0].key + w1 * v[1].key + w2 * v[2].key) * inv_area;
+                let weights = [w0 * inv_area, w1 * inv_area, w2 * inv_area];
+                let rgba = colour(if flipped { [weights[0], weights[2], weights[1]] } else { weights });
                 if test_depth {
                     self.put(x, y, key, rgba, write_depth);
                 } else {
@@ -78,6 +95,14 @@ impl Frame<'_> {
             }
         }
     }
+}
+
+/// Three corner colours mixed by `weights`, truncated as `shade` truncates.
+fn blend(colours: [Rgba; 3], weights: [f32; 3]) -> Rgba {
+    std::array::from_fn(|channel| {
+        let mixed: f32 = (0..3).map(|k| f32::from(colours[k][channel]) * weights[k]).sum();
+        mixed.clamp(0.0, 255.0) as u8
+    })
 }
 
 /// `v.floor().max(0.0) as usize` without calling `floor`: truncation floors non-negative values,

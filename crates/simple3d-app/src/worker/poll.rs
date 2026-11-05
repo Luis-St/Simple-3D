@@ -71,7 +71,7 @@ pub(super) fn evaluation_loop(jobs: Receiver<Job>, done: Sender<Finished>) {
         if result.cancelled {
             continue;
         }
-        let renderable = Renderable::prepare_scene(&result.mesh, &result.ranges);
+        let renderable = Renderable::prepare_scene(&result.mesh, &result.ranges, &result.smooth);
         for &wanted in &job.wanted {
             job.renderables.get(&result, wanted);
         }

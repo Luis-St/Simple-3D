@@ -1,5 +1,6 @@
 //! How a welded mesh's triangles connect: its edges with the triangles meeting along them, each
-//! vertex's triangles and neighbours, its connected bodies and its vertex normals.
+//! vertex's triangles and neighbours, its connected bodies, and its normals per vertex and per
+//! triangle corner.
 //!
 //! One place for what the renderer, the mesh functions (issue 81) and the brush (issue 127) all
 //! read, instead of each building its own. Every table is a set of [`Rows`], filled by counting
@@ -15,7 +16,7 @@ pub use edges::EdgeTable;
 mod bodies;
 pub use bodies::connected_bodies;
 mod normals;
-pub use normals::vertex_normals;
+pub use normals::{corner_normals, vertex_normals};
 #[cfg(test)]
 mod tests;
 

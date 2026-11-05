@@ -3,12 +3,14 @@
 use super::{axis_inside_spans, map_in_order};
 use simple3d_core::scene::NodeId;
 use simple3d_geom::{Mesh, Vec3};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::sync::OnceLock;
 
 mod topology;
 use topology::{bodies_of, border_edges_of, EdgeTable};
+mod smooth;
+pub(crate) use smooth::EDGE_CREASE;
 #[cfg(test)]
 pub(super) use topology::{border_edges, feature_edges};
 
@@ -32,6 +34,9 @@ pub struct Renderable {
     /// One outward unit normal per triangle; `Vec3::ZERO` for a degenerate one, as
     /// [`Mesh::triangle_normal`] gives.
     pub normals: Vec<Vec3>,
+    /// Smooth-shaded triangles' normals at their three corners, split at creases; `Vec3::ZERO`
+    /// corners for a flat triangle, and empty when none is smooth (`Evaluated::smooth`).
+    pub corner_normals: Vec<[Vec3; 3]>,
     /// Real creases, not artefacts of how flat faces are triangulated.
     pub edges: Vec<[u32; 2]>,
     /// The two triangles beside each of `edges`, whose depth slope its bias follows (issue 115).
@@ -69,21 +74,35 @@ fn next_id() -> u64 {
 }
 
 impl Renderable {
+    /// A mesh with nothing smooth and no outline, as the tests build them.
+    #[cfg(test)]
     pub fn prepare(mesh: &Mesh) -> Renderable {
-        Renderable::prepare_with(mesh, false, &BTreeMap::new())
+        Renderable::prepare_with(mesh, false, &BTreeMap::new(), &BTreeSet::new())
     }
 
-    /// The whole evaluated scene; `ranges` (`Evaluated::ranges`) become [`Renderable::parts`].
-    pub fn prepare_scene(mesh: &Mesh, ranges: &BTreeMap<NodeId, Range<u32>>) -> Renderable {
-        Renderable::prepare_with(mesh, false, ranges)
+    /// The whole evaluated scene; `ranges` (`Evaluated::ranges`) become [`Renderable::parts`], and
+    /// the triangles from `smooth` (`Evaluated::smooth`) shade smooth.
+    pub fn prepare_scene(mesh: &Mesh, ranges: &BTreeMap<NodeId, Range<u32>>, smooth: &BTreeSet<u32>) -> Renderable {
+        Renderable::prepare_with(mesh, false, ranges, smooth)
     }
 
-    /// The same, plus the edge adjacency the selection outline needs.
+    /// A mesh with nothing smooth, plus the edge adjacency the selection outline needs.
+    #[cfg(test)]
     pub fn prepare_outlined(mesh: &Mesh) -> Renderable {
-        Renderable::prepare_with(mesh, true, &BTreeMap::new())
+        Renderable::prepare_with(mesh, true, &BTreeMap::new(), &BTreeSet::new())
     }
 
-    pub(super) fn prepare_with(mesh: &Mesh, outlined: bool, ranges: &BTreeMap<NodeId, Range<u32>>) -> Renderable {
+    /// One node's result, plain or `outlined`, with the triangles from `smooth` smooth.
+    pub fn prepare_node(mesh: &Mesh, outlined: bool, smooth: &BTreeSet<u32>) -> Renderable {
+        Renderable::prepare_with(mesh, outlined, &BTreeMap::new(), smooth)
+    }
+
+    pub(super) fn prepare_with(
+        mesh: &Mesh,
+        outlined: bool,
+        ranges: &BTreeMap<NodeId, Range<u32>>,
+        smooth: &BTreeSet<u32>,
+    ) -> Renderable {
         let (welded, remap) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
@@ -95,17 +114,25 @@ impl Renderable {
             let bodies = bodies_of(&welded);
             (table.join().expect("the edge table panicked"), bodies, parts.join().expect("the parts panicked"))
         });
-        let ((edges, edge_faces), outline, axis_spans) = std::thread::scope(|scope| {
+        let flags = smooth::smooth_flags(&welded, smooth);
+        let ((edges, edge_faces), outline, axis_spans, corner_normals) = std::thread::scope(|scope| {
             let outline = scope.spawn(|| if outlined { border_edges_of(&table) } else { Vec::new() });
             let spans = scope.spawn(|| std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis)));
-            let edges = table.feature_edges(&normals, 20.0);
-            (edges, outline.join().expect("the outline panicked"), spans.join().expect("the axis spans panicked"))
+            let corners = scope.spawn(|| smooth::corners(&welded, &table, &flags));
+            let edges = smooth::feature_edges(&table, &normals, &flags);
+            (
+                edges,
+                outline.join().expect("the outline panicked"),
+                spans.join().expect("the axis spans panicked"),
+                corners.join().expect("the corner normals panicked"),
+            )
         });
         let body_count = bodies.iter().max().map_or(0, |last| last + 1);
         let reach = welded.positions.iter().map(|p| p.length()).fold(0.0, f64::max);
         Renderable {
             mesh: welded,
             normals,
+            corner_normals,
             edges,
             edge_faces,
             outline,
@@ -142,7 +169,7 @@ impl Renderable {
         let (welded, _) = mesh.weld_with_remap();
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
-        let (edges, edge_faces) = EdgeTable::of(&welded).feature_edges(&normals, 20.0);
+        let (edges, edge_faces) = EdgeTable::of(&welded).feature_edges(&normals, EDGE_CREASE);
         let bodies = vec![0; welded.positions.len()];
         Renderable { mesh: welded, normals, edges, edge_faces, bodies, ..Renderable::empty() }
     }
@@ -174,6 +201,7 @@ impl Renderable {
         Renderable {
             mesh: Mesh::new(),
             normals: Vec::new(),
+            corner_normals: Vec::new(),
             edges: Vec::new(),
             edge_faces: Vec::new(),
             outline: Vec::new(),

@@ -62,7 +62,9 @@ void main() {
 }
 
 /// A face's colour. The normal is the cross product of the position's screen derivatives, so
-/// none is stored; painted faces read their colour from the paint table by triangle index.
+/// none is stored; painted faces read their colour from the paint table by triangle index. A
+/// smooth-shaded triangle instead blends its corners' normals by the pixel's place in it, found
+/// from its corners in the mesh tables, since a welded vertex cannot carry a normal per side of a crease.
 pub(crate) fn face_fragment() -> String {
     format!("#version 330 core\n{BOX_COMMON}\n{FACE_FRAGMENT_BODY}")
 }
@@ -82,15 +84,62 @@ uniform vec3 u_cap_normal;
 uniform int u_painted;
 uniform usampler2D u_paint;
 uniform int u_table_width;
+// Whether this mesh has smooth triangles: three corner normals per triangle, zero for a flat one,
+// and the positions and triangles to place the pixel by (`Renderable::corner_normals`).
+uniform int u_smooth;
+uniform sampler2D u_corners;
+uniform sampler2D u_positions;
+uniform usampler2D u_triangles;
+uniform mat3 u_model;
 
 layout(location = 0) out vec4 out_colour;
 layout(location = 1) out uint out_tag;
+
+ivec2 cell(int index) {
+    return ivec2(index % u_table_width, index / u_table_width);
+}
+
+// This pixel's normal from its triangle's corner normals, or zero for a flat triangle.
+vec3 smooth_normal() {
+    int first = gl_PrimitiveID * 3;
+    vec3 n0 = texelFetch(u_corners, cell(first), 0).xyz;
+    if (n0 == vec3(0.0)) {
+        return vec3(0.0);
+    }
+    uvec3 tri = texelFetch(u_triangles, cell(gl_PrimitiveID), 0).xyz;
+    vec3 a = u_model * texelFetch(u_positions, cell(int(tri.x)), 0).xyz;
+    vec3 b = u_model * texelFetch(u_positions, cell(int(tri.y)), 0).xyz;
+    vec3 c = u_model * texelFetch(u_positions, cell(int(tri.z)), 0).xyz;
+    // Barycentric weights of the pixel's position, as `push_blended` mixes a clipped corner.
+    vec3 e1 = b - a;
+    vec3 e2 = c - a;
+    vec3 to = v_pos - a;
+    float d11 = dot(e1, e1);
+    float d12 = dot(e1, e2);
+    float d22 = dot(e2, e2);
+    float det = d11 * d22 - d12 * d12;
+    if (det <= 0.0) {
+        return vec3(0.0);
+    }
+    float wb = clamp((d22 * dot(to, e1) - d12 * dot(to, e2)) / det, 0.0, 1.0);
+    float wc = clamp((d11 * dot(to, e2) - d12 * dot(to, e1)) / det, 0.0, 1.0);
+    float wa = max(1.0 - wb - wc, 0.0);
+    vec3 n1 = texelFetch(u_corners, cell(first + 1), 0).xyz;
+    vec3 n2 = texelFetch(u_corners, cell(first + 2), 0).xyz;
+    return u_model * (n0 * wa + n1 * wb + n2 * wc);
+}
 
 void main() {
     if (cut_away(v_pos)) {
         discard;
     }
     vec3 normal = u_mode == 3 ? u_cap_normal : cross(dFdx(v_pos), dFdy(v_pos));
+    if (u_smooth == 1) {
+        vec3 blended = smooth_normal();
+        if (blended != vec3(0.0)) {
+            normal = blended;
+        }
+    }
     float length_ = length(normal);
     float facing = length_ > 0.0 ? abs(dot(normal / length_, u_forward)) : 0.0;
 

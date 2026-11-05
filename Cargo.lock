@@ -2483,6 +2483,7 @@ dependencies = [
  "eframe",
  "egui",
  "egui_kittest",
+ "glutin",
  "rfd",
  "simple3d-core",
  "simple3d-export",

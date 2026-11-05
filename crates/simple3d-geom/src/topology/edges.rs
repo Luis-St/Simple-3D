@@ -125,10 +125,21 @@ impl EdgeTable {
     /// boundary and junction: every triangle edge would just be noise.
     pub fn feature_edges(&self, normals: &[Vec3], angle_deg: f64) -> (Vec<[u32; 2]>, Vec<[u32; 2]>) {
         let cos_limit = angle_deg.to_radians().cos();
+        self.feature_edges_by(normals, |_, _| cos_limit)
+    }
+
+    /// The same with a limit of its own per edge: `cos_limit(a, b)` is the cosine of the angle the
+    /// triangles `a` and `b` beside it must turn by, so a smooth-shaded surface can keep its gentler
+    /// turns unlined.
+    pub fn feature_edges_by(
+        &self,
+        normals: &[Vec3],
+        cos_limit: impl Fn(u32, u32) -> f64,
+    ) -> (Vec<[u32; 2]>, Vec<[u32; 2]>) {
         let (mut edges, mut beside) = (Vec::new(), Vec::new());
         for (ends, faces) in self.iter() {
             let keep = match faces {
-                [a, b] => normals[*a as usize].dot(normals[*b as usize]) < cos_limit,
+                [a, b] => normals[*a as usize].dot(normals[*b as usize]) < cos_limit(*a, *b),
                 // A boundary edge or a non-manifold junction: both are worth seeing.
                 _ => true,
             };

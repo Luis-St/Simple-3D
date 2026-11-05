@@ -22,7 +22,7 @@ pub(crate) fn a_body_sharing_nothing_is_a_stretch_of_its_own() {
     let left = primitives::box_mesh(10.0, 10.0, 10.0);
     let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(50.0, 0.0, 0.0));
     let (scene, ranges) = laid(&[left, right]);
-    let prepared = Renderable::prepare_scene(&scene, &ranges);
+    let prepared = Renderable::prepare_scene(&scene, &ranges, &Default::default());
 
     let (a, b) = (&prepared.parts[&1], &prepared.parts[&2]);
     // A box welds to eight corners, the two ranges consecutive.
@@ -41,7 +41,7 @@ pub(crate) fn bodies_that_touch_are_not_parts() {
     let right = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(10.0, 0.0, 0.0));
     let far = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(100.0, 0.0, 0.0));
     let (scene, ranges) = laid(&[left, right, far]);
-    let prepared = Renderable::prepare_scene(&scene, &ranges);
+    let prepared = Renderable::prepare_scene(&scene, &ranges, &Default::default());
 
     assert!(!prepared.parts.contains_key(&1) && !prepared.parts.contains_key(&2));
     assert!(prepared.parts.contains_key(&3));
@@ -54,7 +54,7 @@ pub(crate) fn a_body_is_found_inside_the_one_it_came_in() {
     let b = primitives::box_mesh(10.0, 10.0, 10.0).translated(Vec3::new(50.0, 0.0, 0.0));
     let (scene, mut ranges) = laid(&[a, b]);
     ranges.insert(9, 0..scene.positions.len() as u32);
-    let prepared = Renderable::prepare_scene(&scene, &ranges);
+    let prepared = Renderable::prepare_scene(&scene, &ranges, &Default::default());
 
     assert_eq!(prepared.parts[&9], 0..16);
     assert_eq!(prepared.parts[&1], 0..8);

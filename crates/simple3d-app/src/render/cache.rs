@@ -50,10 +50,7 @@ impl RenderableCache {
         }
         // Made outside the lock, since a large mesh takes a while.
         let result = evaluated.result_mesh(wanted.0)?;
-        let renderable = Arc::new(match wanted.1 {
-            true => Renderable::prepare_outlined(&result),
-            false => Renderable::prepare(&result),
-        });
+        let renderable = Arc::new(Renderable::prepare_node(&result, wanted.1, &evaluated.smooth));
         let entry = Entry { mesh, frame, renderable: renderable.clone() };
         self.entries.lock().expect("the cache lock").insert(wanted, entry);
         Some(renderable)

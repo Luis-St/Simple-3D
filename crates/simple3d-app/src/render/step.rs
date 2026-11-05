@@ -15,6 +15,13 @@ pub(crate) enum Step {
         tag: u16,
         write_depth: bool,
     },
+    /// A smooth-shaded face: a colour per corner, blended across it.
+    Blended {
+        v: [Vertex; 3],
+        colours: [Rgba; 3],
+        tag: u16,
+        write_depth: bool,
+    },
     Line {
         a: Vertex,
         b: Vertex,
@@ -43,7 +50,7 @@ impl Step {
     /// The rows this primitive can reach, so bands outside them skip it cheaply.
     pub(super) fn rows(&self) -> (f32, f32) {
         match self {
-            Step::Triangle { v, .. } => {
+            Step::Triangle { v, .. } | Step::Blended { v, .. } => {
                 let (a, b, c) = (v[0].pos.y, v[1].pos.y, v[2].pos.y);
                 (a.min(b).min(c), a.max(b).max(c))
             }
@@ -142,6 +149,10 @@ pub(crate) fn draw_steps(frame: &mut Frame, steps: &[Step], mine: &[&[u32]]) {
             Step::Triangle { v, colour, tag, write_depth } => {
                 frame.set_tag(tag);
                 frame.triangle(v, colour, write_depth);
+            }
+            Step::Blended { v, colours, tag, write_depth } => {
+                frame.set_tag(tag);
+                frame.triangle_blended(v, colours, write_depth);
             }
             Step::Line { a, b, colour, bias, tag, write_depth } => {
                 frame.set_tag(tag);

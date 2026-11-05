@@ -65,6 +65,13 @@ impl Evaluator {
         // Nodes no longer in the tree have nothing to reuse.
         self.worlds.retain(|id, _| collected.meshes.contains_key(id));
         self.trim();
+        // Mesh bodies are leaves, so every one in the tree has a mesh of its own.
+        let smooth = collected
+            .meshes
+            .keys()
+            .filter(|&&id| matches!(scene.node(id).body, crate::scene::Body::Mesh { .. }))
+            .map(|&id| source_of(id))
+            .collect();
         Evaluated {
             mesh: result.mesh.clone(),
             bounds: result.mesh.bounds(),
@@ -75,6 +82,7 @@ impl Evaluator {
             node_world_bounds: collected.world_bounds,
             ranges,
             placements: collected.placements,
+            smooth,
             errors: result.errors.clone(),
             cancelled: cancel.is_cancelled(),
         }

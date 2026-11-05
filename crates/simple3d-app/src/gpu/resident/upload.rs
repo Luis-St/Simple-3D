@@ -13,6 +13,7 @@ impl Resident {
             vertices: None,
             faces: None,
             paint: None,
+            corners: None,
             edges: None,
             edge_faces: None,
             tables: None,
@@ -53,6 +54,16 @@ impl Resident {
             {
                 self.paint = Some(table(gl, width, Format::U32, bytes_of(tags), tags.len())?);
             }
+            // Smooth shading finds a pixel's place in its triangle from the triangle's corners.
+            if item.corner_normals.len() == item.mesh.indices.len() && !item.corner_normals.is_empty() {
+                let normals: Vec<[f32; 3]> = item
+                    .corner_normals
+                    .iter()
+                    .flat_map(|corners| corners.map(|n| [n.x as f32, n.y as f32, n.z as f32]))
+                    .collect();
+                self.corners = Some(table(gl, width, Format::Vec3, bytes_of(&normals), normals.len())?);
+                ensure_tables(&mut self.tables, gl, item, &positions, width)?;
+            }
         }
         if needs.edges && self.edges.is_none() {
             let vertices = vertices.expect("made above");
@@ -63,13 +74,7 @@ impl Resident {
             }
         }
         if needs.outline && self.outline.is_none() {
-            if self.tables.is_none() {
-                self.tables = Some(Tables {
-                    positions: table(gl, width, Format::Vec3, bytes_of(&positions), positions.len())?,
-                    triangles: table(gl, width, Format::UVec3, bytes_of(&item.mesh.indices), item.mesh.indices.len())?,
-                    bodies: table(gl, width, Format::U16, bytes_of(&item.bodies), item.bodies.len())?,
-                });
-            }
+            ensure_tables(&mut self.tables, gl, item, &positions, width)?;
             // Junctions are never on the outline (`BorderEdge::junction`), so they are dropped here.
             let edges: Vec<[u32; 4]> = item
                 .outline
@@ -102,10 +107,29 @@ impl Resident {
                 gl.delete_texture(texture);
             }
         }
-        for texture in [self.paint, self.edge_faces].into_iter().flatten() {
+        for texture in [self.paint, self.corners, self.edge_faces].into_iter().flatten() {
             gl.delete_texture(texture);
         }
     }
+}
+
+/// The mesh in textures ([`Tables`]), if not uploaded yet. A function over the one field, so it
+/// can run while the vertices are borrowed.
+unsafe fn ensure_tables(
+    tables: &mut Option<Tables>,
+    gl: &glow::Context,
+    item: &Renderable,
+    positions: &[[f32; 3]],
+    width: usize,
+) -> Result<(), String> {
+    if tables.is_none() {
+        *tables = Some(Tables {
+            positions: table(gl, width, Format::Vec3, bytes_of(positions), positions.len())?,
+            triangles: table(gl, width, Format::UVec3, bytes_of(&item.mesh.indices), item.mesh.indices.len())?,
+            bodies: table(gl, width, Format::U16, bytes_of(&item.bodies), item.bodies.len())?,
+        });
+    }
+    Ok(())
 }
 
 /// Two texels per feature edge: each neighbouring triangle's corner off the edge, stored like the

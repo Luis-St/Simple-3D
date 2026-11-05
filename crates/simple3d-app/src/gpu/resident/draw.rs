@@ -26,6 +26,9 @@ impl Gpu {
         set_forward(gl, program, view);
         set_i32(gl, program, "u_table_width", self.table_width as i32);
         set_i32(gl, program, "u_paint", 0);
+        for (unit, name) in [(1, "u_corners"), (2, "u_positions"), (3, "u_triangles")] {
+            set_i32(gl, program, name, unit);
+        }
         for draw in draws {
             let Some(resident) = self.resident.get(&draw.id) else { continue };
             let Some(faces) = &resident.faces else { continue };
@@ -34,6 +37,17 @@ impl Gpu {
             set_i32(gl, program, "u_mode", draw.mode);
             set_u32(gl, program, "u_tag_base", draw.tag_base as u32);
             set_i32(gl, program, "u_painted", resident.paint.is_some() as i32);
+            // Only a solid shades smooth, as on the CPU (`push_shaded`).
+            let smooth = match (&resident.corners, &resident.tables) {
+                (Some(corners), Some(tables)) if draw.mode == SOLID => Some((*corners, tables)),
+                _ => None,
+            };
+            set_i32(gl, program, "u_smooth", smooth.is_some() as i32);
+            let textures = [smooth.map(|s| s.0), smooth.map(|s| s.1.positions), smooth.map(|s| s.1.triangles)];
+            for (unit, texture) in (1..).zip(textures) {
+                gl.active_texture(glow::TEXTURE0 + unit);
+                gl.bind_texture(glow::TEXTURE_2D, texture);
+            }
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, resident.paint);
             // Solids are back-face culled by the pipeline; ghosts and glows show the whole shell.
@@ -48,7 +62,10 @@ impl Gpu {
         gl.disable(glow::CULL_FACE);
         gl.disable(glow::CLIP_DISTANCE0);
         gl.disable(glow::CLIP_DISTANCE1);
-        gl.bind_texture(glow::TEXTURE_2D, None);
+        for unit in [glow::TEXTURE3, glow::TEXTURE2, glow::TEXTURE1, glow::TEXTURE0] {
+            gl.active_texture(unit);
+            gl.bind_texture(glow::TEXTURE_2D, None);
+        }
         gl.bind_vertex_array(Some(self.buffer.array));
     }
 

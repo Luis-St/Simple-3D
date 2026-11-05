@@ -55,7 +55,8 @@ pub(crate) fn a_dragged_body_is_cut_by_its_negative_siblings_on_the_card() {
     let plate = app.scene.add_primitive("plate", group, 1).unwrap();
     let boss = app.scene.add_primitive("box", group, 2).unwrap();
     app.reevaluate_for_test();
-    app.scene_renderable = crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges);
+    app.scene_renderable =
+        crate::render::Renderable::prepare_scene(&app.evaluated.mesh, &app.evaluated.ranges, &app.evaluated.smooth);
 
     let (_, _, program) = app.csg_plan(boss).expect("a union with a negative part is drawable");
     // The solids first, unioned, then the negative part cut from them, whatever the tree order.

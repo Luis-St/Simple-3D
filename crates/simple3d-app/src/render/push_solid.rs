@@ -31,8 +31,15 @@ pub(crate) fn push_shaded(
             if normal == Vec3::ZERO || normal.dot(eye) <= 0.0 {
                 continue;
             }
-            let colour = shade(triangle_base(item, index, colour_base), normal, forward, alpha);
+            let base = triangle_base(item, index, colour_base);
             let tag = item.tag(index, tag_base);
+            // A mesh body's face shades by its corners' normals (`Renderable::corner_normals`).
+            if let Some(corners) = item.corner_normals.get(index).filter(|corners| corners[0] != Vec3::ZERO) {
+                let colours = corners.map(|n| shade(base, n, forward, alpha));
+                push_blended(out, view, item, screen, tri, section, colours, tag);
+                continue;
+            }
+            let colour = shade(base, normal, forward, alpha);
             push_faces(out, view, item, screen, tri, section, |v| Step::Triangle { v, colour, tag, write_depth: true });
         }
     });

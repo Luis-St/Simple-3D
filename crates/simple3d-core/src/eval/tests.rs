@@ -15,6 +15,7 @@ mod round_extend;
 mod round_extract;
 mod scale;
 mod sketch;
+mod smooth;
 
 use super::*;
 use crate::primitive::ParamValue;

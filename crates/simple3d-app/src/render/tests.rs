@@ -2,6 +2,7 @@ mod axes;
 mod axes_occlusion;
 mod bands;
 mod cache;
+mod gpu;
 mod grid;
 mod parts;
 mod preview;
@@ -9,6 +10,7 @@ mod section;
 mod selection_creases;
 mod selection_outline;
 mod shading;
+mod smooth;
 
 use super::*;
 use crate::raster::{Image, Rgba};
