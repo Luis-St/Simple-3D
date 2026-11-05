@@ -43,8 +43,6 @@ impl Draw {
             Draw::Scale => "Scale",
             Draw::Dimension => "Dimension",
             Draw::Constrain(rule) => rule.label(),
-            Draw::Regions => "Pick regions",
-            Draw::Axis => "Revolve axis",
             Draw::CopyEdges => "Copy face edges",
         }
     }
@@ -89,8 +87,6 @@ impl Draw {
             Draw::Scale => Glyph::SketchScale,
             Draw::Dimension => Glyph::SketchDimension,
             Draw::Constrain(rule) => rule.glyph(),
-            Draw::Regions => Glyph::SketchRegions,
-            Draw::Axis => Glyph::SketchAxis,
             Draw::CopyEdges => Glyph::SketchCopyEdges,
         }
     }
@@ -155,8 +151,6 @@ impl Draw {
                  click where the dimension goes; beside a slanted line it measures across or up."
             }
             Draw::Constrain(rule) => rule.hint(),
-            Draw::Regions => "Click the closed areas to make the solid from; click again to drop one.",
-            Draw::Axis => "Click the line to revolve about.",
             Draw::CopyEdges => "Click a face of the model to copy its edges onto the sketch.",
         }
     }

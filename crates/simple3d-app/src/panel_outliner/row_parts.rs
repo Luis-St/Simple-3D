@@ -45,8 +45,10 @@ pub(crate) fn node_glyph(node: &simple3d_core::scene::Node) -> Glyph {
         Glyph::Split
     } else if node.is_extrusion() {
         Glyph::Extrusion
-    } else if node.is_sketch() {
+    } else if node.is_feature() {
         Glyph::SketchSolid
+    } else if node.is_sketch() {
+        Glyph::Sketch
     } else if node.is_pattern() {
         Glyph::Pattern
     } else if node.is_group() {

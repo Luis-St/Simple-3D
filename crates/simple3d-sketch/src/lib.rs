@@ -1,18 +1,18 @@
 //! Sketches (issue 74): a 2D profile drawn from points and curves, held in shape by geometric
-//! constraints and dimensions, and turned into a solid by extruding or revolving the regions picked
-//! out of it.
+//! constraints and dimensions. The sketch itself stays flat; push/pull and the revolve tool turn
+//! regions picked out of it into solids.
 //!
 //! The pieces stand on each other in this order:
 //!
 //! * [`Sketch`] is the stored drawing: points, curves (lines, arcs, circles, ellipses, elliptical arcs
-//!   and two kinds of spline), constraints, the picked regions and the revolve axis. Everything refers to everything
-//!   else by id, so deleting a point takes what hangs off it along.
+//!   and two kinds of spline) and constraints. Everything refers to everything else by id, so
+//!   deleting a point takes what hangs off it along.
 //! * [`solver`] moves the points until every constraint holds, keeping them as close to where they
 //!   were as it can, and says which points are still free and which constraints fight each other.
 //! * [`regions`] breaks the plane up wherever curves cross and finds every closed area, which is what
 //!   the user picks from. A pick is remembered by the curves around it, so it survives edits.
-//! * [`feature`] turns the picked regions into a mesh: extruded to one side, both or symmetrically,
-//!   with a draft, or revolved about a line of the sketch.
+//! * [`feature`] turns picked regions into a mesh: extruded to one side, both or symmetrically,
+//!   with a draft, or revolved about a line in their plane.
 
 mod constraint;
 pub use constraint::{Constraint, ConstraintId, ConstraintKind};

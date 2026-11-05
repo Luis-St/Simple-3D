@@ -55,10 +55,15 @@ pub enum Body {
         outline: Arc<Outline>,
         params: Params,
     },
-    /// A 2D sketch in the node's XY plane and the solid made from it (issue 74), extruded or revolved
-    /// by `params`. Behind an `Arc` so undo snapshots share it.
+    /// A 2D sketch in the node's XY plane (issue 74). Makes no solid; features are made from it.
+    /// Behind an `Arc` so undo snapshots share it.
     Sketch {
         sketch: Arc<simple3d_sketch::Sketch>,
+    },
+    /// A profile extruded or revolved (issue 74): regions of a sketch, kept up to date with it, or
+    /// a face's outline, in the node's own XY plane, swept by `params`.
+    Feature {
+        feature: Arc<super::Feature>,
         params: Params,
     },
     /// A component placed here (issue 113), standing for another component's whole tree. `op`, if set,

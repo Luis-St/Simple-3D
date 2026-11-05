@@ -22,11 +22,27 @@ fn a_sketch_round_trips_through_its_stored_form() {
     sketch.add_curve(Shape::Spline { points: p.to_vec(), closed: false }, true);
     sketch.push_constraint(ConstraintKind::Horizontal { line: lines[0] });
     sketch.push_constraint(ConstraintKind::Distance { a: corners[0], b: corners[1], value: 10.0 });
-    sketch.axis = Some(lines[3]);
+    sketch.link = 7;
     let text = serde_json::to_string(&sketch).unwrap();
     let back: Sketch = serde_json::from_str(&text).unwrap();
     assert_eq!(back, sketch);
     assert!(back.is_consistent());
+}
+
+#[test]
+fn an_older_sketchs_picks_are_read_but_never_written() {
+    let mut sketch = Sketch::default();
+    let (_, lines) = rectangle(&mut sketch, [0.0, 0.0], [10.0, 5.0]);
+    let clean = sketch.clone();
+    sketch.regions = vec![crate::regions::find(&sketch, 64).pick(0, [5.0, 2.5])];
+    sketch.axis = Some(lines[3]);
+    let mut old = serde_json::to_value(&clean).unwrap();
+    old["regions"] = serde_json::to_value(&sketch.regions).unwrap();
+    old["axis"] = serde_json::to_value(sketch.axis).unwrap();
+    let read: Sketch = serde_json::from_value(old).unwrap();
+    assert_eq!(read, sketch, "the old picks were not read");
+    let written: Sketch = serde_json::from_str(&serde_json::to_string(&read).unwrap()).unwrap();
+    assert_eq!(written, clean, "the old picks were written back");
 }
 
 #[test]

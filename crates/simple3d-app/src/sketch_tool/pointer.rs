@@ -1,5 +1,5 @@
 //! The viewport's pointer while the sketch is open: picking the plane, then drawing, selecting,
-//! dragging and picking regions in it.
+//! dragging and picking in it.
 
 use super::picks::*;
 use super::*;
@@ -73,8 +73,6 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         draw if !draw.draws() => {
             if let (true, Some(cursor)) = (clicked, cursor) {
                 match draw {
-                    Draw::Regions => app.status = toggle_region(tool, view, cursor),
-                    Draw::Axis => app.status = pick_axis(tool, view, cursor),
                     Draw::Trim => app.status = trim_at(tool, view, cursor),
                     Draw::Fillet => app.status = fillet_at(tool, view, cursor),
                     Draw::Chamfer => app.status = super::picks_more::chamfer_at(tool, view, cursor),

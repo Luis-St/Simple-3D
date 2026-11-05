@@ -1,4 +1,4 @@
-//! What is drawn over the picture while sketching: the picked regions, the curves and points coloured
+//! What is drawn over the picture while sketching: the closed regions, the curves and points coloured
 //! by how far the constraints hold them, every line's length, the gesture in progress, the
 //! constraint marks and dimensions, and what a click would infer or place.
 
@@ -41,7 +41,7 @@ pub(crate) fn draw(app: &mut App, ui: &egui::Ui, painter: &egui::Painter, view: 
     }
     let Some(tool) = app.sketch_tool.as_ref() else { return };
     draw_axes(tool, painter, view, app.shown_axes());
-    draw_regions(tool, painter, view, hover);
+    draw_regions(tool, painter, view);
     let (lit_curves, lit_points) = super::glyphs::lit(tool);
     for curve in &tool.sketch.curves {
         draw_curve(tool, painter, view, curve, lit_curves.contains(&curve.id));
@@ -126,52 +126,15 @@ pub(crate) fn on_world_axis(tool: &SketchTool, axis: usize, shown: [bool; 3]) ->
     })
 }
 
-/// The picked regions filled, and in the region tool the one under the pointer faintly.
-fn draw_regions(tool: &SketchTool, painter: &egui::Painter, view: &View, hover: Option<egui::Pos2>) {
+/// Every closed region faintly filled, so it shows what push/pull and the revolve tool can take.
+fn draw_regions(tool: &SketchTool, painter: &egui::Painter, view: &View) {
     let regions = simple3d_sketch::regions::find(&tool.sketch, DRAWN_SEGMENTS);
-    let picked = regions.resolve_all(&tool.sketch.regions);
-    let hovered = match (tool.draw, hover) {
-        (Draw::Regions, Some(cursor)) => tool.under(view, cursor).and_then(|at| regions.at(at)),
-        _ => None,
-    };
-    let fill = |indices: &[usize], colour: egui::Color32| {
-        for outline in regions.outlines(indices) {
-            fill_outline(tool, painter, view, &outline, colour);
-        }
-    };
-    fill(&picked, token::ACCENT.gamma_multiply(0.22));
-    if let Some(index) = hovered.filter(|index| !picked.contains(index)) {
-        fill(&[index], token::ACCENT.gamma_multiply(0.10));
+    let all: Vec<usize> = (0..regions.list.len()).collect();
+    for outline in regions.outlines(&all) {
+        crate::sketch_nodes::fill_outline(painter, &outline, token::ACCENT.gamma_multiply(0.08), |p| {
+            tool.screen(view, p)
+        });
     }
-}
-
-/// An outline filled on screen, holes left open, by triangulating it.
-fn fill_outline(
-    tool: &SketchTool,
-    painter: &egui::Painter,
-    view: &View,
-    outline: &simple3d_geom::push_pull::Outline,
-    colour: egui::Color32,
-) {
-    let mut positions: Vec<Vec3> = Vec::new();
-    let mut loops: Vec<Vec<u32>> = Vec::new();
-    for points in std::iter::once(&outline.outer).chain(outline.holes.iter()) {
-        let start = positions.len() as u32;
-        loops.push((0..points.len() as u32).map(|k| start + k).collect());
-        positions.extend(points.iter().map(|p| Vec3::new(p[0], p[1], 0.0)));
-    }
-    let Some(triangles) = simple3d_geom::planar::triangulate_loops(&positions, Vec3::new(0.0, 0.0, 1.0), loops) else {
-        return;
-    };
-    let mut mesh = egui::Mesh::default();
-    for p in &positions {
-        let at = tool.screen(view, [p.x, p.y]).unwrap_or(egui::Pos2::ZERO);
-        mesh.colored_vertex(at, colour);
-    }
-    for [a, b, c] in triangles {
-        mesh.add_triangle(a, b, c);
-    }
-    painter.add(egui::Shape::mesh(mesh));
 }
 
 fn draw_curve(tool: &SketchTool, painter: &egui::Painter, view: &View, curve: &simple3d_sketch::Curve, lit: bool) {
@@ -190,10 +153,8 @@ fn draw_curve(tool: &SketchTool, painter: &egui::Painter, view: &View, curve: &s
     } else {
         token::TEXT_HI
     };
-    let axis = tool.sketch.axis == Some(curve.id);
-    let width = if axis { 2.5_f32 } else { 1.8 };
-    let stroke = egui::Stroke::new(width, colour);
-    if curve.construction || axis {
+    let stroke = egui::Stroke::new(1.8_f32, colour);
+    if curve.construction {
         painter.extend(egui::Shape::dashed_line(&points, stroke, 7.0, 4.0));
     } else {
         painter.add(egui::Shape::line(points, stroke));

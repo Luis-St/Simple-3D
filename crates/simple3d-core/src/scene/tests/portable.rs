@@ -74,6 +74,7 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
         component: None,
         outline: None,
         sketch: None,
+        feature: None,
         params: Params::new(),
         edits: Vec::new(),
         children: vec![NodeData {
@@ -97,6 +98,7 @@ pub(crate) fn importing_an_unknown_primitive_type_leaves_no_partial_subtree() {
             component: None,
             outline: None,
             sketch: None,
+            feature: None,
             params: Params::new(),
             edits: Vec::new(),
             children: vec![],

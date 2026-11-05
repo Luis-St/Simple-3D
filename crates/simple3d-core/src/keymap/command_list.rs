@@ -66,6 +66,7 @@ impl Command {
         Command::ModeResize,
         Command::ModeScale,
         Command::ModePushPull,
+        Command::ModeRevolve,
         Command::MeasureTool,
         Command::AlignDistribute,
         Command::OntoFace,

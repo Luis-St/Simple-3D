@@ -11,23 +11,21 @@ mod components;
 mod dock;
 // Pointer gestures, executed. Test-only.
 mod arrange_tool;
-mod mirror_tool;
 mod cut_tool;
-mod workplane_tool;
-mod sketch_tool;
-mod panel_workplanes;
 #[cfg(test)]
 mod gestures;
 mod gizmo;
 mod gpu;
 mod icon;
 mod measure_tool;
+mod mirror_tool;
 mod noise_popup;
 mod panel_outliner;
 mod panel_primitives;
 mod panel_properties;
 mod panel_toolrail;
 mod panel_viewport;
+mod panel_workplanes;
 mod pattern_tool;
 mod pick;
 mod place_tool;
@@ -36,11 +34,14 @@ mod push_pull_tool;
 mod raster;
 mod reassemble_tool;
 mod render;
+mod revolve_tool;
 mod round_tool;
 mod section_tool;
 mod shell;
 mod simplify_tool;
 mod size_tool;
+mod sketch_nodes;
+mod sketch_tool;
 mod snap;
 mod split_tool;
 mod tabs;
@@ -48,6 +49,7 @@ mod theme;
 mod ui;
 mod view;
 mod worker;
+mod workplane_tool;
 
 use std::path::PathBuf;
 

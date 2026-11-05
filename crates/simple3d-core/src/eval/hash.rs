@@ -113,11 +113,13 @@ impl Evaluator {
                 hash_outline(hasher, outline);
                 crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
             }
-            Body::Sketch { sketch, params } => {
-                "sketch".hash(&mut hasher.0);
+            // A sketch makes nothing, so what it holds does not change the result.
+            Body::Sketch { .. } => "sketch".hash(&mut hasher.0),
+            Body::Feature { feature, params } => {
+                "feature".hash(&mut hasher.0);
                 hash_params(hasher, params);
-                // The stored form covers every point, curve, constraint and pick; a sketch is small.
-                serde_json::to_string(&**sketch).unwrap_or_default().hash(&mut hasher.0);
+                // The stored form covers the sketch, the picks and the axis; a sketch is small.
+                serde_json::to_string(&**feature).unwrap_or_default().hash(&mut hasher.0);
                 scene.segments_for(id).hash(&mut hasher.0);
                 crate::scene::colour_tag(scene.effective_colour(id)).hash(&mut hasher.0);
             }

@@ -64,6 +64,7 @@ pub fn insert(scene: &mut Scene, clip: &Clip, selection: Option<NodeId>, as_copy
             created.push(id);
         }
     }
+    scene.relink(&created);
     created
 }
 

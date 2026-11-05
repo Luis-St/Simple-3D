@@ -23,8 +23,10 @@ use serde::{Deserialize, Serialize};
 ///   field needed no bump, since older builds read the file fine without it.
 /// * 4: components (issue 113). Projects without components are still written as 3.
 /// * 5: `extrusion` nodes from push/pull (issue 73). Projects without them keep the version above.
-/// * 6: `sketch` nodes (issue 74). Projects without them keep the version above.
-pub const FORMAT_VERSION: u32 = 6;
+/// * 6: `sketch` nodes making their own solids (issue 74).
+/// * 7: flat `sketch` nodes and `feature` nodes made from them (issue 74). Format 6 sketches are
+///   read as both. Projects with neither keep the versions above.
+pub const FORMAT_VERSION: u32 = 7;
 
 /// The version a project with extrusions but no sketches is written as.
 pub const EXTRUSION_FORMAT: u32 = 5;

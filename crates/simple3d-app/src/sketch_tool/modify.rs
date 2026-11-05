@@ -114,7 +114,6 @@ pub(crate) fn trim(sketch: &mut Sketch, id: CurveId, at: [f64; 2]) -> Result<(),
     let cuts = crossings(sketch, id, &track);
     let here = track.place(at);
     let Some(shape) = sketch.curve(id).map(|c| c.shape.clone()) else { return Ok(()) };
-    sketch.regions.retain(|pick| pick.sides.iter().all(|&(curve, _)| curve != id));
     if let Shape::Circle { center, .. } = shape {
         if cuts.len() < 2 {
             sketch.remove_curve(id);

@@ -78,7 +78,7 @@ impl Evaluator {
     fn local(&mut self, scene: &Scene, id: NodeId, cancel: &Cancel) -> Result<Arc<LocalResult>, Vec<NodeError>> {
         let cached = matches!(
             scene.node(id).body,
-            Body::Group { .. } | Body::Split { .. } | Body::Pattern { .. } | Body::Sketch { .. }
+            Body::Group { .. } | Body::Split { .. } | Body::Pattern { .. } | Body::Feature { .. }
         );
         let key = cached.then(|| self.content_key(scene, id));
         if let Some(hit) = key.and_then(|key| self.locals.get(&key)) {
@@ -104,9 +104,10 @@ impl Evaluator {
                 mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                 mesh
             }
-            // A sketch that makes no solid says why on the node, as a boolean that fails does.
-            Body::Sketch { sketch, params } => {
-                match crate::scene::sketch_mesh(sketch, params, scene.segments_for(id)) {
+            Body::Sketch { .. } => Mesh::new(),
+            // A feature that makes no solid says why on the node, as a boolean that fails does.
+            Body::Feature { feature, params } => {
+                match crate::scene::feature_mesh(feature, params, scene.segments_for(id)) {
                     Ok(mut mesh) => {
                         mesh.set_tag(crate::scene::colour_tag(scene.effective_colour(id)));
                         mesh

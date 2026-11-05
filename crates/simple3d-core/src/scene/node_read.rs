@@ -25,9 +25,10 @@ impl Node {
         self.ghost = visibility == Visibility::Ghost;
     }
 
-    /// Whether the node adds material to its parent's result: shown and not a negative part.
+    /// Whether the node adds material to its parent's result: shown, not a negative part and not a
+    /// sketch, which has none.
     pub fn adds(&self) -> bool {
-        self.visible && !self.negative
+        self.visible && !self.negative && !self.is_sketch()
     }
 
     /// Whether the node is cut from its siblings' result (issue 119): a shown negative part.
@@ -72,15 +73,28 @@ impl Node {
         matches!(self.body, Body::Extrusion { .. })
     }
 
-    /// Whether this node is a sketch and the solid made from it (issue 74).
+    /// Whether this node is a sketch (issue 74).
     pub fn is_sketch(&self) -> bool {
         matches!(self.body, Body::Sketch { .. })
+    }
+
+    /// Whether this node is a profile extruded or revolved (issue 74).
+    pub fn is_feature(&self) -> bool {
+        matches!(self.body, Body::Feature { .. })
+    }
+
+    /// The feature a feature node holds.
+    pub fn feature(&self) -> Option<&Arc<Feature>> {
+        match &self.body {
+            Body::Feature { feature, .. } => Some(feature),
+            _ => None,
+        }
     }
 
     /// The sketch a sketch node holds.
     pub fn sketch(&self) -> Option<&Arc<simple3d_sketch::Sketch>> {
         match &self.body {
-            Body::Sketch { sketch, .. } => Some(sketch),
+            Body::Sketch { sketch } => Some(sketch),
             _ => None,
         }
     }
@@ -141,6 +155,8 @@ impl Node {
             Body::Component { .. } => "component",
             Body::Extrusion { .. } => "extrusion",
             Body::Sketch { .. } => "sketch",
+            Body::Feature { feature, .. } if feature.is_revolve() => "revolve",
+            Body::Feature { .. } => "extrusion",
         }
     }
 
@@ -179,7 +195,7 @@ impl Node {
             Body::Primitive { params, .. }
             | Body::Pattern { params }
             | Body::Extrusion { params, .. }
-            | Body::Sketch { params, .. } => Some(params),
+            | Body::Feature { params, .. } => Some(params),
             _ => None,
         }
     }
@@ -189,7 +205,7 @@ impl Node {
             Body::Primitive { params, .. }
             | Body::Pattern { params }
             | Body::Extrusion { params, .. }
-            | Body::Sketch { params, .. } => Some(params),
+            | Body::Feature { params, .. } => Some(params),
             _ => None,
         }
     }

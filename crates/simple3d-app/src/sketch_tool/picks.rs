@@ -1,40 +1,10 @@
-//! The clicks of the tools that pick something rather than draw: regions, the revolve axis, face
-//! edges to copy, and the trim and fillet tools.
+//! The clicks of the tools that pick something rather than draw: face edges to copy, and the trim
+//! and fillet tools.
 
 use super::*;
 use crate::app::{App, Status};
 use crate::view::View;
 use simple3d_sketch::{ConstraintKind, Shape};
-
-/// Pick or drop the region under the pointer.
-pub(crate) fn toggle_region(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) -> Status {
-    let Some(at) = tool.under(view, cursor) else { return Status::Info(String::new()) };
-    let regions = simple3d_sketch::regions::find(&tool.sketch, 64);
-    let Some(index) = regions.at(at) else {
-        return Status::Info("No closed region there; close the outline first".into());
-    };
-    let held = tool.sketch.regions.iter().position(|pick| regions.resolve(pick) == Some(index));
-    let pick = regions.pick(index, at);
-    tool.change(|sketch| match held {
-        Some(k) => {
-            sketch.regions.remove(k);
-        }
-        None => sketch.regions.push(pick),
-    });
-    Status::Info(if held.is_some() { "Dropped the region" } else { "Picked the region" }.into())
-}
-
-/// Make the line under the pointer the revolve axis.
-pub(crate) fn pick_axis(tool: &mut SketchTool, view: &View, cursor: egui::Pos2) -> Status {
-    match tool.curve_at(view, cursor) {
-        Some(id) if tool.sketch.curve(id).is_some_and(|c| matches!(c.shape, Shape::Line { .. })) => {
-            tool.change(|sketch| sketch.axis = Some(id));
-            tool.params.insert("feature".into(), simple3d_core::primitive::ParamValue::Choice(1));
-            Status::Info("The solid now revolves about that line".into())
-        }
-        _ => Status::Info("Click a line to revolve about".into()),
-    }
-}
 
 /// Copy the edges of the face under the pointer onto the sketch, dropped onto its plane.
 pub(crate) fn copy_edges(app: &mut App, view: &View, cursor: egui::Pos2) {
@@ -115,12 +85,12 @@ impl SketchTool {
         let point = || self.point_at(view, cursor, &[]).map(Pick::Point);
         match self.draw {
             Draw::Select => self.pick_at(view, cursor),
-            Draw::Axis | Draw::Trim | Draw::Extend | Draw::Split | Draw::Offset | Draw::Mirror => curve(),
+            Draw::Trim | Draw::Extend | Draw::Split | Draw::Offset | Draw::Mirror => curve(),
             draw if draw.uses_selection() && (shift || self.clicks.is_empty()) => curve().or_else(point),
             Draw::Dimension | Draw::Constrain(_) => {
                 self.pick_at(view, cursor).filter(|p| !matches!(p, Pick::Constraint(_)))
             }
-            Draw::Regions | Draw::CopyEdges => None,
+            Draw::CopyEdges => None,
             _ => point(),
         }
     }

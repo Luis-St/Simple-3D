@@ -3,6 +3,10 @@
 //! are kept inside the object (see `simple3d_core::scene::FaceEdit` for which node holds them), so the
 //! faces they leave flush merge with the object's own and can be pushed again whole.
 //!
+//! A closed region of a kept sketch is pushed the same way (issue 74), into a feature node that
+//! follows the sketch when it changes: outward it adds, inward it cuts into the object the sketch
+//! lies on, or adds on the other side when it lies on none.
+//!
 //! The face is found on the evaluated model, not on each object's own mesh, so what is pushed is
 //! what is seen -- the overlap of two objects, a face left by a cut. Its object is read from the
 //! source channel the boolean kernel carries.
@@ -13,8 +17,13 @@ mod interact;
 pub(crate) use interact::interact;
 pub(crate) mod draw;
 mod prism;
+mod region;
+#[cfg(test)]
+pub(crate) use region::commit as region_commit;
+mod target;
 pub(crate) use draw::draw;
 pub(crate) use prism::template;
+pub(crate) use target::Target;
 
 /// A face found for a mesh (by address) and triangle, or why there is none to push.
 type CachedFace = (usize, usize, Result<FaceHit, &'static str>);
@@ -29,10 +38,10 @@ pub struct PushPull {
     pub(crate) drag: Option<PushDrag>,
 }
 
-/// A face on its way out or in.
+/// A face or region on its way out or in.
 #[derive(Clone)]
 pub(crate) struct PushDrag {
-    pub(crate) hit: FaceHit,
+    pub(crate) target: Target,
     /// Where on the face the drag took hold.
     pub(crate) grab: simple3d_geom::Vec3,
     /// Where on the screen the drag began.

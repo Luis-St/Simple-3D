@@ -40,7 +40,7 @@ fn write(scene: &Scene, components: &[(ComponentId, &Scene)]) -> String {
 /// The oldest version that can hold what the project uses, so files stay readable by older builds.
 fn format_for(scene: &Scene, components: &[(ComponentId, &Scene)]) -> u32 {
     let scenes = || std::iter::once(scene).chain(components.iter().map(|(_, s)| *s));
-    if scenes().any(Scene::has_sketch) {
+    if scenes().any(|s| s.has_sketch() || s.has_feature()) {
         FORMAT_VERSION
     } else if scenes().any(Scene::has_extrusion) {
         EXTRUSION_FORMAT

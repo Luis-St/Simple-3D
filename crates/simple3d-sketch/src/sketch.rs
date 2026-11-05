@@ -5,22 +5,30 @@ use crate::curve::{Curve, CurveId};
 use crate::point::{Point, PointId};
 use serde::{Deserialize, Serialize};
 
-/// A sketch: everything drawn and constrained, the regions picked to become a solid, and the line a
-/// revolve turns about. Lives in the sketch node's own XY plane.
+/// A sketch: everything drawn and constrained. Lives in the sketch node's own XY plane.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Sketch {
+    /// What ties the sketch to the solids made from it: each holds a copy with the same link, which
+    /// changing the sketch replaces. Zero until the sketch is put in a document.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub link: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub points: Vec<Point>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub curves: Vec<Curve>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub constraints: Vec<Constraint>,
-    /// The regions picked to extrude or revolve.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// The regions an older sketch picked to extrude or revolve, read from files before the solids
+    /// moved out of the sketch; never written, and emptied once the file is read.
+    #[serde(default, skip_serializing)]
     pub regions: Vec<RegionPick>,
-    /// The line a revolve turns the regions about.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The line an older sketch revolved about; read and emptied as `regions` is.
+    #[serde(default, skip_serializing)]
     pub axis: Option<CurveId>,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// A picked region, remembered by the sides of the curves around it rather than by number, since

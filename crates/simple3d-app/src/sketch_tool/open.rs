@@ -27,10 +27,10 @@ impl App {
     /// Open the editor on sketch node `id`, looking straight at its plane.
     pub fn edit_sketch(&mut self, id: NodeId) {
         let node = self.scene.node(id);
-        let (Some(sketch), Some(params)) = (node.sketch(), node.params()) else { return };
+        let Some(sketch) = node.sketch() else { return };
         let Some(frame) = sketch_frame(&self.scene, id, &self.evaluated.node_frames) else { return };
         let name = node.name.clone();
-        let tool = SketchTool::editing(id, (**sketch).clone(), params.clone(), frame);
+        let tool = SketchTool::editing(id, (**sketch).clone(), frame);
         self.open_sketch_tool(tool);
         self.scene.camera.target = frame.t;
         self.look_at_sketch();
@@ -53,7 +53,6 @@ impl App {
     pub(crate) fn place_sketch(&mut self, frame: Xform, owner: Option<NodeId>) {
         let Some(tool) = self.sketch_tool.as_mut() else { return };
         tool.frame = Some(frame);
-        tool.owner = owner;
         self.scene.camera.target = frame.t;
         self.look_at_sketch();
         self.status = Status::Info(match owner {
@@ -85,8 +84,8 @@ impl App {
         self.sketch_tool = None;
     }
 
-    /// Keep the sketch as one undo step: a new sketch node, or the edited one changed. Refused with a
-    /// reason while there is nothing to make a solid from.
+    /// Keep the sketch as one undo step: a new sketch node, or the edited one changed along with the
+    /// solids made from it. Refused with a reason while there is nothing to keep.
     pub(crate) fn finish_sketch_tool(&mut self) {
         let Some(tool) = self.sketch_tool.as_ref() else { return };
         if let Some(why) = finish_blocked(tool) {
@@ -96,27 +95,24 @@ impl App {
         let Some(tool) = self.sketch_tool.take() else { return };
         if let Some(id) = tool.editing.filter(|&id| self.scene.contains(id)) {
             self.edit("Change sketch", None);
-            self.scene.set_sketch(id, tool.sketch, tool.params);
-            self.status = Status::Info(format!("Changed {}", self.scene.node(id).name));
+            self.scene.set_sketch(id, tool.sketch);
+            let name = self.scene.node(id).name.clone();
+            let made = self.scene.node(id).sketch().map_or(0, |s| self.scene.features_of(s.link).len());
+            self.status = Status::Info(match made {
+                0 => format!("Changed {name}"),
+                1 => format!("Changed {name} and the solid made from it"),
+                n => format!("Changed {name} and the {n} solids made from it"),
+            });
             return;
         }
         let Some(frame) = tool.frame else { return };
         self.edit("Add sketch", None);
-        let root = self.scene.root();
-        let owner = match tool.owner {
-            Some(owner) => Some((owner, tool.placing)),
-            // A cut with no object under it is a negative part at the top, cutting what is there.
-            None => (tool.placing == Placing::Cut).then_some((root, Placing::Cut)),
-        };
-        let frames = self.evaluated.node_frames.clone();
-        let name = if tool.placing == Placing::Cut { "Sketch cut" } else { "Sketch" };
-        match self.scene.add_sketch(name, tool.sketch, tool.params, &frame, owner, &frames) {
-            Some(id) => {
-                self.select_only(id);
-                self.status = Status::Info(format!("Added {}", self.scene.node(id).name));
-            }
-            None => self.status = Status::Warning("The sketch could not be added there".into()),
-        }
+        let id = self.scene.add_sketch("Sketch", tool.sketch, &frame);
+        self.select_only(id);
+        self.status = Status::Info(format!(
+            "Added {}; push / pull or revolve its regions to make a solid",
+            self.scene.node(id).name
+        ));
     }
 }
 
@@ -124,10 +120,8 @@ impl App {
 pub(crate) fn finish_blocked(tool: &SketchTool) -> Option<&'static str> {
     if tool.frame.is_none() {
         Some("Click where to sketch first")
-    } else if tool.sketch.regions.is_empty() {
-        Some("Pick at least one closed region to make the solid from")
-    } else if tool.params.get("feature").map(|v| v.as_u32()) == Some(1) && tool.sketch.axis.is_none() {
-        Some("Pick a line of the sketch to revolve about")
+    } else if tool.sketch.is_empty() {
+        Some("Draw something to keep first")
     } else {
         None
     }

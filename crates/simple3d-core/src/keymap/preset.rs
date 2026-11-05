@@ -47,6 +47,8 @@ impl Keymap {
         set(RoundEdges, Chord::ctrl_shift("B"));
         // Push/pull (issue 73), the fifth tool, on P in every preset.
         set(ModePushPull, Chord::key("P"));
+        // Revolve (issue 74): R for revolve, free with Alt in every preset.
+        set(ModeRevolve, Chord::alt("R"));
         // Reassemble (issue 108): A for assemble, beside the conversion it undoes.
         set(Reassemble, Chord::ctrl_shift("A"));
         // Split into pieces (issue 82): K for knife.

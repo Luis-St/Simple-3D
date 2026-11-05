@@ -72,10 +72,6 @@ pub(crate) enum Draw {
     Dimension,
     /// Click the points and curves a geometric constraint goes on.
     Constrain(Rule),
-    /// Click regions to make the solid from.
-    Regions,
-    /// Click the line a revolve turns about.
-    Axis,
     /// Click a face of the model to copy its edges into the sketch.
     CopyEdges,
 }
@@ -116,7 +112,7 @@ impl Draw {
         &[Draw::Constrain(Rule::Fix)],
     ];
 
-    pub(crate) const PICKING: [Family; 3] = [&[Draw::Regions], &[Draw::Axis], &[Draw::CopyEdges]];
+    pub(crate) const PICKING: [Family; 1] = [&[Draw::CopyEdges]];
 
     /// Every family, in panel order.
     pub(crate) fn families() -> impl Iterator<Item = Family> {

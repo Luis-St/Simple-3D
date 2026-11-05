@@ -64,7 +64,7 @@ impl Evaluator {
             Body::Mesh { .. }
             | Body::Component { .. }
             | Body::Extrusion { .. }
-            | Body::Sketch { .. }
+            | Body::Feature { .. }
             | Body::Primitive { .. } => {
                 let subtree = self.subtree(scene, id, cancel);
                 let inv =
@@ -86,6 +86,8 @@ impl Evaluator {
                 }
                 out.meshes.insert(id, world);
             }
+            // A sketch has nothing to pick or outline; the viewport draws its curves on its own.
+            Body::Sketch { .. } => {}
             // A split is walked like a group: its pieces are its children.
             Body::Group { .. } | Body::Split { .. } => {
                 let subtree = self.subtree(scene, id, cancel);

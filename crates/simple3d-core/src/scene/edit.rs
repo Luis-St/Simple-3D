@@ -50,6 +50,7 @@ impl Scene {
         data.name = free_name(&self.taken_names(), &copy_name(&data.name));
         let new_id = self.import_subtree(&data, parent, index)?;
         self.rename_subtree_uniquely(new_id, true);
+        self.relink(&[new_id]);
         Some(new_id)
     }
 

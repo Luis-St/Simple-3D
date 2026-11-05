@@ -11,6 +11,8 @@ pub enum Glyph {
     Measure,
     /// A face pulled out of a slab: the push/pull tool (issue 73).
     PushPull,
+    /// The revolve tool (issue 74).
+    Revolve,
     /// A square with one corner rounded off: the edge rounding tool (issue 88).
     Round,
     /// Squares spread along a curve: the align and distribute tool (issue 70).
@@ -61,8 +63,6 @@ pub enum Glyph {
     SketchRotate,
     SketchScale,
     /// A closed area filled in: pick the regions a solid is made from.
-    SketchRegions,
-    SketchAxis,
     SketchCopyEdges,
     // Sketch constraints (issue 74): the tool tiles and the marks drawn beside what they hold.
     ConstrainCoincident,

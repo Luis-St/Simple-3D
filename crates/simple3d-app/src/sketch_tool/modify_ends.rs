@@ -94,7 +94,6 @@ pub(crate) fn split(
     if curve.shape.ends().is_some_and(|(a, b)| a == middle || b == middle) {
         return Err("Click away from its ends");
     }
-    sketch.regions.retain(|pick| pick.sides.iter().all(|&(curve, _)| curve != id));
     let tail = match curve.shape {
         Shape::Arc { center, end, .. } => Shape::Arc { center, start: middle, end },
         Shape::EllipseArc { center, major, minor, end, .. } => {

@@ -71,6 +71,7 @@ pub enum Command {
     ModeResize,
     ModeScale,
     ModePushPull,
+    ModeRevolve,
     MeasureTool,
     AlignDistribute,
     OntoFace,

@@ -88,6 +88,8 @@ impl App {
             cursor: None,
             measure: Measure::default(),
             push_pull: Default::default(),
+            sketch_regions: Default::default(),
+            revolve: Default::default(),
             snap_requested: false,
             snap_sources: None,
             snap_indicator: None,

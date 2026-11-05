@@ -1,12 +1,13 @@
-//! The sketch editor (issue 74): drawing a 2D profile on the ground, a workplane or a face,
-//! constraining it, picking the regions to keep and turning them into a solid.
+//! The sketch editor (issue 74): drawing a 2D profile on the ground, a workplane or a face and
+//! constraining it. The editor only draws; push/pull and the revolve tool make solids from the
+//! sketch's regions once it is kept.
 //!
 //! The editor is a mode of its own. It starts by picking the plane -- a click on one of the orange
 //! origin planes sketches on it, on a face of the model on that face, anywhere else on the plane being
 //! worked on -- then turns the camera
 //! to look straight at it and shows its grid. The viewport's clicks then draw, select and drag in the
 //! sketch, and the editor's panel holds the drawing and modifying tools, the constraints, the list of
-//! what is constrained and the feature settings; while the docks are shown it takes the right dock's place, else it floats
+//! what is constrained; while the docks are shown it takes the right dock's place, else it floats
 //! over the viewport. Clicking a curve, point or constraint opens a small popup beside it to change
 //! that one thing. Nothing enters the document until Finish, which adds the sketch node,
 //! or puts the changed sketch back on the node being edited, as one undo step; the editor keeps its
@@ -74,12 +75,10 @@ mod tests_tools;
 mod tests_variants;
 #[cfg(test)]
 mod tests_view;
-mod window_feature;
 mod window_list;
 mod window_tools;
 
-use simple3d_core::primitive::Params;
-use simple3d_core::scene::{NodeId, Placing};
+use simple3d_core::scene::NodeId;
 use simple3d_core::xform::Xform;
 use simple3d_geom::Vec3;
 use simple3d_sketch::solver::Analysis;
@@ -117,15 +116,10 @@ pub(crate) struct Dragging {
 /// What the editor is working on while it is open.
 pub struct SketchTool {
     pub sketch: Sketch,
-    /// The feature: extrude or revolve, and how far.
-    pub params: Params,
     /// The sketch node being changed, or `None` for a new sketch.
     pub editing: Option<NodeId>,
     /// The sketch plane in the world, or `None` until it is picked.
     pub frame: Option<Xform>,
-    /// The object whose face it was started on; the solid is added beside it or cut out of it.
-    pub owner: Option<NodeId>,
-    pub placing: Placing,
     pub(crate) draw: Draw,
     pub(crate) clicks: Vec<Click>,
     pub(crate) selection: Vec<Pick>,
@@ -164,23 +158,20 @@ pub struct SketchTool {
 impl SketchTool {
     /// A new, empty sketch waiting for its plane.
     pub fn new() -> SketchTool {
-        SketchTool::with(Sketch::default(), simple3d_core::scene::sketch_params(&Params::new()), None, None)
+        SketchTool::with(Sketch::default(), None, None)
     }
 
     /// The editor on an existing sketch node, its plane already known.
-    pub fn editing(id: NodeId, sketch: Sketch, params: Params, frame: Xform) -> SketchTool {
-        SketchTool::with(sketch, params, Some(id), Some(frame))
+    pub fn editing(id: NodeId, sketch: Sketch, frame: Xform) -> SketchTool {
+        SketchTool::with(sketch, Some(id), Some(frame))
     }
 
-    fn with(sketch: Sketch, params: Params, editing: Option<NodeId>, frame: Option<Xform>) -> SketchTool {
+    fn with(sketch: Sketch, editing: Option<NodeId>, frame: Option<Xform>) -> SketchTool {
         let analysis = sketch.analyse();
         SketchTool {
             sketch,
-            params,
             editing,
             frame,
-            owner: None,
-            placing: Placing::Add,
             draw: Draw::Line,
             clicks: Vec::new(),
             selection: Vec::new(),

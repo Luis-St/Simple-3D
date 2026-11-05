@@ -112,6 +112,7 @@ impl App {
             ModeResize => self.pick_transform(Mode::Resize),
             ModeScale => self.pick_transform(Mode::Scale),
             ModePushPull => self.pick_transform(Mode::PushPull),
+            ModeRevolve => self.pick_transform(Mode::Revolve),
             MeasureTool => self.toggle_measure(),
             AlignDistribute => self.toggle_arrange_tool(),
             OntoFace => self.open_onto_face(),
@@ -185,9 +186,14 @@ impl App {
         self.mode = mode;
         self.size_tool_hidden = false;
         self.push_pull.drag = None;
+        self.revolve.clear();
         if mode == Mode::PushPull {
-            self.status =
-                Status::Info("Push / pull: drag a flat face out to add material, or in to cut it away".into());
+            self.status = Status::Info(
+                "Push / pull: drag a flat face or a sketch region out to add material, or in to cut it away".into(),
+            );
+        }
+        if mode == Mode::Revolve {
+            self.status = Status::Info(crate::revolve_tool::step_hint(&self.revolve).into());
         }
         if self.measure.active {
             self.measure.active = false;

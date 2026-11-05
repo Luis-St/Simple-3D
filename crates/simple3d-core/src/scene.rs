@@ -11,8 +11,8 @@ mod body;
 pub use body::{Body, ExportBody};
 mod node;
 pub use node::{Node, Visibility};
-mod node_read;
 mod mirror;
+mod node_read;
 pub use mirror::Mirrored;
 mod view_settings;
 pub use view_settings::{AxisStyle, PreviewViewport, SectionKeep, SectionView};
@@ -37,16 +37,21 @@ pub use face_edit::FaceEdit;
 mod object_edit;
 pub use object_edit::ObjectEdit;
 mod round_edit;
-mod round_holders;
 mod round_extract;
+mod round_holders;
 mod round_join;
 pub use round_edit::{RoundEdit, RoundKind};
 pub use round_join::RoundJoin;
+mod feature;
 mod node_data;
 mod paint;
 mod rebuild;
+pub use feature::{
+    feature_mesh, feature_param_shown, feature_params, feature_specs, profile_outlines, Feature, Profile, RevolveAxis,
+    EXTENTS, EXTRUDE_PARAMS, REVOLVE_PARAMS,
+};
 mod sketch;
-pub use sketch::{sketch_frame, sketch_mesh, sketch_param_shown, sketch_params, EXTENTS, FEATURES, SKETCH_PARAMS};
+pub use sketch::{new_link, sketch_frame};
 mod split;
 mod subtree;
 pub use node_data::NodeData;

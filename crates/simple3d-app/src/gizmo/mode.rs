@@ -11,10 +11,12 @@ pub enum Mode {
     Scale,
     /// Drag a face of the model along its normal (issue 73); no handles, the faces are the handles.
     PushPull,
+    /// Turn a face or sketch region about a line (issue 74); no handles either.
+    Revolve,
 }
 
 impl Mode {
-    pub const ALL: [Mode; 5] = [Mode::Move, Mode::Rotate, Mode::Resize, Mode::Scale, Mode::PushPull];
+    pub const ALL: [Mode; 6] = [Mode::Move, Mode::Rotate, Mode::Resize, Mode::Scale, Mode::PushPull, Mode::Revolve];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -23,6 +25,7 @@ impl Mode {
             Mode::Resize => "Resize",
             Mode::Scale => "Scale",
             Mode::PushPull => "Push / pull",
+            Mode::Revolve => "Revolve",
         }
     }
 }

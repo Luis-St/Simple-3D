@@ -3,7 +3,6 @@ use super::*;
 use crate::app::tests::{draw_one_frame, headless_app, two_boxes};
 use crate::app::App;
 use simple3d_core::keymap::Command;
-use simple3d_core::primitive::ParamValue;
 
 fn click(tool: &mut SketchTool, at: [f64; 2]) {
     let point = tool.sketch.points.iter().find(|p| (p.at[0] - at[0]).hypot(p.at[1] - at[1]) < 1e-9).map(|p| p.id);
@@ -19,22 +18,18 @@ fn sketching() -> App {
     app
 }
 
-/// A 10 x 20 rectangle drawn with the rectangle tool and its region picked, as clicks would.
-fn draw_and_pick(app: &mut App) {
+/// A 10 x 20 rectangle drawn with the rectangle tool, as clicks would.
+pub(crate) fn draw_rectangle(app: &mut App) {
     let tool = app.sketch_tool.as_mut().unwrap();
     tool.set_draw(Draw::Rectangle);
     click(tool, [100.0, 100.0]);
     click(tool, [110.0, 120.0]);
-    let regions = simple3d_sketch::regions::find(&tool.sketch, 64);
-    let index = regions.at([105.0, 105.0]).expect("the rectangle encloses a region");
-    let pick = regions.pick(index, [105.0, 105.0]);
-    tool.change(|sketch| sketch.regions.push(pick));
 }
 
 #[test]
-fn a_rectangle_drawn_and_picked_becomes_an_extruded_sketch_node_in_one_undo_step() {
+fn a_rectangle_drawn_becomes_a_flat_sketch_node_in_one_undo_step() {
     let mut app = sketching();
-    draw_and_pick(&mut app);
+    draw_rectangle(&mut app);
     let tool = app.sketch_tool.as_ref().unwrap();
     assert_eq!(tool.sketch.curves.len(), 4);
     assert_eq!(tool.sketch.constraints.len(), 4, "a rectangle keeps square by its constraints");
@@ -44,27 +39,29 @@ fn a_rectangle_drawn_and_picked_becomes_an_extruded_sketch_node_in_one_undo_step
     assert_eq!(app.history.undo_len(), steps + 1);
     let id = app.primary().expect("the new sketch is selected");
     assert!(app.scene.node(id).is_sketch());
+    let before = app.evaluated.mesh.triangle_count();
     app.reevaluate_for_test();
-    let bounds = app.evaluated.node_world_bounds.get(&id).copied().expect("the sketch made a solid");
-    assert!((bounds.1.x - bounds.0.x - 10.0).abs() < 1e-6 && (bounds.1.z - bounds.0.z - 10.0).abs() < 1e-6);
+    assert_eq!(app.evaluated.mesh.triangle_count(), before, "the sketch made a solid of its own");
     app.history.undo(&mut app.scene);
     assert!(!app.scene.contains(id), "undo left the sketch");
 }
 
 #[test]
-fn nothing_can_be_kept_before_a_plane_and_a_region_are_picked() {
+fn nothing_can_be_kept_before_a_plane_is_picked_and_something_drawn() {
     let mut app = headless_app();
     app.selection.clear();
     app.toggle_sketch_tool();
     app.finish_sketch_tool();
     assert!(app.sketch_tool.is_some(), "Finish without a plane closed the editor");
     app.place_sketch(Xform::from_translation(Vec3::ZERO), None);
+    app.finish_sketch_tool();
+    assert!(app.sketch_tool.is_some(), "Finish with nothing drawn closed the editor");
     let tool = app.sketch_tool.as_mut().unwrap();
-    tool.set_draw(Draw::Circle);
+    tool.set_draw(Draw::Line);
     click(tool, [0.0, 0.0]);
     click(tool, [5.0, 0.0]);
     app.finish_sketch_tool();
-    assert!(app.sketch_tool.is_some(), "Finish without a picked region closed the editor");
+    assert!(app.sketch_tool.is_none(), "an open line could not be kept");
 }
 
 #[test]
@@ -120,21 +117,7 @@ fn a_constraint_fits_the_selection_and_a_repeat_is_refused_with_the_other_marked
 }
 
 #[test]
-fn a_cut_with_no_object_under_it_is_a_negative_part_and_revolving_needs_an_axis() {
-    let mut app = sketching();
-    draw_and_pick(&mut app);
-    let tool = app.sketch_tool.as_mut().unwrap();
-    tool.placing = Placing::Cut;
-    tool.params.insert("feature".into(), ParamValue::Choice(1));
-    assert!(super::open::finish_blocked(tool).is_some(), "a revolve without an axis could be kept");
-    tool.params.insert("feature".into(), ParamValue::Choice(0));
-    app.finish_sketch_tool();
-    let id = app.primary().unwrap();
-    assert!(app.scene.node(id).negative, "the cut is not a negative part");
-}
-
-#[test]
-fn a_sketch_on_a_face_cuts_the_object_under_it_and_reopens_on_its_plane() {
+fn a_sketch_on_a_face_reopens_on_its_plane_and_changes_its_solids_when_kept() {
     let (mut app, a, _) = two_boxes("sketch-face", Vec3::new(60.0, 0.0, 0.0));
     app.reevaluate_for_test();
     app.selection.clear();
@@ -143,22 +126,41 @@ fn a_sketch_on_a_face_cuts_the_object_under_it_and_reopens_on_its_plane() {
     let frame =
         super::plane_pick::plane_frame(Vec3::new(0.0, 0.0, hi.z), Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
     app.place_sketch(frame, Some(a));
-    draw_and_pick(&mut app);
-    let tool = app.sketch_tool.as_mut().unwrap();
-    tool.placing = Placing::Cut;
-    tool.params.insert("distance".into(), ParamValue::Length(2.0));
-    tool.params.insert("flip".into(), ParamValue::Bool(true));
+    draw_rectangle(&mut app);
     app.finish_sketch_tool();
     let id = app.primary().unwrap();
-    let parent = app.scene.node(id).parent.unwrap();
-    assert_eq!(app.scene.node(parent).group_op(), Some(simple3d_core::scene::GroupOp::Difference));
+    assert_eq!(app.scene.node(id).parent, Some(app.scene.root()), "the sketch is not at the top of the tree");
     app.reevaluate_for_test();
+    // A solid made from it, then the sketch opened again and made wider.
+    let sketch = (**app.scene.node(id).sketch().unwrap()).clone();
+    let regions = simple3d_sketch::regions::find(&sketch, 64);
+    let pick = regions.pick(regions.at([105.0, 105.0]).unwrap(), [105.0, 105.0]);
+    let feature = simple3d_core::scene::Feature {
+        profile: simple3d_core::scene::Profile::Sketch { sketch, regions: vec![pick] },
+        axis: None,
+    };
+    let params = simple3d_core::scene::feature_params(false, &Default::default());
+    let frames = app.evaluated.node_frames.clone();
+    let solid = app.scene.add_feature("Extrusion", feature, params, &frame, None, &frames).unwrap();
+    app.select_only(id);
     app.toggle_sketch_tool();
-    let tool = app.sketch_tool.as_ref().expect("the selected sketch did not open");
+    let tool = app.sketch_tool.as_mut().expect("the selected sketch did not open");
     assert_eq!(tool.editing, Some(id));
     let origin = tool.frame.unwrap().t;
     assert!((origin.z - hi.z).abs() < 1e-6, "reopened at {origin:?}");
     assert!(app.grid_plane().is_some_and(|grid| (grid.origin.z - hi.z).abs() < 1e-6), "the grid is not the sketch's");
+    let tool = app.sketch_tool.as_mut().unwrap();
+    tool.change(|sketch| {
+        for point in sketch.points.iter_mut().filter(|p| p.at[0] > 105.0) {
+            point.at[0] = 130.0;
+        }
+    });
+    let steps = app.history.undo_len();
+    app.finish_sketch_tool();
+    assert_eq!(app.history.undo_len(), steps + 1, "the change is not one undo step");
+    app.reevaluate_for_test();
+    let (lo, hi) = app.evaluated.node_world_bounds[&solid];
+    assert!((hi.x - lo.x - 30.0).abs() < 1e-6, "the solid is {} wide, not following its sketch", hi.x - lo.x);
 }
 
 #[test]
@@ -168,7 +170,7 @@ fn the_window_and_overlays_draw_in_every_state() {
     app.toggle_sketch_tool();
     draw_one_frame(&mut app);
     app.place_sketch(Xform::from_translation(Vec3::ZERO), None);
-    draw_and_pick(&mut app);
+    draw_rectangle(&mut app);
     let tool = app.sketch_tool.as_mut().unwrap();
     tool.set_draw(Draw::Spline);
     click(tool, [0.0, 0.0]);
@@ -199,7 +201,6 @@ fn a_click_on_an_orange_origin_plane_puts_the_sketch_on_it_and_faces_it() {
         let frame = app.sketch_tool.as_ref().unwrap().frame.expect("the click did not pick the plane");
         assert!((frame.axis(2) - normal).length() < 1e-9, "{plane:?} faces {:?}", frame.axis(2));
         assert!(frame.t.length() < 1e-9, "{plane:?} is not through the origin");
-        assert_eq!(app.sketch_tool.as_ref().unwrap().owner, None);
     }
     // They stay in the positive corner when the view turns, the nearer one caught where they overlap.
     let mut camera = app.scene.camera;

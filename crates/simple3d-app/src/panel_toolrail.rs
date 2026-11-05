@@ -17,6 +17,7 @@ pub fn tool(mode: Mode) -> (Glyph, Command) {
         Mode::Resize => (Glyph::Resize, Command::ModeResize),
         Mode::Scale => (Glyph::Scale, Command::ModeScale),
         Mode::PushPull => (Glyph::PushPull, Command::ModePushPull),
+        Mode::Revolve => (Glyph::Revolve, Command::ModeRevolve),
     }
 }
 
@@ -96,7 +97,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         let sketching = app.sketch_tool.is_some();
         let shortcut = app.keymap.shortcut_text(Command::Sketch);
         if icon::button(ui, Glyph::Sketch, size, sketching, true)
-            .on_hover_text(format!("Sketch a profile and extrude or revolve it  {shortcut}"))
+            .on_hover_text(format!("Sketch a profile to push / pull or revolve  {shortcut}"))
             .clicked()
         {
             app.run(Command::Sketch);

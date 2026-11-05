@@ -21,9 +21,9 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
     if app.push_pull.drag.is_none() && response.drag_started_by(egui::PointerButton::Primary) {
         let press = ui.input(|i| i.pointer.press_origin()).or(cursor);
         if let Some(press) = press {
-            match app.face_under(view, press) {
-                Some((Ok(hit), grab)) => {
-                    app.push_pull.drag = Some(PushDrag { hit, grab, press, distance: 0.0, prism: None })
+            match app.push_target_under(view, press) {
+                Some((Ok(target), grab)) => {
+                    app.push_pull.drag = Some(PushDrag { target, grab, press, distance: 0.0, prism: None })
                 }
                 Some((Err(why), _)) => app.status = Status::Warning(why.into()),
                 None => {}
@@ -46,7 +46,7 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         return true;
     }
     if response.hovered() {
-        if let Some((Ok(_), _)) = cursor.and_then(|cursor| app.face_under(view, cursor)) {
+        if let Some((Ok(_), _)) = cursor.and_then(|cursor| app.push_target_under(view, cursor)) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
     }
@@ -55,7 +55,7 @@ pub(crate) fn interact(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
 
 /// How far along the face's normal the pointer has dragged it, in millimetres.
 fn travel(view: &View, drag: &PushDrag, cursor: egui::Pos2) -> f64 {
-    let normal = drag.hit.captured.normal;
+    let normal = drag.target.plane().normal;
     let ends = (view.project(drag.grab), view.project(drag.grab + normal));
     let (Some((from, _)), Some((to, _))) = ends else { return drag.distance };
     let along = to - from;
@@ -67,17 +67,20 @@ fn travel(view: &View, drag: &PushDrag, cursor: egui::Pos2) -> f64 {
     (moved.dot(along) / along.length_sq()) as f64
 }
 
-/// Add the dragged face's extrusion or reduction to its object, as one undo step.
+/// Add the dragged face's extrusion or reduction to its object, or the dragged region's feature,
+/// as one undo step.
 pub(crate) fn commit(app: &mut App, drag: PushDrag) {
     if drag.distance.abs() < 1e-9 {
         app.status = Status::Info("Push / pull: drag the face out to add, or in to cut away".into());
         return;
     }
+    let hit = match drag.target {
+        Target::Face(hit) => hit,
+        Target::Region(hit, owner) => return super::region::commit(app, &hit, owner, drag.distance),
+    };
     // Tried on a copy, so a refusal leaves no empty undo step behind.
     let mut scene = app.scene.clone();
-    let Some((holder, _)) =
-        scene.push_pull(drag.hit.owner, &drag.hit.captured, drag.distance, &app.evaluated.node_frames)
-    else {
+    let Some((holder, _)) = scene.push_pull(hit.owner, &hit.captured, drag.distance, &app.evaluated.node_frames) else {
         app.status = Status::Warning("That face could not be pushed or pulled".into());
         return;
     };
@@ -86,7 +89,7 @@ pub(crate) fn commit(app: &mut App, drag: PushDrag) {
     app.scene = scene;
     app.select_only(holder);
     let unit = app.unit();
-    let owner = app.scene.get(drag.hit.owner).map_or(String::new(), |node| node.name.clone());
+    let owner = app.scene.get(hit.owner).map_or(String::new(), |node| node.name.clone());
     app.status = Status::Info(format!(
         "{} {owner}'s face by {} {}",
         if pushed { "Pushed" } else { "Pulled" },

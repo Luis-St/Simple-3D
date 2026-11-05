@@ -137,6 +137,7 @@ pub(crate) fn paint_scene(
             .filter_map(|(id, xform)| app.node_renderables.get(&id).map(|renderable| (&**renderable, xform, None)))
             .chain(cutters.iter().map(|&(renderable, moved)| (renderable, moved, Some(palette.ghost))))
             .chain(crate::push_pull_tool::template(&app.push_pull, &palette))
+            .chain(crate::revolve_tool::template(&app.revolve, &palette))
             .chain(crate::round_tool::templates(app.round_tool.as_ref(), &palette))
             .collect();
         let request = render::Request {

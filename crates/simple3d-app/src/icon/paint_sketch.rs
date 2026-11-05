@@ -114,13 +114,8 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) -> bool {
             pen.arrow((0.5, 0.56), (0.14, 0.56));
             pen.arrow((0.5, 0.56), (0.86, 0.56));
         }
-        Glyph::SketchRegions => {
-            let square = [(0.14, 0.14), (0.86, 0.14), (0.86, 0.86), (0.14, 0.86)];
-            pen.filled(&square, pen.colour.gamma_multiply(0.35));
-            pen.closed(&square);
-        }
-        // A dashed line with the turn about it.
-        Glyph::SketchAxis => {
+        // A dashed line with the turn about it: the revolve tool.
+        Glyph::Revolve => {
             dashed(pen, (0.5, 0.04), (0.5, 0.96), 4);
             pen.ellipse(0.5, 0.5, 0.4, 0.16, 0.35, 0.35 + TAU * 0.8);
             pen.arrow((0.82, 0.42), (0.9, 0.5));

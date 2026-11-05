@@ -13,8 +13,8 @@ impl PushDrag {
         if self.prism.as_ref().is_some_and(|(at, _)| *at == self.distance) {
             return;
         }
-        let face = &self.hit.captured;
-        let mut mesh = extrude_outline(&face.outline, self.distance.abs());
+        let face = self.target.plane();
+        let mut mesh = extrude_outline(self.target.outline(), self.distance.abs());
         if mesh.indices.is_empty() {
             self.prism = None;
             return;
@@ -37,6 +37,6 @@ impl PushDrag {
 pub(crate) fn template<'a>(tool: &'a PushPull, palette: &Palette) -> Option<(&'a Renderable, Xform, Option<Rgba>)> {
     let drag = tool.drag.as_ref()?;
     let (distance, prism) = drag.prism.as_ref()?;
-    let colour = if *distance > 0.0 { palette.extrusion } else { palette.reduction };
+    let colour = if drag.target.cuts(*distance) { palette.reduction } else { palette.extrusion };
     Some((&**prism, Xform::IDENTITY, Some(colour)))
 }

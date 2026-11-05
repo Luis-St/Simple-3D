@@ -22,6 +22,7 @@ impl Scene {
         let mut component: Option<ComponentId> = None;
         let mut outline: Option<simple3d_geom::push_pull::Outline> = None;
         let mut sketch: Option<simple3d_sketch::Sketch> = None;
+        let mut feature: Option<Feature> = None;
         let (type_id, op, params) = match &node.body {
             Body::Group { op } => ("group".to_string(), Some(*op), Params::new()),
             Body::Primitive { type_id, params } => (type_id.clone(), None, params.clone()),
@@ -43,9 +44,13 @@ impl Scene {
                 outline = Some((**shape).clone());
                 ("extrusion".to_string(), None, params.clone())
             }
-            Body::Sketch { sketch: drawn, params } => {
+            Body::Sketch { sketch: drawn } => {
                 sketch = Some((**drawn).clone());
-                ("sketch".to_string(), None, params.clone())
+                ("sketch".to_string(), None, Params::new())
+            }
+            Body::Feature { feature: made, params } => {
+                feature = Some((**made).clone());
+                ("feature".to_string(), None, params.clone())
             }
         };
         Some(NodeData {
@@ -69,6 +74,7 @@ impl Scene {
             component,
             outline,
             sketch,
+            feature,
             params,
             edits: node.edits.clone(),
             children: node.children.iter().filter_map(|&c| self.export_subtree(c)).collect(),
@@ -95,10 +101,22 @@ impl Scene {
                 params: crate::scene::extrusion_params(&data.params),
             },
             // A sketch naming points or curves it does not hold is refused rather than half-drawn.
-            "sketch" => Body::Sketch {
-                sketch: Arc::new(data.sketch.clone().filter(simple3d_sketch::Sketch::is_consistent)?),
-                params: crate::scene::sketch_params(&data.params),
-            },
+            "sketch" => {
+                let sketch = data.sketch.clone().filter(simple3d_sketch::Sketch::is_consistent)?;
+                if sketch::is_old_sketch(&data.params) {
+                    return self.import_old_sketch(data, sketch, parent, index);
+                }
+                Body::Sketch { sketch: Arc::new(sketch) }
+            }
+            // A feature whose sketch names points or curves it does not hold is refused likewise.
+            "feature" => {
+                let feature = data.feature.clone()?;
+                if feature.sketch().is_some_and(|sketch| !sketch.is_consistent()) {
+                    return None;
+                }
+                let params = crate::scene::feature_params(feature.is_revolve(), &data.params);
+                Body::Feature { feature: Arc::new(feature), params }
+            }
             type_id => {
                 let spec = primitive::lookup(type_id)?;
                 Body::Primitive { type_id: data.type_id.clone(), params: spec.migrate_params(&data.params) }
@@ -133,6 +151,34 @@ impl Scene {
                 return None;
             }
         }
+        Some(id)
+    }
+
+    /// A sketch node from before format 7, which made its solid itself: read as the feature it made,
+    /// in its place, and the sketch beside it, hidden as push/pull leaves a sketch it extruded.
+    fn import_old_sketch(
+        &mut self,
+        data: &NodeData,
+        sketch: simple3d_sketch::Sketch,
+        parent: NodeId,
+        index: usize,
+    ) -> Option<NodeId> {
+        let (sketch, made) = sketch::split_old_sketch(sketch, &data.params);
+        let flat = NodeData {
+            params: Params::new(),
+            sketch: Some(sketch),
+            negative: false,
+            colour: None,
+            children: Vec::new(),
+            ..data.clone()
+        };
+        let Some((feature, params)) = made else { return self.import_subtree(&flat, parent, index) };
+        let solid =
+            NodeData { type_id: "feature".into(), sketch: None, feature: Some(feature), params, ..data.clone() };
+        let id = self.import_subtree(&solid, parent, index)?;
+        let hidden = NodeData { name: format!("{} sketch", data.name), visible: false, ghost: false, ..flat };
+        let end = self.nodes[&parent].children.len();
+        self.import_subtree(&hidden, parent, end);
         Some(id)
     }
 

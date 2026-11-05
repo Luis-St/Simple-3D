@@ -1,6 +1,6 @@
 //! The editor's panel: the tool in use and what to do with it, then the tools with their settings
 //! (`window_tools.rs`), the view, the selection and what the constraints leave free, the
-//! constraint list and the feature (in their own files), and the buttons. It fills the right dock
+//! constraint list (in their own files), and the buttons. It fills the right dock
 //! while the docks are shown (`dock.rs`), else it floats over the viewport as an in-place popup.
 
 use super::open::finish_blocked;
@@ -76,7 +76,6 @@ pub(crate) fn body(app: &mut App, ui: &mut egui::Ui) {
         freedom(ui, &tool);
     });
     super::window_list::list(app, ui, &mut tool);
-    super::window_feature::feature(app, ui, &mut tool);
     app.sketch_tool = Some(tool);
 }
 

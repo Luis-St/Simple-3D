@@ -141,6 +141,10 @@ pub struct App {
     pub measure: Measure,
     /// The push/pull tool's hover and drag (issue 73).
     pub(crate) push_pull: crate::push_pull_tool::PushPull,
+    /// The closed regions of the kept sketches, found once per change (issue 74).
+    pub(crate) sketch_regions: crate::sketch_nodes::SketchRegions,
+    /// The revolve tool's profile, axis and turn (issue 74).
+    pub(crate) revolve: crate::revolve_tool::Revolve,
     /// Whether snapping is requested this frame (issue 68).
     pub(crate) snap_requested: bool,
     /// The feature the current drag is snapped onto, for the viewport to mark.

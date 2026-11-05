@@ -59,13 +59,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 let grips_owned = pattern_grips_interact(app, ui, &view);
                 // The section grip likewise slides the cut rather than selecting behind it (issue 71).
                 let section_owned = crate::section_tool::interact(app, ui, &view);
-                // Push/pull drags faces rather than handles (issue 73).
+                // Push/pull drags faces rather than handles (issue 73), and revolve clicks them (issue 74).
                 let owned = grips_owned
                     || section_owned
-                    || if app.mode == crate::gizmo::Mode::PushPull {
-                        crate::push_pull_tool::interact(app, ui, &response, &view)
-                    } else {
-                        manipulate(app, ui, &response, &view)
+                    || match app.mode {
+                        crate::gizmo::Mode::PushPull => crate::push_pull_tool::interact(app, ui, &response, &view),
+                        crate::gizmo::Mode::Revolve => crate::revolve_tool::interact(app, ui, &response, &view),
+                        _ => manipulate(app, ui, &response, &view),
                     };
                 // Picking is outside the manipulator, since with nothing selected there is no gizmo and the first
                 // click was lost.
@@ -133,6 +133,11 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     // Push/pull's swept solid is drawn in the picture (issue 73).
     if let Some((distance, _)) = app.push_pull.drag.as_ref().and_then(|drag| drag.prism.as_ref()) {
         distance.to_bits().hash(&mut hasher);
+    }
+    // So is the revolve tool's turned solid (issue 74).
+    if app.mode == crate::gizmo::Mode::Revolve {
+        app.revolve.generation.hash(&mut hasher);
+        app.revolve.cuts().hash(&mut hasher);
     }
     // The round tool's ghost is drawn in the picture too (issue 88).
     app.round_tool.as_ref().and_then(|tool| tool.picture_key()).hash(&mut hasher);

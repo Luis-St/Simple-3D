@@ -16,7 +16,7 @@ pub(crate) fn draw(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &Vie
         // picture itself (`prism.rs`), where walls in front hide it; until
         // there is one, the face held is tinted, being in front of everything along the pointer.
         if drag.prism.is_none() {
-            tint(app, painter, view, &drag.hit, token::ACCENT.gamma_multiply(0.25));
+            tint_target(app, painter, view, &drag.target, 0.25, false);
         }
         if let Some(cursor) = ui.input(|i| i.pointer.hover_pos()) {
             let unit = app.unit();
@@ -34,11 +34,24 @@ pub(crate) fn draw(app: &App, ui: &egui::Ui, painter: &egui::Painter, view: &Vie
     if !painter.clip_rect().contains(cursor) {
         return;
     }
-    if let Some((Ok(hit), _)) = app.face_under(view, cursor) {
-        tint(app, painter, view, &hit, token::ACCENT.gamma_multiply(0.18));
-        for points in &hit.face.loops {
-            outline(painter, view, points, egui::Stroke::new(1.5_f32, token::ACCENT));
+    if let Some((Ok(target), _)) = app.push_target_under(view, cursor) {
+        tint_target(app, painter, view, &target, 0.18, true);
+    }
+}
+
+/// A face or region tinted at `strength`, with its edge drawn if `edge`.
+pub(crate) fn tint_target(app: &App, painter: &egui::Painter, view: &View, target: &Target, strength: f32, edge: bool) {
+    let colour = token::ACCENT.gamma_multiply(strength);
+    match target {
+        Target::Face(hit) => {
+            tint(app, painter, view, hit, colour);
+            if edge {
+                for points in &hit.face.loops {
+                    outline(painter, view, points, egui::Stroke::new(1.5_f32, token::ACCENT));
+                }
+            }
         }
+        Target::Region(hit, _) => crate::sketch_nodes::tint(painter, view, hit, colour, edge),
     }
 }
 

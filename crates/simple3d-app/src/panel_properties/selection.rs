@@ -45,6 +45,10 @@ pub fn show_inside(app: &mut App, ui: &mut egui::Ui) {
                 Body::Sketch { .. } if targets.len() == 1 => {
                     section(ui, "Sketch", |ui| sketch_body(app, ui, primary, &mut command))
                 }
+                Body::Feature { feature, .. } if targets.len() == 1 => {
+                    let title = if feature.is_revolve() { "Revolve" } else { "Extrusion" };
+                    section(ui, title, |ui| feature_body(app, ui, primary, &mut command))
+                }
                 Body::Component { .. } if targets.len() == 1 => {
                     section(ui, "Component", |ui| component_body(app, ui, primary, &mut open_component))
                 }
