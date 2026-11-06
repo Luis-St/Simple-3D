@@ -34,7 +34,7 @@ impl App {
 
     /// Lift the on-screen component off `App`, leaving the project's other state.
     fn take_component(&mut self) -> Component {
-        self.cancel_simplify_tool();
+        self.cancel_mesh_tools();
         Component { id: self.project.active, model: self.take_model() }
     }
 

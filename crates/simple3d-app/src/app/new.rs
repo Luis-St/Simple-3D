@@ -121,6 +121,8 @@ impl App {
             last_duplicate: Vec::new(),
             repeat_hold: false,
             simplify_tool: None,
+            shape_tool: None,
+            preview_committed: None,
             reassemble_tool: None,
             round_tool: None,
             split_job: None,

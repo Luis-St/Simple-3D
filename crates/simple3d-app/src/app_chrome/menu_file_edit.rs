@@ -137,6 +137,12 @@ impl App {
                 Command::SimplifyMesh,
                 self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
             );
+            // Noise, smoothing and the like over a mesh's surface (issue 81).
+            self.command_item(
+                ui,
+                Command::MeshFunction,
+                self.selection.len() == 1 && self.primary().is_some_and(|id| self.scene.node(id).is_mesh()),
+            );
             // The way back from conversion, enabled on the same rows (issue 108).
             self.command_item(
                 ui,

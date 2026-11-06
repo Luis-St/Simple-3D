@@ -28,6 +28,7 @@ impl Command {
         Command::NewComponent,
         Command::ConvertToMesh,
         Command::SimplifyMesh,
+        Command::MeshFunction,
         Command::RoundEdges,
         Command::Reassemble,
         Command::SplitIntoPieces,

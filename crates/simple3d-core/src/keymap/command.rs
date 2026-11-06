@@ -31,6 +31,7 @@ pub enum Command {
     NewComponent,
     ConvertToMesh,
     SimplifyMesh,
+    MeshFunction,
     RoundEdges,
     Reassemble,
     SplitIntoPieces,

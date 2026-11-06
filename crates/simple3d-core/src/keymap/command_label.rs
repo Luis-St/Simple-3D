@@ -30,6 +30,7 @@ impl Command {
             NewComponent => "New component",
             ConvertToMesh => "Convert to a mesh",
             SimplifyMesh => "Simplify the mesh",
+            MeshFunction => "Apply a function to the mesh",
             RoundEdges => "Round or bevel edges",
             Reassemble => "Reassemble into objects",
             SplitIntoPieces => "Split into smaller pieces",
@@ -89,7 +90,7 @@ impl Command {
         match self {
             New | Open | CloseTab | NextTab | PreviousTab | Save | SaveAs | Import | Export | Quit => Area::File,
             Undo | Redo | Copy | Cut | Paste | Duplicate | RepeatDuplicate | Delete | Group | Pattern
-            | MakeComponent | NewComponent | ConvertToMesh | SimplifyMesh | RoundEdges | Reassemble
+            | MakeComponent | NewComponent | ConvertToMesh | SimplifyMesh | MeshFunction | RoundEdges | Reassemble
             | SplitIntoPieces | CutOnFace | Sketch | Rejoin | Rename | ToggleVisibility | ToggleNegative | MoveUp
             | MoveDown => Area::Edit,
             FrameSelection | FrameAll | ZoomToPointer | ViewTop | ViewBottom | ViewFront | ViewBack | ViewLeft

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 fn wait_for_committed(app: &mut App) {
     app.refresh_committed(true);
     let deadline = Instant::now() + Duration::from_secs(60);
-    while !app.simplify_tool.as_ref().and_then(|tool| tool.committed.as_ref()).is_some_and(|c| c.stats.is_some()) {
+    while !app.preview_committed.as_ref().is_some_and(|c| c.stats.is_some()) {
         assert!(Instant::now() < deadline, "the committed evaluation never finished");
         std::thread::sleep(Duration::from_millis(2));
         app.refresh_committed(false);

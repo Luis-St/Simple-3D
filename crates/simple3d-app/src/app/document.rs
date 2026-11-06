@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// A tool's preview taken out of the document, to be put back (`App::lift_preview`).
 pub(crate) struct Lifted {
-    simplify: Option<(NodeId, Arc<MeshData>)>,
+    mesh: Option<(NodeId, Arc<MeshData>)>,
     round: crate::round_tool::Lifted,
 }
 
@@ -25,20 +25,18 @@ impl App {
     }
 
     /// Lift a tool's preview out of the document while snapshotting (issue 106), returning what to put
-    /// back. The simplify preview and the round tool's draft (issue 88) live in the document but are
-    /// not edits; an undo step over them would restore an unaccepted result. Inert once the tools have
-    /// let go.
+    /// back. A mesh tool's result (`crate::mesh_preview`) and the round tool's draft (issue 88) live in
+    /// the document but are not edits; an undo step over them would restore an unaccepted result. Inert
+    /// once the tools have let go.
     pub(crate) fn lift_preview(&mut self) -> Lifted {
-        let simplify = self.simplify_tool.as_ref().and_then(|tool| {
-            let showing = tool.shown.as_ref()?.mesh.clone();
-            let (target, original) = (tool.target, tool.original.clone());
-            self.scene.set_mesh(target, original).then_some((target, showing))
-        });
-        Lifted { simplify, round: self.lift_round_draft() }
+        let standing = self.standing_preview().map(|s| (s.target, s.original.clone(), s.showing.clone()));
+        let mesh = standing
+            .and_then(|(target, original, showing)| self.scene.set_mesh(target, original).then_some((target, showing)));
+        Lifted { mesh, round: self.lift_round_draft() }
     }
 
     pub(crate) fn drop_preview_back(&mut self, lifted: Lifted) {
-        if let Some((target, mesh)) = lifted.simplify {
+        if let Some((target, mesh)) = lifted.mesh {
             self.scene.set_mesh(target, mesh);
         }
         self.put_round_draft_back(&lifted.round);

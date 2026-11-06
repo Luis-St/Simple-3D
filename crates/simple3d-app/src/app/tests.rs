@@ -43,6 +43,7 @@ mod mesh;
 mod pattern_edit;
 mod reassemble;
 mod reassemble_single;
+mod shape;
 mod simplify;
 mod simplify_committed;
 mod snap;

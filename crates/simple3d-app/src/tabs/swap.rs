@@ -25,8 +25,8 @@ impl App {
 
     /// Lift the current document off `App`, clearing document fields and leaving window ones.
     pub(super) fn detach(&mut self) -> Document {
-        // Undo the simplify preview first, or the tab would return holding an unaccepted result (issue 106).
-        self.cancel_simplify_tool();
+        // Undo a mesh tool's preview first, or the tab would return holding an unaccepted result (issue 106).
+        self.cancel_mesh_tools();
         self.cancel_round_tool();
         let model = self.take_model();
         Document { model, path: self.path.take(), project: std::mem::take(&mut self.project) }
@@ -79,6 +79,7 @@ impl App {
         self.last_duplicate.clear();
         self.repeat_hold = false;
         self.simplify_tool = None;
+        self.shape_tool = None;
         self.reassemble_tool = None;
         self.round_tool = None;
 

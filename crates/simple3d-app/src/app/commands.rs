@@ -55,6 +55,7 @@ impl App {
             NewComponent => self.new_component(),
             ConvertToMesh => self.convert_selection_to_mesh(),
             SimplifyMesh => self.open_simplify_tool(),
+            MeshFunction => self.open_shape_tool(),
             RoundEdges => self.open_round_tool(),
             Reassemble => self.open_reassemble_tool(),
             SplitIntoPieces => self.open_split_tool(),

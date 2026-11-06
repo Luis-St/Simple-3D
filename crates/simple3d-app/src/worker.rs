@@ -13,6 +13,8 @@ mod import;
 pub use import::ImportJob;
 mod reassemble;
 pub use reassemble::ReassembleJob;
+mod shaping;
+pub use shaping::ShapeJob;
 mod simplify;
 pub use simplify::SimplifyJob;
 mod split;

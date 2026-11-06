@@ -96,10 +96,11 @@ pub(crate) fn context_menu(app: &mut App, response: &egui::Response, id: NodeId,
             }
         }
         blocks.rule();
-        // What a node can be turned into: mesh (issue 80), simplify (issue 106), split, also re-cutting
-        // a split (issue 82), and unsplit.
+        // What a node can be turned into: mesh (issue 80), simplify (issue 106), a function over it
+        // (issue 81), split, also re-cutting a split (issue 82), and unsplit.
         item(ui, &mut blocks, keymap, &mut chosen, Command::ConvertToMesh, !is_root && !app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::SimplifyMesh, !multiple && app.scene.node(id).is_mesh());
+        item(ui, &mut blocks, keymap, &mut chosen, Command::MeshFunction, !multiple && app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::Reassemble, !multiple && app.scene.node(id).is_mesh());
         item(ui, &mut blocks, keymap, &mut chosen, Command::SplitIntoPieces, !is_root && !multiple);
         item(ui, &mut blocks, keymap, &mut chosen, Command::Rejoin, !multiple && app.scene.node(id).is_split());

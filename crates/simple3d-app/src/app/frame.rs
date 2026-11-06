@@ -65,6 +65,7 @@ impl App {
         crate::sketch_tool::show(self, ctx);
         crate::size_tool::show(self, ctx);
         crate::simplify_tool::show(self, ctx);
+        crate::shape_tool::show(self, ctx);
         crate::reassemble_tool::show(self, ctx);
         crate::measure_tool::show(self, ctx);
         crate::round_tool::show(self, ctx);

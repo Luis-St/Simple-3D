@@ -15,6 +15,7 @@ pub mod repair;
 pub mod revolve;
 pub mod rounding;
 pub mod section;
+pub mod shaping;
 pub mod simplify;
 pub mod tiling;
 pub mod topology;

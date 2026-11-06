@@ -43,6 +43,7 @@ impl Keymap {
         set(ConvertToMesh, Chord::ctrl_shift("M"));
         // Simplify (issue 106): R for reduce, beside Convert; plain R is resize.
         set(SimplifyMesh, Chord::ctrl_shift("R"));
+        set(MeshFunction, Chord::ctrl_shift("N"));
         // Round and bevel edges (issue 88): B for bevel.
         set(RoundEdges, Chord::ctrl_shift("B"));
         // Push/pull (issue 73), the fifth tool, on P in every preset.

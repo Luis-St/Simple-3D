@@ -116,6 +116,7 @@ impl App {
             || self.split_job.is_some()
             || self.cut_job.is_some()
             || self.simplify_tool.as_ref().is_some_and(|tool| tool.job.is_some())
+            || self.shape_tool.as_ref().is_some_and(|tool| tool.job.is_some())
             || self.reassemble_tool.as_ref().is_some_and(|tool| tool.job.is_some())
     }
 }

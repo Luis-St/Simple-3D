@@ -17,6 +17,8 @@ impl App {
             self.status = Status::Warning("There is no detail there to drop".into());
             return;
         }
+        // The two mesh tools share the one preview (`crate::mesh_preview`).
+        self.cancel_shape_tool();
         self.simplify_tool = Some(SimplifyTool {
             target: id,
             original: mesh,
@@ -24,7 +26,6 @@ impl App {
             shown: None,
             job: None,
             wireframe: true,
-            committed: None,
         });
     }
 }

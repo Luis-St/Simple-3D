@@ -216,6 +216,11 @@ pub struct App {
     /// The simplify tool's window (issue 106). Its result goes into the document live, so it keeps
     /// the original mesh for Cancel. See [`crate::simplify_tool`].
     pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
+    /// The mesh function tool's window (issue 81), previewing like Simplify. See [`crate::shape_tool`].
+    pub shape_tool: Option<crate::shape_tool::ShapeTool>,
+    /// The document evaluated with a standing mesh preview lifted out, for the committed numbers
+    /// (`crate::mesh_preview`).
+    pub(crate) preview_committed: Option<crate::mesh_preview::Committed>,
     /// The edge rounding tool's window (issue 88); see [`crate::round_tool`].
     pub round_tool: Option<crate::round_tool::RoundTool>,
     /// The reassembly tool's window (issue 108). Its subtree only enters the document on accept, to
