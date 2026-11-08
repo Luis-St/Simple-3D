@@ -110,3 +110,9 @@ pub(crate) const EDGE_ON: f64 = 1e-6;
 /// degrees so a 32-segment torus's 22.5-degree rings are not scribbled over; 35 keeps every real
 /// corner.
 pub(crate) const SELECTION_CREASE: f64 = 35.0;
+
+/// The same between two smooth-shaded triangles, as every mesh body's are. A brushed surface bends
+/// past 35 degrees from one coarse triangle to the next all over its folds, and the highlight
+/// scribbled broken strokes there that came and went with the angle; the shading already shows
+/// those folds. A converted box's 90-degree corners stay lined.
+pub(crate) const SMOOTH_SELECTION_CREASE: f64 = 60.0;

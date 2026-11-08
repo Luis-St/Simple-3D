@@ -143,6 +143,7 @@ impl App {
                         Mode::Scale => "Scale",
                         Mode::PushPull => "Push / pull",
                         Mode::Revolve => "Revolve",
+                        Mode::Brush => "Brush",
                     },
                     None,
                 );

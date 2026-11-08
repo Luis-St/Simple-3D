@@ -1,4 +1,5 @@
 pub mod aabb;
+pub mod brush;
 pub mod csg_bsp;
 pub mod hull;
 pub mod mesh;

@@ -38,10 +38,6 @@ impl Edits {
         self.vertices.clear();
         self.triangles.clear();
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.since == self.revision
-    }
 }
 
 /// Add the sorted `indices` to the stretches in `ranges`, joining those within [`JOIN`] and keeping
@@ -86,7 +82,7 @@ mod tests {
         assert_eq!(edits.triangles, vec![3..4]);
         assert_eq!((edits.since, edits.revision), (0, 2));
         edits.sent();
-        assert!(edits.is_empty() && edits.vertices.is_empty());
+        assert!(edits.since == edits.revision && edits.vertices.is_empty());
     }
 
     #[test]

@@ -18,6 +18,7 @@ pub fn tool(mode: Mode) -> (Glyph, Command) {
         Mode::Scale => (Glyph::Scale, Command::ModeScale),
         Mode::PushPull => (Glyph::PushPull, Command::ModePushPull),
         Mode::Revolve => (Glyph::Revolve, Command::ModeRevolve),
+        Mode::Brush => (Glyph::Brush, Command::ModeBrush),
     }
 }
 

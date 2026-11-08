@@ -9,7 +9,7 @@ use crate::raster::Rgba;
 use crate::render::{
     mark_colours, shade, tag_bases, to_vertex, Live, Palette, Renderable, Request, Style, EDGE_BIAS, EDGE_ON,
     EDGE_SLOPE_CAP, EDGE_SLOPE_PIXELS, MARK_BIAS, PREVIEW_BIAS, SELECTION_BIAS, SELECTION_CREASE, SELECTION_SLOPE_CAP,
-    SELECTION_SLOPE_PIXELS,
+    SELECTION_SLOPE_PIXELS, SMOOTH_SELECTION_CREASE,
 };
 use crate::snap::MARK_AXIS;
 use crate::view::View;

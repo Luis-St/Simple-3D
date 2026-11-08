@@ -12,6 +12,15 @@ pub(super) fn paint(pen: &Pen<'_>, glyph: Glyph) {
             pen.line(&[(0.50, 0.82), (0.50, 0.92)]);
             pen.arrow((0.50, 0.62), (0.50, 0.08));
         }
+        // A surface line raised into a bump, under the dashed circle of the brush shaping it.
+        Glyph::Brush => {
+            pen.line(&[(0.06, 0.80), (0.28, 0.80), (0.36, 0.76), (0.42, 0.62), (0.50, 0.56)]);
+            pen.line(&[(0.50, 0.56), (0.58, 0.62), (0.64, 0.76), (0.72, 0.80), (0.94, 0.80)]);
+            for i in 0..8 {
+                let from = TAU * (i as f32 / 8.0 + 0.02);
+                pen.ellipse(0.50, 0.40, 0.34, 0.20, from, from + TAU * 0.07);
+            }
+        }
         // A square with its top right corner rounded off.
         Glyph::Round => {
             pen.line(&[(0.48, 0.14), (0.14, 0.14), (0.14, 0.86), (0.86, 0.86), (0.86, 0.52)]);

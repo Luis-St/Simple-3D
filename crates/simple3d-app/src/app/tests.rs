@@ -1,5 +1,6 @@
 mod add_popup;
 mod bounds;
+mod brush;
 mod camera;
 mod components;
 mod components_files;

@@ -72,6 +72,9 @@ pub struct AppSettings {
     /// The last mesh function settings (issue 81); older files read as the default.
     #[serde(default)]
     pub last_shaping: simple3d_geom::shaping::Shaping,
+    /// The brush's settings (issue 127); older files read as the default.
+    #[serde(default)]
+    pub last_brush: simple3d_geom::brush::Brush,
     /// The last reassembly settings (issue 108); older files read as the default.
     #[serde(default)]
     pub last_reassemble: simple3d_geom::reassemble::Reassemble,
@@ -109,6 +112,7 @@ impl Default for AppSettings {
             last_split: simple3d_geom::tiling::SplitPlan::default(),
             last_simplify: simple3d_geom::simplify::Simplify::default(),
             last_shaping: simple3d_geom::shaping::Shaping::default(),
+            last_brush: simple3d_geom::brush::Brush::default(),
             last_reassemble: simple3d_geom::reassemble::Reassemble::default(),
             recent_files: Vec::new(),
         }

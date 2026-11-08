@@ -70,9 +70,10 @@ pub(crate) fn push_selection(
     let front: Vec<bool> = normals.iter().map(|normal| normal.dot(towards) < -EDGE_ON).collect();
     let faces_the_eye = |face: u32| front.get(face as usize).copied().unwrap_or(false);
     // Corners are measured from the faces, not taken from the feature edges, which use another angle.
-    let cos_limit = SELECTION_CREASE.to_radians().cos();
+    let (cos_limit, cos_smooth) = (SELECTION_CREASE.to_radians().cos(), SMOOTH_SELECTION_CREASE.to_radians().cos());
+    let smooth = |face: u32| item.corner_normals.get(face as usize).is_some_and(|corners| corners[0] != Vec3::ZERO);
     let is_corner = |a: u32, b: u32| match (normals.get(a as usize), normals.get(b as usize)) {
-        (Some(a), Some(b)) => a.dot(*b) < cos_limit,
+        (Some(n), Some(m)) => n.dot(*m) < if smooth(a) && smooth(b) { cos_smooth } else { cos_limit },
         _ => false,
     };
     let centroid = |face: u32| -> Option<Vec3> {

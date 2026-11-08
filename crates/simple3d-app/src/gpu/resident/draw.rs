@@ -159,10 +159,11 @@ impl Gpu {
         set_i32(gl, program, "u_table_width", self.table_width as i32);
         set_f32(gl, program, "u_edge_on", EDGE_ON as f32);
         set_f32(gl, program, "u_crease", SELECTION_CREASE.to_radians().cos() as f32);
+        set_f32(gl, program, "u_smooth_crease", SMOOTH_SELECTION_CREASE.to_radians().cos() as f32);
         set_f32(gl, program, "u_bias", SELECTION_BIAS);
         set_f32(gl, program, "u_slope_pixels", SELECTION_SLOPE_PIXELS);
         set_f32(gl, program, "u_slope_cap", SELECTION_SLOPE_CAP);
-        for (unit, name) in ["u_positions", "u_triangles", "u_bodies"].into_iter().enumerate() {
+        for (unit, name) in ["u_positions", "u_triangles", "u_bodies", "u_corners"].into_iter().enumerate() {
             set_i32(gl, program, name, unit as i32);
         }
         for draw in draws {
@@ -175,14 +176,16 @@ impl Gpu {
             set4(gl, program, "u_colour", &as_float(draw.colour));
             set_u32(gl, program, "u_tag_base", draw.tag_base as u32);
             set_i32(gl, program, "u_all_creases", draw.all_creases as i32);
-            for (unit, texture) in [tables.positions, tables.triangles, tables.bodies].into_iter().enumerate() {
+            set_i32(gl, program, "u_has_corners", resident.corners.is_some() as i32);
+            let textures = [Some(tables.positions), Some(tables.triangles), Some(tables.bodies), resident.corners];
+            for (unit, texture) in textures.into_iter().enumerate() {
                 gl.active_texture(glow::TEXTURE0 + unit as u32);
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                gl.bind_texture(glow::TEXTURE_2D, texture);
             }
             gl.bind_vertex_array(Some(outline.array));
             gl.draw_arrays(glow::POINTS, 0, outline.count);
         }
-        for unit in 0..3 {
+        for unit in 0..4 {
             gl.active_texture(glow::TEXTURE0 + unit);
             gl.bind_texture(glow::TEXTURE_2D, None);
         }

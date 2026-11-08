@@ -123,6 +123,7 @@ impl App {
             simplify_tool: None,
             shape_tool: None,
             sculpt: None,
+            brush: Default::default(),
             preview_committed: None,
             reassemble_tool: None,
             round_tool: None,

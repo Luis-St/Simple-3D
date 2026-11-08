@@ -11,6 +11,7 @@ mod components;
 mod dock;
 // Pointer gestures, executed. Test-only.
 mod arrange_tool;
+mod brush_tool;
 mod cut_tool;
 #[cfg(test)]
 mod gestures;

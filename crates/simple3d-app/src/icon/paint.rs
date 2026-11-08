@@ -9,6 +9,7 @@ pub(crate) fn paint(pen: &Pen<'_>, glyph: Glyph) {
     }
     match glyph {
         Glyph::PushPull
+        | Glyph::Brush
         | Glyph::Round
         | Glyph::Extrusion
         | Glyph::Mirror

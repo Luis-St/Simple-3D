@@ -10,6 +10,7 @@ mod noise;
 pub use noise::Noise;
 mod refine;
 pub use refine::refine_until;
+pub(crate) use refine::split_longest;
 mod smooth;
 mod weights;
 pub use weights::weights;

@@ -84,7 +84,7 @@ impl Gizmo {
                 out
             }
             Mode::Rotate => (0..3).map(Handle::RotateRing).collect(),
-            Mode::PushPull | Mode::Revolve => Vec::new(),
+            Mode::PushPull | Mode::Revolve | Mode::Brush => Vec::new(),
             // Scale works on every axis and corner, for groups as well as primitives.
             Mode::Scale => {
                 let mut out: Vec<Handle> = CORNERS.iter().map(|c| Handle::ResizeCorner(*c)).collect();

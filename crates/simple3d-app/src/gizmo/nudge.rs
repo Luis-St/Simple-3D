@@ -94,7 +94,7 @@ pub fn nudge_step(gizmo: &Gizmo, view: &View, command: Command, move_snap: f64, 
     let (axis, sign) = nudge_axis(gizmo, view, command)?;
     Some(match gizmo.mode {
         // Push/pull has no handles of its own, so the arrow keys keep moving the selection.
-        Mode::Move | Mode::PushPull | Mode::Revolve => {
+        Mode::Move | Mode::PushPull | Mode::Revolve | Mode::Brush => {
             Nudge::Move { axis, world_delta: gizmo.axes[axis] * (move_snap * sign) }
         }
         Mode::Rotate => Nudge::Rotate { axis, degrees: rotate_snap_deg * sign },

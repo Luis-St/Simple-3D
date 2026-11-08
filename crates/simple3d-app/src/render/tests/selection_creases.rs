@@ -3,8 +3,8 @@
 use super::*;
 use crate::raster::Image;
 use simple3d_core::config::DisplayMode;
-use simple3d_geom::Vec3;
 use simple3d_geom::primitives;
+use simple3d_geom::Vec3;
 
 /// The creases inside the contour carry the selection colour too (issue 89), but not the
 /// hidden ones at the far corner, which once drew a cage. Shaded mode, so every accent pixel
@@ -145,4 +145,79 @@ pub(crate) fn a_glowing_body_is_seen_through_whatever_is_in_front_of_it() {
     // Outlined alone it is invisible, behind 15 mm of solid.
     assert_eq!(changed(Style::Selected), 0, "the buried body showed through without being asked to");
     assert!(changed(Style::Glow) > 100, "the glow of the buried body did not reach the frame");
+}
+
+/// A 20 mm box whose top is folded 45 degrees across its diagonal, by lifting a top corner off it,
+/// with the fold's middle on screen.
+fn folded_box() -> (simple3d_geom::Mesh, Vec3) {
+    let mut mesh = primitives::box_mesh(20.0, 20.0, 20.0).weld();
+    let top: Vec<[u32; 3]> =
+        mesh.indices.iter().copied().filter(|t| t.iter().all(|&v| mesh.positions[v as usize].z > 9.0)).collect();
+    let [first, second] = top[..] else { panic!("a box top is two triangles") };
+    let lifted = first.into_iter().find(|v| !second.contains(v)).expect("a corner off the diagonal");
+    let [a, b] = first.into_iter().filter(|v| second.contains(v)).collect::<Vec<_>>()[..] else {
+        panic!("one diagonal")
+    };
+    // Half the diagonal's length up from 14.1 mm away tilts that half of the top by 45 degrees.
+    mesh.positions[lifted as usize].z += 20.0 / 2f64.sqrt();
+    let middle = (mesh.positions[a as usize] + mesh.positions[b as usize]) * 0.5;
+    (mesh, middle)
+}
+
+/// A brushed mesh body bends past the 35-degree corner limit between coarse triangles all over its
+/// folds, and the highlight drew broken strokes along them that came and went with the angle; the
+/// fold is shaded there anyway. Between smooth triangles only a sharper corner is lined, a box's
+/// still is, and a flat body's 45-degree fold keeps its line. On both renderers.
+#[test]
+pub(crate) fn a_smooth_bodys_gentle_folds_are_not_lined_but_its_corners_are() {
+    let (mesh, middle) = folded_box();
+    let mut smooth_mesh = mesh.clone();
+    smooth_mesh.set_source(7);
+    let flat = Renderable::prepare_outlined(&mesh);
+    let smooth = Renderable::prepare_node(&smooth_mesh, true, &[7].into());
+    let accent = Palette::dark().selected;
+    let req = |selected| {
+        request(
+            vec![
+                Item { renderable: selected, style: Style::Solid },
+                Item { renderable: selected, style: Style::Selected },
+            ],
+            DisplayMode::Shaded,
+        )
+    };
+    let at = |point: Vec3| {
+        let p = req(&flat).view.project(point).expect("the box is in frame").0;
+        (p.x.round() as usize, p.y.round() as usize)
+    };
+    // The fold's middle, and the middle of the vertical edge nearest the camera.
+    let fold = at(middle);
+    let near = [(-10.0, -10.0), (-10.0, 10.0), (10.0, -10.0), (10.0, 10.0)]
+        .map(|(x, y)| Vec3::new(x, y, 0.0))
+        .into_iter()
+        .min_by(|a, b| req(&flat).view.to_view(*a).z.total_cmp(&req(&flat).view.to_view(*b).z))
+        .expect("four corners");
+    let near = at(near);
+    let lit = |pixels: &[u8], width: usize, (x, y): (usize, usize)| {
+        (y - 1..=y + 1).any(|row| {
+            (x - 1..=x + 1).any(|col| {
+                let o = (row * width + col) * 4;
+                pixels[o..o + 3] == accent[..3]
+            })
+        })
+    };
+    let cpu = |renderable| {
+        let frame = render(&req(renderable));
+        (lit(&frame.color, frame.width, fold), lit(&frame.color, frame.width, near))
+    };
+    assert_eq!(cpu(&flat), (true, true), "a flat body's fold or corner lost its line");
+    assert_eq!(cpu(&smooth), (false, true), "a smooth body's gentle fold was lined, or its corner was not");
+    if let Some(headless) = super::gpu::headless() {
+        let gpu = |renderable| {
+            let request = req(renderable);
+            let pixels = super::gpu::gpu_render(&headless, &request);
+            (lit(&pixels, request.size[0], fold), lit(&pixels, request.size[0], near))
+        };
+        assert_eq!(gpu(&flat), (true, true), "on the GPU, a flat body's fold or corner lost its line");
+        assert_eq!(gpu(&smooth), (false, true), "on the GPU, a smooth body's gentle fold was lined");
+    }
 }

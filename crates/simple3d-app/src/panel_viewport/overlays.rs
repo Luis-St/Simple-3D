@@ -59,6 +59,7 @@ pub(crate) fn overlays(app: &mut App, ui: &mut egui::Ui, rect: egui::Rect, view:
 
     // The face push/pull would take, or the solid it is sweeping (issue 73).
     crate::push_pull_tool::draw(app, ui, &painter, view);
+    crate::brush_tool::draw(app, &painter, view);
 
     // The profile, axis and turn of a revolve (issue 74).
     crate::revolve_tool::draw(app, ui, &painter, view);

@@ -50,6 +50,13 @@ impl Keymap {
         set(ModePushPull, Chord::key("P"));
         // Revolve (issue 74): R for revolve, free with Alt in every preset.
         set(ModeRevolve, Chord::alt("R"));
+        // The brush (issue 127): B for brush, free with Alt in every preset. Its size and strength on the
+        // comma and full stop, which every layout reaches without Shift or AltGr, unlike the brackets.
+        set(ModeBrush, Chord::alt("B"));
+        set(BrushSmaller, Chord::key("Comma"));
+        set(BrushLarger, Chord::key("Period"));
+        set(BrushWeaker, Chord::alt("Comma"));
+        set(BrushStronger, Chord::alt("Period"));
         // Reassemble (issue 108): A for assemble, beside the conversion it undoes.
         set(Reassemble, Chord::ctrl_shift("A"));
         // Split into pieces (issue 82): K for knife.

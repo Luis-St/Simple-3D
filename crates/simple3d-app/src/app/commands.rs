@@ -114,6 +114,11 @@ impl App {
             ModeScale => self.pick_transform(Mode::Scale),
             ModePushPull => self.pick_transform(Mode::PushPull),
             ModeRevolve => self.pick_transform(Mode::Revolve),
+            ModeBrush => self.pick_transform(Mode::Brush),
+            BrushSmaller => self.resize_brush(1.0 / crate::brush_tool::STEP, 1.0),
+            BrushLarger => self.resize_brush(crate::brush_tool::STEP, 1.0),
+            BrushWeaker => self.resize_brush(1.0, 1.0 / crate::brush_tool::STEP),
+            BrushStronger => self.resize_brush(1.0, crate::brush_tool::STEP),
             MeasureTool => self.toggle_measure(),
             AlignDistribute => self.toggle_arrange_tool(),
             OntoFace => self.open_onto_face(),
@@ -195,6 +200,14 @@ impl App {
         }
         if mode == Mode::Revolve {
             self.status = Status::Info(crate::revolve_tool::step_hint(&self.revolve).into());
+        }
+        // The brush's working copy goes with the brush; a stroke still held is abandoned.
+        if mode == Mode::Brush {
+            self.status = Status::Info(crate::brush_tool::hint(self).into());
+        } else {
+            self.cancel_stroke();
+            self.brush = Default::default();
+            self.sculpt = None;
         }
         if self.measure.active {
             self.measure.active = false;

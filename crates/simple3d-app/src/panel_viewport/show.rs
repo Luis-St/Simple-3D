@@ -65,6 +65,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     || match app.mode {
                         crate::gizmo::Mode::PushPull => crate::push_pull_tool::interact(app, ui, &response, &view),
                         crate::gizmo::Mode::Revolve => crate::revolve_tool::interact(app, ui, &response, &view),
+                        crate::gizmo::Mode::Brush => crate::brush_tool::interact(app, ui, &response, &view),
                         _ => manipulate(app, ui, &response, &view),
                     };
                 // Picking is outside the manipulator, since with nothing selected there is no gizmo and the first

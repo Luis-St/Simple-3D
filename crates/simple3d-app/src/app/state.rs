@@ -220,6 +220,8 @@ pub struct App {
     pub shape_tool: Option<crate::shape_tool::ShapeTool>,
     /// The brush's working copy of a mesh body (issue 127), kept between strokes; see [`crate::sculpt`].
     pub(crate) sculpt: Option<crate::sculpt::Sculpt>,
+    /// The brush tool's pointer state (issue 127); see [`crate::brush_tool`].
+    pub(crate) brush: crate::brush_tool::BrushTool,
     /// The document evaluated with a standing mesh preview lifted out, for the committed numbers
     /// (`crate::mesh_preview`).
     pub(crate) preview_committed: Option<crate::mesh_preview::Committed>,

@@ -51,6 +51,13 @@ impl App {
             self.close_cut_tool();
             return;
         }
+        // Escape abandons a brush stroke in progress (issue 127).
+        if self.brush.stroke.is_some() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.brush.stroke = None;
+            self.cancel_stroke();
+            self.status = crate::app::Status::Info("Brush stroke cancelled".into());
+            return;
+        }
         // The sketch's own keys: Esc steps back, letters pick its tools (issue 74).
         if self.sketch_keys(ctx) {
             return;

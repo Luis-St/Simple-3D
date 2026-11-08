@@ -16,6 +16,7 @@
 
 mod app;
 mod build;
+mod detail;
 mod region;
 #[cfg(test)]
 mod tests;
@@ -67,17 +68,29 @@ pub(crate) struct Sculpt {
     pub settling: bool,
 }
 
-/// One stroke: where each vertex it moved was before, so Cancel can put it back.
+/// One stroke: where each vertex it moved was before, and facing which way, so Cancel can put it
+/// back and the noise mode can measure from there.
 #[derive(Default)]
 pub(crate) struct Stroke {
-    seen: Vec<bool>,
-    before: Vec<(u32, Vec3)>,
+    /// Each vertex's place in `before`, or `u32::MAX` while the stroke has not moved it.
+    seen: Vec<u32>,
+    before: Vec<(u32, Vec3, Vec3)>,
+    /// Detail was added: the triangles changed, so Cancel makes the copy again from `base`.
+    reshaped: bool,
+    /// How strongly each vertex may move, from the brush's keep settings (`shaping::weights`).
+    pub weights: Vec<f64>,
 }
 
 impl Stroke {
-    /// Whether the stroke has moved anything yet.
+    /// Where vertex `v` was when the stroke first moved it, and its normal then; `None` if not yet.
+    pub fn rest(&self, v: u32) -> Option<(Vec3, Vec3)> {
+        let at = *self.seen.get(v as usize)?;
+        self.before.get(at as usize).map(|&(_, position, normal)| (position, normal))
+    }
+
+    /// Whether the stroke has changed anything yet.
     pub fn is_empty(&self) -> bool {
-        self.before.is_empty()
+        self.before.is_empty() && !self.reshaped
     }
 }
 

@@ -16,6 +16,7 @@ mod section;
 pub(crate) use camera::*;
 mod add_popup;
 mod arrange_tool;
+mod brush;
 mod cursor;
 mod keys;
 mod measure;

@@ -13,6 +13,8 @@ pub enum Glyph {
     PushPull,
     /// The revolve tool (issue 74).
     Revolve,
+    /// A bump in a surface under a dashed brush circle: the brush (issue 127).
+    Brush,
     /// A square with one corner rounded off: the edge rounding tool (issue 88).
     Round,
     /// Squares spread along a curve: the align and distribute tool (issue 70).

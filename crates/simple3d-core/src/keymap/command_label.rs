@@ -70,6 +70,11 @@ impl Command {
             ModeScale => "Manipulator: scale",
             ModePushPull => "Push / pull a face",
             ModeRevolve => "Revolve a face or sketch region",
+            ModeBrush => "Brush a mesh",
+            BrushSmaller => "Brush: smaller",
+            BrushLarger => "Brush: larger",
+            BrushWeaker => "Brush: weaker",
+            BrushStronger => "Brush: stronger",
             MeasureTool => "Measure tool",
             AlignDistribute => "Align and distribute",
             OntoFace => "Put onto a face",
@@ -97,9 +102,10 @@ impl Command {
             | ViewRight | ViewIsometric | ToggleGrid | ToggleAxisX | ToggleAxisY | ToggleAxisZ | ToggleSection
             | AddWorkplane | DisplayShaded | DisplayShadedEdges | DisplayWireframe | ToggleBoundingBox
             | ToggleDocks | ResetLayout => Area::View,
-            ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | ModeRevolve | MeasureTool
-            | AlignDistribute | OntoFace | Mirror | SnapToGeometry | AddWithSettings | NudgeLeft | NudgeRight
-            | NudgeUp | NudgeDown | NudgeAway | NudgeToward => Area::Manipulate,
+            ModeMove | ModeRotate | ModeResize | ModeScale | ModePushPull | ModeRevolve | ModeBrush | BrushSmaller
+            | BrushLarger | BrushWeaker | BrushStronger | MeasureTool | AlignDistribute | OntoFace | Mirror
+            | SnapToGeometry | AddWithSettings | NudgeLeft | NudgeRight | NudgeUp | NudgeDown | NudgeAway
+            | NudgeToward => Area::Manipulate,
         }
     }
 }

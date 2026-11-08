@@ -50,6 +50,63 @@ pub fn refine_until(mesh: &Mesh, edge: f64, budget: usize, give_up: Abandon<'_>)
     }
 }
 
+/// One round of splitting by longest edges (Rivara's bisection): every triangle `pick` says yes to
+/// (by its corners) whose longest edge is longer than `edge` has that edge split at its middle, and
+/// so does every triangle an edge of which is split, so no triangle is ever cut across anything but
+/// its longest side and none turns into a sliver. `None` when nothing is split, or when the split
+/// would pass `budget` triangles. New vertices are numbered after the existing ones, in the order
+/// their edges are first met.
+pub(crate) fn split_longest(mesh: &Mesh, pick: &dyn Fn([Vec3; 3]) -> bool, edge: f64, budget: usize) -> Option<Mesh> {
+    let longest = |tri: &[u32; 3]| {
+        let length = |k: usize| (mesh.positions[tri[(k + 1) % 3] as usize] - mesh.positions[tri[k] as usize]).length();
+        let k = (0..3).max_by(|&i, &j| length(i).total_cmp(&length(j))).expect("three sides");
+        (key(tri[k], tri[(k + 1) % 3]), length(k))
+    };
+    let mut marked: FastMap<(u32, u32), u32> = FastMap::default();
+    for tri in &mesh.indices {
+        let (side, length) = longest(tri);
+        if length > edge && pick(mesh.corners(*tri)) {
+            marked.insert(side, 0);
+        }
+    }
+    if marked.is_empty() {
+        return None;
+    }
+    // A triangle with a split side has its longest side split too, until no more are added; each
+    // added side is longer than the one that called for it, so this ends.
+    loop {
+        let mut added = false;
+        for tri in &mesh.indices {
+            let touched = (0..3).any(|k| marked.contains_key(&key(tri[k], tri[(k + 1) % 3])));
+            let (side, _) = longest(tri);
+            if touched && !marked.contains_key(&side) {
+                marked.insert(side, 0);
+                added = true;
+            }
+        }
+        if !added {
+            break;
+        }
+    }
+    // Each split side adds a triangle on each side of it.
+    if mesh.indices.len() + 2 * marked.len() > budget {
+        return None;
+    }
+    // Numbered in the order the sides are first met, so the result depends only on the mesh.
+    let mut next_vertex = mesh.positions.len() as u32;
+    let mut mids: FastMap<(u32, u32), u32> = FastMap::default();
+    for tri in &mesh.indices {
+        for k in 0..3 {
+            let side = key(tri[k], tri[(k + 1) % 3]);
+            if marked.contains_key(&side) && !mids.contains_key(&side) {
+                mids.insert(side, next_vertex);
+                next_vertex += 1;
+            }
+        }
+    }
+    Some(split(mesh, &mids))
+}
+
 fn key(a: u32, b: u32) -> (u32, u32) {
     if a < b {
         (a, b)

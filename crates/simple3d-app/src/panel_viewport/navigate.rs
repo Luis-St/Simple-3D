@@ -76,6 +76,9 @@ pub(crate) fn navigate(app: &mut App, ui: &mut egui::Ui, response: &egui::Respon
         let towards_pointer =
             app.holding(Command::ZoomToPointer, |k| ui.input(|i| i.key_down(k)), ui.input(|i| i.modifiers));
         let anchor = if locked || !towards_pointer { None } else { at.map(|at| (rect, at)) };
-        apply_zoom(&mut app.scene.camera, &nav, scroll, anchor);
+        // The brush takes Ctrl and the wheel for its size (issue 127).
+        if !crate::brush_tool::takes_wheel(app, ui.input(|i| i.modifiers)) {
+            apply_zoom(&mut app.scene.camera, &nav, scroll, anchor);
+        }
     }
 }

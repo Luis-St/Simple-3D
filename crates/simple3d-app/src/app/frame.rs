@@ -70,6 +70,7 @@ impl App {
         crate::measure_tool::show(self, ctx);
         crate::round_tool::show(self, ctx);
         crate::revolve_tool::show(self, ctx);
+        crate::brush_tool::show(self, ctx);
         crate::section_tool::show(self, ctx);
         crate::pattern_tool::show(self, ctx);
         crate::noise_popup::show(self, ctx);

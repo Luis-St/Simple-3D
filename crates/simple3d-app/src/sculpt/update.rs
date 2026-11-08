@@ -11,7 +11,8 @@ impl Sculpt {
     pub fn begin(&mut self) {
         self.renderable.renew_id();
         self.edits.sent();
-        self.stroke = Some(Stroke { seen: vec![false; self.renderable.mesh.positions.len()], before: Vec::new() });
+        let seen = vec![u32::MAX; self.renderable.mesh.positions.len()];
+        self.stroke = Some(Stroke { seen, ..Stroke::default() });
         self.settling = false;
     }
 
@@ -20,8 +21,9 @@ impl Sculpt {
         let Some(stroke) = self.stroke.as_mut() else { return };
         let positions = &mut self.renderable.mesh.positions;
         for &(v, to) in moves {
-            if !std::mem::replace(&mut stroke.seen[v as usize], true) {
-                stroke.before.push((v, positions[v as usize]));
+            if stroke.seen[v as usize] == u32::MAX {
+                stroke.seen[v as usize] = stroke.before.len() as u32;
+                stroke.before.push((v, positions[v as usize], self.normals[v as usize]));
             }
             positions[v as usize] = to;
         }
@@ -34,8 +36,14 @@ impl Sculpt {
     /// Put every vertex the stroke moved back where it was, and end the stroke.
     pub fn restore(&mut self) {
         let Some(stroke) = self.stroke.take() else { return };
+        if stroke.reshaped {
+            let lagging = self.lagging;
+            *self = Sculpt::new(self.target, self.base.clone(), self.placement, self.colour);
+            self.lagging = lagging;
+            return;
+        }
         let mut moved = Vec::with_capacity(stroke.before.len());
-        for &(v, at) in &stroke.before {
+        for &(v, at, _) in &stroke.before {
             self.renderable.mesh.positions[v as usize] = at;
             moved.push(v);
         }

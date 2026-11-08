@@ -28,9 +28,13 @@ layout(line_strip, max_vertices = 4) out;
 flat in uvec4 g_edge[];
 
 uniform vec3 u_forward;
-// `EDGE_ON`, and the cosine of `SELECTION_CREASE`.
+// `EDGE_ON`, and the cosines of `SELECTION_CREASE` and of `SMOOTH_SELECTION_CREASE`, which holds
+// between two smooth triangles: those whose first corner normal in `u_corners` is not zero.
 uniform float u_edge_on;
 uniform float u_crease;
+uniform float u_smooth_crease;
+uniform int u_has_corners;
+uniform sampler2D u_corners;
 // Wireframe takes the creases facing away as well.
 uniform int u_all_creases;
 uniform vec4 u_colour;
@@ -69,6 +73,10 @@ void face(uint index, out vec3 normal, out vec3 centre, out float slope) {
     float k1 = pb.z - pa.z;
     float k2 = pc.z - pa.z;
     slope = abs(det) > 1e-6 ? length(vec2(k1 * e2.y - k2 * e1.y, e1.x * k2 - e2.x * k1) / det) : 1e30;
+}
+
+bool shaded_smooth(uint face) {
+    return u_has_corners == 1 && texelFetch(u_corners, cell(face * 3u), 0).xyz != vec3(0.0);
 }
 
 void line(vec3 a, vec3 b, float clip_a, float clip_b, vec2 shift, float bias, uint tag) {
@@ -115,7 +123,8 @@ void main() {
     uint tag = min(u_tag_base + texelFetch(u_bodies, cell(edge.x), 0).r + 1u, 65535u);
 
     bool silhouette = edge.z == edge.w || near_faces != far_faces;
-    bool crease = (u_all_creases == 1 || near_faces) && dot(near_normal, far_normal) < u_crease;
+    float limit = shaded_smooth(edge.z) && shaded_smooth(edge.w) ? u_smooth_crease : u_crease;
+    bool crease = (u_all_creases == 1 || near_faces) && dot(near_normal, far_normal) < limit;
     if (!silhouette && !crease) {
         return;
     }
