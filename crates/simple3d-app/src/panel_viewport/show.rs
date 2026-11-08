@@ -106,6 +106,8 @@ pub(crate) fn image_key(app: &App, size: [usize; 2], dark: bool) -> u64 {
     }
     // Nor are a held repeating duplicate's (issue 121), which follow the selection already in the key.
     app.repeat_hold.hash(&mut hasher);
+    // Nor is the brush's working copy (issue 127), which changes with every dab.
+    app.sculpt_shown().map(|sculpt| (sculpt.renderable.id, sculpt.edits.revision)).hash(&mut hasher);
     // Nor is the shape being set up before it is added.
     app.adding().hash(&mut hasher);
     // Nor are the mirror tool's (issue 122).

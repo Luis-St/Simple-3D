@@ -206,3 +206,29 @@ fn a_triangle_left_out_has_no_corners_and_cuts_the_smoothing_off() {
     assert!(corners[face][at].length() > 0.999);
     assert!((corners[face][at] - vertex[shared as usize]).length() > 1e-6);
 }
+
+/// Moving a few vertices and updating only them and their neighbours (the brush, issue 127) gives
+/// what computing every normal again gives.
+#[test]
+fn normals_updated_around_moved_vertices_match_a_full_recomputation() {
+    let mut mesh = ellipsoid_mesh(10.0, 10.0, 10.0, 24).weld();
+    let topology = Topology::of(&mesh);
+    let smooth = vec![true; mesh.indices.len()];
+    let mut vertex = vertex_normals(&mesh);
+    let mut corners = corner_normals(&mesh, &topology.edges, &topology.faces, 30.0, &smooth);
+    // A sharp dent, so some corners split at the new creases.
+    let moved: Vec<u32> = vec![40, 41, 65];
+    for &v in &moved {
+        mesh.positions[v as usize] = mesh.positions[v as usize] * 0.6;
+    }
+    let mut ring: Vec<u32> = moved.iter().flat_map(|&v| topology.neighbours.row(v as usize).to_vec()).collect();
+    ring.extend(&moved);
+    ring.sort_unstable();
+    ring.dedup();
+    vertex_normals_at(&mesh, &topology.faces, &ring, &mut vertex);
+    corner_normals_at(&mesh, &topology.edges, &topology.faces, 30.0, &smooth, &ring, &mut corners);
+    let close = |a: Vec3, b: Vec3| (a - b).length() < 1e-12;
+    assert!(vertex.iter().zip(vertex_normals(&mesh)).all(|(&a, b)| close(a, b)));
+    let full = corner_normals(&mesh, &topology.edges, &topology.faces, 30.0, &smooth);
+    assert!(corners.iter().zip(&full).all(|(a, b)| (0..3).all(|k| close(a[k], b[k]))));
+}

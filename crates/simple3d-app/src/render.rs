@@ -4,8 +4,10 @@
 mod cache;
 pub use cache::{RenderableCache, Wanted};
 mod renderable;
-pub(crate) use renderable::body_tag;
 pub use renderable::Renderable;
+pub(crate) use renderable::{body_tag, SMOOTH_CREASE};
+mod edits;
+pub use edits::Edits;
 mod palette;
 pub use palette::Palette;
 pub(crate) use palette::*;

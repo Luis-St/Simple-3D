@@ -8,10 +8,13 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 
 /// Smaller meshes are walked directly; building the tree costs more than the few casts they get.
-pub(super) const MIN_TRIANGLES: usize = 2_048;
+pub(crate) const MIN_TRIANGLES: usize = 2_048;
 
 /// How many triangles a leaf holds.
 const LEAF: usize = 4;
+
+mod refit;
+pub(crate) use refit::Refit;
 
 pub(crate) struct Bvh {
     nodes: Vec<Node>,
@@ -166,11 +169,7 @@ fn grow(
             let (a, b) = boxes[index as usize];
             (lo.min(a), hi.max(b))
         });
-        // Padding, so a ray hitting a triangle's very edge (within `ray_triangle`'s tolerance) is not
-        // rejected by its box.
-        let pad = (hi - lo).length() * 1e-9 + 1e-9;
-        let pad = Vec3::new(pad, pad, pad);
-        let (lo, hi) = (lo - pad, hi + pad);
+        let (lo, hi) = padded(lo, hi);
         if to - from <= LEAF {
             nodes[at] = Node { lo, hi, first: from as u32, count: (to - from) as u32 };
             continue;
@@ -198,6 +197,14 @@ fn grow(
         pending.push((first, from, from + middle));
         pending.push((first + 1, from + middle, to));
     }
+}
+
+/// A box grown slightly, so a ray hitting a triangle's very edge (within `ray_triangle`'s
+/// tolerance) is not rejected by it.
+fn padded(lo: Vec3, hi: Vec3) -> (Vec3, Vec3) {
+    let pad = (hi - lo).length() * 1e-9 + 1e-9;
+    let pad = Vec3::new(pad, pad, pad);
+    (lo - pad, hi + pad)
 }
 
 /// An empty box, for a fold to grow from.

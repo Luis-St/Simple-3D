@@ -10,7 +10,10 @@ use std::sync::OnceLock;
 mod topology;
 use topology::{bodies_of, border_edges_of, EdgeTable};
 mod smooth;
-pub(crate) use smooth::EDGE_CREASE;
+pub(crate) use smooth::{EDGE_CREASE, SMOOTH_CREASE};
+mod parts;
+mod working;
+use parts::parts_of;
 #[cfg(test)]
 pub(super) use topology::{border_edges, feature_edges};
 
@@ -104,22 +107,34 @@ impl Renderable {
         smooth: &BTreeSet<u32>,
     ) -> Renderable {
         let (welded, remap) = mesh.weld_with_remap();
+        let parts = parts_of(&remap, welded.positions.len(), ranges);
+        let flags = smooth::smooth_flags(&welded, smooth);
+        Renderable::prepare_welded(welded, outlined, &flags, parts)
+    }
+
+    /// A mesh that is welded already, kept as it is so its vertices and triangles keep their numbers:
+    /// the brush's working copy (`crate::sculpt`), which edits them in place. `flags` says which
+    /// triangles shade smooth (empty for none).
+    pub(crate) fn prepare_welded(
+        welded: Mesh,
+        outlined: bool,
+        flags: &[bool],
+        parts: BTreeMap<NodeId, Range<u32>>,
+    ) -> Renderable {
         let normals: Vec<Vec3> =
             map_in_order(welded.indices.len(), |index| welded.triangle_normal(welded.indices[index]));
         // Independent passes over the welded mesh run in parallel: sequentially they took most of a
         // second on a large import.
-        let (table, bodies, parts) = std::thread::scope(|scope| {
+        let (table, bodies) = std::thread::scope(|scope| {
             let table = scope.spawn(|| EdgeTable::of(&welded));
-            let parts = scope.spawn(|| parts_of(&remap, welded.positions.len(), ranges));
             let bodies = bodies_of(&welded);
-            (table.join().expect("the edge table panicked"), bodies, parts.join().expect("the parts panicked"))
+            (table.join().expect("the edge table panicked"), bodies)
         });
-        let flags = smooth::smooth_flags(&welded, smooth);
         let ((edges, edge_faces), outline, axis_spans, corner_normals) = std::thread::scope(|scope| {
             let outline = scope.spawn(|| if outlined { border_edges_of(&table) } else { Vec::new() });
             let spans = scope.spawn(|| std::array::from_fn(|axis| axis_inside_spans(&welded, &bodies, axis)));
-            let corners = scope.spawn(|| smooth::corners(&welded, &table, &flags));
-            let edges = smooth::feature_edges(&table, &normals, &flags);
+            let corners = scope.spawn(|| smooth::corners(&welded, &table, flags));
+            let edges = smooth::feature_edges(&table, &normals, flags);
             (
                 edges,
                 outline.join().expect("the outline panicked"),
@@ -228,40 +243,6 @@ impl Renderable {
     pub(crate) fn plane_marks(&self) -> &[Vec<[Vec3; 2]>; 3] {
         self.plane_marks.get_or_init(|| std::array::from_fn(|axis| plane_marks_of(&self.mesh, axis)))
     }
-}
-
-/// Which welded vertices are each node's ([`Renderable::parts`]).
-///
-/// Welded vertices are numbered by first appearance, so an unshared node range welds to a
-/// contiguous range. A node is dropped when its vertices weld to ones outside it, as with two
-/// touching bodies.
-fn parts_of(remap: &[u32], welded: usize, ranges: &BTreeMap<NodeId, Range<u32>>) -> BTreeMap<NodeId, Range<u32>> {
-    if ranges.is_empty() {
-        return BTreeMap::new();
-    }
-    // For each welded vertex, the first and last mesh vertices that went into it.
-    let mut first = vec![u32::MAX; welded];
-    let mut last = vec![0u32; welded];
-    for (index, &to) in remap.iter().enumerate() {
-        let to = to as usize;
-        first[to] = first[to].min(index as u32);
-        last[to] = index as u32;
-    }
-    let mut parts = BTreeMap::new();
-    for (&id, range) in ranges {
-        let (start, end) = (range.start as usize, range.end as usize);
-        if start >= end || end > remap.len() {
-            continue;
-        }
-        let lo = remap[start..end].iter().copied().min().unwrap_or(0) as usize;
-        let hi = remap[start..end].iter().copied().max().unwrap_or(0) as usize + 1;
-        // First copies come in order, so the lowest and highest decide; no copy may come after the range.
-        let owned = first[lo] >= range.start && first[hi - 1] < range.end;
-        if owned && last[lo..hi].iter().all(|&at| at < range.end) {
-            parts.insert(id, lo as u32..hi as u32);
-        }
-    }
-    parts
 }
 
 /// The depth-buffer tag of an item's body. Shared so cached spans and draws agree on it.

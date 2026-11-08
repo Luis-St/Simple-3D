@@ -43,7 +43,7 @@ pub(crate) fn push_glow(
 pub(crate) fn push_edges(
     steps: &mut Vec<Step>,
     view: &View,
-    item: &Renderable,
+    (item, hidden): (&Renderable, &std::ops::Range<u32>),
     screen: &[Vertex],
     (colour, tag_base): (Rgba, u16),
     section: &[Plane],
@@ -63,6 +63,9 @@ pub(crate) fn push_edges(
     extend_in_order(steps, item.edges.len(), |range, out| {
         for index in range {
             let edge = item.edges[index];
+            if hidden.contains(&edge[0]) {
+                continue;
+            }
             let [a, b] = edge.map(|corner| item.mesh.positions[corner as usize]);
             if quiet.holds(a, b) {
                 continue;

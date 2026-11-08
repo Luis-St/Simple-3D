@@ -12,7 +12,7 @@ use simple3d_geom::Vec3;
 pub(crate) fn push_shaded(
     steps: &mut Vec<Step>,
     view: &View,
-    item: &Renderable,
+    (item, hidden): (&Renderable, &std::ops::Range<u32>),
     screen: &[Vertex],
     colour_base: Rgba,
     alpha: u8,
@@ -26,6 +26,9 @@ pub(crate) fn push_shaded(
     extend_in_order(steps, item.mesh.indices.len(), |range, out| {
         for index in range {
             let tri = item.mesh.indices[index];
+            if hidden.contains(&tri[0]) {
+                continue;
+            }
             // Precomputed with the renderable; `Vec3::ZERO` for a degenerate triangle.
             let normal = item.normals[index];
             if normal == Vec3::ZERO || normal.dot(eye) <= 0.0 {

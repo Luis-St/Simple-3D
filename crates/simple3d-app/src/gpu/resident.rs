@@ -22,12 +22,16 @@ use simple3d_geom::Vec3;
 
 mod caps;
 mod draw;
+mod edit;
 mod plan;
 mod project;
+mod table;
 mod upload;
 pub(super) use plan::{mark_planes, plan};
 pub(super) use project::{front_face, rows_at, set_forward, set_projection, set_within};
-pub(super) use upload::{bytes_of, table, Format};
+use table::retable;
+pub(super) use table::{table, Format};
+pub(super) use upload::bytes_of;
 
 /// A vertex array and the element or vertex buffer it draws from.
 pub(super) struct Batch {
@@ -69,6 +73,8 @@ pub(crate) struct Resident {
     pub(super) edge_faces: Option<glow::Texture>,
     tables: Option<Tables>,
     outline: Option<Batch>,
+    /// The [`crate::render::Edits`] revision of a renderable edited in place that the card holds.
+    revision: u64,
 }
 
 /// Which parts of a resident a frame draws with.

@@ -37,6 +37,7 @@ mod reassemble_tool;
 mod render;
 mod revolve_tool;
 mod round_tool;
+mod sculpt;
 mod section_tool;
 mod shape_tool;
 mod shell;

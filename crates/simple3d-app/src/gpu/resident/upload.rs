@@ -18,6 +18,7 @@ impl Resident {
             edge_faces: None,
             tables: None,
             outline: None,
+            revision: 0,
         }
     }
 
@@ -149,72 +150,6 @@ fn far_corners(item: &Renderable, positions: &[[f32; 3]]) -> Vec<[f32; 4]> {
     corners
 }
 
-/// How a table's texels are laid out.
-#[derive(Clone, Copy)]
-pub(in crate::gpu) enum Format {
-    Vec3,
-    Vec4,
-    UVec3,
-    U16,
-    U32,
-}
-
-impl Format {
-    /// Internal format, pixel format, component type and bytes per texel.
-    fn gl(self) -> (u32, u32, u32, usize) {
-        match self {
-            Format::Vec3 => (glow::RGB32F, glow::RGB, glow::FLOAT, 12),
-            Format::Vec4 => (glow::RGBA32F, glow::RGBA, glow::FLOAT, 16),
-            Format::UVec3 => (glow::RGB32UI, glow::RGB_INTEGER, glow::UNSIGNED_INT, 12),
-            Format::U16 => (glow::R16UI, glow::RED_INTEGER, glow::UNSIGNED_SHORT, 2),
-            Format::U32 => (glow::R32UI, glow::RED_INTEGER, glow::UNSIGNED_INT, 4),
-        }
-    }
-}
-
-/// `count` texels as a texture `width` texels wide, filled row by row. The short last row is
-/// uploaded separately so nothing needs padding.
-pub(in crate::gpu) unsafe fn table(
-    gl: &glow::Context,
-    width: usize,
-    format: Format,
-    bytes: &[u8],
-    count: usize,
-) -> Result<glow::Texture, String> {
-    let (internal, pixels, kind, texel) = format.gl();
-    let rows = count.div_ceil(width).max(1);
-    let texture = gl.create_texture()?;
-    gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-    clamp_texture(gl, glow::NEAREST, glow::NEAREST);
-    gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-    let upload_width = if rows == 1 { count.max(1) } else { width };
-    gl.tex_image_2d(
-        glow::TEXTURE_2D,
-        0,
-        internal as i32,
-        upload_width as i32,
-        rows as i32,
-        0,
-        pixels,
-        kind,
-        glow::PixelUnpackData::Slice(None),
-    );
-    let full = count / upload_width;
-    if full > 0 {
-        let data = &bytes[..full * upload_width * texel];
-        let unpack = glow::PixelUnpackData::Slice(Some(data));
-        gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, 0, upload_width as i32, full as i32, pixels, kind, unpack);
-    }
-    let rest = count - full * upload_width;
-    if rest > 0 {
-        let data = &bytes[full * upload_width * texel..count * texel];
-        let unpack = glow::PixelUnpackData::Slice(Some(data));
-        gl.tex_sub_image_2d(glow::TEXTURE_2D, 0, 0, full as i32, rest as i32, 1, pixels, kind, unpack);
-    }
-    gl.bind_texture(glow::TEXTURE_2D, None);
-    Ok(texture)
-}
-
 unsafe fn buffer(gl: &glow::Context, target: u32, bytes: &[u8]) -> Result<glow::Buffer, String> {
     let buffer = gl.create_buffer()?;
     gl.bind_buffer(target, Some(buffer));
@@ -265,7 +200,20 @@ impl Gpu {
         let needs = plan.needs();
         for renderable in drawn {
             let id = renderable.id;
-            let resident = self.resident.entry(id).or_insert_with(|| Resident::new(renderable));
+            // A renderable edited in place sends what changed, or goes up whole when the card is out of step.
+            let edits = request.live.edits(id);
+            if let (Some(edits), Some(resident)) = (edits, self.resident.get_mut(&id)) {
+                if resident.revision == edits.since {
+                    resident.edit(gl, renderable, edits, self.table_width)?;
+                } else if resident.revision != edits.revision {
+                    resident.destroy(gl);
+                    self.resident.remove(&id);
+                }
+            }
+            let resident = self.resident.entry(id).or_insert_with(|| Resident {
+                revision: edits.map_or(0, |edits| edits.revision),
+                ..Resident::new(renderable)
+            });
             let need = needs.get(&id).copied().unwrap_or_default();
             resident.ensure(gl, renderable, need, self.table_width)?;
         }

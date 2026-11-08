@@ -87,6 +87,17 @@ pub(crate) fn paint_scene(
                 }
             }
         }
+        // The brush's working copy stands in for its node's committed geometry (issue 127). Where that is
+        // not one stretch of the scene, as in a boolean, the copy is drawn over it.
+        let target = app.sculpt_shown().map(|sculpt| sculpt.target);
+        let sculpt = app.sculpt.as_ref().filter(|_| target.is_some());
+        if let Some(sculpt) = sculpt {
+            if let Some(part) = solid.parts.get(&sculpt.target).filter(|_| whole) {
+                live.hidden.push((solid.id, part.clone()));
+            }
+            items.push(Item { renderable: &sculpt.renderable, style: Style::Solid });
+            live.edits.push((sculpt.renderable.id, &sculpt.edits));
+        }
         // A dragged cutter is a red shell with red edges, and the edges it cuts into are left out.
         let cutters: Vec<_> = app
             .moving_cutters()
@@ -115,7 +126,9 @@ pub(crate) fn paint_scene(
         for id in selected.iter().filter(|&&id| Some(id) != adding) {
             // A dragged cutter is outlined by its own red edges instead.
             let cutter = |renderable: &render::Renderable| cutters.iter().any(|(moving, _)| moving.id == renderable.id);
-            if let Some(renderable) = app.node_renderables.get(id).filter(|renderable| !cutter(renderable)) {
+            if let Some(sculpt) = sculpt.filter(|sculpt| sculpt.target == *id) {
+                items.push(Item { renderable: &sculpt.renderable, style: Style::Selected });
+            } else if let Some(renderable) = app.node_renderables.get(id).filter(|renderable| !cutter(renderable)) {
                 items.push(Item { renderable, style: Style::Selected });
             }
         }
@@ -194,6 +207,10 @@ pub(crate) fn paint_scene(
             }
         }
         app.image_key = key;
+        // Whichever engine drew it, the working copy's changes are on screen now.
+        if let Some(sculpt) = app.sculpt.as_mut() {
+            sculpt.edits.sent();
+        }
     }
 
     // Either way the result is a texture painted over the panel.

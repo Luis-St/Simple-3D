@@ -45,11 +45,15 @@ pub enum Style {
 
 /// A body being dragged, drawn where the drag has taken it. Only its placement changes, so its
 /// scene range is hidden and its own renderable drawn moved instead of re-evaluating. Keyed by
-/// renderable id.
+/// renderable id. The brush's working copy (issue 127) hides its node's range the same way, on both
+/// renderers.
 #[derive(Clone, Default)]
 pub struct Live<'a> {
     /// Welded vertex ranges to hide, with their triangles and edges: the dragged body's part.
     pub hidden: Vec<(u64, Range<u32>)>,
+    /// Renderables edited in place since the last frame, with what changed: the GPU sends only that
+    /// to the card.
+    pub edits: Vec<(u64, &'a Edits)>,
     /// Renderables to draw moved by the transform.
     pub placed: Vec<(u64, Xform)>,
     /// A per-pixel boolean standing in for the hidden part, when a drag moves an operand
@@ -86,6 +90,10 @@ impl Live<'_> {
         self.hidden.iter().find(|(of, _)| *of == id).map(|(_, range)| range)
     }
 
+    pub fn edits(&self, id: u64) -> Option<&Edits> {
+        self.edits.iter().find(|(of, _)| *of == id).map(|(_, edits)| *edits)
+    }
+
     pub fn placed(&self, id: u64) -> Option<&Xform> {
         self.placed.iter().find(|(of, _)| *of == id).map(|(_, xform)| xform)
     }
@@ -107,7 +115,8 @@ pub struct Request<'a> {
     /// world transform carrying it there, with its colour when not the palette's template colour
     /// (push/pull's solid, issue 73).
     pub templates: Vec<(&'a Renderable, Xform, Option<Rgba>)>,
-    /// What a drag has moved since the renderables were made; GPU renderer only (see [`Live`]).
+    /// What a drag or the brush has moved since the renderables were made (see [`Live`]). Moved bodies
+    /// and per-pixel booleans are the GPU renderer's alone; hidden ranges are honoured by both.
     pub live: Live<'a>,
     /// The section planes (issue 71). Everything drawn from the model is cut by them, and the opening
     /// is capped so walls read as solid.

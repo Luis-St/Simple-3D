@@ -2,6 +2,7 @@
 //! since the merged result forgets its sources; so a drilled hole's wall selects its cutter.
 
 mod bvh;
+pub(crate) use bvh::{Bvh, Refit, MIN_TRIANGLES};
 mod ray;
 pub use ray::{ray_mesh, ray_mesh_triangle};
 mod pick;

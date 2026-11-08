@@ -45,6 +45,7 @@ impl App {
             self.dirty = false;
         }
         self.refresh_committed(submitting);
+        self.settle_stroke();
         self.poll_snap_warming();
         self.poll_export();
         self.poll_import();

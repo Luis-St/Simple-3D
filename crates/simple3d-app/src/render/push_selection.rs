@@ -131,9 +131,10 @@ pub(crate) fn push_wireframe(
     screen: &[Vertex],
     colour: Rgba,
     section: &[Plane],
+    hidden: &std::ops::Range<u32>,
 ) {
     extend_in_order(steps, item.edges.len(), |range, out| {
-        for edge in &item.edges[range] {
+        for edge in item.edges[range].iter().filter(|edge| !hidden.contains(&edge[0])) {
             // No depth bias and no fill, so the far side shows, as wireframe intends; nothing owns a pixel's
             // depth, so the wireframe tag is used.
             push_edge(out, view, item, screen, *edge, section, |a, b| projected_line_step(a, b, colour, 0.0, 0, true));

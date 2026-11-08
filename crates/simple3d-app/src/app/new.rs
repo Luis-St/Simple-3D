@@ -122,6 +122,7 @@ impl App {
             repeat_hold: false,
             simplify_tool: None,
             shape_tool: None,
+            sculpt: None,
             preview_committed: None,
             reassemble_tool: None,
             round_tool: None,

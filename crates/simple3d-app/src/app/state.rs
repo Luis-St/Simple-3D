@@ -218,6 +218,8 @@ pub struct App {
     pub simplify_tool: Option<crate::simplify_tool::SimplifyTool>,
     /// The mesh function tool's window (issue 81), previewing like Simplify. See [`crate::shape_tool`].
     pub shape_tool: Option<crate::shape_tool::ShapeTool>,
+    /// The brush's working copy of a mesh body (issue 127), kept between strokes; see [`crate::sculpt`].
+    pub(crate) sculpt: Option<crate::sculpt::Sculpt>,
     /// The document evaluated with a standing mesh preview lifted out, for the committed numbers
     /// (`crate::mesh_preview`).
     pub(crate) preview_committed: Option<crate::mesh_preview::Committed>,

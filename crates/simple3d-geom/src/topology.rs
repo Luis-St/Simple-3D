@@ -16,7 +16,7 @@ pub use edges::EdgeTable;
 mod bodies;
 pub use bodies::connected_bodies;
 mod normals;
-pub use normals::{corner_normals, vertex_normals};
+pub use normals::{corner_normals, corner_normals_at, vertex_normals, vertex_normals_at};
 #[cfg(test)]
 mod tests;
 

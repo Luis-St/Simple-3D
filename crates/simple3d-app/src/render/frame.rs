@@ -94,19 +94,22 @@ pub(crate) fn prepare_with(request: &Request<'_>) -> Vec<Step> {
         let needs_screen = item.style != Style::Selected && cut.is_empty();
         let screen = if needs_screen { project_all(&view, &item.renderable.mesh.positions) } else { Vec::new() };
         let screen = &screen[..];
+        // A range the brush's working copy stands in for (`Live::hidden`).
+        let hidden = request.live.hidden(item.renderable.id).cloned().unwrap_or(0..0);
+        let body = (item.renderable, &hidden);
         match item.style {
             Style::Solid => {
                 let palette = &request.palette;
                 match request.mode {
                     DisplayMode::Wireframe => {
-                        push_wireframe(&mut steps, &view, item.renderable, screen, palette.wire, cut)
+                        push_wireframe(&mut steps, &view, item.renderable, screen, palette.wire, cut, &hidden)
                     }
                     DisplayMode::Shaded => {
-                        push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut)
+                        push_shaded(&mut steps, &view, body, screen, palette.solid, 255, tag_base, cut)
                     }
                     DisplayMode::ShadedWithEdges => {
-                        push_shaded(&mut steps, &view, item.renderable, screen, palette.solid, 255, tag_base, cut);
-                        push_edges(&mut steps, &view, item.renderable, screen, (palette.edge, tag_base), cut, &quiet);
+                        push_shaded(&mut steps, &view, body, screen, palette.solid, 255, tag_base, cut);
+                        push_edges(&mut steps, &view, body, screen, (palette.edge, tag_base), cut, &quiet);
                     }
                 }
                 push_cap(&mut steps, &view, item.renderable, palette, cut, request.mode);

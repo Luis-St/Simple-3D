@@ -53,14 +53,24 @@ pub(super) fn headless() -> Option<Headless> {
     None
 }
 
-/// `req` drawn by the GPU renderer, as RGBA rows from the top like the CPU's [`Image`].
+/// `req` drawn by a fresh GPU renderer, as RGBA rows from the top like the CPU's [`Image`].
 pub(super) fn gpu_render(headless: &Headless, req: &Request<'_>) -> Vec<u8> {
-    let gl = &headless.gl;
-    let mut gpu = crate::gpu::Gpu::new(gl.clone()).expect("the shaders compile");
+    let (mut gpu, texture) = gpu_for(headless);
+    gpu.render(req).expect("the frame is drawn");
+    read_back(headless, texture, req.size)
+}
+
+/// A GPU renderer on the headless context, kept by a test that draws several frames with it.
+pub(super) fn gpu_for(headless: &Headless) -> (crate::gpu::Gpu, glow::Texture) {
+    let mut gpu = crate::gpu::Gpu::new(headless.gl.clone()).expect("the shaders compile");
     let texture = gpu.prepare_texture().expect("a texture");
     gpu.set_texture_id(egui::TextureId::User(1));
-    gpu.render(req).expect("the frame is drawn");
-    let [width, height] = req.size;
+    (gpu, texture)
+}
+
+/// The last frame drawn into `texture`, as RGBA rows from the top.
+pub(super) fn read_back(headless: &Headless, texture: glow::Texture, [width, height]: [usize; 2]) -> Vec<u8> {
+    let gl = &headless.gl;
     let mut pixels = vec![0u8; width * height * 4];
     unsafe {
         let fbo = gl.create_framebuffer().expect("a framebuffer");

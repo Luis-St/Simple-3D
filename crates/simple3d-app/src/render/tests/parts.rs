@@ -59,3 +59,22 @@ pub(crate) fn a_body_is_found_inside_the_one_it_came_in() {
     assert_eq!(prepared.parts[&9], 0..16);
     assert_eq!(prepared.parts[&1], 0..8);
 }
+
+/// The software renderer leaves a hidden range out too, faces and edges: the brush's working copy
+/// stands in for its node there on either renderer (issue 127).
+#[test]
+fn the_software_renderer_leaves_a_hidden_range_out() {
+    let left = primitives::box_mesh(20.0, 20.0, 20.0).translated(Vec3::new(-20.0, 0.0, 0.0));
+    let right = primitives::box_mesh(20.0, 20.0, 20.0).translated(Vec3::new(20.0, 0.0, 0.0));
+    let (scene, ranges) = laid(&[left.clone(), right]);
+    let prepared = Renderable::prepare_scene(&scene, &ranges, &Default::default());
+    let only_left = Renderable::prepare(&left);
+    for mode in [DisplayMode::ShadedWithEdges, DisplayMode::Wireframe] {
+        let mut hiding = request(vec![Item { renderable: &prepared, style: Style::Solid }], mode);
+        hiding.live.hidden.push((prepared.id, prepared.parts[&2].clone()));
+        let alone = request(vec![Item { renderable: &only_left, style: Style::Solid }], mode);
+        let shown = request(vec![Item { renderable: &prepared, style: Style::Solid }], mode);
+        assert_eq!(render(&hiding).color, render(&alone).color, "{mode:?}: the hidden box still shows");
+        assert_ne!(render(&shown).color, render(&alone).color);
+    }
+}

@@ -85,21 +85,8 @@ impl App {
     pub(crate) fn committed_world_bounds(&self, id: NodeId) -> Option<(Vec3, Vec3)> {
         let previewed = self.standing_preview().filter(|standing| standing.target == id);
         let Some(standing) = previewed else { return self.evaluated.node_world_bounds.get(&id).copied() };
-        let node = self.scene.get(id)?;
-        let placement = simple3d_core::xform::Xform::from_pos_rot_scale(
-            node.position,
-            node.rotation,
-            simple3d_core::scene::Node::sane_scale(node.scale),
-        );
-        let own = self.evaluated.node_frames.get(&id)?.compose(&placement);
-        let mesh = &standing.original.mesh;
-        let (lo, _) = mesh.bounds()?;
-        // As the evaluation lifts a base-anchored shape onto its base.
-        let lift = match node.anchor {
-            simple3d_core::scene::Anchor::Base => Vec3::new(0.0, 0.0, -lo.z),
-            simple3d_core::scene::Anchor::Centre => Vec3::ZERO,
-        };
-        let mut points = mesh.positions.iter().map(|&p| own.point(p + lift));
+        let own = self.mesh_placement(id, standing.original)?;
+        let mut points = standing.original.mesh.positions.iter().map(|&p| own.point(p));
         let first = points.next()?;
         Some(points.fold((first, first), |(lo, hi), p| (lo.min(p), hi.max(p))))
     }
