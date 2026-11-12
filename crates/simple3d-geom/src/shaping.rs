@@ -4,13 +4,15 @@
 //! ([`refine`]) so the surface has the vertices to show detail the size of [`Shaping::scale`].
 //! The moving functions push each vertex along its normal ([`crate::topology::vertex_normals`]) or
 //! along an axis, by the function's value times the vertex's weight ([`weights`]), which is how a hole's
-//! rim and a print's base are kept in place.
+//! rim and a print's base are kept in place. Inflating moves each vertex by its offset vector instead
+//! ([`offset::offset_directions`]), so a box's faces move out by the amount right to their edges.
 
 mod noise;
 pub use noise::Noise;
 mod refine;
 pub use refine::refine_until;
 pub(crate) use refine::split_longest;
+mod offset;
 mod smooth;
 mod weights;
 pub use weights::weights;

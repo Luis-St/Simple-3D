@@ -135,3 +135,38 @@ fn the_brush_settings_are_remembered_and_leaving_drops_the_working_copy() {
     assert!(app.sculpt.is_none(), "the working copy outlived the brush");
 }
 
+/// One noise stroke of 40 overlapping dabs along x across the top of `mesh`, with or without adding
+/// detail; how far the stroke moved the top face's inner vertices off its plane at most.
+fn noise_height(name: &str, mesh: simple3d_geom::Mesh, detail: bool) -> f64 {
+    let (mut app, _) = app_with(name, mesh);
+    app.settings.last_brush =
+        Brush { mode: Mode::Noise, detail, edge: 0.5, radius: 4.0, strength: 1.0, scale: 2.0, ..Brush::default() };
+    let top = app.evaluated.bounds.expect("evaluated").1.z;
+    assert!(app.begin_brush_stroke());
+    for k in 0..40 {
+        let x = -10.0 + k as f64 * 0.5;
+        app.brush_dab(Vec3::new(x, 0.0, top + 50.0), Vec3::new(0.0, 0.0, -1.0), Mode::Noise).expect("landed");
+    }
+    let copy = &app.sculpt.as_ref().expect("a session").renderable.mesh;
+    copy.positions
+        .iter()
+        .filter(|p| p.z > top - 2.0 && p.x.abs() < 18.0 && p.y.abs() < 18.0)
+        .map(|p| (p.z - top).abs())
+        .fold(0.0, f64::max)
+}
+
+#[test]
+fn a_noise_stroke_adding_detail_stays_within_the_noise_height() {
+    // The noise mode never goes past a tenth of the radius times the strength (0.4 mm here), measured
+    // from where a vertex was when the stroke began. Adding detail remakes the copy (`reshape`) and
+    // clears the stroke's record of those places, so every dab that split something made the
+    // vertices already moved start again from where they now were: the same stroke reached 1.19 mm.
+    let cap = 4.0 * 0.1 * 1.0 + 1e-9;
+    let coarse = simple3d_geom::primitives::box_mesh(40.0, 40.0, 10.0);
+    let (fine, _) =
+        simple3d_geom::shaping::refine_until(&coarse, 0.5, 2_000_000, &simple3d_geom::never).expect("refined");
+    let refined = noise_height("brush-noise-refined", fine, false);
+    assert!(refined <= cap, "on a mesh already fine enough the stroke reached {refined} mm");
+    let detailed = noise_height("brush-noise-detail", coarse, true);
+    assert!(detailed <= cap, "adding detail, the same stroke reached {detailed} mm, past the {cap} mm the mode allows");
+}

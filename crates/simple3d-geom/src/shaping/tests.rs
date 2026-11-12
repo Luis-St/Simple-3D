@@ -134,3 +134,60 @@ fn refining_first_gives_a_coarse_box_enough_vertices_to_show_the_noise() {
     assert!(outcome.moved > 0.3);
     assert_eq!(outcome.mesh.manifold_issue(), None);
 }
+
+/// Where the line along -x at height `(y, z)` first meets `mesh` from the +x side.
+fn front_x(mesh: &Mesh, y: f64, z: f64) -> f64 {
+    let (origin, dir) = (Vec3::new(100.0, y, z), Vec3::new(-1.0, 0.0, 0.0));
+    let hits = mesh.indices.iter().filter_map(|&tri| crate::ray::line_triangle(origin, dir, mesh.corners(tri), 0.0));
+    100.0 - hits.fold(f64::INFINITY, f64::min)
+}
+
+#[test]
+fn inflating_a_coarse_box_moves_its_faces_out_by_the_amount() {
+    // A box's corners lean out of all three faces (`vertex_normals`), so with refining off they
+    // moved 4 / sqrt(3) out of each: the 40 mm box grew to 44.6 mm, not 48 mm.
+    let cube = box_mesh(40.0, 40.0, 40.0);
+    let inflated = shape(&cube, &Shaping { amount: 4.0, ..plan(Function::Inflate) }).mesh;
+    let (lo, hi) = inflated.bounds().expect("a box");
+    assert!((hi.x - 24.0).abs() < 1e-6 && (lo.x + 24.0).abs() < 1e-6, "the box spans x {} to {}", lo.x, hi.x);
+}
+
+#[test]
+fn inflating_a_refined_box_keeps_each_face_flat_out_to_its_edges() {
+    // Refined to edges of 2 mm or less, the face vertices move 4 mm out but the vertices on the box's edges only
+    // 4 / sqrt(2) out of each face, so a 45-degree strip one refined edge (1.25 mm) wide ran along every edge:
+    // at y = 19.5 the +X face stood at x = 23.78 rather than 24.
+    let cube = box_mesh(40.0, 40.0, 40.0);
+    let inflated =
+        shape(&cube, &Shaping { function: Function::Inflate, amount: 4.0, edge: 2.0, ..Shaping::default() }).mesh;
+    for y in [0.0, 15.0, 18.5, 19.5, 19.9] {
+        let x = front_x(&inflated, y, 0.3);
+        assert!((x - 24.0).abs() < 1e-6, "at y = {y} the +X face stands at x = {x}, not 24");
+    }
+}
+
+#[test]
+fn splitting_by_longest_sides_names_the_two_vertices_each_new_one_lies_between() {
+    let cube = box_mesh(10.0, 10.0, 10.0).weld();
+    let (split, parents) = split_longest(&cube, &|_| true, 1.0, MAX_TRIANGLES).expect("split");
+    assert_eq!(split.positions.len(), cube.positions.len() + parents.len());
+    for (k, [a, b]) in parents.iter().enumerate() {
+        let mid = (split.positions[*a as usize] + split.positions[*b as usize]) * 0.5;
+        assert_eq!(split.positions[cube.positions.len() + k], mid);
+    }
+}
+
+#[test]
+fn refining_a_round_tessellation_puts_the_new_vertices_on_the_curve() {
+    // Left halfway along the flat facets, a refined 32-segment cylinder's new side vertices sat up to
+    // 0.096 mm inside its 20 mm radius, and every facet shaded as a flat band.
+    let cylinder = crate::primitives::cylinder_mesh(40.0, 40.0, 40.0, 32);
+    let (fine, _) = refine_until(&cylinder, 2.0, MAX_TRIANGLES, &crate::never).expect("not abandoned");
+    let side = fine.positions.iter().filter(|p| p.z.abs() < 19.9);
+    for p in side {
+        let r = (p.x * p.x + p.y * p.y).sqrt();
+        assert!((r - 20.0).abs() < 0.01, "a side vertex at radius {r}");
+    }
+    // The flat caps stay flat, and the rim stays on them.
+    assert!(fine.positions.iter().all(|p| p.z.abs() <= 20.0 + 1e-9));
+}

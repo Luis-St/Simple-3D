@@ -22,7 +22,11 @@ pub fn shape_until(mesh: &Mesh, plan: &Shaping, give_up: Abandon<'_>) -> Option<
     if plan.function == Function::Smooth {
         smooth::taubin(&mut mesh.positions, &topology.neighbours, &weights, plan.layers.max(1), give_up)?;
     } else {
-        let normals = vertex_normals(&mesh);
+        // Inflating moves the faces, not the vertices, out by the amount (`offset_directions`).
+        let normals = match plan.function {
+            Function::Inflate => super::offset::offset_directions(&mesh),
+            _ => vertex_normals(&mesh),
+        };
         let noise = Noise::new(plan.seed);
         let scale = plan.scale.max(1e-6);
         let positions = &mesh.positions;

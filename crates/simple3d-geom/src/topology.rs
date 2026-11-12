@@ -16,11 +16,18 @@ pub use edges::EdgeTable;
 mod bodies;
 pub use bodies::connected_bodies;
 mod normals;
+pub(crate) use normals::face_shape;
 pub use normals::{corner_normals, corner_normals_at, vertex_normals, vertex_normals_at};
 #[cfg(test)]
 mod tests;
 
 use crate::mesh::Mesh;
+
+/// How sharply a mesh body's faces must meet to count as a corner rather than a curved surface's
+/// tessellation: where its smooth shading breaks and a line is drawn, and where refining it for a
+/// mesh function stops curving the new vertices out. 30 degrees, as in other modellers'
+/// auto-smooth: a 32-segment cylinder (11.25 degree facets) is round, a box sharp.
+pub const SMOOTH_CREASE: f64 = 30.0;
 
 /// The triangles touching each vertex, in ascending order.
 pub fn vertex_faces(mesh: &Mesh) -> Rows<u32> {

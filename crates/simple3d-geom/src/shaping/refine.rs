@@ -1,6 +1,7 @@
 //! Splitting a mesh's long edges until none is longer than asked.
 
 use crate::mesh::{FastMap, Mesh};
+use crate::topology::{corner_normals, Topology, SMOOTH_CREASE};
 use crate::vec3::Vec3;
 use crate::Abandon;
 
@@ -8,8 +9,10 @@ use crate::Abandon;
 /// whether it stopped at `budget` triangles first. `None` when `give_up` says so.
 ///
 /// An edge is split once for both of its triangles, so the surface stays closed; a triangle then
-/// becomes two, three or four depending on how many of its edges were split. Midpoints lie on the
-/// flat triangles, so the shape does not change, only how finely it is cut.
+/// becomes two, three or four depending on how many of its edges were split. Each new vertex is
+/// curved out onto the smooth surface the mesh is shaded as ([`curved`]): left on the flat
+/// triangles, a 32-segment cylinder's facets turned into flat patches, which its smooth shading then
+/// showed as bands. Flat faces and corners sharper than [`SMOOTH_CREASE`] keep their shape.
 pub fn refine_until(mesh: &Mesh, edge: f64, budget: usize, give_up: Abandon<'_>) -> Option<(Mesh, bool)> {
     let mut mesh = mesh.weld();
     if edge.is_nan() || edge <= 0.0 {
@@ -46,8 +49,44 @@ pub fn refine_until(mesh: &Mesh, edge: f64, budget: usize, give_up: Abandon<'_>)
         if mesh.indices.len() + added > budget {
             return Some((mesh, true));
         }
+        let bulges = curved(&mesh, &mids);
         mesh = split(&mesh, &mids);
+        for (m, bulge) in bulges {
+            mesh.positions[m as usize] = mesh.positions[m as usize] + bulge;
+        }
     }
+}
+
+/// How far each new vertex in `mids` moves off its edge's middle onto the smooth surface through the
+/// edge's ends: half way to their tangent planes (Phong tessellation), which puts it on the circle a
+/// round tessellation's corners lie on, to second order. An end's tangent planes are its corner
+/// normals in the triangles beside the edge ([`corner_normals`]), each distinct one counted once:
+/// one on a curved surface, the faces' own across a crease, where an edge along a flat face moves
+/// not at all.
+fn curved(mesh: &Mesh, mids: &FastMap<(u32, u32), u32>) -> Vec<(u32, Vec3)> {
+    let topology = Topology::of(mesh);
+    let smooth = vec![true; mesh.indices.len()];
+    let corners = corner_normals(mesh, &topology.edges, &topology.faces, SMOOTH_CREASE, &smooth);
+    let mut out = Vec::with_capacity(mids.len());
+    for (&(a, b), &m) in mids {
+        let Some(edge) = topology.edges.find(a, b) else { continue };
+        let middle = (mesh.positions[a as usize] + mesh.positions[b as usize]) * 0.5;
+        let mut bulge = Vec3::ZERO;
+        for end in [a, b] {
+            let mut planes: Vec<Vec3> = Vec::with_capacity(2);
+            for &face in topology.edges.faces(edge) {
+                let Some(k) = mesh.indices[face as usize].iter().position(|&v| v == end) else { continue };
+                let normal = corners[face as usize][k];
+                if normal != Vec3::ZERO && planes.iter().all(|seen| seen.dot(normal) < 1.0 - 1e-9) {
+                    planes.push(normal);
+                }
+            }
+            let to = middle - mesh.positions[end as usize];
+            bulge = planes.iter().fold(bulge, |sum, &n| sum - n * to.dot(n));
+        }
+        out.push((m, bulge * 0.25));
+    }
+    out
 }
 
 /// One round of splitting by longest edges (Rivara's bisection): every triangle `pick` says yes to
@@ -55,8 +94,14 @@ pub fn refine_until(mesh: &Mesh, edge: f64, budget: usize, give_up: Abandon<'_>)
 /// so does every triangle an edge of which is split, so no triangle is ever cut across anything but
 /// its longest side and none turns into a sliver. `None` when nothing is split, or when the split
 /// would pass `budget` triangles. New vertices are numbered after the existing ones, in the order
-/// their edges are first met.
-pub(crate) fn split_longest(mesh: &Mesh, pick: &dyn Fn([Vec3; 3]) -> bool, edge: f64, budget: usize) -> Option<Mesh> {
+/// their edges are first met, and each one's edge is returned in that order: the two vertices it
+/// lies halfway between.
+pub(crate) fn split_longest(
+    mesh: &Mesh,
+    pick: &dyn Fn([Vec3; 3]) -> bool,
+    edge: f64,
+    budget: usize,
+) -> Option<(Mesh, Vec<[u32; 2]>)> {
     let longest = |tri: &[u32; 3]| {
         let length = |k: usize| (mesh.positions[tri[(k + 1) % 3] as usize] - mesh.positions[tri[k] as usize]).length();
         let k = (0..3).max_by(|&i, &j| length(i).total_cmp(&length(j))).expect("three sides");
@@ -95,16 +140,18 @@ pub(crate) fn split_longest(mesh: &Mesh, pick: &dyn Fn([Vec3; 3]) -> bool, edge:
     // Numbered in the order the sides are first met, so the result depends only on the mesh.
     let mut next_vertex = mesh.positions.len() as u32;
     let mut mids: FastMap<(u32, u32), u32> = FastMap::default();
+    let mut parents = Vec::with_capacity(marked.len());
     for tri in &mesh.indices {
         for k in 0..3 {
             let side = key(tri[k], tri[(k + 1) % 3]);
             if marked.contains_key(&side) && !mids.contains_key(&side) {
                 mids.insert(side, next_vertex);
+                parents.push([side.0, side.1]);
                 next_vertex += 1;
             }
         }
     }
-    Some(split(mesh, &mids))
+    Some((split(mesh, &mids), parents))
 }
 
 fn key(a: u32, b: u32) -> (u32, u32) {

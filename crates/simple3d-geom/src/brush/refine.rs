@@ -15,20 +15,34 @@ const ROUNDS: usize = 12;
 /// rather than turning into slivers fanning out to far corners, which a raised stroke then showed as
 /// creases. The surface stays closed and its shape does not change; the existing vertices keep their
 /// numbers and new ones come after them. Each triangle's tag and source go to its pieces.
-pub fn refine_within(mesh: &Mesh, edge: f64, centre: Vec3, radius: f64, budget: usize) -> Option<Mesh> {
+///
+/// Also returns, for each new vertex in order, the two vertices it was put halfway between (either
+/// may be new itself, from an earlier round, so always numbered lower), so whoever tracks where the
+/// vertices were can place the new ones there too.
+pub fn refine_within(
+    mesh: &Mesh,
+    edge: f64,
+    centre: Vec3,
+    radius: f64,
+    budget: usize,
+) -> Option<(Mesh, Vec<[u32; 2]>)> {
     if edge.is_nan() || edge <= 0.0 {
         return None;
     }
     let reached = |corners: [Vec3; 3]| distance_to_triangle(centre, corners) <= radius;
     let mut current: Option<Mesh> = None;
+    let mut parents = Vec::new();
     for _ in 0..ROUNDS {
         let from = current.as_ref().unwrap_or(mesh);
         match crate::shaping::split_longest(from, &reached, edge, budget) {
-            Some(split) => current = Some(split),
+            Some((split, added)) => {
+                parents.extend(added);
+                current = Some(split);
+            }
             None => break,
         }
     }
-    current
+    current.map(|mesh| (mesh, parents))
 }
 
 /// How far `p` is from the triangle: from the plane where `p` lies over it, else from its nearest side.

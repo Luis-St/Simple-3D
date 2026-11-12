@@ -152,7 +152,7 @@ fn faces_of(mesh: &Mesh) -> Vec<(Vec3, [f64; 3])> {
 
 /// A triangle's unit normal and the angle at each corner; a zero normal and zero angles for a
 /// degenerate one.
-fn face_shape(mesh: &Mesh, face: u32) -> (Vec3, [f64; 3]) {
+pub(crate) fn face_shape(mesh: &Mesh, face: u32) -> (Vec3, [f64; 3]) {
     let corners = mesh.corners(mesh.indices[face as usize]);
     let normal = (corners[1] - corners[0]).cross(corners[2] - corners[0]).normalized();
     if normal == Vec3::ZERO {

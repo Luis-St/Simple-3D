@@ -39,10 +39,33 @@ impl Sculpt {
         let mut world = self.renderable.mesh.clone();
         // The stored tags ride along as sources, which splitting hands to each piece as it does tags.
         world.sources = self.tags.clone();
-        let Some(mut refined) = refine_within(&world, edge, centre, radius, MAX_TRIANGLES) else { return false };
+        let Some((mut refined, parents)) = refine_within(&world, edge, centre, radius, MAX_TRIANGLES) else {
+            return false;
+        };
+        let rests = self.rests_between(&parents);
         self.tags = std::mem::take(&mut refined.sources);
-        self.reshape(refined);
+        self.reshape(refined, rests);
         true
+    }
+
+    /// Where each new vertex (halfway between `parents`, in order) was when the stroke began, and
+    /// facing which way: halfway between where its two vertices were. `None` for one between vertices
+    /// the stroke has not moved, which starts where it is.
+    fn rests_between(&self, parents: &[[u32; 2]]) -> Vec<Option<(Vec3, Vec3)>> {
+        let Some(stroke) = self.stroke.as_ref() else { return Vec::new() };
+        let (positions, old) = (&self.renderable.mesh.positions, self.renderable.mesh.positions.len());
+        // Each new vertex's place and normal then, and whether the stroke had moved either of its two.
+        let mut found: Vec<((Vec3, Vec3), bool)> = Vec::with_capacity(parents.len());
+        for &[a, b] in parents {
+            let [((pa, na), ma), ((pb, nb), mb)] = [a, b].map(|v| match (v as usize).checked_sub(old) {
+                Some(k) => found[k],
+                None => {
+                    stroke.rest(v).map_or(((positions[v as usize], self.normals[v as usize]), false), |r| (r, true))
+                }
+            });
+            found.push((((pa + pb) * 0.5, (na + nb).normalized()), ma || mb));
+        }
+        found.into_iter().map(|(rest, moved)| moved.then_some(rest)).collect()
     }
 
     /// Whether a triangle the dab reaches has a side too long: cheaper than trying to refine, which
@@ -57,8 +80,11 @@ impl Sculpt {
         })
     }
 
-    /// Make the copy's caches again for `mesh`, whose triangles changed.
-    fn reshape(&mut self, mesh: Mesh) {
+    /// Make the copy's caches again for `mesh`, whose triangles changed: the old vertices keep their
+    /// numbers, the new ones follow with where they were when the stroke began (`rests`). The stroke
+    /// keeps where it found the old ones, or the noise mode would measure from where they now are and
+    /// pile up with every dab that adds detail.
+    fn reshape(&mut self, mesh: Mesh, rests: Vec<Option<(Vec3, Vec3)>>) {
         let count = mesh.indices.len();
         self.smooth = vec![true; count];
         self.topology = Topology::of(&mesh);
@@ -68,8 +94,14 @@ impl Sculpt {
         self.renderable = Renderable::prepare_welded(mesh, true, &self.smooth, BTreeMap::new());
         self.visited.clear();
         if let Some(stroke) = self.stroke.as_mut() {
-            stroke.seen = vec![u32::MAX; self.renderable.mesh.positions.len()];
-            stroke.before.clear();
+            let old = stroke.seen.len();
+            stroke.seen.resize(self.renderable.mesh.positions.len(), u32::MAX);
+            for (k, rest) in rests.into_iter().enumerate() {
+                if let Some((position, normal)) = rest {
+                    stroke.seen[old + k] = stroke.before.len() as u32;
+                    stroke.before.push(((old + k) as u32, position, normal));
+                }
+            }
             stroke.reshaped = true;
         }
     }

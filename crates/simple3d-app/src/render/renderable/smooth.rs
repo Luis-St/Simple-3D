@@ -8,10 +8,9 @@ use std::collections::BTreeSet;
 /// How sharply flat-shaded faces must meet to draw a line between them.
 pub(crate) const EDGE_CREASE: f64 = 20.0;
 
-/// How sharply a mesh body's faces must meet to shade as a corner, and to draw a line there. Wider
-/// than [`EDGE_CREASE`] since a mesh is often a curved surface's tessellation, and 30 degrees, as in
-/// other modellers' auto-smooth: a 32-segment cylinder (11.25 degree facets) shades round, a box sharp.
-pub(crate) const SMOOTH_CREASE: f64 = 30.0;
+/// How sharply a mesh body's faces must meet to shade as a corner, and to draw a line there; kept
+/// with the geometry, whose refining curves the surface by the same rule.
+pub(crate) use simple3d_geom::topology::SMOOTH_CREASE;
 
 /// Whether each triangle of `mesh` shades smooth: those whose source is in `smooth`
 /// (`Evaluated::smooth`). Empty when none does, so flat items carry nothing extra.

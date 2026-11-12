@@ -148,7 +148,7 @@ fn a_kept_rim_and_base_do_not_move() {
 #[test]
 fn adding_detail_splits_only_near_the_dab_and_keeps_the_mesh_closed() {
     let mesh = box_mesh(20.0, 20.0, 20.0).weld();
-    let refined = refine_within(&mesh, 1.0, Vec3::new(0.0, 0.0, 10.0), 3.0, 1_000_000).expect("the top was split");
+    let refined = refine_within(&mesh, 1.0, Vec3::new(0.0, 0.0, 10.0), 3.0, 1_000_000).expect("the top was split").0;
     assert!(refined.manifold_issue().is_none(), "{:?}", refined.manifold_issue());
     assert_eq!(refined.positions[..8], mesh.positions[..], "the old vertices were renumbered");
     // Fine near the dab, coarse far from it.
@@ -255,7 +255,7 @@ fn raising_across_a_pole_again_and_again_folds_nothing() {
 #[test]
 fn added_detail_makes_no_slivers() {
     let mesh = box_mesh(40.0, 40.0, 20.0).weld();
-    let refined = refine_within(&mesh, 0.6, Vec3::new(-3.0, 1.0, 10.0), 4.0, 1_000_000).expect("split");
+    let refined = refine_within(&mesh, 0.6, Vec3::new(-3.0, 1.0, 10.0), 4.0, 1_000_000).expect("split").0;
     let smallest = refined
         .indices
         .iter()
